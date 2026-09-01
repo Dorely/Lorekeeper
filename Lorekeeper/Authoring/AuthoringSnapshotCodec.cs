@@ -50,7 +50,6 @@ public sealed record AuthoringReleaseCoverSnapshot(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
     SpineReadingDirection SpineReadingDirection,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,

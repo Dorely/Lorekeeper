@@ -260,14 +260,25 @@ durable image job; another explicit mutation places or associates the completed
 asset. Free-standing generation and unmasked editing default to a provider-valid
 raster with the configured Core Book page aspect; a concrete layout target
 replaces that default when the composition must honor a Figure, page, frame, or
-cover.
+cover. Publish exposes only target identity, aspect, protected regions, and exact
+surface bounds to the model; its tool schema has no pixel-size or density controls,
+and its results return the application-prepared placement image ID without native
+or production raster diagnostics. The application selects the target-specific
+native request and any required derivative. Editor, Images, and
+Outline retain the moderate concept-art default unless their tools explicitly
+request `minimumDpi` and an optional custom aspect. Free-standing DPI uses the
+exact Core Book page or its largest fitting custom-aspect rectangle. An
+infeasible explicit minimum outside Publish fails before job creation; a concrete
+size cannot bypass that explicit minimum.
 The Images workspace refreshes its library and job projections only for an
 explicit image-mutation update; ordinary tool completion, assistant completion,
 and turn errors remain local chat updates and must not reload the workspace.
-Expansion of an existing image uses the ordinary source-driven edit
-operation: the original image is supplied directly and the complete larger
-framing is described in the prompt, including left-and-right, above-and-below,
-or all-sides extension as appropriate. Regional guides are reserved for
+Same-aspect up-resolution uses the ordinary source-driven edit operation: the
+original image is supplied directly, the complete framing and content are
+preserved, and the prompt asks for credible reconstructed detail without
+outward extension or cropping. Intentional expansion is a distinct outpainting
+request whose prompt describes the larger framing, including left-and-right or
+above-and-below surroundings as appropriate. Regional guides are reserved for
 genuinely localized or otherwise hard-to-describe edits. They are soft visual
 guidance, not pixel protection, and are unavailable for broad restyling,
 reframing, resizing, layout-bound targets, or reserved-region work. Assistant
@@ -277,7 +288,16 @@ label. `edit_project_image` accepts only optional inline
 guide atomically with that edit. Every generated or edited result is inspected
 in full before the assistant presents, promotes, associates, or places it,
 including the area outside any guide. Deterministic resize creates a new
-unattached source-linked asset and adds no visual detail.
+unattached source-linked asset and adds no visual detail; it is never evidence
+of publication-quality enhancement.
+
+Publish target-bound generation always uses crop-to-fill. For unusually narrow
+or wide targets, the application chooses the closest supported native aspect,
+keeps important content inside the centered target window, and prepares a
+same-aspect derivative large enough to cover the physical target. The assistant
+does not receive or manage a panel plan. Release covers still prefer server-owned
+Back, Spine, and Front regions and require annotated plus clean whole-wrap
+inspection.
 Failed, cancelled, or stale calls must not create partial destination state. A completed assistant mutation may be captured by the separate
 version-history checkpoint service; that durable Git snapshot history is not
 the process-lifetime Undo/Redo history described by the manuscript chapter.
@@ -336,15 +356,34 @@ mutate Core/release metadata and settings, publication sections, covers, page
 setup/styles where allowed, and preparation workflows. It cannot mutate chapter
 manuscript or reorder the project outline. Low-level renderer invocation, raw
 profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
+When it creates an ordinary custom single-page publication section without a
+user-directed side, it uses the next available leaf rather than inventing a
+parity blank. Contents retains its authored recto start, so any required numbered
+parity leaf sits immediately before Contents instead of before preceding custom
+matter.
 For a full-wrap cover it uses the exact region tools to read and preview Back,
 Spine, or Front before editing, then fills only the selected region or changes
 the persisted spine direction with an expected revision. A narrow spine
-generation target reports the closest supported raster, crop loss, effective
-DPI, safety geometry, and fingerprint; generation remains unattached and never
-stretches to fit. Spine art contains no baked-in words, title/author remain real
+generation target reports its aspect, protected geometry, fingerprint, and a
+reusable target token; Lorekeeper prepares the crop-to-fill asset internally.
+Generation remains unattached and never stretches to fit. Spine
+art contains no baked-in words, title/author remain real
 text above the art, US/English defaults to top-to-bottom unless the user asks
 otherwise, and successful mutations are followed by annotated spine and
 whole-wrap inspection plus clean final previews.
+Bindable cover copy uses the token catalog returned by the cover read. The
+assistant can place `{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`,
+or `{{description}}` inside any text frame, including repeated author or title
+frames on the spine, and may combine tokens with literal copy. Large cover-scene
+stages must name the same exact surface role that was read and previewed; apply
+is surface-bound and must not target an implicit default. `{{description}}`
+means the effective Description returned from the visible Book details; the
+assistant must not invent or maintain separate back-cover metadata.
+Every successful durable Core or release cover mutation, including an
+exact-surface patch or placement, emits a cover-specific workspace update as
+soon as that tool completes. An open cover canvas reloads from that update
+during the turn and preserves a returned object selection; it does not wait for
+the assistant's final message before reflecting the persisted scene.
 
 ### Review Edits and approval
 
@@ -517,6 +556,14 @@ manuscript before reporting completion. The coordinator
 cancels and awaits any outstanding progress read
 before disposing the async enumerator. Completion, cancellation, and failure
 must leave durable terminal state and no concurrent-disposal error.
+
+Publish preparation results include the persisted image-preparation summary:
+active threshold, created and reused derivatives, replaced references, and
+actionable failures. The assistant reports this existing job evidence; it does
+not choose alternate DPI rules, perform provider generation, or reproduce the
+managed publication model's layout math. Permanent replacements are system-owned publication mutations and
+invalidate Review Edits/manual history through their content owners just like
+other direct assistant-visible changes.
 
 ## Key files and file families
 

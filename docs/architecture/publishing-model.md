@@ -88,7 +88,12 @@ inherit the Core policy live and may store one sparse override, with reset
 returning to Core inheritance.
 The current Core page aspect also supplies the default provider-valid raster for
 free-standing image generation and editing throughout the application; concrete
-Figure, page, frame, and cover targets retain their own exact geometry.
+Figure, page, frame, and cover targets retain their own exact geometry. Editor
+retains its existing explicit layout-generation controls. Publish supplies only
+the concrete target aspect and protected regions to the assistant; the managed
+image workflow selects resolution from the target's internal output policy,
+including hardcover targets. Digital-PDF placement validation remains 180 DPI;
+that validation threshold does not lower the authoring-generation default.
 Release creation is explicit: no release or ISBN is created automatically. The
 creation dialog establishes release format, destination, name, and any
 destination-level use mode. Release setup then exposes only artifact-affecting
@@ -98,13 +103,23 @@ product selector. Paper color, finish, price, listing, account, tax, and
 fulfillment settings remain at the printer because they do not change generated
 bytes or geometry.
 
+The Publish workspace orders editable sections by likely authoring frequency.
+Core and release targets both lead with cover, book details, and book content;
+release-only content follows those shared concerns, then page geometry and other
+format presentation, with release setup last. This order is the document order,
+not a visual CSS rearrangement. Long-form copyright and description metadata use
+full-width, vertically resizable multiline fields in both Core and release
+overrides.
+
 Publication sections have an anchor before, after, or around the Core outline,
 an inclusion state, and a start-side choice of next available, right/recto, or
 left/verso. Inclusion, order, and starting side are authored settings rather
 than silently derived vendor policy. A two-leaf Designed Page spread is the
 specific parity exception that must begin on a verso leaf so its two leaves
-form one physical opening. KDP/common front-matter guidance is surfaced as a
-non-blocking recommendation; it does not rewrite the author’s section order.
+form one physical opening. A blank leaf deliberately inserted to satisfy either
+parity rule remains part of the interior folio sequence and displays its page
+number. KDP/common front-matter guidance is surfaced as a non-blocking
+recommendation; it does not rewrite the author’s section order.
 
 Releases inherit Core sections live. They may replace, omit, add, reset, or
 reorder sections through sparse overlays. A release order overlay does not
@@ -115,22 +130,27 @@ stales only releases whose effective source fingerprint changes.
 
 Core and release forms use one serialized debounce queue. Navigation, assistant
 turns, cover entry, and preparation flush pending edits before reading or
-acting. A revision race reloads the current target and retries a still-dirty
+acting. Text inputs keep their active draft local and suspend background saves
+while focused; leaving the field resumes the debounce queue so a save-time
+rerender cannot move the active caret. A revision race reloads the current target and retries a still-dirty
 patch when intent remains unambiguous. Successful background saves remain
 silent but refresh artifact freshness. A stale assistant or UI operation must
 receive a compact conflict/recovery result rather than overwriting newer
 content.
 
-Physical-release cover entry is also a pagination boundary. After flushing the
-current release, Publish automatically runs the compact Press interior layout
-needed to obtain the current page count and opens the cover only after that
-snapshot succeeds. The release cover and its assistant tools therefore use the
-calculated spine rather than minimum-page placeholder geometry. The persisted
-page count survives release, printer, paper, cover, identifier, and other changes
-that cannot affect interior pagination. While the cover is open, Publish compares
-the pagination fingerprint after an assistant mutation and closes the editor only
-when the interior layout identity actually changed; reopening then refreshes
-pagination before further cover work.
+Physical-release cover entry and artifact preparation are pagination boundaries.
+After flushing the current release, Publish automatically runs the compact Press
+interior layout needed to obtain the current page count and opens the cover only
+after that snapshot succeeds. Independently, the background render processor
+ensures the same current snapshot before loading or validating a physical cover.
+The release cover, its assistant tools, and preparation therefore use the
+calculated spine rather than minimum-page placeholder geometry, including after
+renderer-version invalidation. The persisted page count survives release,
+printer, paper, cover, identifier, and other changes that cannot affect interior
+pagination. While the cover is open, Publish compares the pagination fingerprint
+after an assistant mutation and closes the editor only when the interior layout
+identity actually changed; reopening then refreshes pagination before further
+cover work.
 
 Release-specific manuscript content is opt-in. An untouched release chapter
 reads current Core live. Its first text or layout mutation creates a complete
@@ -211,6 +231,10 @@ return compact changed IDs, fields, revisions, diagnostic counts, and refresh
 notices rather than echoing complete unchanged records. Large scene changes
 use persisted non-replayable stages; preview returns a stage ID and compact
 diagnostics, and apply accepts only that ID plus expected revision.
+Cover-scene stages are bound to the exact artifact surface role used to preview
+them. Apply updates that same surface rather than a hidden default scene, and
+the agent must pass the same role when staging an outside, inside, case, jacket,
+cloth, or other supported surface.
 
 Publish mutation tools cover section metadata, focused prose operations,
 section page scenes, cover operations, readiness, preparation, cancellation,
@@ -238,9 +262,29 @@ Release cover reads expose exact Back, Spine, and Front region descriptors with
 bounds, physical aspect, safety/guides, participation, and geometry fingerprints.
 The assistant can read or preview one region, fill it with a project image, set
 spine direction, and request an exact region generation target. Region-targeted
-generation remains unattached, selects the closest supported raster without
-stretching, and reports aspect error, expected crop, effective DPI, and focal
-placement guidance before any revision-checked mutation.
+generation remains unattached and is composed edge-to-edge for Cover placement.
+The assistant receives aspect and safety geometry but no raster or density
+controls. Lorekeeper chooses a target-specific native request and, when needed,
+creates a deterministic same-aspect derivative large enough to crop-fill the
+region without stretching. Extremely narrow spines use the closest supported
+generated aspect with crop-safe margins rather than an assistant-managed panel
+plan. Back, Spine, and Front remain the preferred semantic regions, and the
+assistant must inspect annotated regions plus the clean whole wrap after placement.
+
+Publication text uses one canonical binding catalog for title, subtitle, author,
+publisher, copyright, description, and ISBN. Designed Page frames store these as
+semantic `PublicationBoundField` links and resolve the effective Core or release
+Book details in both the editor and every publication render path. Cover frames
+use the equivalent inline tokens (`{{title}}`, `{{subtitle}}`, `{{author}}`,
+`{{publisher}}`, `{{copyright}}`, `{{description}}`, and `{{isbn}}`); the derived
+`{{spineText}}` token is available only on print covers.
+Tokens can be repeated or combined with literals, allowing the same effective
+value to appear independently on a front, spine, or back frame. The Publish UI
+exposes insertion controls and the assistant cover read returns the supported
+token catalog; render/export resolves templates from the effective Core/release
+metadata immediately before producing output. `{{description}}` always resolves
+from the inherited or overridden Description visible in Book details. A cover
+does not own a second back-copy field or editor control.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or
@@ -288,6 +332,33 @@ and publication sections so authored publication intent can be restored. They
 exclude preparation jobs, render/package bytes, page maps, audits, migration
 journals, and other derived or operational production state; those artifacts
 are regenerated after restore through the Press boundary.
+
+Publication preparation runs permanent image preparation after basic readiness
+checks and before reusable-render lookup. EPUB records no DPI transformation;
+Core and Digital PDF use 180 DPI, while every print profile uses 300 DPI. The
+managed publication model resolves each included placement's effective geometry
+and a maximum proportional raster per source asset before staging Press. If any included placement is undersized, one suitable
+derivative is created or reused and every included reference owned by the prepared
+target is replaced atomically. Excluded content, unrelated releases, entity
+visuals, and chat attachments are outside this mutation. When
+`Images:PrintUpscale` is disabled, an undersized placement blocks preparation
+without creating a derivative or changing references.
+
+Ownership follows effective publication inheritance: an inherited chapter,
+publication section, composition, or Core cover updates Core; content already
+customized by the release updates that release without manufacturing a new
+customization. The mutation validates the queued source fingerprint immediately
+before commit, updates all owner revisions and invalidations, stores the new
+fingerprint, and then reruns managed image validation. A stale source is retryable;
+corrupt input, an oversized required raster, or any still-undersized placement
+blocks before final rendering. Cancellation before commit rolls back; cancellation
+after a coherent replacement commit preserves it and stops before rendering.
+
+Each preparation job persists and projects a structured image summary containing
+the threshold, created/reused asset counts, replaced-reference count, and
+actionable failures. Publish UI and assistant preparation results surface this
+summary. Since image preparation precedes artifact reuse, both the final artifact
+and its fingerprint describe the permanent replacement references.
 
 ## Key files and file families
 

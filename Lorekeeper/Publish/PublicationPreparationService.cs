@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -17,7 +18,8 @@ public sealed record PublicationPreparationJobView(
     string Message,
     IReadOnlyList<PublicationPreflightItem> Diagnostics,
     DateTime CreatedAt,
-    DateTime? CompletedAt);
+    DateTime? CompletedAt,
+    PublicationImagePreparationSummary? ImagePreparationSummary = null);
 
 public interface IPublicationPreparationService
 {
@@ -33,6 +35,42 @@ public interface IPublicationPreparationQueue
     IAsyncEnumerable<Guid> ReadAllAsync(CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Bridges a user's preparation cancellation request to the background worker
+/// without making the persisted job row the worker's only cancellation signal.
+/// The row remains authoritative across process restarts.
+/// </summary>
+public sealed class PublicationPreparationCancellationRegistry
+{
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _tokens = new();
+
+    public CancellationToken Register(Guid jobId, CancellationToken stoppingToken)
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        if (!_tokens.TryAdd(jobId, source))
+        {
+            source.Dispose();
+            throw new InvalidOperationException($"Publication preparation job {jobId:N} is already running.");
+        }
+        return source.Token;
+    }
+
+    public void Cancel(Guid jobId)
+    {
+        if (_tokens.TryGetValue(jobId, out var source))
+        {
+            try { source.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    public void Unregister(Guid jobId)
+    {
+        if (_tokens.TryRemove(jobId, out var source))
+            source.Dispose();
+    }
+}
+
 public sealed class PublicationPreparationQueue : IPublicationPreparationQueue
 {
     private readonly Channel<Guid> _jobs = Channel.CreateUnbounded<Guid>(new UnboundedChannelOptions { SingleReader = true });
@@ -45,7 +83,8 @@ public sealed class PublicationPreparationService(
     IPublicationPreparationQueue queue,
     IPublicationBookService books,
     IPublicationEditionService editions,
-    IPublicationRenderService renders) : IPublicationPreparationService
+    IPublicationRenderService renders,
+    PublicationPreparationCancellationRegistry cancellationRegistry) : IPublicationPreparationService
 {
     internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
@@ -106,23 +145,31 @@ public sealed class PublicationPreparationService(
     }
     public async Task<PublicationPreparationJobView> CancelAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        // Signal an active worker before waiting for the project mutation
+        // lease. The lease may be held by image preparation itself; delaying
+        // this signal until after OpenWriteAsync would make cancellation
+        // unable to reach the pre-commit rollback point.
+        cancellationRegistry.Cancel(jobId);
+        await using var databaseOperation = await database.OpenWriteAsync(CancellationToken.None);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var job = await db.PublicationPreparationJobs.SingleAsync(item => item.ProjectId == projectId && item.Id == jobId, cancellationToken);
+        var job = await db.PublicationPreparationJobs.SingleAsync(
+            item => item.ProjectId == projectId && item.Id == jobId,
+            CancellationToken.None);
         if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)
         {
             job.CancellationRequested = true;
             job.Status = PublicationPreparationStatus.Cancelled;
             job.Message = "Cancelled";
             job.CompletedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(CancellationToken.None);
+            cancellationRegistry.Cancel(jobId);
             if (job.RenderJobId is Guid renderJobId)
             {
                 if (job.TargetKind == PublicationTargetKind.CoreBook)
-                    await renders.CancelCoreAsync(projectId, renderJobId, cancellationToken);
+                    await renders.CancelCoreAsync(projectId, renderJobId, CancellationToken.None);
                 else if (job.EditionId is Guid editionId)
-                    await renders.CancelAsync(projectId, editionId, renderJobId, cancellationToken);
+                    await renders.CancelAsync(projectId, editionId, renderJobId, CancellationToken.None);
             }
         }
         return View(job);
@@ -131,6 +178,7 @@ public sealed class PublicationPreparationService(
     internal static PublicationPreparationJobView View(PublicationPreparationJob job)
     {
         var diagnostics = DeserializeDiagnostics(job.DiagnosticsJson);
+        var imageSummary = DeserializeImagePreparationSummary(job.ImagePreparationSummaryJson);
         if (job.RenderJob is not null
             && (diagnostics.Count == 0
                 || diagnostics.Any(item => !IsUsable(item)
@@ -145,7 +193,7 @@ public sealed class PublicationPreparationService(
             PublicationDiagnosticText.SanitizeUserFacing(job.Step),
             job.ProgressPercent,
             PublicationDiagnosticText.SanitizeUserFacing(job.Message),
-            diagnostics, job.CreatedAt, job.CompletedAt);
+            diagnostics, job.CreatedAt, job.CompletedAt, imageSummary);
     }
 
     internal static IReadOnlyList<PublicationPreflightItem> DeserializeDiagnostics(string json)
@@ -178,6 +226,25 @@ public sealed class PublicationPreparationService(
         !string.IsNullOrWhiteSpace(item.Severity)
         && !string.IsNullOrWhiteSpace(item.Code)
         && !string.IsNullOrWhiteSpace(item.Message);
+
+    private static PublicationImagePreparationSummary? DeserializeImagePreparationSummary(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || string.Equals(json.Trim(), "{}", StringComparison.Ordinal))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<PublicationImagePreparationSummary>(json, DiagnosticsJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return new(
+                0,
+                0,
+                0,
+                0,
+                [new("IMAGE_PREPARATION_SUMMARY_INVALID", "The stored image-preparation summary is invalid.")]);
+        }
+    }
 }
 
 public sealed class PublicationPreparationWorker(
@@ -185,7 +252,8 @@ public sealed class PublicationPreparationWorker(
     IAppDatabaseOperationFactory database,
     IPublicationPreparationQueue queue,
     IApplicationStartupState startup,
-    ILogger<PublicationPreparationWorker> logger) : BackgroundService
+    ILogger<PublicationPreparationWorker> logger,
+    PublicationPreparationCancellationRegistry cancellationRegistry) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -204,12 +272,18 @@ public sealed class PublicationPreparationWorker(
         {
             await foreach (var jobId in queue.ReadAllAsync(stoppingToken))
             {
-                try { await ProcessAsync(jobId, stoppingToken); }
+                var jobCancellation = cancellationRegistry.Register(jobId, stoppingToken);
+                try { await ProcessAsync(jobId, jobCancellation); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
                 catch (Exception exception)
                 {
                     logger.LogError(exception, "Publication preparation {JobId} failed.", jobId);
                     await FailAsync(jobId, exception, CancellationToken.None);
+                }
+                finally
+                {
+                    cancellationRegistry.Unregister(jobId);
                 }
             }
         }
@@ -247,6 +321,9 @@ public sealed class PublicationPreparationWorker(
         }
 
         var preparationDiagnostics = new List<PublicationPreflightItem>();
+        var imagePreparation = await PrepareImagesOrBlockAsync(job, scope.ServiceProvider, cancellationToken);
+        if (imagePreparation is null || await IsCancelledAsync(jobId, CancellationToken.None))
+            return;
 
         if (job.TargetKind == PublicationTargetKind.CoreBook)
         {
@@ -325,6 +402,81 @@ public sealed class PublicationPreparationWorker(
             candidate.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
             candidate.CompletedAt = DateTime.UtcNow;
         }, cancellationToken);
+    }
+
+    private async Task<PublicationImagePreparationResult?> PrepareImagesOrBlockAsync(
+        PublicationPreparationJob job,
+        IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        await UpdateJobAsync(job.Id, candidate =>
+        {
+            candidate.Step = "Preparing publication images";
+            candidate.ProgressPercent = 8;
+        }, cancellationToken);
+
+        PublicationImagePreparationResult result;
+        try
+        {
+            result = await services.GetRequiredService<IPublicationImagePreparationService>().PrepareAsync(
+                job.ProjectId,
+                job.TargetKind,
+                job.EditionId,
+                job.SourceFingerprint,
+                cancellationToken);
+        }
+        catch (PublicationImagePreparationException exception)
+        {
+            await UpdateJobAsync(job.Id, candidate =>
+            {
+                if (candidate.CancellationRequested || candidate.Status == PublicationPreparationStatus.Cancelled)
+                    return;
+                candidate.Status = PublicationPreparationStatus.Blocked;
+                candidate.Message = exception.Summary.Failures.FirstOrDefault()?.Message ?? exception.Message;
+                candidate.DiagnosticsJson = JsonSerializer.Serialize(
+                    exception.Summary.Failures.Select(item => new PublicationPreflightItem(
+                        "error", item.Code, item.Message, null, item.PageNumber, item.Surface, item.AssetId?.ToString("D"))).ToArray(),
+                    PublicationPreparationService.DiagnosticsJsonOptions);
+                candidate.ImagePreparationSummaryJson = JsonSerializer.Serialize(
+                    exception.Summary, PublicationPreparationService.DiagnosticsJsonOptions);
+                candidate.CompletedAt = DateTime.UtcNow;
+            }, CancellationToken.None);
+            return null;
+        }
+
+        await UpdateJobAsync(job.Id, candidate =>
+        {
+            candidate.ImagePreparationSummaryJson = JsonSerializer.Serialize(
+                result.Summary, PublicationPreparationService.DiagnosticsJsonOptions);
+            candidate.SourceFingerprint = result.SourceFingerprint;
+            if (candidate.CancellationRequested || candidate.Status == PublicationPreparationStatus.Cancelled)
+                return;
+            if (result.Summary.Failures.Count > 0)
+            {
+                candidate.Status = PublicationPreparationStatus.Blocked;
+                candidate.Message = result.Summary.Failures[0].Message;
+                candidate.DiagnosticsJson = JsonSerializer.Serialize(
+                    result.Summary.Failures.Select(item => new PublicationPreflightItem(
+                        "error", item.Code, item.Message, null, item.PageNumber, item.Surface, item.AssetId?.ToString("D"))).ToArray(),
+                    PublicationPreparationService.DiagnosticsJsonOptions);
+                candidate.CompletedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                candidate.Step = "Typesetting and validating publication images";
+                candidate.ProgressPercent = 10;
+            }
+        }, CancellationToken.None);
+        return result.Summary.Failures.Count == 0 ? result : null;
+    }
+
+    private async Task<bool> IsCancelledAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Db.PublicationPreparationJobs.AsNoTracking()
+            .Where(item => item.Id == jobId)
+            .Select(item => item.CancellationRequested || item.Status == PublicationPreparationStatus.Cancelled)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private async Task<PublicationPreflightReport?> PreflightOrBlockAsync(

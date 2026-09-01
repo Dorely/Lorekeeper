@@ -425,8 +425,10 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidOperationException($"Unsupported import format '{document.FormatId}'.");
         if (document.FormatVersion < 1 || document.FormatVersion > ProjectExportDocument.CurrentFormatVersion)
             throw new InvalidOperationException($"Unsupported import format version {document.FormatVersion}.");
-        document = AdaptLegacySourceEvidence(
-            AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document)));
+        document = AdaptLegacyCoverDescription(
+            AdaptLegacySourceEvidence(
+                AdaptLegacyImageSources(
+                    AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document)))));
 
         var duplicateNode = document.Nodes
             .GroupBy(node => StableKey(node.NodeType, node.Key), StringComparer.Ordinal)
@@ -505,6 +507,30 @@ public sealed class ProjectImportJobProcessor(
         if (duplicateImage is not null)
             throw new InvalidOperationException($"Import file contains duplicate image '{duplicateImage.Key:N}'.");
         var exportedImageIds = document.Images.Select(image => image.Id).ToHashSet();
+        if (document.FormatVersion >= 29)
+        {
+            foreach (var image in document.Images.Where(image => image.DerivedFromImageId is not null))
+            {
+                var parentId = image.DerivedFromImageId!.Value;
+                if (!exportedImageIds.Contains(parentId))
+                {
+                    throw new InvalidOperationException(
+                        $"Imported upscale '{image.Id:N}' references missing source image '{parentId:N}'.");
+                }
+
+                var parent = document.Images.First(parentImage => parentImage.Id == parentId);
+                if (parent.Data is null
+                    || parent.Data.Length == 0
+                    || string.IsNullOrWhiteSpace(parent.ContentType)
+                    || !parent.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Imported upscale '{image.Id:N}' references source image '{parentId:N}', which cannot be imported.");
+                }
+            }
+
+            ValidateImageLineageAcyclic(document.Images);
+        }
         if (document.FormatVersion >= 12)
         {
             if (document.FontFamilies.GroupBy(family => family.Id).Any(group => group.Count() > 1)
@@ -856,11 +882,11 @@ public sealed class ProjectImportJobProcessor(
             }
             if (edition.CoverDesign is { } cover
                 && (!Enum.IsDefined(cover.BarcodeMode)
+                    || (document.FormatVersion >= 30 && cover.LegacyBackCopy is not null)
                     || cover.Title.Trim().Length is < 1 or > 160
                     || cover.Subtitle.Trim().Length > 240
                     || cover.Author.Trim().Length > 160
                     || cover.SpineText.Trim().Length > 120
-                    || cover.BackCopy.Trim().Length > 1_800
                     || !System.Text.RegularExpressions.Regex.IsMatch(cover.BackgroundColor, "^#[0-9a-fA-F]{6}$")
                     || !double.IsFinite(cover.ImageCropXPercent)
                     || !double.IsFinite(cover.ImageCropYPercent)
@@ -1662,6 +1688,10 @@ public sealed class ProjectImportJobProcessor(
             {
                 Id = localId,
                 ProjectId = job.ProjectId,
+                // ReadAndValidateAsync has already normalized legacy image source
+                // values before this phase. Applying the legacy adapter again
+                // would reinterpret the newly canonical Upscaled value as the
+                // pre-v29 numeric Imported value.
                 Source = importedImage.Source,
                 FileName = string.IsNullOrWhiteSpace(importedImage.FileName) ? $"imported-image-{localId:N}.png" : importedImage.FileName.Trim(),
                 ContentType = importedImage.ContentType.Trim(),
@@ -1699,6 +1729,67 @@ public sealed class ProjectImportJobProcessor(
             await AddReportAsync(job, ProjectImportReportItemKind.Structural, $"Imported {state.ImageMap.Count} project image(s)", "Images were added to the project image library.", "ProjectImage", job.ProjectId.ToString("N"), cancellationToken: cancellationToken);
         }
 
+    }
+
+    private static ProjectExportDocument AdaptLegacyImageSources(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 29)
+            return document;
+
+        return document with
+        {
+            Images = document.Images
+                .Select(image => image with
+                {
+                    Source = ProjectExportImageCompatibility.AdaptLegacySource(
+                        image.Source,
+                        image.SourceMetadataJson),
+                })
+                .ToList(),
+        };
+    }
+
+    internal static ProjectExportDocument AdaptLegacyCoverDescription(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 30)
+            return document;
+
+        static ProjectExportCoverDesign? Adapt(ProjectExportCoverDesign? cover) => cover is null
+            ? null
+            : cover with
+            {
+                CompositionSceneJson = LegacyCoverTextBindingMigration.AdaptSceneJson(cover.CompositionSceneJson),
+                SurfaceScenesJson = LegacyCoverTextBindingMigration.AdaptSurfaceScenesJson(cover.SurfaceScenesJson),
+                LegacyBackCopy = null,
+            };
+
+        return document with
+        {
+            PublicationBook = document.PublicationBook is null
+                ? null
+                : document.PublicationBook with { CoverDesign = Adapt(document.PublicationBook.CoverDesign) },
+            PublicationEditions = document.PublicationEditions
+                .Select(edition => edition with { CoverDesign = Adapt(edition.CoverDesign) })
+                .ToList(),
+        };
+    }
+
+    private static void ValidateImageLineageAcyclic(IReadOnlyList<ProjectExportImage> images)
+    {
+        var parentByImageId = images
+            .Where(image => image.DerivedFromImageId is not null)
+            .ToDictionary(image => image.Id, image => image.DerivedFromImageId!.Value);
+        foreach (var image in images)
+        {
+            var visited = new HashSet<Guid>();
+            var current = image.Id;
+            while (parentByImageId.TryGetValue(current, out var parentId))
+            {
+                if (!visited.Add(current))
+                    throw new InvalidOperationException($"Image lineage contains a cycle involving image '{current:N}'.");
+                current = parentId;
+            }
+        }
     }
 
     private static string UpgradeImportedManuscript(string json, Guid id, long revision)
@@ -2246,7 +2337,6 @@ public sealed class ProjectImportJobProcessor(
                 Subtitle = cover.Subtitle,
                 Author = cover.Author,
                 SpineText = cover.SpineText,
-                BackCopy = cover.BackCopy,
                 BackgroundColor = cover.BackgroundColor,
                 BarcodeMode = cover.BarcodeMode,
                 ImageCropXPercent = cover.ImageCropXPercent,
@@ -3549,9 +3639,11 @@ public sealed class ProjectImportJobProcessor(
         {
             if (!allowCoverBindings && !string.IsNullOrWhiteSpace(item.TextBinding))
                 throw new InvalidOperationException($"{label} stores duplicated text instead of a semantic content reference.");
+            if (allowCoverBindings && string.IsNullOrWhiteSpace(item.TextBinding))
+                throw new InvalidOperationException($"{label} contains an empty cover text frame.");
             if (allowCoverBindings
-                && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
-                throw new InvalidOperationException($"{label} contains an unsupported cover-copy binding.");
+                && PublicationTextBindings.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
+                throw new InvalidOperationException($"{label} contains unsupported cover-copy token(s): {string.Join(", ", unknownTokens)}.");
         }
     }
 

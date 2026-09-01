@@ -27,7 +27,7 @@
   `codex/` prefix for Codex-created branches unless the user requests another
   name.
 - If you are already on a feature branch that has commits that are not merged; 
-  continue work on the current branch after merging changes back from `main`.
+  merge in the latest from `main` and then continue work on the current branch after merging.
 - Start feature work only from a clean working tree whose index matches `HEAD`.
 - If existing changes form coherent prior work, finish their verification and
   documentation, then commit them before beginning a new feature. Never mix

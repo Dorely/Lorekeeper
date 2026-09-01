@@ -576,6 +576,7 @@ public sealed class PublicationPackageService(
             and not PublicationArtifactKind.PrintSetupManifest
             and not PublicationArtifactKind.BookPdf))
             generated.Add(Artifact(
+                projectId,
                 editionId,
                 file.Value.Kind,
                 file.Key,
@@ -585,6 +586,7 @@ public sealed class PublicationPackageService(
                 PackageRuntimeVersion(edition.Format),
                 packageIdentity));
         generated.Add(Artifact(
+            projectId,
             editionId,
             PublicationArtifactKind.PublicationPackage,
             "publication-package.zip",
@@ -1245,7 +1247,7 @@ public sealed class PublicationPackageService(
                 ($"cover {coverDesign.Id:N} subtitle", coverDesign.Subtitle),
                 ($"cover {coverDesign.Id:N} author", coverDesign.Author),
                 ($"cover {coverDesign.Id:N} spine", coverDesign.SpineText),
-                ($"cover {coverDesign.Id:N} back copy", coverDesign.BackCopy),
+                ($"cover {coverDesign.Id:N} description", document.Profile.Description),
             ]);
         }
         foreach (var source in renderedText.Where(source =>
@@ -1693,6 +1695,7 @@ public sealed class PublicationPackageService(
     }
 
     private static PublicationArtifact Artifact(
+        Guid projectId,
         Guid editionId,
         PublicationArtifactKind kind,
         string fileName,
@@ -1702,6 +1705,8 @@ public sealed class PublicationPackageService(
         string rendererVersion,
         string profileId) => new()
         {
+            ProjectId = projectId,
+            TargetKind = PublicationTargetKind.Release,
             EditionId = editionId,
             Kind = kind,
             FileName = fileName,

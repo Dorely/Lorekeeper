@@ -291,6 +291,7 @@ else
     private CancellationTokenSource? _formAutosave;
     private readonly SemaphoreSlim _formSaveGate = new(1, 1);
     private long _formChangeVersion;
+    private bool _formFieldFocused;
     private int _pollGeneration;
     private int _targetLoadGeneration;
 
@@ -499,44 +500,43 @@ else
             @CoreDownloads()
         </section>
 
-        <section class="workspace-card core-book-design-card">
+        <section class="workspace-card cover-card">
             <header>
-                <div><div><span class="eyebrow">Book design</span><h2>Page, text, and cover defaults</h2><p>These shared choices flow into the reading PDF and publication releases unless customized.</p></div></div>
+                <div><span class="step">01</span><div><span class="eyebrow">Core cover</span><h2>Reusable front cover</h2><p>The front cover flows into EPUB and PDF releases and becomes the front panel of print covers.</p></div></div>
+                <div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="OpenCoreCoverAsync">Edit Core cover</button><span class="status-pill">Revision @_core!.CoverRevision</span></div>
             </header>
-            <div class="core-book-design-grid">
-                <div class="core-design-pane">
-                    <div class="core-design-heading"><div><h3>Page and text defaults</h3><p>Set the regular page geometry and baseline body typography.</p></div><button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenBookTextStylesModal">Manage Book Text Styles</button></div>
-                    <div class="page-setup-grid">
-                        <label class="field full"><span>Page size</span><select class="form-select" value="@PageSetupPreset()" @onchange="PageSetupPresetChanged"><option value="6x9">6 × 9 in</option><option value="5.5x8.5">5.5 × 8.5 in</option><option value="8.5x11">8.5 × 11 in</option><option value="custom">Custom</option></select></label>
-                        <label class="field"><span>Width (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageWidthInches" @bind:after="MarkPageSetupDirty" /></label>
-                        <label class="field"><span>Height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageHeightInches" @bind:after="MarkPageSetupDirty" /></label>
-                        <label class="field"><span>Margins (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.0625" @bind="_pageMarginInches" @bind:after="MarkPageSetupDirty" /></label>
-                        <label class="field"><span>Body size (pt)</span><input class="form-control" type="number" min="6" max="36" step="0.25" @bind="_bodyFontSizePoints" @bind:after="MarkPageSetupDirty" /></label>
-                        <label class="field"><span>Line height</span><input class="form-control" type="number" min="0.8" max="3" step="0.05" @bind="_bodyLineHeight" @bind:after="MarkPageSetupDirty" /></label>
-                    </div>
-                </div>
-                <div class="core-design-pane core-cover-summary">
-                    <div><span class="eyebrow">Core cover</span><h3>Reusable front cover</h3><p>The front cover flows into EPUB and PDF releases and becomes the front panel of paperback covers.</p></div>
-                    <div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="OpenCoreCoverAsync">Edit Core cover</button><span class="status-pill">Revision @_core!.CoverRevision</span></div>
-                </div>
-            </div>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div></header>
+        <section class="workspace-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div></header>
             <div class="form-grid">
-                <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
-                <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
-                <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
+                <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
+                <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
+                <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
                 <label class="field"><span>Language</span>@LanguageSelect(_coreDraft.Language, false, value => CoreChanged(nameof(CoreDraft.Language), value))</label>
-                <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
-                <label class="field"><span>Copyright <small>optional</small></span><input class="form-control" value="@_coreDraft.Copyright" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())" /></label>
-                <label class="field full"><span>Description <small>optional</small></span><textarea class="form-control" rows="4" value="@_coreDraft.Description" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
+                <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
+                <label class="field full metadata-long-field"><span>Copyright <small>optional</small></span><textarea class="form-control" rows="3" value="@_coreDraft.Copyright" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())"></textarea></label>
+                <label class="field full metadata-long-field"><span>Description <small>optional</small></span><textarea class="form-control" rows="5" value="@_coreDraft.Description" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
             </div>
         </section>
 
         @PublicationFlowCard()
 
-        <section class="workspace-card"><header><div><span class="step">03</span><div><h2>PDF presentation</h2><p>Defaults for the Core reading PDF and inheriting PDF ebook releases.</p></div></div></header>
+        <section class="workspace-card">
+            <header>
+                <div><span class="step">04</span><div><h2>Page geometry and text</h2><p>Set the regular page geometry and baseline body typography inherited by releases.</p></div></div>
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenBookTextStylesModal">Manage Book Text Styles</button>
+            </header>
+            <div class="page-setup-grid">
+                <label class="field full"><span>Page size</span><select class="form-select" value="@PageSetupPreset()" @onchange="PageSetupPresetChanged"><option value="6x9">6 × 9 in</option><option value="5.5x8.5">5.5 × 8.5 in</option><option value="8.5x11">8.5 × 11 in</option><option value="custom">Custom</option></select></label>
+                <label class="field"><span>Width (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageWidthInches" @bind:after="MarkPageSetupDirty" /></label>
+                <label class="field"><span>Height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageHeightInches" @bind:after="MarkPageSetupDirty" /></label>
+                <label class="field"><span>Margins (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.0625" @bind="_pageMarginInches" @bind:after="MarkPageSetupDirty" /></label>
+                <label class="field"><span>Body size (pt)</span><input class="form-control" type="number" min="6" max="36" step="0.25" @bind="_bodyFontSizePoints" @bind:after="MarkPageSetupDirty" /></label>
+                <label class="field"><span>Line height</span><input class="form-control" type="number" min="0.8" max="3" step="0.05" @bind="_bodyLineHeight" @bind:after="MarkPageSetupDirty" /></label>
+            </div>
+        </section>
+
+        <section class="workspace-card"><header><div><span class="step">05</span><div><h2>PDF presentation</h2><p>Defaults for the Core reading PDF and inheriting PDF ebook releases.</p></div></div></header>
             <div class="option-grid pdf-presentation-options">
                 <label class="check-row"><input type="checkbox" checked="@_coreDraft.AllowDesignedPageOverrides" @onchange="e => CoreToggle(nameof(CoreDraft.AllowDesignedPageOverrides), (bool)e.Value!)" /><span><strong>Preserve Designed Page sizes</strong><small>Full-art facing spreads stay one wide PDF page, and custom Designed Pages keep their own geometry instead of being fitted into regular book pages.</small></span></label>
                 <div class="plain-setting"><strong>Regular pages</strong><span>@_core!.PageSetup.PageWidthInches × @_core.PageSetup.PageHeightInches in, from Project Page Setup</span></div>
@@ -547,7 +547,7 @@ else
 
     </div>;
 
-    private RenderFragment ReleaseView() => @<div class="workspace-stack release-workspace-stack">
+    private RenderFragment ReleaseView() => @<div class="workspace-stack">
         <section class="readiness-card">
             <div><span class="eyebrow">@ReleaseTypeLabel(_workspace!.Edition.Format)</span><h1>@_workspace.Edition.Name</h1><p>@ReleaseSummary(_workspace.Edition)</p></div>
             <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareReleaseAsync">@PreparationButton("Prepare files")</button><small>Renders, validates, and packages in one step.</small></div>
@@ -555,9 +555,30 @@ else
             @ArtifactDownloads(ReleaseArtifactKinds(_workspace.Edition.Format))
         </section>
 
-        <section class="workspace-card edition-content-card">
+        <section class="workspace-card cover-card">
             <header>
-                <div><span class="step">03</span><div><h2>Edition-specific content</h2><p>Keep this release live with Core Book, or opt in to chapter-level edition copies edited in Editor.</p></div></div>
+                <div><span class="step">01</span><div><span class="eyebrow">@CoverEyebrow(_workspace.Edition.Format)</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p></div></div>
+                <div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div>
+            </header>
+        </section>
+
+        <section class="workspace-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Inherited from Core Book. Customize only the fields that differ for this release.</p></div></div></header>
+            <div class="inherit-grid">
+                @InheritedText("Title", PublicationEditionOverrideField.Title, _releaseDraft.Title, value => ReleaseText(nameof(ReleaseDraft.Title), value))
+                @InheritedText("Subtitle", PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle, value => ReleaseText(nameof(ReleaseDraft.Subtitle), value))
+                @InheritedText("Author", PublicationEditionOverrideField.Author, _releaseDraft.Author, value => ReleaseText(nameof(ReleaseDraft.Author), value))
+                @InheritedLanguage()
+                @InheritedText("Publisher", PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher, value => ReleaseText(nameof(ReleaseDraft.Publisher), value))
+                @InheritedLongText("Copyright", PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright, 3, value => ReleaseText(nameof(ReleaseDraft.Copyright), value))
+                @InheritedLongText("Description", PublicationEditionOverrideField.Description, _releaseDraft.Description, 5, value => ReleaseText(nameof(ReleaseDraft.Description), value))
+            </div>
+        </section>
+
+        @PublicationFlowCard()
+
+        <section class="workspace-card">
+            <header>
+                <div><span class="step">04</span><div><h2>Edition-specific content</h2><p>Keep this release live with Core Book, or opt in to chapter-level edition copies edited in Editor.</p></div></div>
                 <label class="edition-content-switch"><input type="checkbox" checked="@_workspace!.Edition.EditionSpecificContentEnabled" disabled="@(_editionContentBusy || _workspace.Edition.Status == PublicationEditionStatus.Archived)" @onchange="ToggleEditionContentAsync" /><span>Enable</span></label>
             </header>
             @if (_workspace.Edition.EditionSpecificContentEnabled)
@@ -589,11 +610,33 @@ else
             }
         </section>
 
-        @PublicationFlowCard()
+        @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
+        {
+            <section class="workspace-card"><header><div><span class="step">05</span><div><h2>Page geometry</h2><p>@(_releaseDesignOpen ? "Page size and margins are customized for this release." : "Uses Core Book page size and margins. Edition-specific typography is applied in Editor.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book geometry" : "Customize geometry")</button></header>
+                @if (_releaseDesignOpen)
+                {
+                    <div class="form-grid">
+                        <label class="field"><span>Page width (in)</span><input class="form-control" type="number" min="3" max="18" step="0.01" @bind="_releaseDraft.PageWidthInches" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>Page height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.01" @bind="_releaseDraft.PageHeightInches" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>Margin (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.01" @bind="_releaseDraft.PageMarginInches" @bind:after="MarkReleasePaginationDirty" /></label>
+                    </div>
+                }
+            </section>
+            @if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
+            {
+                <section class="workspace-card"><header><div><span class="step">06</span><div><h2>PDF presentation</h2><p>Uses Core Book defaults until deliberately customized for this PDF release.</p></div></div></header>
+                    <div class="release-presentation-options">
+                        @InheritedToggle("Preserve Designed Page sizes", PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides, value => ReleaseToggle(nameof(ReleaseDraft.AllowDesignedPageOverrides), value))
+                        <div class="plain-setting"><strong>Page behavior</strong><span>When enabled, full-art spreads remain one wide PDF page and custom Designed Pages retain their geometry. When disabled, spreads use regular book leaves.</span></div>
+                        <div class="plain-setting"><strong>Accessibility</strong><span>Tagged text, bookmarks, links, and logical reading order remain automatic.</span></div>
+                    </div>
+                </section>
+            }
+        }
 
-        <section class="workspace-card release-setup-card"><header><div><span class="step">04</span><div><h2>Release setup</h2><p>Only choices that change the prepared files belong here. Changes save automatically.</p></div></div></header>
+        <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.Epub ? "05" : _workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "07" : "06")</span><div><h2>Release setup</h2><p>Only choices that change the prepared files belong here. Changes save automatically.</p></div></div></header>
             <div class="form-grid">
-                <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                 @if (_workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 {
                     <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
@@ -628,65 +671,27 @@ else
                         || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
                             && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
                     {
-                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                     }
                 }
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                 }
                 else
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                     <div class="plain-setting"><strong>EPUB 3</strong><span>Reflowable navigation and accessibility are managed automatically.</span></div>
                 }
             </div>
         </section>
-
-        <section class="workspace-card release-book-details-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Inherited from Core Book. Customize only the fields that differ for this release.</p></div></div></header>
-            <div class="inherit-grid">
-                @InheritedText("Title", PublicationEditionOverrideField.Title, _releaseDraft.Title, value => ReleaseText(nameof(ReleaseDraft.Title), value))
-                @InheritedText("Subtitle", PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle, value => ReleaseText(nameof(ReleaseDraft.Subtitle), value))
-                @InheritedText("Author", PublicationEditionOverrideField.Author, _releaseDraft.Author, value => ReleaseText(nameof(ReleaseDraft.Author), value))
-                @InheritedLanguage()
-                @InheritedText("Publisher", PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher, value => ReleaseText(nameof(ReleaseDraft.Publisher), value))
-                @InheritedText("Copyright", PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright, value => ReleaseText(nameof(ReleaseDraft.Copyright), value))
-                @InheritedText("Description", PublicationEditionOverrideField.Description, _releaseDraft.Description, value => ReleaseText(nameof(ReleaseDraft.Description), value))
-            </div>
-        </section>
-
-        <section class="workspace-card release-cover-card"><div><span class="eyebrow">@CoverEyebrow(_workspace.Edition.Format)</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
-
-        @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
-        {
-            @if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
-            {
-                <section class="workspace-card"><header><div><span class="step">05</span><div><h2>PDF presentation</h2><p>Uses Core Book defaults until deliberately customized for this PDF release.</p></div></div></header>
-                    <div class="release-presentation-options">
-                        @InheritedToggle("Preserve Designed Page sizes", PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides, value => ReleaseToggle(nameof(ReleaseDraft.AllowDesignedPageOverrides), value))
-                        <div class="plain-setting"><strong>Page behavior</strong><span>When enabled, full-art spreads remain one wide PDF page and custom Designed Pages retain their geometry. When disabled, spreads use regular book leaves.</span></div>
-                        <div class="plain-setting"><strong>Accessibility</strong><span>Tagged text, bookmarks, links, and logical reading order remain automatic.</span></div>
-                    </div>
-                </section>
-            }
-            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "06" : "05")</span><div><h2>Page geometry</h2><p>@(_releaseDesignOpen ? "Page size and margins are customized for this release." : "Uses Core Book page size and margins. Edition-specific typography is applied in Editor.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book geometry" : "Customize geometry")</button></header>
-                @if (_releaseDesignOpen)
-                {
-                    <div class="form-grid">
-                        <label class="field"><span>Page width (in)</span><input class="form-control" type="number" min="3" max="18" step="0.01" @bind="_releaseDraft.PageWidthInches" @bind:after="MarkReleasePaginationDirty" /></label>
-                        <label class="field"><span>Page height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.01" @bind="_releaseDraft.PageHeightInches" @bind:after="MarkReleasePaginationDirty" /></label>
-                        <label class="field"><span>Margin (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.01" @bind="_releaseDraft.PageMarginInches" @bind:after="MarkReleasePaginationDirty" /></label>
-                    </div>
-                }
-            </section>
-        }
 
         <details class="technical"><summary>Advanced and technical details</summary><dl><div><dt>Profile</dt><dd>Managed automatically for @_workspace.Edition.Vendor</dd></div><div><dt>Source state</dt><dd>Calculated when files are prepared</dd></div><div><dt>Release revision</dt><dd>@_workspace.Edition.Revision</dd></div></dl><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="CloneReleaseAsync">Clone release</button><button class="btn btn-sm btn-outline-danger" @onclick="ArchiveReleaseAsync">Archive release</button></div></details>
     </div>;
 
     private RenderFragment PublicationFlowCard() => @<section class="workspace-card publication-flow-card">
         <header>
-            <div><span class="step">@(_selectedReleaseId is null ? "02" : "01")</span><div><h2>Book content</h2><p>Choose what appears in the front, main content, and back of this book.</p></div></div>
+            <div><span class="step">03</span><div><h2>Book content</h2><p>Choose what appears in the front, main content, and back of this book.</p></div></div>
         </header>
         @if (!_coreDetailsLoaded && _selectedReleaseId is null)
         {
@@ -866,7 +871,7 @@ else
                     <label class="field"><span>Place near</span><select class="form-select" disabled="@_assistantRunning" value="@SectionTargetValue()" @onchange="SectionTargetChangedAsync">@foreach (var item in SectionAnchorTargets()){<option value="@($"{item.TargetKind}|{item.TargetId}")">@item.Title</option>}</select></label>
                 }
                 <label class="field"><span>Include</span><select class="form-select" disabled="@_assistantRunning" value="@_sectionInclusion" @onchange="SectionInclusionChangedAsync"><option value="@PublicationSectionInclusionMode.Automatic">Automatic</option><option value="@PublicationSectionInclusionMode.Included">Included</option><option value="@PublicationSectionInclusionMode.Omitted">Omitted</option></select></label>
-                <label class="field"><span>Start on</span><select class="form-select" disabled="@_assistantRunning" value="@_sectionStartSide" @onchange="SectionStartSideChangedAsync"><option value="@PublicationSectionStartSide.Next">Next available page</option><option value="@PublicationSectionStartSide.Recto">Right-hand page (recto)</option><option value="@PublicationSectionStartSide.Verso">Left-hand page (verso)</option></select><small>A two-page facing spread always begins on a left page so both leaves face each other.</small></label>
+                <label class="field"><span>Start on</span><select class="form-select" disabled="@_assistantRunning" value="@_sectionStartSide" @onchange="SectionStartSideChangedAsync"><option value="@PublicationSectionStartSide.Next">Next available page</option><option value="@PublicationSectionStartSide.Recto">Right-hand page (recto)</option><option value="@PublicationSectionStartSide.Verso">Left-hand page (verso)</option></select><small>Right- or left-hand placement may insert a numbered blank page. Choose Next available to avoid a parity blank. A two-page facing spread always begins on a left page.</small></label>
             </div>
         }
         <div class="publication-section-editor-body">
@@ -911,7 +916,12 @@ else
 
     private RenderFragment InheritedText(string Label, PublicationEditionOverrideField Field, string Value, Action<string?> Changed) => @<div class="inherited-field">
         <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
-        <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())" />
+        <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => Changed(e.Value?.ToString())" />
+    </div>;
+
+    private RenderFragment InheritedLongText(string Label, PublicationEditionOverrideField Field, string Value, int Rows, Action<string?> Changed) => @<div class="inherited-field metadata-long-field">
+        <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
+        <textarea class="form-control" rows="@Rows" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => Changed(e.Value?.ToString())"></textarea>
     </div>;
 
     private RenderFragment InheritedLanguage() => @<div class="inherited-field">
@@ -954,8 +964,32 @@ else
     }
     else if (_preparations.FirstOrDefault() is { } job)
     {
-        <div class="preparation @PreparationCssClass(job)"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button><div class="preparation-progress" role="progressbar" aria-label="Publication preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@job.ProgressPercent"><span style="width:@job.ProgressPercent%"></span></div>}@if (_preparationDiagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@_preparationDiagnostics.Count production note@(_preparationDiagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in _preparationDiagnostics){@PreparationDiagnostic(diagnostic)}</div></details>}</div>
+        <div class="preparation @PreparationCssClass(job)">
+            <strong>@job.Message</strong>
+            @if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)
+            {
+                <span>@job.ProgressPercent% · @job.Step</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>
+                <div class="preparation-progress" role="progressbar" aria-label="Publication preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@job.ProgressPercent"><span style="width:@job.ProgressPercent%"></span></div>
+            }
+            @if (job.ImagePreparationSummary is { } imageSummary)
+            {
+                <span class="preparation-image-summary">@ImagePreparationSummaryText(imageSummary)</span>
+            }
+            @if (_preparationDiagnostics.Count > 0)
+            {
+                <details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)">
+                    <summary>@_preparationDiagnostics.Count production note@(_preparationDiagnostics.Count == 1 ? "" : "s")</summary>
+                    <div>@foreach (var diagnostic in _preparationDiagnostics){@PreparationDiagnostic(diagnostic)}</div>
+                </details>
+            }
+        </div>
     }</text>;
+
+    private static string ImagePreparationSummaryText(PublicationImagePreparationSummary summary) =>
+        summary.ThresholdDpi <= 0
+            ? "Images: no DPI transformation for EPUB."
+            : $"Images: {summary.ThresholdDpi:0} DPI · {summary.CreatedAssetCount} created · {summary.ReusedAssetCount} reused · {summary.ReplacedReferenceCount} reference{(summary.ReplacedReferenceCount == 1 ? "" : "s")} replaced{(summary.Failures.Count == 0 ? string.Empty : $" · {summary.Failures.Count} failure{(summary.Failures.Count == 1 ? "" : "s")}")}.";
 
     private RenderFragment PreparationDiagnostic(PublicationDiagnosticPresentation Diagnostic) => @<article class="preparation-diagnostic">
         <div><strong>@Diagnostic.Title</strong><span>@Diagnostic.Message</span></div>
@@ -2285,6 +2319,12 @@ else
             ? id
             : selectedReleaseId;
         var targetChanged = targetReleaseId != selectedReleaseId;
+        if (coverWasOpen && !targetChanged && mutation.Kind == PublishWorkspaceMutationKind.Cover)
+        {
+            if (mutation.SelectedObjectId is Guid selectedObjectId)
+                _coverSelectionId = selectedObjectId;
+            _coverRefreshSignal++;
+        }
         var paginationChanged = false;
         if (coverWasOpen && !targetChanged && selectedReleaseId is Guid selectedEditionId
             && mutation.Kind == PublishWorkspaceMutationKind.Edition)
@@ -2401,13 +2441,34 @@ else
         _preparedCoverPaginationFingerprint = null;
     }
 
+    private void BeginFormFieldEdit()
+    {
+        _formFieldFocused = true;
+        CancelFormAutosave();
+    }
+
+    private void EndFormFieldEdit()
+    {
+        _formFieldFocused = false;
+        if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
+            QueueFormAutosave();
+    }
+
     private void QueueFormAutosave()
     {
         var version = ++_formChangeVersion;
-        _formAutosave?.Cancel();
-        _formAutosave?.Dispose();
+        CancelFormAutosave();
+        if (_formFieldFocused)
+            return;
         _formAutosave = CancellationTokenSource.CreateLinkedTokenSource(_dispose.Token);
         _ = AutosaveFormsAsync(version, _formAutosave.Token);
+    }
+
+    private void CancelFormAutosave()
+    {
+        _formAutosave?.Cancel();
+        _formAutosave?.Dispose();
+        _formAutosave = null;
     }
 
     private async Task AutosaveFormsAsync(long version, CancellationToken cancellationToken)
@@ -2417,6 +2478,8 @@ else
             await Task.Delay(500, cancellationToken);
             await InvokeAsync(async () =>
             {
+                if (_formFieldFocused)
+                    return;
                 await SavePendingAsync();
                 if (version != _formChangeVersion && !_dispose.IsCancellationRequested)
                     QueueFormAutosave();

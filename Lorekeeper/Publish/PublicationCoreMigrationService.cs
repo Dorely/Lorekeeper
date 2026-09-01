@@ -519,7 +519,6 @@ public sealed class PublicationCoreMigrationService(
                     cover.Subtitle,
                     cover.Author,
                     cover.SpineText,
-                    cover.BackCopy,
                     cover.BackgroundColor,
                     cover.BarcodeMode,
                     cover.ImageCropXPercent,

@@ -114,6 +114,17 @@
     line-height: 1.2;
 }
 
+.image-upscaled-badge {
+    width: fit-content;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bs-info, #0dcaf0) 16%, transparent);
+    color: var(--bs-info-text-emphasis, #055160);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
 .image-tool-panel h6 {
     margin: 0;
     color: var(--bs-secondary-color, #6c757d);
@@ -249,6 +260,29 @@
     animation: image-job-spin 0.8s linear infinite;
 }
 
+.image-job-terminal {
+    display: grid;
+    justify-items: center;
+    gap: 0.45rem;
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+}
+
+.image-job-terminal > span {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    place-items: center;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    font-size: 1.6rem;
+    line-height: 1;
+}
+
+.image-job-terminal > strong {
+    font-size: 0.78rem;
+}
+
 @keyframes image-job-spin {
     to { transform: rotate(360deg); }
 }
@@ -317,6 +351,15 @@
     gap: 0.75rem;
     padding: 0.75rem;
     overflow-y: auto;
+}
+
+.upscale-provenance-note {
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    border-radius: var(--lk-radius-md);
+    background: var(--lk-soft);
+    color: var(--lk-muted);
+    font-size: 0.78rem;
 }
 
 .partials-group {

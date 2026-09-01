@@ -201,6 +201,27 @@ public sealed class ProjectImageJobService(
             partial.ContentType,
             partial.FileName,
             ResolveProviderOutputLimit());
+        var physicalGeometry = TryReadPhysicalGeometry(job.TargetGeometryJson);
+        var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requestedRaster);
+        var rasterMatched = !hasRequestedRaster
+            || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
+        var aspectMatched = TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
+            ? LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect)
+            : !hasRequestedRaster
+                || LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, (double)requestedRaster.Width / requestedRaster.Height);
+        var effectiveDpi = physicalGeometry is { } physical
+            ? Math.Min(storedImage.Width / physical.WidthInches, storedImage.Height / physical.HeightInches)
+            : (double?)null;
+        var minimumDpiMet = physicalGeometry?.MinimumDpi is not { } minimumDpi
+            ? (bool?)null
+            : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+        var warningCodes = new List<string>();
+        if (!rasterMatched)
+            warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
+        if (!aspectMatched)
+            warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
+        if (minimumDpiMet == false)
+            warningCodes.Add("MINIMUM_DPI_NOT_MET");
         var asset = new PublishAsset
         {
             ProjectId = projectId,
@@ -222,6 +243,7 @@ public sealed class ProjectImageJobService(
                 partial.Provider,
                 partial.MainlineModel,
                 partial.ImageModel,
+                TargetGeometry = JsonNodeOrString(job.TargetGeometryJson),
                 partial.RequestId,
                 partial.ResponseId,
                 partial.CallId,
@@ -243,6 +265,21 @@ public sealed class ProjectImageJobService(
                     storedImage.Height,
                     SizeBytes = storedImage.Data.LongLength,
                 },
+                GeometryValidation = new
+                {
+                    LayoutBound = HasLayoutTargetGeometry(job.TargetGeometryJson),
+                    RequestedRaster = hasRequestedRaster ? requestedRaster.Size : job.Size,
+                    ActualRaster = $"{storedImage.Width}x{storedImage.Height}",
+                    RasterMatched = rasterMatched,
+                    AspectMatched = aspectMatched,
+                    WidthInches = physicalGeometry?.WidthInches,
+                    HeightInches = physicalGeometry?.HeightInches,
+                    RequestedMinimumDpi = physicalGeometry?.MinimumDpi,
+                    EffectiveDpi = effectiveDpi,
+                    MinimumDpiMet = minimumDpiMet,
+                    WarningCodes = warningCodes,
+                    WarningCode = warningCodes.FirstOrDefault(),
+                },
             }, JsonOptions),
             CreatedAt = now,
             UpdatedAt = now,
@@ -253,6 +290,34 @@ public sealed class ProjectImageJobService(
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
         return ProjectImageService.ToView(projectId, asset);
+    }
+
+    public async Task DeleteUnpromotedPartialsAsync(
+        Guid projectId,
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var job = await db.ProjectImageGenerationJobs
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
+            ?? throw new InvalidOperationException("Image generation job was not found.");
+        if (job.Status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running)
+            throw new InvalidOperationException("Cancel the image request before deleting its partials.");
+
+        var partials = await db.ProjectImagePartials
+            .Where(partial => partial.ProjectId == projectId
+                && partial.JobId == jobId
+                && partial.FinalOutputImageId == null)
+            .ToListAsync(cancellationToken);
+        if (partials.Count == 0)
+            return;
+
+        db.ProjectImagePartials.RemoveRange(partials);
+        if (await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken) is { } project)
+            project.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<ProjectImageJobView> CreateGenerateJobAsync(
@@ -580,6 +645,20 @@ public sealed class ProjectImageJobService(
             ? LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect)
             : !hasRequestedRaster
                 || LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, (double)requestedRaster.Width / requestedRaster.Height);
+        var physicalGeometry = TryReadPhysicalGeometry(job.TargetGeometryJson);
+        var effectiveDpi = physicalGeometry is { } physical
+            ? Math.Min(storedImage.Width / physical.WidthInches, storedImage.Height / physical.HeightInches)
+            : (double?)null;
+        var minimumDpiMet = physicalGeometry?.MinimumDpi is not { } minimumDpi
+            ? (bool?)null
+            : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+        var warningCodes = new List<string>();
+        if (!rasterMatched)
+            warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
+        if (!aspectMatched)
+            warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
+        if (minimumDpiMet == false)
+            warningCodes.Add("MINIMUM_DPI_NOT_MET");
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
@@ -621,9 +700,13 @@ public sealed class ProjectImageJobService(
                     ActualRaster = $"{storedImage.Width}x{storedImage.Height}",
                     RasterMatched = rasterMatched,
                     AspectMatched = aspectMatched,
-                    WarningCode = !rasterMatched
-                        ? "PROVIDER_IMAGE_RASTER_MISMATCH"
-                        : !aspectMatched ? "LAYOUT_IMAGE_ASPECT_MISMATCH" : null,
+                    WidthInches = physicalGeometry?.WidthInches,
+                    HeightInches = physicalGeometry?.HeightInches,
+                    RequestedMinimumDpi = physicalGeometry?.MinimumDpi,
+                    EffectiveDpi = effectiveDpi,
+                    MinimumDpiMet = minimumDpiMet,
+                    WarningCodes = warningCodes,
+                    WarningCode = warningCodes.FirstOrDefault(),
                 },
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
                 Mask = mask is null ? null : new { mask.Id, mask.Label, mask.ContentType, mask.Width, mask.Height },
@@ -667,8 +750,11 @@ public sealed class ProjectImageJobService(
         job.UpdatedAt = now;
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
-        foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
-            await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
+        if (minimumDpiMet != false)
+        {
+            foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
+                await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
+        }
         return ProjectImageService.ToView(projectId, asset);
     }
 
@@ -1023,8 +1109,17 @@ public sealed class ProjectImageJobService(
     private static bool TryReadTargetAspect(string? value, out double aspect)
     {
         aspect = 0;
-        if (string.IsNullOrWhiteSpace(value))
+        var geometry = TryReadPhysicalGeometry(value);
+        if (geometry is null)
             return false;
+        aspect = geometry.WidthInches / geometry.HeightInches;
+        return true;
+    }
+
+    private static TargetPhysicalGeometry? TryReadPhysicalGeometry(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
         try
         {
             using var document = JsonDocument.Parse(value);
@@ -1036,16 +1131,24 @@ public sealed class ProjectImageJobService(
                 || !height.TryGetDouble(out var heightInches)
                 || heightInches <= 0)
             {
-                return false;
+                return null;
             }
-            aspect = widthInches / heightInches;
-            return true;
+            var minimumDpi = TryReadPositiveDouble(root, "minimumDpi")
+                ?? TryReadPositiveDouble(root, "requestedMinimumDpi");
+            return new TargetPhysicalGeometry(widthInches, heightInches, minimumDpi);
         }
         catch (JsonException)
         {
-            return false;
+            return null;
         }
     }
+
+    private static double? TryReadPositiveDouble(JsonElement root, string propertyName) =>
+        root.TryGetProperty(propertyName, out var value)
+        && value.TryGetDouble(out var parsed)
+        && parsed > 0
+            ? parsed
+            : null;
 
     private static string? NormalizeImageContentType(string contentType) =>
         contentType.Trim().ToLowerInvariant() switch
@@ -1141,6 +1244,11 @@ public sealed class ProjectImageJobService(
 
     private static string ExtensionForContentType(string contentType) =>
         contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) ? "webp" : "png";
+
+    private sealed record TargetPhysicalGeometry(
+        double WidthInches,
+        double HeightInches,
+        double? MinimumDpi);
 
     private static ImagePayload ParsePartialDataUrl(string? dataUrl, int maxBytes)
     {

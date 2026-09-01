@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -34,7 +35,7 @@ public static class ProjectExportWarningText
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 28;
+    public const int CurrentFormatVersion = 30;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -246,6 +247,65 @@ public sealed record ProjectExportImage(
     DateTime CreatedAt,
     DateTime UpdatedAt);
 
+/// <summary>
+/// Keeps the versioned export boundary compatible with the persisted image
+/// source values that predate the dedicated upscaled source. Before export
+/// Before format v29, numeric source value 6 meant <see cref="PublishAssetSource.Imported"/>;
+/// format v29 added a dedicated <see cref="PublishAssetSource.Upscaled"/>
+/// source instead.
+/// </summary>
+internal static class ProjectExportImageCompatibility
+{
+    public static PublishAssetSource AdaptLegacySource(
+        PublishAssetSource source,
+        string? sourceMetadataJson)
+    {
+        if (source == PublishAssetSource.Upscaled)
+            return PublishAssetSource.Imported;
+        if (source != PublishAssetSource.Resized || string.IsNullOrWhiteSpace(sourceMetadataJson))
+            return source;
+
+        try
+        {
+            using var document = JsonDocument.Parse(sourceMetadataJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !TryGetPropertyIgnoreCase(document.RootElement, "transform", out var transform)
+                || transform.ValueKind != JsonValueKind.Object
+                || !TryGetPropertyIgnoreCase(transform, "kind", out var kind)
+                || kind.ValueKind != JsonValueKind.String)
+            {
+                return source;
+            }
+
+            return string.Equals(kind.GetString(), "print-resample", StringComparison.Ordinal)
+                ? PublishAssetSource.Upscaled
+                : source;
+        }
+        catch (JsonException)
+        {
+            return source;
+        }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(
+        JsonElement element,
+        string propertyName,
+        out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+}
+
 public sealed record ProjectExportFontFamily(
     Guid Id,
     string Name,
@@ -414,7 +474,6 @@ public sealed record ProjectExportCoverDesign(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
     double ImageCropXPercent,
@@ -424,6 +483,10 @@ public sealed record ProjectExportCoverDesign(
 {
     public string SurfaceScenesJson { get; init; } = "{}";
     public SpineReadingDirection SpineReadingDirection { get; init; } = SpineReadingDirection.TopToBottom;
+
+    [JsonPropertyName("backCopy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyBackCopy { get; init; }
 }
 
 public sealed record ProjectExportEditionOutlineItem(

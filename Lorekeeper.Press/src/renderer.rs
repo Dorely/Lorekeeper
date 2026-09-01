@@ -1703,7 +1703,7 @@ fn validate_request(
             || cover.subtitle.chars().count() > 400
             || cover.author.chars().count() > 240
             || cover.spine_text.chars().count() > 240
-            || cover.back_copy.chars().count() > 4_000
+            || cover.description.chars().count() > 100_000
         {
             return reject(
                 "PRESS_COVER_TEXT_OVERFLOW",
@@ -3707,17 +3707,14 @@ fn designed_page(
                         .chars()
                         .filter(|character| character.is_whitespace())
                         .count();
-                    let word_spacing = if alignment == "Justify"
-                        && line_index + 1 < wrapped_line_count
-                        && !ends_paragraph
-                        && whitespace_count > 0
-                        && measured_width < width * scene_width
-                    {
-                        ((width * scene_width - measured_width) / whitespace_count as f32)
-                            .clamp(0.0, size * 0.25)
-                    } else {
-                        0.0
-                    };
+                    let word_spacing = justified_word_spacing(
+                        alignment == "Justify",
+                        line_index + 1 == wrapped_line_count,
+                        ends_paragraph,
+                        whitespace_count,
+                        measured_width,
+                        width * scene_width,
+                    );
                     let line_x = x * scene_width
                         + match alignment {
                             "Center" => (width * scene_width - measured_width) / 2.0,
@@ -5799,15 +5796,14 @@ fn append_styled_runs_with_gap(
             let estimated_width = measured_run_width(&line_runs, style.size);
             let spaces = line.chars().filter(|character| *character == ' ').count();
             let is_final_line = offset + relative_index + 1 == lines.len();
-            let word_spacing = if style.alignment == "justify"
-                && !is_final_line
-                && spaces > 0
-                && estimated_width < line_width
-            {
-                ((line_width - estimated_width) / spaces as f32).clamp(0.0, style.size * 0.25)
-            } else {
-                0.0
-            };
+            let word_spacing = justified_word_spacing(
+                style.alignment == "justify",
+                is_final_line,
+                false,
+                spaces,
+                estimated_width,
+                line_width,
+            );
             let alignment_offset = match style.alignment.as_str() {
                 "center" => ((line_width - estimated_width) / 2.0).max(0.0),
                 "right" => (line_width - estimated_width).max(0.0),
@@ -5992,6 +5988,26 @@ fn measured_run_width(runs: &[LayoutRun], size: f32) -> f32 {
     runs.iter()
         .map(|run| measure_text(run.face, &run.text, size * run.size_scale))
         .sum()
+}
+
+fn justified_word_spacing(
+    is_justified: bool,
+    is_final_line: bool,
+    ends_paragraph: bool,
+    whitespace_count: usize,
+    measured_width: f32,
+    available_width: f32,
+) -> f32 {
+    if is_justified
+        && !is_final_line
+        && !ends_paragraph
+        && whitespace_count > 0
+        && measured_width < available_width
+    {
+        (available_width - measured_width) / whitespace_count as f32
+    } else {
+        0.0
+    }
 }
 
 fn clip_layout_runs_to_width(
@@ -6902,7 +6918,7 @@ fn cover_layout(
         17.0,
     )?);
     lines.extend(cover_text_lines(
-        &cover.back_copy,
+        &cover.description,
         FontFace::SerifRegular,
         9.0,
         back_x,
@@ -7258,7 +7274,7 @@ fn cover_scene_layout(
                 "subtitle" => Some(&cover.subtitle),
                 "author" => Some(&cover.author),
                 "spineText" => Some(&cover.spine_text),
-                "backCopy" => Some(&cover.back_copy),
+                "description" => Some(&cover.description),
                 _ => None,
             };
             if let Some(resolved) = resolved {
@@ -7513,7 +7529,7 @@ fn assign_page_labels(pages: &mut [LayoutPage], body_start: usize) {
     let mut front_number = 0;
     for (index, page) in pages.iter_mut().enumerate() {
         let physical = index + 1;
-        if page.kind == PageKind::Blank || page.kind == PageKind::Cover || physical == 1 {
+        if page.kind == PageKind::Cover || physical == 1 {
             page.page_label = None;
         } else if physical < body_start {
             front_number += 1;
@@ -8167,7 +8183,7 @@ mod tests {
 
             let available_width =
                 (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
-            for line in &content_lines {
+            for (line_index, line) in content_lines.iter().enumerate() {
                 let measured = measured_run_width(&line.runs, line.size);
                 let alignment_offset = match alignment {
                     "center" => ((available_width - measured) / 2.0).max(0.0),
@@ -8178,6 +8194,18 @@ mod tests {
                 assert_eq!(line.semantic_id.as_deref(), Some("list-id"));
                 assert!(line.source_start_utf16.is_some());
                 assert!(!line.text.starts_with(marker));
+                if alignment == "justify" && line_index + 1 < content_lines.len() {
+                    let spaces = line
+                        .text
+                        .chars()
+                        .filter(|character| *character == ' ')
+                        .count();
+                    let painted_width = measured + line.word_spacing * spaces as f32;
+                    assert!((painted_width - available_width).abs() < 0.01);
+                }
+            }
+            if alignment == "justify" {
+                assert_eq!(content_lines.last().unwrap().word_spacing, 0.0);
             }
             assert!((marker_line.x - (content_lines[0].x + style.first_line_indent)).abs() < 0.01);
         }
@@ -8433,7 +8461,7 @@ mod tests {
         let height = request.trim.height_inches * 72.0;
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.0,
-            back_copy: String::new(),
+            description: String::new(),
             title: "Grouped title".to_owned(),
             subtitle: String::new(),
             author: String::new(),
@@ -8544,7 +8572,7 @@ mod tests {
         }));
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.0,
-            back_copy: String::new(),
+            description: String::new(),
             title: "Cover".to_owned(),
             subtitle: String::new(),
             author: "Author".to_owned(),
@@ -8879,7 +8907,7 @@ mod tests {
         }));
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.125,
-            back_copy: "Back copy".to_owned(),
+            description: "Book description".to_owned(),
             title: "Front title".to_owned(),
             subtitle: "Subtitle".to_owned(),
             author: "Author".to_owned(),

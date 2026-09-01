@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
+using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
@@ -139,19 +140,19 @@ public sealed class ImagesChatTools(
                 method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
                     ResizeImageAsync(context, sourceImageId, width, height, fileName, altText),
                 name: "resize_project_image",
-                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not generative editing: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use edit_project_image with the source image and a larger-framing brief when the user's intent is to generate surrounding content."),
+                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This local pixel transform creates a new unattached source-linked image and adds no visual detail; it is not publication-quality enhancement. Use edit_project_image with the original source for same-aspect detail reconstruction or intentional outpainting."),
 
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
-                    GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, label),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null) =>
+                    GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label),
                 name: "generate_project_image",
-                description: $"Generate one free-standing, unattached project-library image at the configured Core Book page raster and wait for a terminal result. Inspect it before promoting it to an entity's canonical references. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, label),
+                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null) =>
+                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the configured Core Book page raster by default; describe the complete desired result. Supply regionalGuideShapes only when words cannot reliably locate the intended area and a visual guide is necessary. Guide shapes use source-relative 0-100 percentages and may be rect, ellipse, or polygon shapes. A regional guide uses a source-aspect-bound raster and is soft model guidance, not hard pixel protection; the model may change pixels outside it. Never use a regional guide for broad restyling, resizing, reframing, expansion, or layout work. For larger framing, use an unmasked edit and describe the surrounding scene and direction in the desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. The output is a new free-standing, unattached library image; inspect the entire result, including content outside any guide, before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -540,6 +541,8 @@ public sealed class ImagesChatTools(
         string? quality,
         string? outputFormat,
         int? outputCompression,
+        int? minimumDpi,
+        string? aspectRatio,
         string? label)
     {
         try
@@ -548,7 +551,7 @@ public sealed class ImagesChatTools(
                 ctx.ProjectId,
                 brief,
                 references,
-                null,
+                MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,
                 quality,
                 outputFormat,
@@ -557,6 +560,10 @@ public sealed class ImagesChatTools(
                 ctx.TrackImageGenerationJob,
                 ctx.TurnCancellationToken);
             return await BuildImageResultAsync(ctx, result, "Generated output saved to the image library.");
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -574,6 +581,8 @@ public sealed class ImagesChatTools(
         string? quality,
         string? outputFormat,
         int? outputCompression,
+        int? minimumDpi,
+        string? aspectRatio,
         string? label)
     {
         if (sourceImageId == Guid.Empty)
@@ -593,7 +602,7 @@ public sealed class ImagesChatTools(
                 brief,
                 regionalGuide,
                 references,
-                null,
+                MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,
                 quality,
                 outputFormat,
@@ -602,6 +611,10 @@ public sealed class ImagesChatTools(
                 ctx.TrackImageGenerationJob,
                 ctx.TurnCancellationToken);
             return await BuildImageResultAsync(ctx, result, "Edited output saved to the image library.");
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -634,12 +647,15 @@ public sealed class ImagesChatTools(
                 sourceImageId,
                 targetRaster = $"{width}x{height}",
                 actualRaster = $"{width}x{height}",
+                requestedMinimumDpi = (double?)null,
+                minimumDpiMet = (bool?)null,
+                warningCodes = Array.Empty<string>(),
                 sourceLinked = true,
                 attached = false,
                 interpolation = ProjectImageResize.DeterministicInterpolation,
                 addsNewDetail = false,
                 image = ImagesChatImagePayload.From(image),
-                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use edit_project_image with the source image and a larger-framing brief for generative expansion.",
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail and is not publication-quality enhancement; use an original-source generative edit for detail reconstruction or intentional outpainting.",
             }, JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
@@ -647,6 +663,68 @@ public sealed class ImagesChatTools(
             return $"Error: {ex.Message}";
         }
     }
+
+    private static ImageGenerationTarget? MinimumDpiTarget(int? minimumDpi, string? aspectRatio)
+    {
+        if (minimumDpi is null && string.IsNullOrWhiteSpace(aspectRatio))
+            return null;
+        return new ImageGenerationTarget
+        {
+            MinimumDpi = minimumDpi,
+            AspectRatio = aspectRatio?.Trim() ?? string.Empty,
+        };
+    }
+
+    private static string SerializeMinimumDpiRejection(MinimumDpiUnachievableException exception) =>
+        JsonSerializer.Serialize(new
+        {
+            ok = false,
+            code = MinimumDpiUnachievableException.Code,
+            stage = exception.Stage,
+            physicalDimensions = new
+            {
+                widthInches = exception.Resolution.WidthInches,
+                heightInches = exception.Resolution.HeightInches,
+            },
+            requestedMinimumDpi = exception.RequestedMinimumDpi,
+            requiredRaster = new { widthPixels = exception.RequiredRaster.Width, heightPixels = exception.RequiredRaster.Height, size = exception.RequiredRaster.Size },
+            largestCompatibleRaster = exception.MaximumRaster is null
+                ? null
+                : new { widthPixels = (int?)exception.MaximumRaster.Width, heightPixels = (int?)exception.MaximumRaster.Height, size = exception.MaximumRaster.Size },
+            maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
+            bindingProviderLimits = exception.Resolution.BindingProviderLimits,
+            providerConstraints = new
+            {
+                sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
+                minimumPixels = LayoutImageSizeResolver.MinimumPixels,
+                maximumPixels = LayoutImageSizeResolver.MaximumPixels,
+                maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
+                minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
+                maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
+            },
+            splitSuggestions = exception.SplitSuggestions.Select(suggestion => new
+            {
+                rows = suggestion.Rows,
+                columns = suggestion.Columns,
+                panelCount = suggestion.PanelCount,
+                panels = suggestion.Panels.Select(panel => new
+                {
+                    panel.Index,
+                    panel.XPercent,
+                    panel.YPercent,
+                    panel.WidthPercent,
+                    panel.HeightPercent,
+                    panel.WidthInches,
+                    panel.HeightInches,
+                    panel.AspectRatio,
+                    raster = panel.Raster.Size,
+                    effectiveDpi = Math.Round(panel.EffectiveDpi, 1),
+                }),
+            }),
+            partitioningSupported = false,
+            summary = exception.Message,
+            recovery = "One Figure block holds one image. Use multiple Figure blocks, or confirm a structural change to a Designed Page before using a multi-image layout; treat independently generated images as deliberate panels rather than a seamless panorama.",
+        }, JsonOptions);
 
     private async Task<string> BuildImageResultAsync(
         ImagesChatToolContext ctx,
@@ -660,6 +738,17 @@ public sealed class ImagesChatTools(
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
+            if (output.PrintImageId is { } printImageId
+                && await projectImages.GetAsync(ctx.ProjectId, printImageId, ctx.TurnCancellationToken) is { } printImage)
+            {
+                var printVisual = await BuildVisualAsync(
+                    ctx,
+                    printImage,
+                    printImage.FileName,
+                    "Print-upscaled derivative for the physical print target; place this image ID.");
+                ctx.AddVisual(printVisual);
+                ctx.AddModelOnlyImage(printImage);
+            }
             outputs.Add(ImageOutputPayload(output));
         }
         if (result.Images.Count > 0)
@@ -671,17 +760,24 @@ public sealed class ImagesChatTools(
             status = result.Status,
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
+            requestedMinimumDpi = result.RequestedMinimumDpi,
+            minimumDpiMet = result.MinimumDpiMet,
+            warningCodes = result.WarningCodes ?? [],
             outputImageIds = result.Images.Select(image => image.Id),
             images = outputs,
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched) },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
             diagnostics = result.Diagnostics.Take(3),
-            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
             {
-                code = !output.RasterMatched && !output.AspectMatched
-                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
-                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
-                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+                code = output.MinimumDpiMet == false
+                    ? "MINIMUM_DPI_NOT_MET"
+                    : !output.RasterMatched && !output.AspectMatched
+                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
+                message = output.MinimumDpiMet == false
+                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not describe it as publication-compliant."
+                    : $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
             }),
             summary = result.Summary,
         }, JsonOptions);
@@ -771,6 +867,12 @@ public sealed class ImagesChatTools(
         output.RasterMatched,
         output.AspectMatched,
         effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
+        printImageId = output.PrintImageId,
+        printRaster = output.PrintRaster,
+        printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null,
+        requestedMinimumDpi = output.RequestedMinimumDpi,
+        minimumDpiMet = output.MinimumDpiMet,
+        warningCodes = output.WarningCodes ?? [],
         output.Image.CreatedAt,
         output.Image.UpdatedAt,
         output.Image.SizeBytes,

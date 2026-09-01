@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Composition;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -20,7 +21,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V28WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V30WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -42,7 +43,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(28, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(30, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -68,6 +69,106 @@ public sealed class ProjectExportCompatibilityTests
         Assert.DoesNotContain("\"imagePlacements\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyFontSizePoints\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyLineHeight\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("backCopy", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V29CoverBindingsAdaptToTheVisibleDescriptionField()
+    {
+        var scene = new CompositionScene
+        {
+            Objects =
+            [
+                new CompositionObject
+                {
+                    Id = Guid.NewGuid(),
+                    LayerId = Guid.NewGuid(),
+                    Kind = CompositionObjectKind.Text,
+                    TextBinding = "About {{backCopy}}",
+                },
+            ],
+        };
+        var sceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
+        var cover = new ProjectExportCoverDesign(
+            "Book", "", "Author", "", "#ffffff", PublicationBarcodeMode.VendorOverlay,
+            50, 50, sceneJson, 1)
+        {
+            SurfaceScenesJson = JsonSerializer.Serialize(
+                new Dictionary<string, string> { ["perfect-bound-outside"] = sceneJson },
+                ManuscriptCodec.JsonOptions),
+            LegacyBackCopy = "A hidden duplicate that must not win.",
+        };
+        var document = Document(new ProjectExportChapter()) with
+        {
+            FormatVersion = 29,
+            PublicationEditions = [Edition(null, null, []) with { CoverDesign = cover }],
+        };
+
+        var adapted = ProjectImportJobProcessor.AdaptLegacyCoverDescription(document);
+        var adaptedCover = Assert.Single(adapted.PublicationEditions).CoverDesign;
+
+        Assert.NotNull(adaptedCover);
+        Assert.Null(adaptedCover.LegacyBackCopy);
+        Assert.Contains("{{description}}", adaptedCover.CompositionSceneJson, StringComparison.Ordinal);
+        Assert.Contains("{{description}}", adaptedCover.SurfaceScenesJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("backCopy", adaptedCover.CompositionSceneJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("backCopy", adaptedCover.SurfaceScenesJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V29PrevalidationRejectsDerivedImageWithoutItsProvenanceParent()
+    {
+        var imageId = Guid.NewGuid();
+        var sourceImageId = Guid.NewGuid();
+        var image = new ProjectExportImage(
+            imageId,
+            "upscaled.png",
+            "image/png",
+            [1, 2, 3],
+            "Upscaled artwork",
+            PublishAssetSource.Upscaled,
+            string.Empty,
+            string.Empty,
+            "{}",
+            sourceImageId,
+            null,
+            null,
+            null,
+            null,
+            DateTime.UtcNow,
+            DateTime.UtcNow);
+        var document = Document(new ProjectExportChapter()) with { Images = [image] };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ProjectImportJobProcessor.ValidateChapterPayloads(document));
+
+        Assert.Contains(imageId.ToString("N"), exception.Message, StringComparison.Ordinal);
+        Assert.Contains(sourceImageId.ToString("N"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyImageSourcesAdaptWithoutConfusingPrintResamplesWithImportedImages()
+    {
+        Assert.Equal(
+            PublishAssetSource.Upscaled,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"Transform\":{\"Kind\":\"print-resample\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Upscaled,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"transform\":{\"kind\":\"print-resample\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Resized,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"transform\":{\"kind\":\"deterministic-resize\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Imported,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                (PublishAssetSource)6,
+                "{}"));
     }
 
     [Fact]

@@ -57,7 +57,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
         - Title and copyright are system Designed Pages: their linked copy resolves live from Core or effective release metadata while their placement and typography are edited on the page canvas. Contents is generated automatically from the effective book structure. Each other publication section has one content mode: either prose with optional flowing Figures, or Designed Page canvases. Use separate sections when both forms are needed. Sections may be placed at the front, back, or immediately before or after an act or chapter.
-        - Publication-section inclusion, order, and single-page start side are authored choices. Preserve them unless the user asks to change them. A section can start on the next available, right/recto, or left/verso page; a true two-page facing spread necessarily starts verso. Distinguish vendor blockers from optional design guidance: KDP does not require a copyright page, and KDP front-matter order/side guidance is advisory; Ingram does not mandate title/copyright presence or order. Explain recommendations without silently applying them.
+        - Publication-section inclusion, order, and single-page start side are authored choices. Preserve them unless the user asks to change them. A section can start on the next available, right/recto, or left/verso page; a true two-page facing spread necessarily starts verso. When creating an ordinary custom single-page section without an explicit side request, use Next so it does not create a gratuitous parity blank; keep Contents recto and use an intentional numbered blank immediately before it when parity requires one. Distinguish vendor blockers from optional design guidance: KDP does not require a copyright page, and KDP front-matter order/side guidance is advisory; Ingram does not mandate title/copyright presence or order. Explain recommendations without silently applying them.
         - To edit a title, copyright, or other designed publication section: start from the protected visible-workspace context when that page is already open; otherwise list and read sections in the active target. The section read returns pageCanvases with exact composition and active-variant revisions. Call get_or_create_publication_section_page_variant before editing; it safely materializes and remaps an inherited release section when required. Then read and preview the returned variant, mutate it with focused page tools, and preview again. An omitted section remains editable; do not change its inclusion merely to design it. Never upsert unchanged section metadata merely to find or unlock its canvas.
         - Create user-authored material such as Dedication, Epigraph, Acknowledgments, About the Author, Also By, References, image pages, or arbitrary production pages with publication-section tools. Release sections inherit Core live until customized; do not create duplicate release content when inheritance is sufficient.
         - upsert_publication_section creates an empty section or changes section metadata only. It never accepts manuscript JSON and never replaces content. After creating a prose section, read its returned ID and revision, then add the requested copy with focused patch_publication_section_manuscript operations in the same turn. Do not copy the bounded blocks returned by read_publication_section into an upsert payload.
@@ -76,12 +76,13 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         - Returned URLs require a user action. Never claim that you downloaded a file.
         - Chapters may combine semantic text, flowing Figures, and Designed Pages. A publication section is intentionally either prose with optional Figures or a designed-page canvas section. Covers remain separate front-cover or full-wrap compositions.
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
-        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Provider size is best effort even when explicitly requested: verify actualRaster and rasterMatched, and never report a requested raster or DPI as achieved when they differ. For a larger version of an approved source, use edit_project_image with the original source and a complete visual brief for the desired framing. When the target is wider, ask the model to extend naturally to the left and right; when taller, ask it to extend above and below; when the aspect is effectively unchanged, ask it to extend outward on all sides. This is model-driven source-guided editing, so do not claim exact pixel preservation. For a pixel-only exact raster change, use resize_project_image; it preserves aspect, creates a source-linked unattached asset, and adds no visual detail. Do not substitute a materially different fallback image without the user's approval. Inspect the visible output, then use its ID with the focused Core/release cover tool or publication-section page tool in this same turn. Chapter manuscript and chapter Designed Page placement belongs to Editor. Never imply geometry guidance attached an image.
-        - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
+        - generate_project_image and edit_project_image wait for completion and always return unattached project images. For target-bound work, read the target and pass its generationTarget unchanged. Think only in terms of the target aspect, composition, protected copy regions, and crop-to-fill placement; Lorekeeper prepares the target asset internally. Compose edge-to-edge for the target, inspect the visible output, then place its returned imageId with Cover using the focused Core/release cover or publication-section page tool in this same turn. Chapter manuscript and chapter Designed Page placement belongs to Editor. Never imply geometry guidance attached an image.
+        - Cover artwork always remains beneath title, subtitle, author, spine, and back-cover text. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
+        - Cover textBinding is an editable text template. It may contain literal copy and repeatable bindable tokens: {{title}}, {{subtitle}}, {{author}}, {{spineText}}, and {{description}}. {{description}} resolves from the Description visible in Book details; never invent or maintain separate back-cover copy. Use {{author}} for another live author frame such as a spine byline instead of duplicating the current author value. Unknown tokens are invalid. Preserve a read scene's existing bare canonical bindings; when adding or rewriting a frame, prefer the explicit token form. Reread and preview to verify resolved text, not the stored token spelling.
         - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
-        - Cover generation targets provide an exact target aspect, a provider-valid final-DPI recommendation, and a moderate provider-valid default raster for the selected cover surface or frame. Core front-cover targets use CoreCoverSurface/CoreCoverFrame without releaseId; release cover targets use CoverSurface/CoverFrame with releaseId. A different provider raster must be reported as a raster mismatch even when aspectMatched=true. For cover expansion, edit the approved source with a larger-framing brief that names the desired direction—left and right for a wider target, above and below for a taller target, or outward on all sides for an effectively unchanged aspect. Do not silently regenerate a materially different image or claim publication DPI from a proportional but smaller output.
-        - Full-wrap covers are one connected [BACK][SPINE][FRONT] composition even when a vendor package derives separate front/back PDFs. Before spine work, read and preview the exact Spine region. Default US/English spine copy to TopToBottom, honor an explicit BottomToTop or Horizontal request, and keep title/author as real text above generated art. Generate narrow spine artwork without baked-in words, preserve typography quiet zones, choose the closest supported raster without stretching, disclose expected crop loss, and place the unattached result with focal crop controls. After mutation inspect the annotated Spine and whole wrap, then clean versions after validation. When B&N separate-panel submission is selected, preserve the authored spine but treat it as vendor-generated and excluded from the upload package.
-        - Treat perfect-bound outside and inside, case wrap, dust jacket, and Digital Cloth setup as distinct artifact surfaces. Read, mutate, and visually preview the exact surface being edited; never overwrite a reviewed surface while working on another. For duplex paperbacks, page one is outside and page two is inside, with the inside-spine no-ink region kept clear. For jacketed cases, case and jacket are independent required designs.
+        - Cover generation targets provide the exact target aspect and protected regions for the selected cover surface, frame, or Back/Spine/Front region. Core front-cover targets use CoreCoverSurface/CoreCoverFrame without releaseId; release cover targets use CoverSurface/CoverFrame with releaseId. Generate edge-to-edge art with crop-safe margins, keep important content and quiet typography zones inside the target window, and place it with Cover. Lorekeeper prepares the correct target asset internally.
+        - Full-wrap covers are one connected [BACK][SPINE][FRONT] composition even when a vendor package derives separate front/back PDFs. Before spine work, read and preview the exact Spine region. Default US/English spine copy to TopToBottom, honor an explicit BottomToTop or Horizontal request, and keep title/author as real text above generated art. Generate narrow spine artwork without baked-in words, preserve typography quiet zones, and crop-to-fill the region. After mutation inspect the annotated Spine and whole wrap, then clean versions after validation. When B&N separate-panel submission is selected, preserve the authored spine but treat it as vendor-generated and excluded from the upload package.
+        - Treat perfect-bound outside and inside, case wrap, dust jacket, and Digital Cloth setup as distinct artifact surfaces. Read, mutate, stage, and visually preview the exact surface being edited; pass that same surfaceRole to stage_publication_cover_composition so the applied stage cannot land in another surface. Never overwrite a reviewed surface while working on another. For duplex paperbacks, page one is outside and page two is inside, with the inside-spine no-ink region kept clear. For jacketed cases, case and jacket are independent required designs.
         - A cover-canvas preview is a visible chat attachment and model visual context when vision is available; it is not an image-library asset. If model visual delivery is unavailable, leave the preview visible for the user and report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
         - Submit large cover or publication-section page payloads once to staging, then apply only the stage ID and expected revision.
@@ -132,13 +133,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         "update_publication_cover_design",
         "apply_publication_cover_composition_stage",
         "patch_publication_cover_element",
+        "patch_publication_cover_surface_element",
         "place_project_image_on_release_cover",
+        "place_project_image_on_release_cover_surface",
         "add_project_image_to_release_cover",
+        "add_project_image_to_release_cover_surface",
         "fill_project_image_on_publication_cover_region",
         "set_publication_cover_spine_direction",
         "generate_project_image",
         "edit_project_image",
-        "resize_project_image",
     ];
 
     public async Task<PublishConversation> GetOrCreateAsync(
@@ -244,10 +247,10 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                     + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
                     + "\n\n" + AssistantWorkflowInstructions.PublicationContentCraft
-                    + "\n\n" + AssistantWorkflowInstructions.ImageGeneration
+                    + "\n\n" + AssistantWorkflowInstructions.PublicationImageGeneration
                     + "\n\n" + AssistantWorkflowInstructions.ImageSpaceDiscipline
                     + "\n\n" + AssistantWorkflowInstructions.BookDesignCraft
-                    + "\n\n" + AssistantWorkflowInstructions.CompositionDesign
+                    + "\n\n" + AssistantWorkflowInstructions.PublicationCompositionDesign
                     + "\n\n" + AssistantWorkflowInstructions.PublicationDesign),
             cancellationToken);
         return assembly.Assemble();
@@ -772,35 +775,65 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         ? ReadGuid(resultJson, "targetId")
                         : ReadGuid(argumentsJson, "variantId")));
         }
-        if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
-            or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
-            or "patch_publication_book_content"
-            or "patch_publication_core_cover_element" or "place_project_image_on_core_cover" or "add_project_image_to_core_cover"
+        if (toolName is "patch_publication_core_cover_element"
+            or "place_project_image_on_core_cover"
+            or "add_project_image_to_core_cover"
             or "apply_publication_core_cover_composition_stage")
             return new PublishWorkspaceMutated(
                 null,
                 false,
-                PublishWorkspaceMutationKind.Edition,
+                PublishWorkspaceMutationKind.Cover,
                 toolName is "patch_publication_core_cover_element" or "place_project_image_on_core_cover"
                     ? ReadGuid(argumentsJson, "targetId")
                     : toolName == "add_project_image_to_core_cover"
                         ? ReadGuid(resultJson, "selectId")
                     : null);
+        if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
+            or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
+            or "patch_publication_book_content")
+            return new PublishWorkspaceMutated(null, false);
 
-        var selectEdition = toolName is "create_publication_release" or "customize_publication_release_cover" or "use_core_publication_cover";
+        if (toolName is "customize_publication_release_cover"
+            or "use_core_publication_cover"
+            or "update_publication_cover_design"
+            or "apply_publication_cover_composition_stage"
+            or "patch_publication_cover_element"
+            or "patch_publication_cover_surface_element"
+            or "place_project_image_on_release_cover"
+            or "place_project_image_on_release_cover_surface"
+            or "add_project_image_to_release_cover"
+            or "add_project_image_to_release_cover_surface"
+            or "fill_project_image_on_publication_cover_region"
+            or "set_publication_cover_spine_direction")
+        {
+            var selectCoverEdition = toolName is "customize_publication_release_cover" or "use_core_publication_cover";
+            var coverEditionId = selectCoverEdition
+                ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
+                : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
+                    ?? (toolName == "apply_publication_cover_composition_stage"
+                        ? ReadGuid(resultJson, "targetId")
+                        : null);
+            var coverObjectId = toolName is "patch_publication_cover_element"
+                or "patch_publication_cover_surface_element"
+                or "place_project_image_on_release_cover"
+                or "place_project_image_on_release_cover_surface"
+                    ? ReadGuid(argumentsJson, "targetId")
+                    : toolName is "add_project_image_to_release_cover"
+                        or "add_project_image_to_release_cover_surface"
+                        or "fill_project_image_on_publication_cover_region"
+                            ? ReadGuid(resultJson, "selectId")
+                            : null;
+            return coverEditionId is { } coverId
+                ? new PublishWorkspaceMutated(coverId, selectCoverEdition, PublishWorkspaceMutationKind.Cover, coverObjectId)
+                : null;
+        }
+
+        var selectEdition = toolName == "create_publication_release";
         var editionId = selectEdition
             ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
-            : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
-                ?? (toolName == "apply_publication_cover_composition_stage"
-                    ? ReadGuid(resultJson, "targetId")
-                    : null);
-        var selectedObjectId = toolName is "patch_publication_cover_element" or "place_project_image_on_release_cover"
-            ? ReadGuid(argumentsJson, "targetId")
-            : toolName is "add_project_image_to_release_cover" or "fill_project_image_on_publication_cover_region"
-                ? ReadGuid(resultJson, "selectId")
-                : null;
+            : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId");
         return editionId is { } id
-            ? new PublishWorkspaceMutated(id, selectEdition, PublishWorkspaceMutationKind.Edition, selectedObjectId)
+            ? new PublishWorkspaceMutated(id, selectEdition)
             : null;
     }
 

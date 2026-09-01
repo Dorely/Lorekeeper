@@ -694,9 +694,7 @@ public sealed partial class CompositionCanvasPreviewService(
     {
         if (!string.IsNullOrWhiteSpace(item.TextBinding))
         {
-            var text = textBindings?.TryGetValue(item.TextBinding, out var resolved) == true
-                ? resolved
-                : item.TextBinding;
+            var text = PublicationTextBindings.Resolve(item.TextBinding, textBindings);
             return string.IsNullOrWhiteSpace(text)
                 ? []
                 : [new ManuscriptInline { Text = text }];
@@ -731,8 +729,8 @@ public sealed partial class CompositionCanvasPreviewService(
         IReadOnlyDictionary<string, string>? textBindings) =>
         item.Kind == CompositionObjectKind.Text
         && !string.IsNullOrWhiteSpace(item.TextBinding)
-        && textBindings?.TryGetValue(item.TextBinding, out var text) == true
-        && string.IsNullOrWhiteSpace(text);
+        && textBindings is not null
+        && string.IsNullOrWhiteSpace(PublicationTextBindings.Resolve(item.TextBinding, textBindings));
 
     private static CompositionObject ResolveStyle(
         CompositionObject item,
@@ -799,7 +797,7 @@ public sealed partial class CompositionCanvasPreviewService(
         IReadOnlyDictionary<string, string>? textBindings)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        Append(hash, "composition-canvas-preview-v2");
+        Append(hash, "composition-canvas-preview-v3");
         Append(hash, variant.CompositionId.ToString("N"));
         Append(hash, variant.Composition.Revision.ToString());
         Append(hash, variant.Revision.ToString());

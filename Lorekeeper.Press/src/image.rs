@@ -18,6 +18,7 @@ pub struct EmbeddedImage {
     pub width: u32,
     pub height: u32,
     pub samples: Vec<u8>,
+    pub alpha: Option<Vec<u8>>,
     pub cmyk: bool,
     pub grayscale: bool,
     pub maximum_total_ink_percent: f32,
@@ -28,6 +29,14 @@ pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
+    pub alpha: Option<Vec<u8>>,
+}
+
+struct DecodedPng {
+    width: u32,
+    height: u32,
+    rgb: Vec<u8>,
+    alpha: Option<Vec<u8>>,
 }
 
 pub fn prepare_images<F>(
@@ -55,9 +64,23 @@ where
                 "Validated image pixels were unavailable.",
             )
         })?;
+        let preserve_alpha = matches!(
+            request.profile.as_str(),
+            "kdp-paperback-v2"
+                | "kdp-hardcover-v1"
+                | "ingram-print-pdfx1a-v2"
+                | "bn-print-pdfa1b-v1"
+        );
+        let (source_rgb, alpha) = if preserve_alpha {
+            (decoded.rgb.clone(), decoded.alpha.clone())
+        } else {
+            (
+                flatten_rgb_alpha_against_white(&decoded.rgb, decoded.alpha.as_deref()),
+                None,
+            )
+        };
         let (samples, cmyk, grayscale, maximum_total_ink_percent) = if black_and_white {
-            let gray = decoded
-                .rgb
+            let gray = source_rgb
                 .chunks_exact(3)
                 .map(|pixel| {
                     ((pixel[0] as u32 * 2126
@@ -69,7 +92,7 @@ where
                 .collect();
             (gray, false, true, 0.0)
         } else if pdf_x {
-            let cmyk = convert_to_cmyk(&decoded.rgb)?;
+            let cmyk = convert_to_cmyk(&source_rgb)?;
             let maximum = cmyk
                 .chunks_exact(4)
                 .map(|pixel| {
@@ -87,7 +110,7 @@ where
             }
             (cmyk, true, false, maximum)
         } else {
-            (decoded.rgb.clone(), false, false, 0.0)
+            (source_rgb, false, false, 0.0)
         };
         result.insert(
             declaration.id.clone(),
@@ -96,6 +119,7 @@ where
                 width: decoded.width,
                 height: decoded.height,
                 samples,
+                alpha,
                 cmyk,
                 grayscale,
                 maximum_total_ink_percent,
@@ -144,9 +168,15 @@ pub fn decode_declared_image(
     declaration: &crate::model::AssetDeclaration,
     bytes: &[u8],
 ) -> Result<DecodedImage, Diagnostic> {
-    let (width, height, rgb) = match declaration.media_type.as_str() {
-        "image/png" => decode_png(&declaration.id, bytes)?,
-        "image/jpeg" => decode_jpeg(&declaration.id, bytes)?,
+    let (width, height, rgb, alpha) = match declaration.media_type.as_str() {
+        "image/png" => {
+            let decoded = decode_png(&declaration.id, bytes)?;
+            (decoded.width, decoded.height, decoded.rgb, decoded.alpha)
+        }
+        "image/jpeg" => {
+            let (width, height, rgb) = decode_jpeg(&declaration.id, bytes)?;
+            (width, height, rgb, None)
+        }
         _ => {
             return Err(Diagnostic::error(
                 "PRESS_ASSET_FORMAT_UNSUPPORTED",
@@ -163,10 +193,15 @@ pub fn decode_declared_image(
             ),
         ));
     }
-    Ok(DecodedImage { width, height, rgb })
+    Ok(DecodedImage {
+        width,
+        height,
+        rgb,
+        alpha,
+    })
 }
 
-fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic> {
+fn decode_png(id: &str, bytes: &[u8]) -> Result<DecodedPng, Diagnostic> {
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(Transformations::EXPAND | Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|error| {
@@ -184,6 +219,7 @@ fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic>
     })?;
     let source = &buffer[..output.buffer_size()];
     let mut rgb = Vec::with_capacity(output.width as usize * output.height as usize * 3);
+    let mut alpha = None;
     match output.color_type {
         ColorType::Rgb => rgb.extend_from_slice(source),
         ColorType::Grayscale => {
@@ -192,19 +228,20 @@ fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic>
             }
         }
         ColorType::Rgba => {
+            let mut values = Vec::with_capacity(output.width as usize * output.height as usize);
             for pixel in source.chunks_exact(4) {
-                let alpha = pixel[3] as u16;
-                for channel in &pixel[..3] {
-                    rgb.push(((*channel as u16 * alpha + 255 * (255 - alpha) + 127) / 255) as u8);
-                }
+                rgb.extend_from_slice(&pixel[..3]);
+                values.push(pixel[3]);
             }
+            alpha = values.iter().any(|value| *value < 255).then_some(values);
         }
         ColorType::GrayscaleAlpha => {
+            let mut values = Vec::with_capacity(output.width as usize * output.height as usize);
             for pixel in source.chunks_exact(2) {
-                let alpha = pixel[1] as u16;
-                let value = ((pixel[0] as u16 * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
-                rgb.extend_from_slice(&[value, value, value]);
+                rgb.extend_from_slice(&[pixel[0], pixel[0], pixel[0]]);
+                values.push(pixel[1]);
             }
+            alpha = values.iter().any(|value| *value < 255).then_some(values);
         }
         ColorType::Indexed => {
             return Err(Diagnostic::error(
@@ -213,7 +250,26 @@ fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic>
             ));
         }
     }
-    Ok((output.width, output.height, rgb))
+    Ok(DecodedPng {
+        width: output.width,
+        height: output.height,
+        rgb,
+        alpha,
+    })
+}
+
+fn flatten_rgb_alpha_against_white(rgb: &[u8], alpha: Option<&[u8]>) -> Vec<u8> {
+    let Some(alpha) = alpha else {
+        return rgb.to_vec();
+    };
+    let mut flattened = Vec::with_capacity(rgb.len());
+    for (pixel, alpha) in rgb.chunks_exact(3).zip(alpha) {
+        let alpha = u16::from(*alpha);
+        for channel in pixel {
+            flattened.push(((u16::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8);
+        }
+    }
+    flattened
 }
 
 fn convert_to_cmyk(rgb: &[u8]) -> Result<Vec<u8>, Diagnostic> {

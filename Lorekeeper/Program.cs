@@ -324,7 +324,9 @@ builder.Services.AddScoped<IPublicationEpubPreviewService, PublicationEpubPrevie
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
 builder.Services.AddSingleton<IPublicationPreparationQueue, PublicationPreparationQueue>();
+builder.Services.AddSingleton<PublicationPreparationCancellationRegistry>();
 builder.Services.AddScoped<IPublicationPreparationService, PublicationPreparationService>();
+builder.Services.AddScoped<IPublicationImagePreparationService, PublicationImagePreparationService>();
 builder.Services.AddScoped<IPublicationDiagnosticPresentationService, PublicationDiagnosticPresentationService>();
 builder.Services.AddHostedService<PublicationPreparationWorker>();
 builder.Services.AddScoped<PublicationRenderProcessor>();

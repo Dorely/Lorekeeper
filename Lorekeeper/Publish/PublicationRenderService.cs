@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Lorekeeper.Composition;
 using Lorekeeper.Fonts;
+using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -749,7 +750,8 @@ public sealed class PublicationRenderProcessor(
     IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
     IPrintArtifactProfileRegistry printArtifactProfiles,
-    IOptions<PublicationPressOptions> options) : IPublicationPaginationService
+    IOptions<PublicationPressOptions> options,
+    IOptions<ProjectImageGenerationOptions>? imageOptions = null) : IPublicationPaginationService
 {
     public PublicationRenderProcessor(
         IAppDatabaseOperationFactory database,
@@ -985,6 +987,22 @@ public sealed class PublicationRenderProcessor(
             : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (!string.Equals(fingerprintBeforeRender, job.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed while this render was queued. Request a new render.");
+        if (!coreTarget
+            && edition!.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+        {
+            job.ProgressPercent = 20;
+            job.ProgressMessage = "Calculating current interior pagination";
+            await db.SaveChangesAsync(cancellationToken);
+            var pagination = await EnsureCurrentAsync(job.ProjectId, edition.Id, cancellationToken);
+            if (!string.Equals(
+                pagination.PaginationFingerprint,
+                job.PaginationFingerprint,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The edition changed while its cover geometry was being prepared. Request a new render.");
+            }
+        }
         var expectedChapterPageMap = document.Sections
             .SelectMany(section => section.Chapters)
             .SelectMany(chapter => chapter.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
@@ -1282,7 +1300,7 @@ public sealed class PublicationRenderProcessor(
             cover.Subtitle,
             cover.Author,
             string.Empty,
-            string.Empty,
+            document.Profile.Description,
             cover.BackgroundColor,
             PublicationBarcodeMode.None,
             50,
@@ -1366,18 +1384,33 @@ public sealed class PublicationRenderProcessor(
             || release?.Format == PublicationEditionFormat.DigitalPdf;
         var assets = document.Assets
             .GroupBy(asset => asset.Id)
-            .Select(group => StageAsset(group.First()))
+            .Select(group => StageAsset(group.First(), ConfiguredPrintAssetMaxBytes()))
             .ToArray();
         var coverScene = coverDesign is null ? null : JsonSerializer.Deserialize<CompositionScene>(
             coverDesign.CompositionSceneJson,
             ManuscriptCodec.JsonOptions);
+        var coverTextBindings = coverDesign is null
+            ? null
+            : PublicationTextBindings.Bindings(
+                coverDesign.Title,
+                coverDesign.Subtitle,
+                coverDesign.Author,
+                document.Profile.Publisher,
+                document.Profile.Copyright,
+                document.Profile.Description,
+                document.Profile.Isbn,
+                coverDesign.SpineText);
         if (coverScene is not null)
-            coverScene = NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(coverScene));
+            coverScene = NormalizeSceneLanguages(PublicationTextBindings.ResolveScene(
+                CoverCompositionFactory.KeepArtworkBehindCopy(coverScene),
+                coverTextBindings!));
         var coverSurfaceScenes = (coverDesign?.SurfaceScenes ?? new Dictionary<string, string>()).ToDictionary(
             item => item.Key,
-            item => NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(
-                JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
-                    ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty."))),
+            item => NormalizeSceneLanguages(PublicationTextBindings.ResolveScene(
+                CoverCompositionFactory.KeepArtworkBehindCopy(
+                    JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
+                        ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty.")),
+                coverTextBindings!)),
             StringComparer.Ordinal);
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)
@@ -1610,7 +1643,7 @@ public sealed class PublicationRenderProcessor(
             {
                 bleedInches = release?.Bleed == true ? 0.125 : 0,
                 surfaces = requiredCoverSurfaces,
-                backCopy = coverDesign.BackCopy,
+                description = coverDesign.Description,
                 title = coverDesign.Title,
                 subtitle = coverDesign.Subtitle,
                 author = coverDesign.Author,
@@ -1680,9 +1713,12 @@ public sealed class PublicationRenderProcessor(
         new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
     internal static PressStagedAsset StageAsset(PublishAssetDocument asset)
+        => StageAsset(asset, 256L * 1024 * 1024);
+
+    private static PressStagedAsset StageAsset(PublishAssetDocument asset, long maximumBytes)
     {
-        if (asset.Data.Length is 0 or > 20_000_000)
-            throw new InvalidOperationException($"Publication image '{asset.FileName}' must be non-empty and no larger than 20 MB.");
+        if (asset.Data.LongLength == 0 || asset.Data.LongLength > maximumBytes)
+            throw new InvalidOperationException($"Publication image '{asset.FileName}' must be non-empty and no larger than {maximumBytes / (1024d * 1024d):0.##} MiB.");
         var contentType = asset.ContentType.Trim().ToLowerInvariant() switch
         {
             "image/png" => "image/png",
@@ -1701,9 +1737,14 @@ public sealed class PublicationRenderProcessor(
                 $"Publication image '{asset.FileName}' ({asset.Id:N}) does not contain valid {contentType} data.",
                 exception);
         }
-        if (width <= 0 || height <= 0 || (long)width * height > 16_000_000)
+        if (width <= 0 || height <= 0
+            || width > LayoutImageSizeResolver.PrintMaximumEdge
+            || height > LayoutImageSizeResolver.PrintMaximumEdge
+            || (long)width * height > LayoutImageSizeResolver.PrintMaximumPixels)
         {
-            throw new InvalidOperationException($"Publication image '{asset.FileName}' dimensions exceed the renderer limit.");
+            throw new InvalidOperationException(
+                $"Publication image '{asset.FileName}' dimensions exceed the renderer limit of "
+                + $"{LayoutImageSizeResolver.PrintMaximumEdge} pixels per edge and {LayoutImageSizeResolver.PrintMaximumPixels:N0} pixels.");
         }
         return new PressStagedAsset(
             asset.Id,
@@ -1714,6 +1755,15 @@ public sealed class PublicationRenderProcessor(
             width,
             height,
             asset.AltText);
+    }
+
+    private long ConfiguredPrintAssetMaxBytes()
+    {
+        const long pressMaximumBytes = 256L * 1024 * 1024;
+        var configured = imageOptions?.Value.MaxPrintUpscaleBytes ?? (int)pressMaximumBytes;
+        // Keep managed staging and publication preparation on one authority:
+        // the configured image limit, constrained by Press's 256 MiB ceiling.
+        return configured > 0 ? Math.Min(configured, pressMaximumBytes) : pressMaximumBytes;
     }
 
     private static (int Width, int Height) ReadRasterDimensions(byte[] data, string contentType)

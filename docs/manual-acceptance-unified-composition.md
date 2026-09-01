@@ -12,6 +12,11 @@ the live test project; terminate the browser host after the run.
 - Open Publish in a project with zero releases. Confirm Core Book is selected,
   shared details/content/matter/design/cover remain usable, and no release or
   ISBN is created implicitly.
+- Confirm Core begins with Cover, Book details, and Book content before page and
+  PDF settings. Confirm every release follows Cover, Book details, Book content,
+  Edition-specific content, page/format settings where applicable, and Release
+  setup in that document and visual order. Confirm Core and release Copyright and
+  Description fields are full-width multiline controls that resize vertically.
 - Supply title, author, and language, choose **Prepare reading PDF**, reconnect
   after navigation, preview the current PDF in-app, and download the immutable
   private reading copy. Confirm the Markdown and plain-text downloads sit beside
@@ -136,6 +141,14 @@ the live test project; terminate the browser host after the run.
   upload a second reference. Give each a distinct role, queue generation, and
   confirm the job's reference manifest and provider inputs preserve the visible
   order and exact image identities.
+- Create or reuse a deterministic print upscale and confirm the Images library
+  shows only the original as a top-level card, with each child available through
+  its **Upscales** modal and deletable there when unused. Search for the child
+  filename and confirm the parent card remains discoverable. Cancel an image
+  request after it has streamed partials; confirm its card shows the persisted
+  cancelled state and latest partial without an animated loader, then use
+  **Delete card & partials** and confirm the card and unpromoted partials leave
+  the library while completed images remain intact.
 
 ## Review Edits and Contest review
 
@@ -339,7 +352,7 @@ the live test project; terminate the browser host after the run.
   update and select the affected live canvas object.
 - Confirm paperback shows back, spine, front, bleed/safe/fold guides, and barcode
   reserve, while Digital PDF/EPUB shows only a front surface.
-- Verify canonical title/subtitle/author/spine/back-copy bindings, project font
+- Verify canonical publication-metadata and derived spine-text bindings, project font
   selection, image crop-position state, shapes, layers, grouping, styles, and
   logical reading order.
 - Add several cover images and text objects. Confirm artwork remains behind copy,

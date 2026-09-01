@@ -71,6 +71,10 @@ else
                                     Used in @chapterUsage.ChapterTitles.Count chapter@((chapterUsage.ChapterTitles.Count == 1) ? string.Empty : "s")
                                 </div>
                             }
+                            @if (image.Source == PublishAssetSource.Upscaled)
+                            {
+                                <div class="image-upscaled-badge">Upscaled</div>
+                            }
                             <input class="form-control form-control-sm"
                                    value="@image.FileName"
                                    @onchange="e => UpdateImageAsync(image, fileName: e.Value?.ToString() ?? string.Empty, altText: image.AltText)" />
@@ -80,6 +84,10 @@ else
                                    @onchange="e => UpdateImageAsync(image, fileName: image.FileName, altText: e.Value?.ToString() ?? string.Empty)" />
                             <div class="image-meta">
                                 <span>@image.Source</span>
+                                @if (image.Width > 0 && image.Height > 0)
+                                {
+                                    <span>@image.Width × @image.Height</span>
+                                }
                                 <span>@FormatBytes(image.SizeBytes)</span>
                             </div>
                             <ImageEntityAssociations ProjectId="@Project.Id" ImageId="@image.Id" />
@@ -87,6 +95,14 @@ else
                                 @if (PartialsForImage(image.Id) is { Count: > 0 } imagePartials)
                                 {
                                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenImagePartials(image)">Partials (@imagePartials.Count)</button>
+                                }
+                                @if (image.Upscales is { Count: > 0 })
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenUpscales(image)">Upscales (@image.Upscales.Count)</button>
+                                }
+                                @if (ParentImage(image) is { } parentImage)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenImageModal(parentImage)">Original</button>
                                 }
                                 <button type="button"
                                         class="btn btn-sm btn-outline-secondary"
@@ -100,8 +116,8 @@ else
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
                                 <button type="button"
                                         class="btn btn-sm btn-outline-danger"
-                                        disabled="@(chapterUsage is not null)"
-                                        title="@(chapterUsage is null ? "Delete image" : ChapterUsageTitle(chapterUsage))"
+                                        disabled="@(chapterUsage is not null || image.Upscales.Count > 0)"
+                                        title="@DeleteImageTitle(image, chapterUsage)"
                                         @onclick="() => DeleteAsync(image.Id)">Delete</button>
                             </div>
                         </div>
@@ -158,6 +174,17 @@ else
                                 </select>
                             </label>
                         }
+                        <label>
+                            <span>Minimum DPI</span>
+                            <input class="form-control form-control-sm"
+                                   type="number"
+                                   min="1"
+                                   step="1"
+                                   placeholder="Optional"
+                                   @bind="_minimumDpi"
+                                   disabled="@HasConcreteImageSize" />
+                            <small>@(HasConcreteImageSize ? "Clear the concrete size to resolve a raster from DPI." : "Uses effective pixels at the intended physical size; no file-header DPI is stamped.")</small>
+                        </label>
                         <label>
                             <span>Quality</span>
                             <select class="form-select form-select-sm" @bind="_imageQuality">
@@ -267,7 +294,59 @@ else
                       Title="@_viewImage.FileName"
                       AltText="@ImageAlt(_viewImage)"
                       Details="@ViewerDetails(_viewImage)"
-                      Closed="CloseImageModal" />
+                      Closed="CloseImageModal">
+        <Actions>
+            @if (ParentImage(_viewImage) is { } original)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenImageModal(original)">View original</button>
+            }
+        </Actions>
+    </ImageViewerModal>
+}
+
+@if (SelectedUpscaleOwner is { } upscaleOwner)
+{
+    <div class="partials-modal-backdrop" @onclick="CloseUpscales">
+        <section class="partials-modal" role="dialog" aria-modal="true" aria-label="Upscaled versions of @upscaleOwner.FileName" @onclick:stopPropagation="true">
+            <header class="partials-modal-header">
+                <div>
+                    <h5>Upscales</h5>
+                    <span>@upscaleOwner.FileName · original @upscaleOwner.Width × @upscaleOwner.Height</span>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseUpscales"></button>
+            </header>
+            <div class="partials-modal-grid">
+                <p class="upscale-provenance-note">These are deterministic Lanczos3 derivatives. They increase pixel dimensions but add no new visual detail.</p>
+                <div class="partials-group-grid">
+                    @foreach (var upscale in upscaleOwner.Upscales.OrderBy(item => (long)item.Width * item.Height))
+                    {
+                        var upscaleImage = _images.FirstOrDefault(image => image.Id == upscale.Id);
+                        var upscaleUsage = ChapterUsage(upscale.Id);
+                        <article class="partial-card" @key="upscale.Id">
+                            <button type="button" class="partial-preview-button" @onclick="() => OpenUpscale(upscale.Id)">
+                                <img src="@upscale.PreviewUrl" alt="@upscale.FileName" />
+                            </button>
+                            <div class="partial-card-body">
+                                <strong>@upscale.FileName</strong>
+                                @foreach (var detail in UpscaleDetails(upscale))
+                                {
+                                    <span>@detail</span>
+                                }
+                                <div class="image-actions">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenUpscale(upscale.Id)">View upscale</button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@(upscaleImage is null || upscaleUsage is not null)"
+                                            title="@(upscaleImage is null ? "Upscale image not found." : upscaleUsage is null ? "Delete upscale" : ChapterUsageTitle(upscaleUsage))"
+                                            @onclick="() => DeleteAsync(upscale.Id)">Delete</button>
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </div>
+        </section>
+    </div>
 }
 
 @if (_partialModalOpen)
@@ -379,6 +458,14 @@ else
                     OnConfirm="ConfirmHistoryImageDeleteAsync"
                     OnCancel="CancelHistoryDelete" />
 
+<ConfirmationDialog IsOpen="@(_discardPartialsJobId is not null)"
+                    Title="Delete request card and partials?"
+                    Message="@(_discardPartialsMessage ?? string.Empty)"
+                    ConfirmLabel="Delete card and partials"
+                    Destructive="true"
+                    OnConfirm="ConfirmDiscardJobPartialsAsync"
+                    OnCancel="CancelDiscardJobPartials" />
+
 @code {
     private const long MaxImageBytes = 20L * 1024 * 1024;
 
@@ -400,6 +487,7 @@ else
     private Guid? _partialModalImageId;
     private Guid? _partialModalJobId;
     private string _partialModalOwnerLabel = string.Empty;
+    private Guid? _upscaleModalImageId;
     private readonly HashSet<Guid> _promotingPartialIds = [];
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _maskModule;
@@ -408,6 +496,7 @@ else
     private string _uploadAltText = string.Empty;
     private string _imagePrompt = string.Empty;
     private string _imageSize = "auto";
+    private int? _minimumDpi;
     private string _defaultImageRaster = string.Empty;
     private string _imageQuality = "auto";
     private string _imageFormat = "png";
@@ -436,15 +525,24 @@ else
 
     private int MaxReferenceImages => Math.Max(0, ImageOptions.Value.MaxReferenceImages);
 
+    private bool HasConcreteImageSize =>
+        _layoutTarget is null
+        && !string.IsNullOrWhiteSpace(_imageSize)
+        && !_imageSize.Equals("auto", StringComparison.OrdinalIgnoreCase);
+
     private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
         _generationReferences.Select(reference => reference.Image.Id).ToList();
 
+    private IReadOnlyList<ProjectImageView> LibraryImages =>
+        _images.Where(image => !IsNestedUpscale(image)).ToList();
+
     private IReadOnlyList<ProjectImageView> FilteredImages =>
         string.IsNullOrWhiteSpace(_query)
-            ? _images
-            : _images.Where(image => image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
-                || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
-                || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+            ? LibraryImages
+            : LibraryImages.Where(image => MatchesImageSearch(image, _query)
+                || _images.Any(candidate => candidate.Source == PublishAssetSource.Upscaled
+                    && candidate.DerivedFromImageId == image.Id
+                    && MatchesImageSearch(candidate, _query))).ToList();
 
     private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
         _jobs.Where(job => IsActiveJob(job.Status) || OrphanPartialsForJob(job.Id).Count > 0)
@@ -498,8 +596,37 @@ else
         _generationReferences.Clear();
         _generationReferencePickerOpen = false;
         _imageSize = "auto";
+        _minimumDpi = null;
         _loadedProjectId = Project.Id;
         await ReloadAsync();
+    }
+
+    private static (int Width, int Height, double TargetDpi)? ReadPrintUpscalePlan(string? geometryJson)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(geometryJson ?? string.Empty);
+            var root = document.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("printUpscalePlan", out var plan)
+                || plan.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return null;
+            }
+            if (!plan.TryGetProperty("printRaster", out var raster) || raster.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !raster.TryGetProperty("width", out var widthElement) || !widthElement.TryGetInt32(out var width)
+                || !raster.TryGetProperty("height", out var heightElement) || !heightElement.TryGetInt32(out var height)
+                || !plan.TryGetProperty("targetDpi", out var dpiElement) || !dpiElement.TryGetDouble(out var targetDpi)
+                || width <= 0 || height <= 0 || targetDpi <= 0)
+            {
+                return null;
+            }
+            return (width, height, targetDpi);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -633,8 +760,8 @@ else
                 },
                 references,
                 target: _layoutTarget is null
-                    ? new ImageGenerationTarget { Size = _imageSize }
-                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId });
+                    ? new ImageGenerationTarget { Size = _imageSize, MinimumDpi = HasConcreteImageSize ? null : _minimumDpi }
+                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId, MinimumDpi = _minimumDpi });
             await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
                 compiled.Prompt,
                 compiled.Size,
@@ -650,8 +777,18 @@ else
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
-            _status = "Image job queued.";
+            var printPlan = ReadPrintUpscalePlan(compiled.TargetGeometryJson);
+            _status = printPlan is { } queuedPlan
+                ? $"Image job queued at the largest provider-compatible raster; the finished image is upscaled without adding detail to {queuedPlan.Width}x{queuedPlan.Height} for the {queuedPlan.TargetDpi:0} DPI print target when generated through the image assistant."
+                : "Image job queued.";
             await ReloadAsync();
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            var split = ex.SplitSuggestions.FirstOrDefault();
+            _error = $"{ex.Message} Required raster: {ex.RequiredRaster.Size}. Largest compatible raster: {ex.MaximumRaster?.Size ?? "none"}."
+                + (ex.Resolution.BindingProviderLimits.Count == 0 ? string.Empty : $" Binding provider limits: {string.Join(", ", ex.Resolution.BindingProviderLimits)}.")
+                + (split is null ? string.Empty : $" Use {split.PanelCount} images in a {split.Rows}×{split.Columns} panel layout to cover this space at the requested DPI.");
         }
         catch (Exception ex)
         {
@@ -750,6 +887,8 @@ else
 
     private Guid? _historyDeleteImageId;
     private string? _historyDeleteMessage;
+    private Guid? _discardPartialsJobId;
+    private string? _discardPartialsMessage;
 
     private async Task DeleteAsync(Guid imageId, bool clearAffectedHistory = false)
     {
@@ -784,6 +923,42 @@ else
     private Task ConfirmHistoryImageDeleteAsync() => _historyDeleteImageId is Guid imageId
         ? DeleteAsync(imageId, true)
         : Task.CompletedTask;
+
+    private void RequestDiscardJobPartials(ProjectImageJobView job, int partialCount)
+    {
+        if (IsActiveJob(job.Status))
+            return;
+
+        _discardPartialsJobId = job.Id;
+        _discardPartialsMessage = $"Delete {partialCount} unpromoted partial image{(partialCount == 1 ? string.Empty : "s")} from “{job.Label}”? The request card will leave the Images library. This cannot be undone.";
+    }
+
+    private void CancelDiscardJobPartials()
+    {
+        _discardPartialsJobId = null;
+        _discardPartialsMessage = null;
+    }
+
+    private async Task ConfirmDiscardJobPartialsAsync()
+    {
+        if (Project is null || _discardPartialsJobId is not Guid jobId)
+            return;
+
+        _error = null;
+        try
+        {
+            await ImageJobs.DeleteUnpromotedPartialsAsync(Project.Id, jobId);
+            if (_partialModalJobId == jobId)
+                ClosePartialsModal();
+            CancelDiscardJobPartials();
+            _status = "Request card and partials deleted.";
+            await ReloadJobsAndPartialsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
 
     private async Task AttachToChatAsync(ProjectImageView image)
     {
@@ -820,6 +995,16 @@ else
     private void OpenImageModal(ProjectImageView image) => _viewImage = image;
 
     private void CloseImageModal() => _viewImage = null;
+
+    private void OpenUpscales(ProjectImageView image) => _upscaleModalImageId = image.Id;
+
+    private void CloseUpscales() => _upscaleModalImageId = null;
+
+    private void OpenUpscale(Guid imageId)
+    {
+        _viewImage = _images.FirstOrDefault(image => image.Id == imageId);
+        _upscaleModalImageId = null;
+    }
 
     private void OpenImagePartials(ProjectImageView image)
     {
@@ -924,15 +1109,75 @@ else
     private ProjectImageChapterUsageView? ChapterUsage(Guid imageId) =>
         _chapterUsage.GetValueOrDefault(imageId);
 
+    private ProjectImageView? SelectedUpscaleOwner => _upscaleModalImageId is Guid imageId
+        ? _images.FirstOrDefault(image => image.Id == imageId)
+        : null;
+
+    private ProjectImageView? ParentImage(ProjectImageView image) => image.DerivedFromImageId is Guid parentId
+        ? _images.FirstOrDefault(candidate => candidate.Id == parentId)
+        : null;
+
+    private bool IsNestedUpscale(ProjectImageView image) =>
+        image.Source == PublishAssetSource.Upscaled && ParentImage(image) is not null;
+
+    private static bool MatchesImageSearch(ProjectImageView image, string query) =>
+        image.FileName.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || image.AltText.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || image.Prompt.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private ProjectImageUpscaleSummary? UpscaleSummary(Guid imageId) => _images
+        .SelectMany(image => image.Upscales)
+        .FirstOrDefault(upscale => upscale.Id == imageId);
+
     private static string ChapterUsageTitle(ProjectImageChapterUsageView usage) =>
         "Used by " + string.Join(", ", usage.ChapterTitles) + ". Remove or replace it in every chapter before deleting.";
 
-    private static IReadOnlyList<string> ViewerDetails(ProjectImageView image) =>
+    private IReadOnlyList<string> ViewerDetails(ProjectImageView image)
+    {
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(image.AltText))
+            details.Add(image.AltText);
+        details.Add($"{image.Source} · {FormatBytes(image.SizeBytes)}");
+        if (image.Width > 0 && image.Height > 0)
+            details.Add($"{image.Width} × {image.Height} pixels");
+        if (UpscaleSummary(image.Id) is { } upscale)
+            details.AddRange(UpscaleDetails(upscale));
+        return details;
+    }
+
+    private static IReadOnlyList<string> UpscaleDetails(ProjectImageUpscaleSummary upscale) =>
         new[]
         {
-            image.AltText,
-            $"{image.Source} - {FormatBytes(image.SizeBytes)}",
+            !string.IsNullOrWhiteSpace(upscale.SourceRaster) && !string.IsNullOrWhiteSpace(upscale.TargetRaster)
+                ? $"Raster: {upscale.SourceRaster} → {upscale.TargetRaster}"
+                : $"Raster: {upscale.Width} × {upscale.Height} pixels",
+            upscale.SourceEffectiveDpi is double sourceDpi
+                ? $"Source placement: {sourceDpi:0.#} DPI"
+                : string.Empty,
+            upscale.RequiredEffectiveDpi is double requiredDpi
+                ? $"Required: {requiredDpi:0.#} DPI"
+                : string.Empty,
+            upscale.TargetEffectiveDpi is double targetDpi
+                ? $"Upscaled placement: {targetDpi:0.#} DPI"
+                : string.Empty,
+            string.IsNullOrWhiteSpace(upscale.Algorithm)
+                ? string.Empty
+                : $"{upscale.Algorithm} {upscale.AlgorithmVersion}".Trim(),
+            string.IsNullOrWhiteSpace(upscale.CreationTrigger)
+                ? string.Empty
+                : $"Created by {upscale.CreationTrigger}",
+            string.IsNullOrWhiteSpace(upscale.SourceByteHash)
+                ? string.Empty
+                : $"Source SHA-256 {upscale.SourceByteHash[..Math.Min(12, upscale.SourceByteHash.Length)]}…",
+            upscale.AddsNewDetail ? "Adds new visual detail" : "Adds no new visual detail",
         }.Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
+
+    private static string DeleteImageTitle(ProjectImageView image, ProjectImageChapterUsageView? chapterUsage) =>
+        chapterUsage is not null
+            ? ChapterUsageTitle(chapterUsage)
+            : image.Upscales.Count > 0
+                ? "Delete linked upscales before deleting their provenance original."
+                : "Delete image";
 
     private void OpenCropModal(ProjectImageView image) => _croppingImage = image;
 
@@ -1069,26 +1314,41 @@ else
     private RenderFragment RenderJobCard(ProjectImageJobView job) => __builder =>
     {
         var runtimeJob = RuntimeJob(job.Id);
+        var activeJob = IsActiveJob(job.Status);
+        var displayedRuntimeJob = activeJob ? runtimeJob : null;
+        var jobPartials = OrphanPartialsForJob(job.Id);
+        var latestPartial = jobPartials.OrderByDescending(partial => partial.UpdatedAt).FirstOrDefault();
         <article class="image-card image-job-card" @key="job.Id">
             <div class="image-job-preview">
-                @if (runtimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl)) is { PartialImageUrl: { } partialUrl })
+                @if (displayedRuntimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl)) is { PartialImageUrl: { } partialUrl })
                 {
                     <img src="@partialUrl" alt="Partial image preview" />
+                }
+                else if (latestPartial is not null)
+                {
+                    <img src="@latestPartial.PreviewUrl" alt="@PartialAlt(latestPartial)" />
                 }
                 else if (job.OutputImageIds.FirstOrDefault() is Guid outputId && outputId != Guid.Empty)
                 {
                     <img src="@ImagePreviewUrl(outputId)" alt="@job.Label" />
                 }
-                else
+                else if (activeJob)
                 {
                     <div class="image-job-spinner" aria-hidden="true"></div>
+                }
+                else
+                {
+                    <div class="image-job-terminal" role="img" aria-label="@JobTerminalPreviewLabel(job.Status)">
+                        <span aria-hidden="true">@JobTerminalPreviewSymbol(job.Status)</span>
+                        <strong>@JobTerminalPreviewLabel(job.Status)</strong>
+                    </div>
                 }
             </div>
             <div class="image-card-body">
                 <strong>@job.Label</strong>
                 <div class="image-meta">
                     <span>@job.Kind</span>
-                    <span>@JobStatusText(job, runtimeJob)</span>
+                    <span>@JobStatusText(job, displayedRuntimeJob)</span>
                 </div>
                 <p class="small mb-0">@Truncate(job.Prompt, 160)</p>
                 <details class="small mt-2">
@@ -1114,13 +1374,17 @@ else
                 {
                     <p class="small text-danger mb-0">@job.Error</p>
                 }
-                @if (OrphanPartialsForJob(job.Id) is { Count: > 0 } jobPartials)
+                @if (jobPartials.Count > 0)
                 {
                     <div class="image-actions">
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenJobPartials(job)">Partials (@jobPartials.Count)</button>
+                        @if (!activeJob)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDiscardJobPartials(job, jobPartials.Count)">Delete card &amp; partials</button>
+                        }
                     </div>
                 }
-                @foreach (var output in (runtimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
+                @foreach (var output in (displayedRuntimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
                 {
                     <div class="image-output-row">
                         <span>@(output.OutputIndex + 1)</span>
@@ -1155,10 +1419,26 @@ else
 
     private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
     {
-        if (runtimeJob is { IsRunning: true })
+        if (IsActiveJob(job.Status) && runtimeJob is { IsRunning: true })
             return "Running";
         return job.Status.ToString();
     }
+
+    private static string JobTerminalPreviewLabel(ProjectImageGenerationJobStatus status) => status switch
+    {
+        ProjectImageGenerationJobStatus.Cancelled => "Request cancelled",
+        ProjectImageGenerationJobStatus.Failed => "Request failed",
+        ProjectImageGenerationJobStatus.CompletedWithErrors => "Completed with errors",
+        ProjectImageGenerationJobStatus.Succeeded => "Request complete",
+        _ => "Request stopped",
+    };
+
+    private static string JobTerminalPreviewSymbol(ProjectImageGenerationJobStatus status) => status switch
+    {
+        ProjectImageGenerationJobStatus.Succeeded => "✓",
+        ProjectImageGenerationJobStatus.CompletedWithErrors => "!",
+        _ => "×",
+    };
 
     private string ImagePreviewUrl(Guid imageId) =>
         Project is null ? string.Empty : $"/projects/{Project.Id:N}/images/{imageId:N}/content?maxEdge=640";
@@ -1168,6 +1448,8 @@ else
         var ids = _images.Select(image => image.Id).ToHashSet();
         if (_viewImage is not null)
             _viewImage = ids.Contains(_viewImage.Id) ? _images.First(image => image.Id == _viewImage.Id) : null;
+        if (_upscaleModalImageId is Guid upscaleOwnerId && !ids.Contains(upscaleOwnerId))
+            _upscaleModalImageId = null;
         if (_editingImage is not null && !ids.Contains(_editingImage.Id))
         {
             _editingImage = null;

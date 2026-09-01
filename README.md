@@ -92,7 +92,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v27 preserves artifact-only print settings, manuscript review annotations, and only the Book Brief's selected
+- Full project export format v30 preserves artifact-only print settings, manuscript review annotations, image-upscale provenance, cover Description bindings, and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
@@ -159,14 +159,20 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   not a hard pixel boundary; the complete result still requires inspection. The
   manual Generate panel can select existing library images or upload new images
   as ordered visual references, with an explicit role for each reference carried
-  into the saved generation request. Exact target-aspect generation treats a
-  proportional provider raster as compatible even when its pixel dimensions
-  differ from the request.
+  into the saved generation request. It also accepts an optional Minimum DPI and
+  resolves that effective placement density into provider-valid pixels. Publish
+  image tools instead expose only the selected target, its aspect, and protected
+  copy regions: Lorekeeper chooses the native generation request and prepares the
+  output asset for that target internally. Very narrow or wide targets use a
+  crop-safe generated aspect and still fill their canvas rather than turning into
+  an assistant-managed panel plan. Same-aspect
+  generative up-resolution preserves the complete framing and reconstructs
+  detail, while deterministic resizing changes dimensions without adding detail.
   Target-bound generation, accessibility state, and layout diagnostics remain
-  available. Image frames
-  retain the raster's aspect ratio by default, can fill the largest proportional
-  canvas area in one action, and permit deliberate stretching only when the user
-  disables that constraint. Legacy cropped placement remains repositionable.
+  available. Publish image placement defaults to proportional Cover so artwork
+  fills its target; Contain remains available when showing the complete uncropped
+  image matters, and deliberate stretching remains an explicit exception. Legacy
+  cropped placement remains repositionable.
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference
   placement is a separate revision-safe step using that image ID. Generation
@@ -175,9 +181,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Generation partials remain available behind a `Partials` action on their final
   image or unfinished job card; authors can inspect, download, or promote a
   partial into a separate unattached library image.
+  Publication preparation permanently replaces any included image below the
+  active output threshold with a deterministic Lanczos3 upscale: 180 DPI for
+  Core and Digital PDF, 300 DPI for print, and no DPI transformation for EPUB.
+  The original remains in the project as provenance, while linked upscales show
+  their source/target raster, effective DPI, algorithm, and explicit no-new-detail
+  status. Repeated preparation reuses the smallest sufficient derivative and a
+  later larger target is derived directly from the original.
   The Images library keeps every card at one bounded size, marks assets used by
   chapters, and disables deletion until every semantic Figure and chapter-owned
-  Designed Page reference has been removed or replaced; the image service
+  Designed Page reference has been removed or replaced. An original is also
+  protected while linked upscales exist; the image service
   enforces the same rule against stale UI state.
 - An always-present Core Book for shared title/author/language metadata, fixed
   outline order, presentation, publication sections, project typography, and
@@ -201,7 +215,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
-  release target. Unresolved image accessibility choices remain visible warnings
+  release target. Preparation runs managed image-layout preflight before
+  artifact reuse, commits permanent owner-aware reference replacements, repeats
+  preflight, and includes the resulting image summary and new source fingerprint
+  in the job. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
   print-artifact profile registry with built-in
@@ -250,7 +267,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
-  tools, including justified text alignment: the Core front scene flows into digital releases and the front panel of
+  tools, canvas-aligned resize handles for rotated objects, justified text
+  alignment, and reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
+  `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
   paper weight/thickness, color process, construction, and cover mode. Paper
   color and finish stay outside the artifact workflow. The final interior page
@@ -262,8 +281,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout needed to obtain that current page count; the editor opens only after
   the calculated spine is available, without requiring a full prepared interior
   PDF first.
-  B&N covers remain one connected Back/Spine/Front composition with region-local
-  focus, fill, crop, generation guidance, and spine direction. They can prepare
+  B&N covers remain one connected Back/Spine/Front composition; choosing a
+  region is confined to the Fill selected region dialog while ordinary editing,
+  crop, generation guidance, and spine direction stay whole-canvas. They can prepare
   either one measured full-wrap PDF or derived front/back PDFs when B&N supplies
   the spine in its wizard.
 - Versioned Lorekeeper validation with independent post-write inspection,

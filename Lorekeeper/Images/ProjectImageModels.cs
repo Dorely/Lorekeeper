@@ -15,7 +15,33 @@ public sealed record ProjectImageView(
     string SourceMetadataJson,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    long SizeBytes);
+    long SizeBytes,
+    int Width = 0,
+    int Height = 0,
+    Guid? DerivedFromImageId = null,
+    IReadOnlyList<ProjectImageUpscaleSummary>? DirectUpscales = null)
+{
+    public IReadOnlyList<ProjectImageUpscaleSummary> Upscales => DirectUpscales ?? [];
+}
+
+public sealed record ProjectImageUpscaleSummary(
+    Guid Id,
+    string FileName,
+    string PreviewUrl,
+    int Width,
+    int Height,
+    string Raster,
+    double? SourceEffectiveDpi,
+    double? RequiredEffectiveDpi,
+    double? TargetEffectiveDpi,
+    string Algorithm,
+    string AlgorithmVersion,
+    string SourceByteHash,
+    bool AddsNewDetail,
+    string CreationTrigger,
+    DateTime CreatedAt,
+    string SourceRaster = "",
+    string TargetRaster = "");
 
 public sealed record ProjectImageChapterUsageView(
     Guid ImageId,
@@ -47,6 +73,18 @@ public sealed record ProjectImageResizeRequest(
     int Height,
     string FileName,
     string AltText);
+
+public sealed record ProjectImagePrintUpscaleRequest(
+    int Width,
+    int Height,
+    double WidthInches,
+    double HeightInches,
+    double TargetDpi,
+    string CreationTrigger = "print-upscale-pipeline");
+
+public sealed record ProjectImagePrintUpscaleResult(
+    ProjectImageView Image,
+    bool WasCreated);
 
 public sealed record ProjectImageCropSaved(
     ProjectImageView Image,

@@ -124,6 +124,28 @@ public sealed class ProjectImportExportService(
                 example.SourceVisualCandidate?.Locator ?? string.Empty))
             .ToList();
         var referencedVisualImageIds = exportedVisualExamples.Select(example => example.ImageId).ToHashSet();
+        HashSet<Guid>? exportedImageIds = null;
+        if (kind == ProjectExportKind.NonStructural)
+        {
+            exportedImageIds = referencedVisualImageIds;
+            var imageParents = await db.PublishAssets
+                .AsNoTracking()
+                .Where(asset => asset.ProjectId == projectId)
+                .Select(asset => new { asset.Id, asset.DerivedFromImageId })
+                .ToListAsync(cancellationToken);
+            var parentByImageId = imageParents.ToDictionary(item => item.Id, item => item.DerivedFromImageId);
+            var pending = new Queue<Guid>(exportedImageIds);
+            while (pending.TryDequeue(out var imageId))
+            {
+                if (parentByImageId.GetValueOrDefault(imageId) is not Guid parentId
+                    || !exportedImageIds.Add(parentId))
+                {
+                    continue;
+                }
+
+                pending.Enqueue(parentId);
+            }
+        }
 
         var exportedEdges = new List<ProjectExportEdge>();
         foreach (var edge in await edges.ListByProjectAsync(projectId, cancellationToken))
@@ -198,7 +220,7 @@ public sealed class ProjectImportExportService(
             Images = await db.PublishAssets
                     .AsNoTracking()
                     .Where(asset => asset.ProjectId == projectId
-                        && (kind == ProjectExportKind.Full || referencedVisualImageIds.Contains(asset.Id)))
+                        && (kind == ProjectExportKind.Full || exportedImageIds!.Contains(asset.Id)))
                     .OrderBy(asset => asset.CreatedAt)
                     .Select(asset => ProjectImage(asset))
                     .ToListAsync(cancellationToken),
@@ -623,7 +645,6 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.Subtitle,
                 profile.CoverDesign.Author,
                 profile.CoverDesign.SpineText,
-                profile.CoverDesign.BackCopy,
                 profile.CoverDesign.BackgroundColor,
                 profile.CoverDesign.BarcodeMode,
                 profile.CoverDesign.ImageCropXPercent,
@@ -668,7 +689,7 @@ public sealed class ProjectImportExportService(
         book.OutlineItems.OrderBy(item => item.SortOrder).Select(item => new ProjectExportEditionOutlineItem(
             item.Id, item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder)).ToList(),
         book.CoverDesign is null ? null : new ProjectExportCoverDesign(
-            book.Title, book.Subtitle, book.Author, string.Empty, string.Empty, book.CoverDesign.BackgroundColor,
+            book.Title, book.Subtitle, book.Author, string.Empty, book.CoverDesign.BackgroundColor,
             PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision))
     {
         AllowDesignedPageOverrides = book.PdfPresentation?.AllowDesignedPageOverrides ?? false,

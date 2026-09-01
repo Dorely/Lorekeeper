@@ -34,6 +34,17 @@ one. Existing policy permits application tests only for startup database migrati
 and versioned project import/export transformation safety, plus Press conformance
 tests that map to the native renderer evidence matrix.
 
+Image-generation resolution controls therefore use compilation, static contract
+inspection, startup smoke checks, and user-authorized provider/UI exercise rather
+than new automated assistant or provider tests. Static evidence must cover the
+Publish aspect/protected-region-only schema, application-owned target resolution,
+crop-to-fill behavior for provider-supported and extreme aspects, decoded-output
+fallback preparation, surface-bound geometry fingerprints, hardcover versus
+digital expectations, explicit minimum/size validation outside Publish,
+regional-guide exclusion, and undersized provider output handling.
+Do not claim the external provider or rendered UI was exercised unless that
+integration check actually ran.
+
 ## Current architecture and invariants
 
 ### Documentation hierarchy and routed reading
@@ -272,6 +283,17 @@ Packaging and updater claims require execution on the relevant operating system.
 Never claim OAuth, provider calls, embeddings, web search, image generation,
 publishing output, packaging, automatic updates, or platform-specific Electron
 behavior solely from compilation or static inspection.
+
+Static managed acceptance inspection covers flowing Figures, Designed Pages,
+publication sections, selected covers, and structured physical cover scenes;
+contain/cover/stretch geometry; 180/300-DPI thresholds; and aggregation to the
+maximum required proportional raster. Press conformance remains unchanged because
+the application passes the prepared assets through its existing request contract.
+Approved migration/import fixtures cover historical
+print-resample reclassification, preparation-job preservation, v30 full and
+non-structural round trips, parent remapping/missing-parent rejection, legacy
+cover-description adaptation, and snapshot-schema-v6 restore preservation. Ordinary publication
+service or UI tests remain outside the automated-test boundary.
 
 ## Key files and file families
 

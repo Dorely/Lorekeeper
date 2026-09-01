@@ -40,14 +40,16 @@ reported production page counts, exact stock/spine calculations, trim, bleed,
 safe, hinge, board, wrap, flap, gutter, barcode, and duplex no-ink regions.
 The interior layout pass precedes final cover geometry. Constraint-bound cover
 objects reflow when geometry changes; free-positioned objects retain their
-coordinates and produce actionable compatibility warnings.
+coordinates and produce actionable compatibility warnings. Page-constrained
+crop-to-fill or stretch-to-fill artwork that covered the prior canvas continues
+to cover the recalculated canvas instead of retaining a stale absolute wrap size.
 
 `PublicationCoverService`, `PublicationCoverDesign`, and the cover-oriented
 publication services own release cover aggregates and artifact-surface scenes.
 Core owns the reusable front scene; physical releases project it into the
 artifact front panel while retaining profile-owned outside, inside, case,
 jacket, cloth, spine, flap, and barcode regions. Canonical title, subtitle,
-author, spine, and back copy remain bindings, not duplicated frame text.
+author, spine, and publication Description remain bindings, not duplicated frame text.
 Cover reads and mutations normalize a valid current-schema scene to effective
 trim/bleed/page-count geometry before validation. Incomplete copy bindings,
 accessibility choices, reading order, and layout placement remain editable
@@ -61,17 +63,19 @@ rules still apply. Text and ordinary figure placement remain inside their safe
 regions. Structured diagnostics retain object IDs only as internal navigation
 metadata; publishing UI messages sanitize identifiers at their service/view
 boundaries.
-Opening a physical-release cover first asks Press for a compact interior-only
-pagination result. The resulting page count is bound to the current pagination
-fingerprint and renderer version; cover mutations fail closed when that evidence
-is missing or stale. The fingerprint contains only inputs that can affect the
-interior layout, so printer identity, paper/caliper, cover construction, project
-use, identifier mode, cover-submission choices, and cover artwork do not discard an
-otherwise current page count. The producing profile remains recorded as
-provenance but is not part of pagination validity. This pass does not create or
-claim a prepared
-interior PDF. It establishes the real page count needed for spine and wrap
-geometry, and the UI runs it automatically when cover editing is attempted.
+Opening a physical-release cover or preparing its artifacts first asks Press for
+a compact interior-only pagination result. The resulting page count is bound to
+the current pagination fingerprint and renderer version; cover mutations fail
+closed when that evidence is missing or stale. The fingerprint contains only
+inputs that can affect the interior layout, so printer identity, paper/caliper,
+cover construction, project use, identifier mode, cover-submission choices, and
+cover artwork do not discard an otherwise current page count. The producing
+profile remains recorded as provenance but is not part of pagination validity.
+This pass does not create or claim a prepared interior PDF. It establishes the
+real page count needed for spine and wrap geometry. Both editor entry and the
+background render processor run it before loading or validating physical cover
+scenes, so an artifact or renderer-version invalidation never substitutes
+minimum-page placeholder geometry during production validation.
 
 `PublicationPressRuntime` owns packaged executable discovery, exact manifest
 validation, platform/architecture checks, file hashes, environment isolation,
@@ -82,6 +86,10 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 `PublicationRenderProcessor` owns the bounded child process. `PublicationPackageService`
 owns final format-specific preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
+Managed request assembly resolves every cover text template against the
+effective Core/release title, subtitle, author, spine text, and Description before
+protocol serialization. Press therefore receives concrete selectable text and
+does not own application metadata-token semantics.
 
 The native `Lorekeeper.Press` project owns protocol v11, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
@@ -171,11 +179,13 @@ Text, manuscript-decoration vectors, and images follow the selected interior
 color space; a black-and-white job converts quotation-rule and caption tones to
 gray while preserving color-cover independence.
 
-Composition text uses the scene's Start, Center, End, or Justify alignment.
-Press emits bounded inter-word spacing for justified soft-wrapped non-final
-lines, leaves final and explicit hard-break paragraph-ending lines ragged, and
-applies the same spacing to text-shadow and foreground paint in the layout
-trace and PDF.
+Flowing manuscript and composition text distribute the complete residual line
+width as inter-word spacing for justified soft-wrapped non-final lines. This
+keeps exported composition text consistent with the editor surface while using
+the same full-measure rule for manuscript typography. Final lines and explicit
+hard-break paragraph endings remain ragged. Composition text uses the scene's
+Start, Center, End, or Justify alignment and applies identical spacing to
+text-shadow and foreground paint in the layout trace and PDF.
 
 B&N `bn-print-pdfa1b-v1` emits PDF 1.4 with PDF/A-1b identification, embedded
 fonts, output intent, flattened transparency, and profile-calculated page boxes.
@@ -199,8 +209,18 @@ deterministically composites translucent backing shapes where safe while
 retaining selectable opaque text. Ingram PDF/X-1a flattens opacity against the
 page or cover substrate. A translucent object overlapping lower page art is
 rejected with exact object IDs when flattening would change appearance or
-rasterize semantic text/vector content. Raster source alpha is flattened in
-owned image normalization.
+rasterize semantic text/vector content. For transparency-flattened print
+profiles, decoded raster alpha and image-frame opacity remain separate until
+the display list is complete. A transparent or translucent image immediately
+above opaque lower artwork is deterministically precomposed into that artwork
+before PDF serialization; only an image without eligible lower artwork is
+flattened against the page or cover substrate. This keeps transparent PNG
+icons and overlays from acquiring a white matte.
+
+Composition rotation remains clockwise-positive in the editor, Skia previews,
+layout traces, and persisted scenes. The PDF writer negates that angle only
+when crossing into PDF's bottom-up page coordinate system, so the final visual
+direction matches the canvas without changing the shared scene contract.
 
 Digital PDF jobs produce one immutable Book PDF whose front cover is page one,
 followed by publication sections and manuscript content. Tagged structure,
@@ -216,6 +236,9 @@ no parity blanks. When the effective Core/release right-hand policy is enabled,
 Press inserts only the blanks needed for recto chapter openings. Parity is based
 on final artifact page numbers: a Digital PDF front cover counts as page one,
 while coverless chapter layout traces have no synthetic leading-page offset.
+Every deliberately inserted interior blank remains in the active Roman or Arabic
+folio sequence and paints its page number; only covers and the intentionally
+suppressed opening interior folio omit that label.
 
 The application requests the full glyph-evidence `layout` trace for
 conformance and `layoutTraceMode: browser-preview` for bounded chapter Read or
@@ -229,7 +252,7 @@ Publication renders reject meaningful images until alternative text or an
 explicit decorative decision is present. Core reading copies may retain an
 unresolved image as a warning-bearing private artifact so tagged reading order
 remains structurally valid. Cover scene text retains canonical bindings until
-Press materializes the resolved title, subtitle, author, spine, and back copy;
+Press materializes the resolved title, subtitle, author, spine, and Description;
 an optional binding or valid semantic content reference that resolves to empty
 is omitted without creating a text frame, while a frame with neither binding
 nor reference remains a hard layout error. Application-side cover validation
@@ -285,11 +308,19 @@ and provides no inherited PATH, Cargo, Python, uv, Typst, WeasyPrint,
 Chromium, machine PDF tool, or repository fallback. Debug and Release use this
 same boundary; Rust is not compiled at application runtime.
 
+Press remains an artifact renderer and validator; publication-time image
+upscaling is completed by the managed application before the existing Press
+request is staged. Press receives only the effective publication document and
+its already-selected assets, with no preparation mutation or image-lineage
+responsibility. Managed staging permits at most a 12,000-pixel edge,
+120-megapixel raster, and a configured per-asset byte limit no greater than
+Press's existing 256 MiB containment boundary.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v10 request/response, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v11 request/response, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |

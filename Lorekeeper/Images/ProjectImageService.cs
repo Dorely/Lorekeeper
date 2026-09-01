@@ -7,6 +7,9 @@ using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Lorekeeper.Images;
 
@@ -22,39 +25,13 @@ public sealed class ProjectImageService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        var rows = await db.PublishAssets
+        var assets = await db.PublishAssets
             .AsNoTracking()
             .Where(asset => asset.ProjectId == projectId)
             .OrderByDescending(asset => asset.CreatedAt)
-            .Select(asset => new
-            {
-                asset.Id,
-                asset.FileName,
-                asset.ContentType,
-                asset.AltText,
-                asset.Source,
-                asset.Prompt,
-                asset.GenerationModel,
-                asset.SourceMetadataJson,
-                asset.CreatedAt,
-                asset.UpdatedAt,
-                SizeBytes = (long)asset.Data.Length,
-            })
             .ToListAsync(cancellationToken);
 
-        return rows.Select(row => new ProjectImageView(
-            row.Id,
-            row.FileName,
-            row.ContentType,
-            $"/projects/{projectId:N}/images/{row.Id:N}/content?maxEdge=640",
-            row.AltText,
-            row.Source,
-            row.Prompt,
-            row.GenerationModel,
-            row.SourceMetadataJson,
-            row.CreatedAt,
-            row.UpdatedAt,
-            row.SizeBytes)).ToList();
+        return ToViews(projectId, assets);
     }
 
     public async Task<IReadOnlyList<ProjectImageChapterUsageView>> ListChapterUsageAsync(
@@ -85,39 +62,18 @@ public sealed class ProjectImageService(
         if (requestedIds.Count == 0)
             return [];
 
-        var rows = await db.PublishAssets
+        var assets = await db.PublishAssets
             .AsNoTracking()
-            .Where(asset => asset.ProjectId == projectId && requestedIds.Contains(asset.Id))
+            .Where(asset => asset.ProjectId == projectId
+                && (requestedIds.Contains(asset.Id)
+                    || (asset.DerivedFromImageId != null
+                        && requestedIds.Contains(asset.DerivedFromImageId.Value))))
             .OrderByDescending(asset => asset.CreatedAt)
-            .Select(asset => new
-            {
-                asset.Id,
-                asset.FileName,
-                asset.ContentType,
-                asset.AltText,
-                asset.Source,
-                asset.Prompt,
-                asset.GenerationModel,
-                asset.SourceMetadataJson,
-                asset.CreatedAt,
-                asset.UpdatedAt,
-                SizeBytes = (long)asset.Data.Length,
-            })
             .ToListAsync(cancellationToken);
 
-        return rows.Select(row => new ProjectImageView(
-            row.Id,
-            row.FileName,
-            row.ContentType,
-            $"/projects/{projectId:N}/images/{row.Id:N}/content?maxEdge=640",
-            row.AltText,
-            row.Source,
-            row.Prompt,
-            row.GenerationModel,
-            row.SourceMetadataJson,
-            row.CreatedAt,
-            row.UpdatedAt,
-            row.SizeBytes)).ToList();
+        return ToViews(projectId, assets)
+            .Where(view => requestedIds.Contains(view.Id))
+            .ToList();
     }
 
     public async Task<ProjectImageView?> GetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
@@ -128,7 +84,17 @@ public sealed class ProjectImageService(
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
 
-        return asset is null ? null : ToView(projectId, asset);
+        if (asset is null)
+            return null;
+
+        var directUpscales = await db.PublishAssets
+            .AsNoTracking()
+            .Where(candidate => candidate.ProjectId == projectId
+                && candidate.DerivedFromImageId == imageId
+                && candidate.Source == PublishAssetSource.Upscaled)
+            .OrderBy(candidate => candidate.CreatedAt)
+            .ToListAsync(cancellationToken);
+        return ToView(projectId, asset, directUpscales);
     }
 
     public async Task<ProjectImageData?> GetDataAsync(
@@ -283,7 +249,7 @@ public sealed class ProjectImageService(
         if (!LayoutImageSizeResolver.AspectMatches(
                 (double)request.Width / request.Height,
                 (double)sourceBitmap.Width / sourceBitmap.Height))
-            throw new InvalidOperationException("The requested resize raster must preserve the source aspect ratio. Use edit_project_image with a larger-framing brief for model-driven expansion.");
+            throw new InvalidOperationException("The requested resize raster must preserve the source aspect ratio. Use edit_project_image with an intentional-outpainting brief for model-driven expansion.");
         if (sourceBitmap.Width == request.Width && sourceBitmap.Height == request.Height)
             throw new InvalidOperationException("The source image already has the requested raster; no derived image was created.");
 
@@ -333,6 +299,170 @@ public sealed class ProjectImageService(
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
         return ToView(projectId, asset);
+    }
+
+    public async Task<ProjectImagePrintUpscaleResult> EnsurePrintUpscaleAsync(
+        Guid projectId,
+        Guid sourceImageId,
+        ProjectImagePrintUpscaleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // A publication-preparation transaction can call this helper through
+        // the ambient write operation. In that case the owner commits the
+        // derivative and its reference replacements together; standalone
+        // generation calls retain the service-owned save below.
+        var ownsWriteOperation = AppDatabaseOperationAmbient.Current is null;
+        LayoutImageSizeResolver.ValidatePrintRaster(request.Width, request.Height);
+        LayoutImageSizeResolver.ValidatePhysicalDimensions(request.WidthInches, request.HeightInches);
+        LayoutImageSizeResolver.ValidateMinimumDpi(request.TargetDpi);
+        var minimum = LayoutImageSizeResolver.ResolvePrintRaster(request.WidthInches, request.HeightInches, request.TargetDpi);
+        if (request.Width < minimum.Width || request.Height < minimum.Height)
+            throw new InvalidOperationException(
+                $"The requested print raster {request.Width}x{request.Height} is below the physical target minimum "
+                + $"({request.WidthInches:0.####} x {request.HeightInches:0.####} inches at {request.TargetDpi:0.##} DPI = {minimum.Size}).");
+
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var project = await db.Projects.FirstOrDefaultAsync(item => item.Id == projectId, cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        var source = await db.PublishAssets
+            .FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == sourceImageId, cancellationToken)
+            ?? throw new InvalidOperationException("Source image was not found in this project.");
+
+        var sourceRoot = await FindNonUpscaledRootAsync(db, source, cancellationToken);
+        using var sourceBitmap = SKBitmap.Decode(sourceRoot.Data)
+            ?? throw new InvalidOperationException("Source image data could not be decoded.");
+        if (sourceBitmap.Width <= 0 || sourceBitmap.Height <= 0)
+            throw new InvalidOperationException("Source image dimensions are invalid.");
+        if (!LayoutImageSizeResolver.AspectMatches(
+                (double)request.Width / request.Height,
+                (double)sourceBitmap.Width / sourceBitmap.Height))
+        {
+            throw new InvalidOperationException(
+                $"The requested print raster {request.Width}x{request.Height} must preserve the source image aspect ratio "
+                + $"({sourceBitmap.Width}x{sourceBitmap.Height}).");
+        }
+
+        if (sourceBitmap.Width >= request.Width && sourceBitmap.Height >= request.Height)
+        {
+            // A native image that already satisfies the required raster is compliant.
+            // No derivative is needed, and callers can treat this as a reuse.
+            return new ProjectImagePrintUpscaleResult(ToView(projectId, sourceRoot), false);
+        }
+
+        var sourceHash = Convert.ToHexString(SHA256.HashData(sourceRoot.Data)).ToLowerInvariant();
+        var expectedId = DeterministicUpscaleId(sourceRoot.Id, sourceHash, request.Width, request.Height);
+
+        PublishAsset? reusable = null;
+        var reusableWidth = 0;
+        var reusableHeight = 0;
+        var linkedDerivatives = await db.PublishAssets
+            .AsNoTracking()
+            .Where(asset => asset.ProjectId == projectId
+                && asset.DerivedFromImageId == sourceRoot.Id
+                && asset.Source == PublishAssetSource.Upscaled)
+            .ToListAsync(cancellationToken);
+        var linkedDerivativeIds = linkedDerivatives.Select(asset => asset.Id).ToHashSet();
+        linkedDerivatives.AddRange(db.PublishAssets.Local
+            .Where(asset => asset.ProjectId == projectId
+                && asset.DerivedFromImageId == sourceRoot.Id
+                && asset.Source == PublishAssetSource.Upscaled
+                && !linkedDerivativeIds.Contains(asset.Id)));
+
+        foreach (var derived in linkedDerivatives)
+        {
+            using var derivedBitmap = SKBitmap.Decode(derived.Data);
+            if (derivedBitmap is not { Width: > 0, Height: > 0 })
+                continue;
+
+            // Reuse the smallest linked derivative that already satisfies the
+            // requested raster. Reading dimensions from bytes also detects old
+            // or hand-edited metadata before it can be treated as compliant.
+            if (derivedBitmap.Width < request.Width || derivedBitmap.Height < request.Height)
+                continue;
+            if (!HasMatchingUpscaleProvenance(derived.SourceMetadataJson, sourceHash))
+                continue;
+
+            if (reusable is null
+                || (long)derivedBitmap.Width * derivedBitmap.Height < (long)reusableWidth * reusableHeight
+                || ((long)derivedBitmap.Width * derivedBitmap.Height == (long)reusableWidth * reusableHeight
+                    && (derivedBitmap.Width < reusableWidth
+                        || derivedBitmap.Width == reusableWidth && derivedBitmap.Height < reusableHeight)))
+            {
+                reusable = derived;
+                reusableWidth = derivedBitmap.Width;
+                reusableHeight = derivedBitmap.Height;
+            }
+        }
+
+        if (reusable is not null)
+            return new ProjectImagePrintUpscaleResult(ToView(projectId, reusable), false);
+
+        var fileName = PrintUpscaleFileName(sourceRoot.FileName, request.Width, request.Height);
+        var data = ProjectImageResampler.ResampleExact(sourceRoot.Data, request.Width, request.Height);
+        var normalized = ProjectImageBinary.Normalize(
+            data,
+            "image/png",
+            fileName,
+            PrintUpscaleMaxBytes());
+        var now = DateTime.UtcNow;
+        var asset = new PublishAsset
+        {
+            ProjectId = projectId,
+            Id = expectedId,
+            Source = PublishAssetSource.Upscaled,
+            FileName = normalized.FileName,
+            ContentType = normalized.ContentType,
+            Data = normalized.Data,
+            AltText = sourceRoot.AltText,
+            Prompt = string.Empty,
+            GenerationModel = string.Empty,
+            SourceMetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Transform = new
+                {
+                    Kind = "print-upscale",
+                    SourceImageId = sourceRoot.Id,
+                    DerivedFromImageId = sourceRoot.Id,
+                    SourceRaster = $"{sourceBitmap.Width}x{sourceBitmap.Height}",
+                    TargetRaster = $"{normalized.Width}x{normalized.Height}",
+                    SourceRasterWidth = sourceBitmap.Width,
+                    SourceRasterHeight = sourceBitmap.Height,
+                    TargetRasterWidth = normalized.Width,
+                    TargetRasterHeight = normalized.Height,
+                    WidthInches = request.WidthInches,
+                    HeightInches = request.HeightInches,
+                    SourceEffectiveDpi = Math.Min(sourceBitmap.Width / request.WidthInches, sourceBitmap.Height / request.HeightInches),
+                    RequiredEffectiveDpi = request.TargetDpi,
+                    RequiredDpi = request.TargetDpi,
+                    TargetDpi = request.TargetDpi,
+                    TargetEffectiveDpi = Math.Min(normalized.Width / request.WidthInches, normalized.Height / request.HeightInches),
+                    Algorithm = ProjectImageResampler.Algorithm,
+                    AlgorithmVersion = ProjectImageResampler.AlgorithmVersion,
+                    Interpolation = ProjectImageResampler.Lanczos3Interpolation,
+                    AddsNewDetail = false,
+                    SourceByteHash = sourceHash,
+                    CreationTrigger = CleanOrDefault(request.CreationTrigger, "print-upscale-pipeline"),
+                },
+                RasterStorage = new
+                {
+                    normalized.ContentType,
+                    normalized.Width,
+                    normalized.Height,
+                    LayoutTransform = "none",
+                },
+            }),
+            DerivedFromImageId = sourceRoot.Id,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        await db.PublishAssets.AddAsync(asset, cancellationToken);
+        project.UpdatedAt = now;
+        if (ownsWriteOperation)
+            await db.SaveChangesAsync(cancellationToken);
+        return new ProjectImagePrintUpscaleResult(ToView(projectId, asset), true);
     }
 
     public async Task<ProjectImageView> GenerateAsync(
@@ -406,6 +536,15 @@ public sealed class ProjectImageService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
+        if (await db.PublishAssets.AsNoTracking().AnyAsync(
+            candidate => candidate.ProjectId == projectId
+                && candidate.DerivedFromImageId == imageId
+                && candidate.Source == PublishAssetSource.Upscaled,
+            cancellationToken))
+        {
+            throw new InvalidOperationException(
+                $"Image '{asset.FileName}' has linked upscale derivatives. Delete the upscales before deleting their original image.");
+        }
         var chapterUsage = await BuildChapterUsageAsync(db, projectId, cancellationToken);
         var figureChapters = chapterUsage.GetValueOrDefault(imageId)?.Values.ToList() ?? [];
         if (figureChapters.Count > 0)
@@ -444,16 +583,25 @@ public sealed class ProjectImageService(
         var coverUses = (await db.PublicationCoverDesigns
             .AsNoTracking()
             .Where(cover => cover.Edition.ProjectId == projectId)
-            .Select(cover => new { cover.Edition.Name, cover.CompositionSceneJson })
+            .Select(cover => new { cover.Edition.Name, cover.CompositionSceneJson, cover.SurfaceScenesJson })
             .ToListAsync(cancellationToken))
-            .Where(item => SceneUsesImage(item.CompositionSceneJson, imageId))
+            .Where(item => SceneUsesImage(item.CompositionSceneJson, imageId)
+                || SurfaceScenesUseImage(item.SurfaceScenesJson, imageId))
             .Select(item => item.Name)
             .ToList();
-        if (compositionUses.Count > 0 || coverUses.Count > 0)
+        var coreCoverUses = (await db.PublicationBookCoverDesigns
+            .AsNoTracking()
+            .Where(cover => cover.ProjectId == projectId)
+            .Select(cover => cover.CompositionSceneJson)
+            .ToListAsync(cancellationToken))
+            .Where(sceneJson => SceneUsesImage(sceneJson, imageId))
+            .Select(_ => "Core Book")
+            .ToList();
+        if (compositionUses.Count > 0 || coverUses.Count > 0 || coreCoverUses.Count > 0)
         {
             throw new InvalidOperationException(
                 $"Image '{asset.FileName}' is used by a page or cover composition: "
-                + string.Join(", ", compositionUses.Concat(coverUses))
+                + string.Join(", ", compositionUses.Concat(coverUses).Concat(coreCoverUses).Distinct(StringComparer.Ordinal))
                 + ". Remove or replace those scene objects before deleting the image.");
         }
         var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
@@ -497,7 +645,15 @@ public sealed class ProjectImageService(
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
     }
     public static ProjectImageView ToView(Guid projectId, PublishAsset asset) =>
-        new(
+        ToView(projectId, asset, []);
+
+    private static ProjectImageView ToView(
+        Guid projectId,
+        PublishAsset asset,
+        IReadOnlyList<PublishAsset> directUpscales)
+    {
+        var (width, height) = ReadDimensions(asset.Data);
+        return new ProjectImageView(
             asset.Id,
             asset.FileName,
             asset.ContentType,
@@ -509,7 +665,221 @@ public sealed class ProjectImageService(
             asset.SourceMetadataJson,
             asset.CreatedAt,
             asset.UpdatedAt,
-            asset.Data.LongLength);
+            asset.Data.LongLength,
+            width,
+            height,
+            asset.DerivedFromImageId,
+            directUpscales
+                .Where(child => child.Source == PublishAssetSource.Upscaled)
+                .Select(child => ToUpscaleSummary(projectId, child))
+                .OrderBy(child => child.Width * (long)child.Height)
+                .ThenBy(child => child.Width)
+                .ThenBy(child => child.Height)
+                .ToList());
+    }
+
+    private static IReadOnlyList<ProjectImageView> ToViews(Guid projectId, IReadOnlyList<PublishAsset> assets)
+    {
+        var directUpscales = assets
+            .Where(asset => asset.Source == PublishAssetSource.Upscaled && asset.DerivedFromImageId is not null)
+            .GroupBy(asset => asset.DerivedFromImageId!.Value)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<PublishAsset>)group.ToList());
+
+        return assets
+            .Select(asset => ToView(projectId, asset, directUpscales.GetValueOrDefault(asset.Id, [])))
+            .ToList();
+    }
+
+    private static ProjectImageUpscaleSummary ToUpscaleSummary(Guid projectId, PublishAsset asset)
+    {
+        var (width, height) = ReadDimensions(asset.Data);
+        var metadata = ReadUpscaleMetadata(asset.SourceMetadataJson);
+        return new ProjectImageUpscaleSummary(
+            asset.Id,
+            asset.FileName,
+            $"/projects/{projectId:N}/images/{asset.Id:N}/content?maxEdge=640",
+            width,
+            height,
+            width > 0 && height > 0 ? $"{width}x{height}" : string.Empty,
+            metadata.SourceEffectiveDpi,
+            metadata.RequiredEffectiveDpi,
+            metadata.TargetEffectiveDpi,
+            metadata.Algorithm,
+            metadata.AlgorithmVersion,
+            metadata.SourceByteHash,
+            metadata.AddsNewDetail,
+            metadata.CreationTrigger,
+            asset.CreatedAt,
+            metadata.SourceRaster,
+            metadata.TargetRaster.Length > 0 ? metadata.TargetRaster : width > 0 && height > 0 ? $"{width}x{height}" : string.Empty);
+    }
+
+    private static (int Width, int Height) ReadDimensions(byte[] data)
+    {
+        try
+        {
+            using var stream = new SKMemoryStream(data);
+            using var codec = SKCodec.Create(stream);
+            return codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0
+                ? (0, 0)
+                : (codec.Info.Width, codec.Info.Height);
+        }
+        catch (Exception)
+        {
+            // A corrupt asset remains visible in the library with unknown
+            // dimensions; publication preflight is responsible for blocking it.
+            return (0, 0);
+        }
+    }
+
+    private static async Task<PublishAsset> FindNonUpscaledRootAsync(
+        AppDbContext db,
+        PublishAsset source,
+        CancellationToken cancellationToken)
+    {
+        var current = source;
+        var visited = new HashSet<Guid>();
+        while (current.Source == PublishAssetSource.Upscaled)
+        {
+            if (current.DerivedFromImageId is not Guid parentId || parentId == Guid.Empty)
+                throw new InvalidOperationException("The image upscale source is missing its provenance parent.");
+            if (!visited.Add(current.Id))
+                throw new InvalidOperationException("The image upscale lineage contains a cycle.");
+
+            current = await db.PublishAssets
+                .AsNoTracking()
+                .FirstOrDefaultAsync(asset => asset.ProjectId == source.ProjectId && asset.Id == parentId, cancellationToken)
+                ?? throw new InvalidOperationException("The image upscale source is missing its provenance parent.");
+        }
+
+        return current;
+    }
+
+    private static Guid DeterministicUpscaleId(Guid sourceId, string sourceHash, int width, int height)
+    {
+        var identity = $"lorekeeper-image-upscale|{ProjectImageResampler.AlgorithmVersion}|{sourceId:N}|{sourceHash}|{width}x{height}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private static bool HasMatchingUpscaleProvenance(string metadataJson, string sourceHash)
+    {
+        var metadata = ReadUpscaleMetadata(metadataJson);
+        if (!string.Equals(metadata.Algorithm, ProjectImageResampler.Algorithm, StringComparison.Ordinal)
+            || !string.Equals(metadata.AlgorithmVersion, ProjectImageResampler.AlgorithmVersion, StringComparison.Ordinal)
+            || metadata.AddsNewDetail)
+        {
+            return false;
+        }
+
+        // Legacy derivatives may not have captured a byte hash. Their parent
+        // identity remains authoritative and dimensions are still decoded above.
+        return string.IsNullOrWhiteSpace(metadata.SourceByteHash)
+            || string.Equals(metadata.SourceByteHash, sourceHash, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static UpscaleMetadata ReadUpscaleMetadata(string metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+            return new UpscaleMetadata();
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (!TryGetProperty(document.RootElement, "Transform", out var transform)
+                || transform.ValueKind != JsonValueKind.Object)
+            {
+                return new UpscaleMetadata();
+            }
+
+            var interpolation = ReadString(transform, "Interpolation");
+            var kind = ReadString(transform, "Kind");
+            var knownLanczosTransform = string.Equals(kind, "print-upscale", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(kind, "print-resample", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(interpolation, ProjectImageResampler.Lanczos3Interpolation, StringComparison.Ordinal);
+            var algorithm = ReadString(transform, "Algorithm")
+                ?? (knownLanczosTransform
+                    ? ProjectImageResampler.Algorithm
+                    : string.Empty);
+            var algorithmVersion = ReadString(transform, "AlgorithmVersion")
+                ?? (string.Equals(algorithm, ProjectImageResampler.Algorithm, StringComparison.Ordinal)
+                    ? ProjectImageResampler.AlgorithmVersion
+                    : string.Empty);
+            return new UpscaleMetadata(
+                ReadDouble(transform, "SourceEffectiveDpi"),
+                ReadDouble(transform, "RequiredEffectiveDpi")
+                    ?? ReadDouble(transform, "RequiredDpi")
+                    ?? ReadDouble(transform, "TargetDpi"),
+                ReadDouble(transform, "TargetEffectiveDpi"),
+                algorithm,
+                algorithmVersion,
+                ReadString(transform, "SourceByteHash") ?? string.Empty,
+                ReadBoolean(transform, "AddsNewDetail"),
+                ReadString(transform, "CreationTrigger") ?? ReadString(transform, "PlannedBy") ?? string.Empty,
+                ReadString(transform, "SourceRaster") ?? string.Empty,
+                ReadString(transform, "TargetRaster") ?? string.Empty);
+        }
+        catch (JsonException)
+        {
+            return new UpscaleMetadata();
+        }
+        catch (InvalidOperationException)
+        {
+            return new UpscaleMetadata();
+        }
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static double? ReadDouble(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.TryGetDouble(out var result)
+            ? result
+            : null;
+
+    private static bool ReadBoolean(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value)
+        && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+        && value.GetBoolean();
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.TryGetProperty(propertyName, out value))
+            return true;
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private int PrintUpscaleMaxBytes()
+    {
+        const int pressMaximumBytes = 256 * 1024 * 1024;
+        var configured = imageOptions.Value.MaxPrintUpscaleBytes;
+        return configured > 0 ? Math.Min(configured, pressMaximumBytes) : pressMaximumBytes;
+    }
+
+    private sealed record UpscaleMetadata(
+        double? SourceEffectiveDpi = null,
+        double? RequiredEffectiveDpi = null,
+        double? TargetEffectiveDpi = null,
+        string Algorithm = "",
+        string AlgorithmVersion = "",
+        string SourceByteHash = "",
+        bool AddsNewDetail = false,
+        string CreationTrigger = "",
+        string SourceRaster = "",
+        string TargetRaster = "");
 
     private async Task<IReadOnlyList<Guid>> AttachedEntityIdsAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
@@ -666,6 +1036,22 @@ public sealed class ProjectImageService(
         }
     }
 
+    private static bool SurfaceScenesUseImage(string json, Guid imageId)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            var scenes = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ManuscriptCodec.JsonOptions);
+            return scenes?.Values.Any(sceneJson => SceneUsesImage(sceneJson, imageId)) == true;
+        }
+        catch (JsonException)
+        {
+            // A malformed surface collection cannot be proven free of a
+            // reference; keep the asset until the cover data is repaired.
+            return true;
+        }
+    }
+
     private static string CropFileName(string? requestedFileName, string sourceFileName, string contentType)
     {
         var extension = contentType == "image/jpeg" ? ".jpg" : ".png";
@@ -686,6 +1072,16 @@ public sealed class ProjectImageService(
         if (string.IsNullOrWhiteSpace(sourceStem)) sourceStem = "image";
         return $"{sourceStem}-resized.png";
     }
+
+    private static string PrintUpscaleFileName(string sourceFileName, int width, int height)
+    {
+        var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName);
+        if (string.IsNullOrWhiteSpace(sourceStem)) sourceStem = "image";
+        return $"{sourceStem}-upscale-{width}x{height}.png";
+    }
+
+    private static string CleanOrDefault(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
 }

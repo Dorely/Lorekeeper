@@ -38,8 +38,8 @@ public interface ICompositionService
     Task<CompositionWorkspaceMutationResult> ApplyWorkspaceStageAsync(EditorContentTarget target, Guid projectId, Guid conversationId, Guid stageId, long expectedCompositionRevision, CancellationToken cancellationToken = default);
     Task<CompositionEditionGeometry> GetEditionGeometryAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<CompositionEditionGeometry> GetAuthoringGeometryAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(Guid projectId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default);
-    Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default);
+    Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(Guid projectId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
+    Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
     Task<LayoutValidationView> ValidateAuthoringVariantAsync(Guid projectId, Guid variantId, CancellationToken cancellationToken = default);
     Task<LayoutValidationView> ValidateVariantAsync(Guid projectId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
     Task<AuthoringHistoryState> GetHistoryStateAsync(Guid projectId, Guid compositionId, CancellationToken cancellationToken = default);
@@ -1635,7 +1635,8 @@ public sealed class CompositionService(
         string targetKind,
         Guid targetId,
         Guid? variantId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CompositionBounds? surfaceBounds = null)
     {
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var normalizedKind = NormalizeGenerationTargetKind(targetKind);
@@ -1653,10 +1654,10 @@ public sealed class CompositionService(
             _ => await ResolveEditionPageFrameTargetAsync(projectId, edition, targetId, variantId!.Value, cancellationToken),
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
-        var pixelsPerInch = edition.Format == PublicationEditionFormat.Paperback ? 300 : 180;
+        var pixelsPerInch = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? 300 : 180;
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
-        var recommendedRaster = LayoutImageSizeResolver.ResolveNearest(width * pixelsPerInch, height * pixelsPerInch);
+        var requestedRaster = ResolveRasterOrUnsupported(width, height);
+        var recommendedRaster = ResolveNearestRasterOrUnsupported(width * pixelsPerInch, height * pixelsPerInch);
         var geometryFingerprint = TargetGeometryFingerprint(
             edition,
             normalizedKind,
@@ -1665,7 +1666,7 @@ public sealed class CompositionService(
             width,
             height,
             regions);
-        return new LayoutGenerationTargetDescriptor(
+        var descriptor = new LayoutGenerationTargetDescriptor(
             edition.Id,
             variantId,
             geometryFingerprint,
@@ -1679,10 +1680,11 @@ public sealed class CompositionService(
             recommendedRaster.Height,
             requestedRaster.Width,
             requestedRaster.Height,
-            requestedRaster.Size,
+            RasterLabel(requestedRaster),
             pixelsPerInch,
             regions,
             diagnostics);
+        return ApplySurfaceBounds(descriptor, normalizedKind, surfaceBounds);
     }
 
     public async Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(
@@ -1690,7 +1692,8 @@ public sealed class CompositionService(
         string targetKind,
         Guid targetId,
         Guid? variantId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CompositionBounds? surfaceBounds = null)
     {
         var setup = await ReadPageSetupAsync(projectId, cancellationToken);
         var normalizedKind = NormalizeGenerationTargetKind(targetKind);
@@ -1716,8 +1719,8 @@ public sealed class CompositionService(
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
-        var recommendedRaster = LayoutImageSizeResolver.ResolveNearest(width * 300, height * 300);
+        var requestedRaster = ResolveRasterOrUnsupported(width, height);
+        var recommendedRaster = ResolveNearestRasterOrUnsupported(width * 300, height * 300);
         var fingerprint = TargetGeometryFingerprint(
             $"project:{setup.Revision}:{setup.PageWidthInches:F4}:{setup.PageHeightInches:F4}:{setup.PageMarginInches:F4}",
             normalizedKind,
@@ -1726,7 +1729,7 @@ public sealed class CompositionService(
             width,
             height,
             regions);
-        return new LayoutGenerationTargetDescriptor(
+        var descriptor = new LayoutGenerationTargetDescriptor(
             null,
             variantId,
             fingerprint,
@@ -1740,10 +1743,11 @@ public sealed class CompositionService(
             recommendedRaster.Height,
             requestedRaster.Width,
             requestedRaster.Height,
-            requestedRaster.Size,
+            RasterLabel(requestedRaster),
             300,
             regions,
             diagnostics);
+        return ApplySurfaceBounds(descriptor, normalizedKind, surfaceBounds);
     }
 
     public async Task<CompositionEditionGeometry> GetEditionGeometryAsync(
@@ -1975,17 +1979,11 @@ public sealed class CompositionService(
             .FirstOrDefault(block => block is not null)
             ?? throw new KeyNotFoundException("Figure target was not found in this project.");
         var presentation = figure.FigurePresentation ?? new FigurePresentation();
-        var contentWidth = Math.Max(.25, setup.PageWidthInches - setup.PageMarginInches * 2);
-        var contentHeight = Math.Max(.25, setup.PageHeightInches - setup.PageMarginInches * 2);
-        var width = presentation.Placement == FigurePlacementIntent.FullBleed
-            ? setup.PageWidthInches
-            : contentWidth * Math.Clamp(presentation.WidthPercent, 5, 100) / 100;
-        var height = presentation.Placement switch
-        {
-            FigurePlacementIntent.FullBleed => setup.PageHeightInches,
-            FigurePlacementIntent.DedicatedPage => contentHeight * .75,
-            _ => Math.Min(contentHeight * .34, width * 1.25),
-        };
+        var (width, height) = LayoutImageSizeResolver.ResolveFlowingFigurePhysicalSize(
+            setup.PageWidthInches,
+            setup.PageHeightInches,
+            setup.PageMarginInches,
+            presentation);
         var scene = CreatePageScene(setup);
         var regions = presentation.Placement is FigurePlacementIntent.FullBleed or FigurePlacementIntent.DedicatedPage
             ? PageRegions(scene, includeReservedText: presentation.Placement == FigurePlacementIntent.DedicatedPage)
@@ -2185,6 +2183,85 @@ public sealed class CompositionService(
             .Select(region => region!)
             .ToList();
         return (width, height, regions, []);
+    }
+
+    private static LayoutGenerationTargetDescriptor ApplySurfaceBounds(
+        LayoutGenerationTargetDescriptor descriptor,
+        string normalizedTargetKind,
+        CompositionBounds? surfaceBounds)
+    {
+        if (surfaceBounds is null)
+            return descriptor;
+        if (normalizedTargetKind is not ("page-surface" or "cover-surface" or "core-cover-surface"))
+            throw new ArgumentException("Surface bounds require a Designed Page, release cover, or Core cover surface target.", nameof(surfaceBounds));
+
+        ValidateSurfaceBounds(surfaceBounds);
+        var width = descriptor.WidthInches * surfaceBounds.WidthPercent / 100;
+        var height = descriptor.HeightInches * surfaceBounds.HeightPercent / 100;
+        var requestedRaster = ResolveRasterOrUnsupported(width, height);
+        var recommendedRaster = ResolveNearestRasterOrUnsupported(
+            width * descriptor.EffectiveDpiExpectation,
+            height * descriptor.EffectiveDpiExpectation);
+        var regions = descriptor.Regions
+            .Select(region => ToFrameLocalRegion(region, surfaceBounds))
+            .Where(region => region is not null)
+            .Select(region => region!)
+            .ToList();
+        var fingerprint = TargetGeometryFingerprint(
+            descriptor.GeometryKey,
+            descriptor.TargetKind,
+            descriptor.TargetId,
+            descriptor.VariantId,
+            width,
+            height,
+            regions,
+            surfaceBounds);
+        return descriptor with
+        {
+            GeometryKey = fingerprint,
+            WidthInches = width,
+            HeightInches = height,
+            AspectRatio = AspectLabel(width, height),
+            RecommendedWidthPixels = recommendedRaster.Width,
+            RecommendedHeightPixels = recommendedRaster.Height,
+            RequestedWidthPixels = requestedRaster.Width,
+            RequestedHeightPixels = requestedRaster.Height,
+            RequestedRaster = RasterLabel(requestedRaster),
+            Regions = regions,
+            SurfaceBounds = surfaceBounds,
+        };
+    }
+
+    private static LayoutImageSize ResolveRasterOrUnsupported(double width, double height)
+    {
+        try { return LayoutImageSizeResolver.Resolve(width, height); }
+        catch (ArgumentException) { return new LayoutImageSize(0, 0); }
+    }
+
+    private static LayoutImageSize ResolveNearestRasterOrUnsupported(double widthPixels, double heightPixels)
+    {
+        try { return LayoutImageSizeResolver.ResolveNearest(widthPixels, heightPixels); }
+        catch (ArgumentException) { return new LayoutImageSize(0, 0); }
+    }
+
+    private static string RasterLabel(LayoutImageSize raster) =>
+        raster.Width > 0 && raster.Height > 0 ? raster.Size : "unsupported";
+
+    private static void ValidateSurfaceBounds(CompositionBounds bounds)
+    {
+        if (!double.IsFinite(bounds.XPercent)
+            || !double.IsFinite(bounds.YPercent)
+            || !double.IsFinite(bounds.WidthPercent)
+            || !double.IsFinite(bounds.HeightPercent)
+            || bounds.XPercent < 0
+            || bounds.YPercent < 0
+            || bounds.WidthPercent <= 0
+            || bounds.HeightPercent <= 0
+            || bounds.XPercent + bounds.WidthPercent > 100
+            || bounds.YPercent + bounds.HeightPercent > 100)
+        {
+            throw new ArgumentException("Surface bounds must use finite positive percentage dimensions inside the 0-100 surface.", nameof(bounds));
+        }
     }
 
     private static LayoutGenerationRegionDescriptor? ToFrameLocalRegion(
@@ -2574,7 +2651,22 @@ public sealed class CompositionService(
         && (item.GroupId is not Guid groupId
             || scene.Objects.FirstOrDefault(candidate => candidate.Id == groupId) is { Visible: true });
 
+    private static string AspectLabel(double width, double height)
+    {
+        var scaledWidth = (long)Math.Round(width * 1_000_000);
+        var scaledHeight = (long)Math.Round(height * 1_000_000);
+        var gcd = GreatestCommonDivisor(scaledWidth, scaledHeight);
+        return $"{scaledWidth / gcd}:{scaledHeight / gcd}";
+    }
+
     private static int GreatestCommonDivisor(int left, int right)
+    {
+        while (right != 0)
+            (left, right) = (right, left % right);
+        return Math.Max(left, 1);
+    }
+
+    private static long GreatestCommonDivisor(long left, long right)
     {
         while (right != 0)
             (left, right) = (right, left % right);
@@ -2588,8 +2680,9 @@ public sealed class CompositionService(
         Guid? variantId,
         double width,
         double height,
-        IReadOnlyList<LayoutGenerationRegionDescriptor> regions)
-        => TargetGeometryFingerprint(GeometryCanonical(edition), targetKind, targetId, variantId, width, height, regions);
+        IReadOnlyList<LayoutGenerationRegionDescriptor> regions,
+        CompositionBounds? surfaceBounds = null)
+        => TargetGeometryFingerprint(GeometryCanonical(edition), targetKind, targetId, variantId, width, height, regions, surfaceBounds);
 
     private static string TargetGeometryFingerprint(
         string geometrySource,
@@ -2598,7 +2691,8 @@ public sealed class CompositionService(
         Guid? variantId,
         double width,
         double height,
-        IReadOnlyList<LayoutGenerationRegionDescriptor> regions)
+        IReadOnlyList<LayoutGenerationRegionDescriptor> regions,
+        CompositionBounds? surfaceBounds = null)
     {
         var canonical = new StringBuilder()
             .Append(geometrySource).Append('|')
@@ -2606,6 +2700,14 @@ public sealed class CompositionService(
             .Append(variantId?.ToString("N") ?? "-").Append('|')
             .Append(width.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)).Append('|')
             .Append(height.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        if (surfaceBounds is not null)
+        {
+            canonical.Append("|surface-bounds|")
+                .Append(surfaceBounds.XPercent.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                .Append(surfaceBounds.YPercent.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                .Append(surfaceBounds.WidthPercent.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)).Append('|')
+                .Append(surfaceBounds.HeightPercent.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        }
         foreach (var region in regions.OrderBy(item => item.Kind, StringComparer.Ordinal).ThenBy(item => item.Label, StringComparer.Ordinal))
         {
             canonical.Append('|').Append(region.Kind).Append('|').Append(region.Label).Append('|')

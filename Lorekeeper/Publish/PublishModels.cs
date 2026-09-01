@@ -243,6 +243,8 @@ public sealed record PublishDocument(
     public IReadOnlyList<PublishFontDocument> Fonts { get; init; } = [];
     public IReadOnlyList<PublishPublicationSectionDocument> PublicationSections { get; init; } = [];
     public PublishCoverDocument? Cover { get; init; }
+    public IReadOnlyDictionary<string, CompositionScene> CoverSurfaceScenes { get; init; } =
+        new Dictionary<string, CompositionScene>();
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
         ? ProjectName
@@ -265,7 +267,7 @@ public sealed record PublishCoverDocument(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
+    string Description,
     string BackgroundColor,
     CompositionScene Scene);
 
@@ -315,6 +317,7 @@ public sealed record PublishDocumentProfile(
 {
     public bool AllowDesignedPageOverrides { get; init; }
     public bool RectoChapterStarts { get; init; }
+    public double BleedInches { get; init; }
 }
 
 public sealed record PublishSectionDocument(

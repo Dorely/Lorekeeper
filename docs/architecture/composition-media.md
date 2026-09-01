@@ -92,26 +92,82 @@ shared Core Book page-to-provider-raster default used by prompt compilation,
 direct job creation, and the manual Images UI. A
 `LayoutGenerationTargetDescriptor` is
 used only when art must honor physical regions such as a page, frame, or cover.
-It carries exact aspect, provider-valid final-DPI recommendation plus moderate
-provider-valid default raster guidance, effective-DPI expectation, geometry
+It carries exact aspect, application-owned resolution guidance, geometry
 fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or reserved-text
-regions. An assistant may select a proportional larger provider
-size when the requested quality or effective DPI warrants it; explicit
-overrides are accepted only when provider-valid and, for layout-bound targets,
-when they preserve the server-owned aspect. It is guidance and prompt context,
-not an acceptance rule imposed on provider pixels.
+regions. Publish projects only target identity, aspect, protected regions, and
+optional exact surface bounds into `PublishImageGenerationTarget`; size and
+minimum-density fields never enter its tool schema or result contract. Other image
+surfaces may select a proportional larger provider size when the requested quality
+warrants it, or request a positive integer `minimumDpi` and
+let Lorekeeper select the smallest provider-valid raster that meets that
+effective DPI at the physical target size. Images and Outline retain their moderate
+concept-art defaults while exposing explicit `minimumDpi` and optional custom
+aspect controls to their assistants. Free-standing explicit-DPI work uses the
+exact Core Book page as its physical basis, or the largest rectangle of the
+requested aspect that fits inside it. A concrete `size` and explicit
+`minimumDpi` are mutually exclusive, and a publication caller's concrete size
+must still satisfy its surface default. DPI is pixels divided by intended
+placement inches, not a PNG/JPEG density header.
+
+Explicit minimum-DPI resolution outside Publish is a pre-dispatch acceptance boundary. When edge,
+megapixel, aspect, or alignment constraints make the requested DPI impossible
+as one native provider raster, but the physical target's aspect is still
+provider-representable, `ResolveMinimumDpi` returns a
+`LayoutPrintUpscalePlan`: the largest provider-compatible native raster plus
+the exact print raster (`widthInches × dpi`, ceil). With `Images:PrintUpscale`
+enabled (the default), prompt compilation dispatches the native raster and
+records the plan in the target geometry before any provider request;
+after a successful completion `AgentProjectImageWorkflow` derives a separate
+unattached print asset through `IProjectImageService.EnsurePrintUpscaleAsync`
+using deterministic separable Lanczos3 sampling that adds no visual detail
+(`print-upscale` provenance with source/target rasters, source/required/target
+effective DPI, and `AddsNewDetail: false`). Results flag
+`PRINT_DPI_UPSCALED`, carry both native and print rasters and DPIs, and
+assistants place the print-upscaled derivative. Only a target whose aspect no
+provider raster can represent, or whose print raster exceeds the generous
+print sanity guards, fails with `MINIMUM_DPI_UNACHIEVABLE` before a job,
+partial, asset, or provider request exists; that rejection carries required and
+maximum-compatible rasters, maximum achievable DPI, binding provider limits,
+target identity, and the deterministic smallest equal-panel split of at most 64
+images when one is available. Disabling `Images:PrintUpscale` restores the
+reject-with-panels behavior for every target. `surfaceBounds` may bind a panel
+to a verified Designed
+Page, Core-cover, or release-cover surface subregion; its physical dimensions,
+transformed protected regions, and bounds participate in the geometry
+fingerprint. It is not valid for semantic Project Pages, Figures, or existing
+image frames.
+
+Publish uses the separate application resolution policy. `ResolveFillMinimumDpi`
+chooses the smallest supported native raster that can cover the target at its
+internal output expectation. If the target aspect is outside provider limits, it
+clamps only the generated aspect, preserves a centered crop-safe target window,
+and derives a same-aspect production raster large enough to cover both physical
+edges. If native output is insufficient or differs from the requested raster,
+`AgentProjectImageWorkflow` performs the same application-owned fill preparation
+from the decoded output. This path returns one placement-ready image ID and never
+returns a panel plan to Publish.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. The result
 reports `rasterMatched` separately from `aspectMatched`; any explicit
 requested raster is compared with actual decoded pixels even for a
-free-standing request, and mismatches are surfaced as warnings. Generation
-does not infer publication DPI readiness; placed-image validation owns DPI
-diagnostics. The provider-output byte boundary is separately configurable and
-defaults to 64 MiB.
+free-standing request, and mismatches are surfaced as warnings. When a minimum
+was requested, provenance and assistant results also carry the physical basis,
+requested minimum, `effectiveDpi`, `minimumDpiMet`, and every warning code. An
+unexpected undersized provider result remains an unattached asset with
+`MINIMUM_DPI_NOT_MET`; it is not publication-compliant and must not be placed as
+though it were. Under a print-upscale plan this warning describes the native
+asset only; the derived print-upscaled asset is the publication candidate, and
+its provenance records the native source DPI honestly.
+Placement validation remains the final DPI diagnostic owner.
+The provider-output byte boundary is separately configurable and defaults to
+64 MiB.
 
-The manual Images Generate panel uses that Core Book page raster by default and
-still offers explicit provider-valid raster overrides. Authors can select
+The manual Images Generate panel uses that Core Book page raster by default,
+offers explicit provider-valid raster overrides, and exposes an optional
+Minimum DPI field that is unavailable while a concrete size is selected.
+Infeasible requests show pre-dispatch resolution and panel guidance instead of
+queueing. Authors can select
 existing project images or upload new project-library images as ordered
 generation references, give each reference a visible role, and remove it before
 queueing. The compiled reference manifest and the exact ordered image IDs are
@@ -128,13 +184,14 @@ contains intermediate alpha, or has no editable pixel.
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
 `Resized` asset at an exact provider-valid raster using deterministic
 SkiaSharp sampling. It does not invent visual detail and records the source,
-target, interpolation, and raster storage in provenance. A larger version of
-an existing image uses the ordinary source-driven edit workflow: the original
-image is supplied directly to the provider and the prompt describes the
-complete larger framing. Wider targets ask for natural extension to the left
-and right, taller targets above and below, and effectively unchanged aspects
-outward on all sides. This is model-driven editing and does not guarantee
-exact preservation of existing image detail. A regional guide remains an
+target, interpolation, and raster storage in provenance. Same-aspect generative
+up-resolution instead uses the original image, preserves its complete framing
+and visible content, and asks the model to reconstruct credible fine detail
+without cropping, zooming out, or inventing surrounding canvas. Intentional
+aspect or framing expansion is a separate outpainting edit: wider targets ask
+for natural extension left and right and taller targets above and below. Both
+are model-driven and do not guarantee exact source-pixel preservation. A
+regional guide remains an
 exception for genuinely localized changes or changes that cannot be described
 reliably in words. It is explicitly soft guidance for the model, not a pixel
 boundary or protection guarantee; the complete result must be inspected for
@@ -164,7 +221,11 @@ asset boundary, stored as a separate unattached project image with provenance,
 and removed from the partial collection. It never inherits entity associations
 or a placement. Deleting a final image also deletes every unpromoted partial
 still associated with that image; already promoted images and unrelated orphan
-partials remain independent.
+partials remain independent. Active jobs alone use an animated progress preview;
+cancelled and failed jobs display their persisted terminal state and any latest
+partial. An author may delete a terminal request card and its unpromoted partials;
+this removes those job-owned previews while retaining the hidden terminal job as
+durable audit state.
 
 The shared prompt composer gives generation and editing the same spatial
 discipline. Regional-guide mode focuses the requested change in the indicated
@@ -240,10 +301,21 @@ actions move to the actual applicable stack edge. Group transforms, opacity,
 visibility, clipping, rotation, and z-order must resolve consistently in the
 canvas, previews, generation-target inspection, EPUB projection, and Press.
 Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
-`Justify`. Justification distributes bounded inter-word spacing on soft-wrapped
-non-final lines; final lines and explicit hard-break paragraph endings remain
-ragged. The canvas, transient preview, EPUB projection, and Press layout trace
-share that alignment behavior.
+`Justify`. Justification distributes the complete residual width as inter-word
+spacing on soft-wrapped non-final lines; final lines and explicit hard-break
+paragraph endings remain ragged. The canvas, transient preview, EPUB projection,
+and Press layout trace share that alignment behavior.
+Publication text bindings use one canonical catalog for `title`, `subtitle`,
+`author`, `publisher`, `copyright`, `description`, and `isbn`. Designed Page text
+frames bind semantically to one catalog field and expose the selector in the
+visual editor; their live editor and render projections use the effective Core or
+release Book details without converting the frame back to literal copy. Cover
+text frames accept the corresponding inline tokens, while the print-only
+`spineText` token remains a cover-specific derived value. A cover frame can
+combine literal copy with one or more `{{token}}` references, and the same
+resolver supplies canvas previews, EPUB projection, and Press request scenes.
+The exact bare canonical binding remains valid shorthand. Description is sourced
+from the effective publication Book details rather than cover-owned copy.
 
 Active authoring variants always use the current project page setup and retain
 only single-page or facing-spread mode. A variant is selected by exact
@@ -269,9 +341,19 @@ art.
 Physical covers additionally expose exact Back, Spine, and Front regions.
 `FillRegion` constrains a selected image to one region, defaults to proportional
 crop-to-fill, and retains focal positioning when page-count-driven spine reflow
-changes the connected wrap. The cover workspace can focus each region, reports
-its physical dimensions/aspect and output participation, and preserves the full
-connected scene even when a provider package derives separate front/back pages.
+changes the connected wrap. The cover workspace always edits the full connected
+scene; only the app-owned Fill selected region dialog chooses Back, Spine, or
+Front and reports that region's physical dimensions, aspect, and output
+participation. A global region focus must not constrain ordinary cover editing.
+Canvas resize handles remain aligned to the canvas axes even when the selected
+object is rotated, so pointer deltas continue to update stored bounds in canvas
+coordinates. Move, resize, rotate, and crop gestures update transient canvas
+state without scheduling persistence on every pointer event. Cover pointer
+tracking releases browser capture immediately on pointer up, cancellation, or
+lost capture, coalesces movement to the latest position while one UI update is
+in flight, applies the final pointer position, and then saves the completed
+gesture once. The full connected scene is preserved even when a provider package
+derives separate front/back pages.
 Spine copy remains real text above artwork. Persisted direction supports
 top-to-bottom (the US/English default), bottom-to-top, and horizontal layouts;
 the user can override the default. The assistant must inspect annotated spine
@@ -283,20 +365,30 @@ The visual editor uses `CompositionVisualEditorShell`: a one-line view
 toolbar, largest practical canvas, fixed contextual bottom controls, and an
 on-demand details drawer for accessibility, reading order, exact geometry,
 diagnostics, and secondary settings. It does not expose a permanent inspector
-or layer manager that steals canvas width. Saves are serialized per mounted
-workspace. Each save uses an immutable semantic/scene snapshot, adopts returned
-revisions before the next queued save, and clears dirty state only when no
-newer local mutation exists. Revision-checked assistant mutations acquire the
-project mutation lease, reread tracked state, commit, and return the
-authoritative snapshot. Stale or failed mutations cannot leak tracked entities
-into a later operation.
+or layer manager that steals canvas width. The primary cover text toolbar keeps
+background color and a percentage-labelled background-opacity control beside
+the other text formatting actions and provides an explicit No background action
+that sets full transparency; these controls are not hidden in the details drawer.
+Saves are serialized per mounted workspace. Each save uses an immutable
+semantic/scene snapshot, adopts returned revisions before the next queued save,
+and clears dirty state only when no newer local mutation exists. A cover
+object-format override materializes every resolved reusable-style value before
+detaching the style, and applies the requested property to the latest mounted
+object rather than a stale render snapshot. If an external or assistant cover
+save advances the revision while a manual save is in flight, the workspace
+three-way merges unchanged remote
+items and locally changed items against its loaded baseline, adopts the current
+revision, and retries; it must not reload over dirty manual work.
+Revision-checked assistant mutations acquire the project mutation lease, reread
+tracked state, commit, and return the authoritative snapshot. Stale or failed
+mutations cannot leak tracked entities into a later operation.
 
 `ICompositionCanvasPreviewService` renders the exact selected scene revision
 as one transient PNG surface. Clean mode returns the composed artwork;
 annotated mode adds safe/trim/gutter/center/bleed/object indicators plus
 overflow and clipping diagnostics. Cache keys include semantic and scene
 revisions, referenced image/font bytes, and any resolved cover-copy bindings.
-Cover previews resolve canonical title, subtitle, author, spine, and back-copy
+Cover previews resolve canonical publication metadata and derived spine-text
 bindings at render time without changing the persisted scene; page previews
 retain their existing semantic-manuscript resolution. Editor and Publish
 persist the preview through their transcript visual boundary so the exact image
@@ -317,21 +409,41 @@ Browser, Read preview, EPUB, cover, and Press all stage the same referenced
 faces rather than substituting a machine font. Font changes affect manuscript,
 composition, Core/release fingerprints, and artifact freshness.
 
+Publication-time image preparation uses the same idempotent upscale contract as
+generation-time output. `EnsurePrintUpscaleAsync` resolves the non-upscaled root,
+hashes its bytes, and gives an exact source/hash/raster/algorithm-version request
+a deterministic identity. It reuses the smallest linked upscale that satisfies
+the requested raster; larger siblings are always sampled from the original so
+resampling is never compounded. The maximum accepted output is 12,000 pixels on
+either edge, 120 megapixels, and the configured byte limit clamped to Press's
+256 MiB per-asset boundary.
+
+Upscales are ordinary permanent project assets with `PublishAssetSource.Upscaled`,
+`DerivedFromImageId`, source and target raster/DPI evidence, Lanczos3 version,
+source-byte hash, creation trigger, and `AddsNewDetail = false`. Originals expose
+direct upscale children through an Upscales modal rather than duplicating them as
+top-level library cards. Search matches on a child surface its parent card, and
+the modal owns viewing and deletion of unused children. An original cannot be
+deleted while those children exist. Publication reference replacement changes
+only image IDs, preserving canvas bounds, fit, focal crop, rotation, opacity,
+z-order, semantic IDs, reading order, captions, and accessibility.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact resizing, metadata, usage projections, and deletion guards. |
+| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact upscaling, dimensions and lineage views, provenance metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
 | `Lorekeeper/Images/ProjectImageRegionalGuide.cs` / `ProjectImageBinary.cs` | Soft-guide prompt discipline, source-aspect output resolution, transient same-size PNG normalization, and binary-alpha mask validation. |
+| `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
 | `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
-| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` | Region-local fill, connected-wrap reflow, exact region bounds, and persisted spine-text orientation. |
+| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `PublicationTextBindings.cs` / `LegacyCoverTextBindingMigration.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, shared publication text-binding catalog and cover token resolution, and boundary-only retired-token adaptation. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
 | `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |

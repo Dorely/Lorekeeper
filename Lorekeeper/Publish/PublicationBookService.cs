@@ -402,7 +402,7 @@ public sealed class PublicationBookService(
         Validate(book);
         book.Revision++;
         book.UpdatedAt = DateTime.UtcNow;
-        _ = await PublicationSectionService.RefreshSystemBindingsAsync(
+        _ = await PublicationSectionService.RefreshBindingsAsync(
             db,
             new PublicationSectionTarget(projectId),
             new Dictionary<PublicationBoundField, string>
@@ -841,7 +841,7 @@ public sealed class PublicationBookService(
             book.Subtitle,
             book.Author,
             string.Empty,
-            string.Empty,
+            book.Description,
             design.BackgroundColor,
             PublicationBarcodeMode.None,
             50,

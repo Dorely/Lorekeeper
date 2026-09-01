@@ -207,6 +207,9 @@ public sealed class PublishService(
                 && (composition.EditionId == null || composition.EditionId == editionId))
             .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
             .ToListAsync(cancellationToken);
+        var boundValues = new Dictionary<PublicationBoundField, string>();
+        foreach (var field in Enum.GetValues<PublicationBoundField>())
+            boundValues[field] = await publicationSections.ResolveBoundFieldAsync(new(projectId, coreTarget ? null : editionId), field, cancellationToken);
         var sections = new List<PublishSectionDocument>();
         var actNumber = 0;
         var chapterNumber = 0;
@@ -254,7 +257,8 @@ public sealed class PublishService(
                     compositions.Where(composition => composition.ChapterId == chapter.Id
                         && (chapterOverrides.ContainsKey(chapter.Id)
                             ? composition.EditionId == editionId
-                            : composition.EditionId == null)).ToList()));
+                            : composition.EditionId == null)).ToList(),
+                    boundValues));
             }
 
             if (source.Act is null)
@@ -286,9 +290,6 @@ public sealed class PublishService(
                 chapterDocuments));
         }
 
-        var boundValues = new Dictionary<PublicationBoundField, string>();
-        foreach (var field in Enum.GetValues<PublicationBoundField>())
-            boundValues[field] = await publicationSections.ResolveBoundFieldAsync(new(projectId, coreTarget ? null : editionId), field, cancellationToken);
         var publicationSectionIds = publicationSectionViews.Select(item => item.Id).ToHashSet();
         var sectionCompositions = compositions.Where(item => item.PublicationSectionId is Guid sectionId && publicationSectionIds.Contains(sectionId))
             .GroupBy(item => item.PublicationSectionId!.Value).ToDictionary(group => group.Key, group => group.ToList());
@@ -314,6 +315,7 @@ public sealed class PublishService(
             : JsonSerializer.Deserialize<CompositionScene>(coverDesign.CompositionSceneJson, ManuscriptCodec.JsonOptions);
         if (coverScene is not null)
             coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
+        var coverSurfaceScenes = ReadCoverSurfaceScenes(coverDesign?.SurfaceScenesJson);
         var coverSceneImageIds = coverScene is null
             ? []
             : CompositionSceneResolver.Flatten(coverScene)
@@ -341,6 +343,10 @@ public sealed class PublishService(
                 .Where(item => item.ImageId.HasValue)
                 .Select(item => item.ImageId!.Value))
             .Concat(coverSceneImageIds)
+            .Concat(coverSurfaceScenes.Values
+                .SelectMany(scene => CompositionSceneResolver.Flatten(scene))
+                .Where(item => item.Visible && item.ImageId is not null)
+                .Select(item => item.ImageId!.Value))
             .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -388,6 +394,8 @@ public sealed class PublishService(
                 ? []
                 : coverScene.Objects.Select(item => item.FontFamilyKey)
                     .Concat(coverScene.Styles.Select(style => style.FontFamilyKey)))
+            .Concat(coverSurfaceScenes.Values.SelectMany(scene => scene.Objects.Select(item => item.FontFamilyKey)
+                .Concat(scene.Styles.Select(style => style.FontFamilyKey))))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -457,6 +465,7 @@ public sealed class PublishService(
             NamedStyles = namedStyles,
             Fonts = publishFonts,
             PublicationSections = publicationSectionDocuments,
+            CoverSurfaceScenes = coverSurfaceScenes,
             Cover = coverDesign is null || coverScene is null
                 ? null
                 : new PublishCoverDocument(
@@ -464,10 +473,24 @@ public sealed class PublishService(
                     coverDesign.Subtitle,
                     coverDesign.Author,
                     coverDesign.SpineText,
-                    coverDesign.BackCopy,
+                    profile.Description,
                     coverDesign.BackgroundColor,
                     coverScene),
         };
+    }
+
+    private static IReadOnlyDictionary<string, CompositionScene> ReadCoverSurfaceScenes(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, CompositionScene>();
+        var serialized = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ManuscriptCodec.JsonOptions)
+            ?? new Dictionary<string, string>();
+        return serialized.ToDictionary(
+            item => item.Key,
+            item => CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty.")),
+            StringComparer.Ordinal);
     }
 
     private async Task<PublicationCoverDesign?> CoreCoverAsync(Guid projectId, CancellationToken cancellationToken)
@@ -580,6 +603,10 @@ public sealed class PublishService(
         {
             AllowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
             RectoChapterStarts = profile.RectoChapterStarts,
+            BleedInches = profile.Bleed
+                && profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+                    ? .125
+                    : 0,
         };
 
     private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch
@@ -667,7 +694,8 @@ public sealed class PublishService(
         Chapter chapter,
         PublicationEdition profile,
         int chapterNumber,
-        IReadOnlyList<PageComposition> compositions)
+        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyDictionary<PublicationBoundField, string> boundValues)
     {
         return new(
             chapter.Id,
@@ -678,24 +706,7 @@ public sealed class PublishService(
             chapterNumber - 1,
             profile.IncludeChapterHeadings,
             chapter.Manuscript,
-            compositions.Select(composition => new PublishPageCompositionDocument(
-                composition.Id,
-                composition.Name,
-                ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
-                composition.Revision,
-                composition.Variants
-                    .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
-                    .OrderByDescending(variant => composition.ActiveAuthoringVariantId == variant.Id)
-                    .ThenByDescending(variant => variant.UpdatedAt)
-                    .Take(1)
-                    .Select(variant => new PublishPageCompositionVariantDocument(
-                    variant.Id,
-                    variant.GeometryKey,
-                    NormalizeSceneLanguages(PdfPresentationScene(
-                        JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
-                            ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
-                        profile)),
-                    variant.Revision)).ToList())).ToList());
+            compositions.Select(composition => CompositionDocument(composition, profile, boundValues)).ToList());
     }
 
     private static PublishPageCompositionDocument CompositionDocument(

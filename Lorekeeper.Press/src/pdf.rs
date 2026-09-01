@@ -713,7 +713,7 @@ where
                 content.save_state();
                 apply_opacity(&mut content, shape.opacity);
                 if shape.rotation_degrees.abs() > f32::EPSILON {
-                    let radians = shape.rotation_degrees.to_radians();
+                    let radians = -shape.rotation_degrees.to_radians();
                     let (sin, cos) = radians.sin_cos();
                     let center_x = shape.x + shape.width / 2.0;
                     let center_y = shape.y + shape.height / 2.0;
@@ -882,7 +882,7 @@ where
                 let name = format!("Im{}", image_ref.get());
                 content.save_state();
                 apply_opacity(&mut content, image.opacity);
-                let angle = image.rotation_degrees.to_radians();
+                let angle = -image.rotation_degrees.to_radians();
                 content.transform([
                     angle.cos(),
                     angle.sin(),
@@ -1009,7 +1009,7 @@ where
                 };
                 let mut cursor_x = line.x;
                 if line.rotation_degrees.abs() > f32::EPSILON {
-                    let angle = line.rotation_degrees.to_radians();
+                    let angle = -line.rotation_degrees.to_radians();
                     let origin_x = line.rotation_origin_x.unwrap_or(line.x);
                     let origin_y = line.rotation_origin_y.unwrap_or(line.y);
                     content.transform([
@@ -1601,6 +1601,7 @@ fn flatten_pdfx_opacity(
 ) -> Result<(), Diagnostic> {
     let mut flattened_images = BTreeMap::<(String, u16, [u8; 3]), String>::new();
     for (page_index, page) in pages.iter_mut().enumerate() {
+        precompose_translucent_images_into_lower_art(page, images, page_index)?;
         flatten_translucent_artifacts_into_lower_art(
             page,
             fonts,
@@ -1648,7 +1649,10 @@ fn flatten_pdfx_opacity(
         }
         for image in &mut page.images {
             let opacity = opacity_key(image.opacity);
-            if opacity >= 1_000 {
+            let has_source_alpha = images
+                .get(&image.asset_id)
+                .is_some_and(|source| source.alpha.is_some());
+            if opacity >= 1_000 && !has_source_alpha {
                 continue;
             }
             let substrate_key = substrate.map(|channel| (channel * 255.0).round() as u8);
@@ -1663,10 +1667,15 @@ fn flatten_pdfx_opacity(
                     )
                 })?;
                 let mut flattened = source.clone();
-                let alpha = f32::from(opacity) / 1_000.0;
+                let object_alpha = f32::from(opacity) / 1_000.0;
                 if flattened.cmyk {
                     let background = rgb_to_bounded_cmyk(substrate);
-                    for pixel in flattened.samples.chunks_exact_mut(4) {
+                    for (pixel_index, pixel) in flattened.samples.chunks_exact_mut(4).enumerate() {
+                        let alpha = object_alpha
+                            * flattened
+                                .alpha
+                                .as_ref()
+                                .map_or(1.0, |values| f32::from(values[pixel_index]) / 255.0);
                         for channel in 0..4 {
                             pixel[channel] =
                                 blend_sample(pixel[channel], background[channel], alpha);
@@ -1690,17 +1699,28 @@ fn flatten_pdfx_opacity(
                 } else if flattened.grayscale {
                     let background =
                         substrate[0] * 0.2126 + substrate[1] * 0.7152 + substrate[2] * 0.0722;
-                    for sample in &mut flattened.samples {
+                    for (pixel_index, sample) in flattened.samples.iter_mut().enumerate() {
+                        let alpha = object_alpha
+                            * flattened
+                                .alpha
+                                .as_ref()
+                                .map_or(1.0, |values| f32::from(values[pixel_index]) / 255.0);
                         *sample = blend_sample(*sample, background, alpha);
                     }
                 } else {
-                    for pixel in flattened.samples.chunks_exact_mut(3) {
+                    for (pixel_index, pixel) in flattened.samples.chunks_exact_mut(3).enumerate() {
+                        let alpha = object_alpha
+                            * flattened
+                                .alpha
+                                .as_ref()
+                                .map_or(1.0, |values| f32::from(values[pixel_index]) / 255.0);
                         for channel in 0..3 {
                             pixel[channel] =
                                 blend_sample(pixel[channel], substrate[channel], alpha);
                         }
                     }
                 }
+                flattened.alpha = None;
                 let id = format!(
                     "{}-pdfx-flat-{opacity}-{:02x}{:02x}{:02x}",
                     image.asset_id, substrate_key[0], substrate_key[1], substrate_key[2]
@@ -1715,6 +1735,300 @@ fn flatten_pdfx_opacity(
         }
     }
     Ok(())
+}
+
+fn precompose_translucent_images_into_lower_art(
+    page: &mut LayoutPage,
+    images: &mut BTreeMap<String, EmbeddedImage>,
+    page_index: usize,
+) -> Result<(), Diagnostic> {
+    let paint_order = page.paint_order.clone();
+    let mut baked_images = std::collections::BTreeSet::new();
+    for (paint_position, paint) in paint_order.iter().enumerate() {
+        let LayoutPaint::Image(foreground_index) = *paint else {
+            continue;
+        };
+        let foreground_placement = &page.images[foreground_index];
+        let foreground_has_alpha = images
+            .get(&foreground_placement.asset_id)
+            .is_some_and(|source| source.alpha.is_some());
+        if opacity_key(foreground_placement.opacity) >= 1_000 && !foreground_has_alpha {
+            continue;
+        }
+        let Some(LayoutPaint::Image(background_index)) = paint_order[..paint_position]
+            .iter()
+            .rev()
+            .find(
+                |paint| !matches!(paint, LayoutPaint::Image(index) if baked_images.contains(index)),
+            )
+            .copied()
+        else {
+            continue;
+        };
+        let background_placement = &page.images[background_index];
+        let foreground_bounds = rotated_bounds(
+            foreground_placement.x,
+            foreground_placement.y,
+            foreground_placement.width,
+            foreground_placement.height,
+            foreground_placement.rotation_degrees,
+        );
+        if background_placement.rotation_degrees.abs() > f32::EPSILON
+            || opacity_key(background_placement.opacity) < 1_000
+            || foreground_bounds[0] < background_placement.x - 0.01
+            || foreground_bounds[1] < background_placement.y - 0.01
+            || foreground_bounds[0] + foreground_bounds[2]
+                > background_placement.x + background_placement.width + 0.01
+            || foreground_bounds[1] + foreground_bounds[3]
+                > background_placement.y + background_placement.height + 0.01
+        {
+            continue;
+        }
+        let Some(background_source) = images.get(&background_placement.asset_id).cloned() else {
+            continue;
+        };
+        let Some(foreground_source) = images.get(&foreground_placement.asset_id) else {
+            continue;
+        };
+        if background_source.alpha.is_some()
+            || background_source.cmyk != foreground_source.cmyk
+            || background_source.grayscale != foreground_source.grayscale
+        {
+            continue;
+        }
+        let mut flattened = background_source;
+        if opacity_key(foreground_placement.opacity) > 0
+            && !blend_image_into_image(
+                &mut flattened,
+                background_placement,
+                foreground_source,
+                foreground_placement,
+            )
+        {
+            continue;
+        }
+        if flattened.maximum_total_ink_percent > 240.001 {
+            return Err(Diagnostic::error(
+                "PRESS_TOTAL_INK_EXCEEDED",
+                "Precomposed image content exceeds the 240% total-ink limit.",
+            ));
+        }
+        flattened.id = format!(
+            "{}-page-{page_index}-image-{foreground_index}-flat",
+            flattened.id
+        );
+        page.images[background_index]
+            .asset_id
+            .clone_from(&flattened.id);
+        images.insert(flattened.id.clone(), flattened);
+        baked_images.insert(foreground_index);
+    }
+    page.paint_order.retain(
+        |paint| !matches!(paint, LayoutPaint::Image(index) if baked_images.contains(index)),
+    );
+    Ok(())
+}
+
+fn blend_image_into_image(
+    background: &mut EmbeddedImage,
+    background_placement: &crate::model::LayoutImage,
+    foreground: &EmbeddedImage,
+    foreground_placement: &crate::model::LayoutImage,
+) -> bool {
+    let Some(background_geometry) = image_draw_geometry(background_placement, background) else {
+        return false;
+    };
+    let Some(foreground_geometry) = image_draw_geometry(foreground_placement, foreground) else {
+        return false;
+    };
+    let channels = if background.cmyk {
+        4
+    } else if background.grayscale {
+        1
+    } else {
+        3
+    };
+    let angle = foreground_placement.rotation_degrees.to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let foreground_center_x = foreground_placement.x + foreground_placement.width / 2.0;
+    let foreground_center_y = foreground_placement.y + foreground_placement.height / 2.0;
+    let mut sampled = false;
+    for row in 0..background.height {
+        let page_y = background_geometry.origin_y
+            + (1.0 - (row as f32 + 0.5) / background.height as f32)
+                * background_geometry.drawn_height;
+        if page_y < background_placement.y
+            || page_y > background_placement.y + background_placement.height
+        {
+            continue;
+        }
+        for column in 0..background.width {
+            let page_x = background_geometry.origin_x
+                + (column as f32 + 0.5) / background.width as f32 * background_geometry.drawn_width;
+            if page_x < background_placement.x
+                || page_x > background_placement.x + background_placement.width
+            {
+                continue;
+            }
+            // Composition angles are clockwise in the editor's top-down coordinate system.
+            // PDF page coordinates are bottom-up, so the final paint uses the inverse angle;
+            // apply the corresponding inverse transform here to sample the unrotated frame.
+            let delta_x = page_x - foreground_center_x;
+            let delta_y = page_y - foreground_center_y;
+            let local_x = foreground_center_x + delta_x * cos - delta_y * sin;
+            let local_y = foreground_center_y + delta_x * sin + delta_y * cos;
+            if local_x < foreground_placement.x
+                || local_x > foreground_placement.x + foreground_placement.width
+                || local_y < foreground_placement.y
+                || local_y > foreground_placement.y + foreground_placement.height
+            {
+                continue;
+            }
+            let source_x = (local_x - foreground_geometry.origin_x)
+                / foreground_geometry.drawn_width
+                * foreground.width as f32
+                - 0.5;
+            let source_y = (1.0
+                - (local_y - foreground_geometry.origin_y) / foreground_geometry.drawn_height)
+                * foreground.height as f32
+                - 0.5;
+            if source_x < -0.5
+                || source_y < -0.5
+                || source_x > foreground.width as f32 - 0.5
+                || source_y > foreground.height as f32 - 0.5
+            {
+                continue;
+            }
+            sampled = true;
+            let source_alpha = foreground.alpha.as_ref().map_or(1.0, |alpha| {
+                f32::from(sample_channel_bilinear(
+                    alpha,
+                    foreground.width,
+                    foreground.height,
+                    1,
+                    0,
+                    source_x,
+                    source_y,
+                )) / 255.0
+            });
+            let alpha = foreground_placement.opacity.clamp(0.0, 1.0) * source_alpha;
+            if alpha <= 0.0 {
+                continue;
+            }
+            let target_offset =
+                (row as usize * background.width as usize + column as usize) * channels;
+            for channel in 0..channels {
+                let foreground_sample = sample_channel_bilinear(
+                    &foreground.samples,
+                    foreground.width,
+                    foreground.height,
+                    channels,
+                    channel,
+                    source_x,
+                    source_y,
+                );
+                background.samples[target_offset + channel] = blend_sample(
+                    foreground_sample,
+                    f32::from(background.samples[target_offset + channel]) / 255.0,
+                    alpha,
+                );
+            }
+        }
+    }
+    if background.cmyk {
+        background.maximum_total_ink_percent = background
+            .samples
+            .chunks_exact(4)
+            .map(|pixel| {
+                pixel.iter().map(|channel| u32::from(*channel)).sum::<u32>() as f32 * 100.0 / 255.0
+            })
+            .fold(0.0_f32, f32::max);
+    }
+    sampled
+}
+
+#[derive(Clone, Copy)]
+struct ImageDrawGeometry {
+    origin_x: f32,
+    origin_y: f32,
+    drawn_width: f32,
+    drawn_height: f32,
+}
+
+fn image_draw_geometry(
+    placement: &crate::model::LayoutImage,
+    source: &EmbeddedImage,
+) -> Option<ImageDrawGeometry> {
+    if source.width == 0 || source.height == 0 {
+        return None;
+    }
+    let source_fraction = placement.source_width_fraction.clamp(0.01, 1.0);
+    let source_width = source.width as f32 * source_fraction;
+    let width_scale = placement.width / source_width;
+    let height_scale = placement.height / source.height as f32;
+    let (drawn_width, drawn_height, visible_width) = match placement.fit {
+        LayoutImageFit::Contain => {
+            let scale = width_scale.min(height_scale);
+            (
+                source.width as f32 * scale,
+                source.height as f32 * scale,
+                source_width * scale,
+            )
+        }
+        LayoutImageFit::Cover => {
+            let scale = width_scale.max(height_scale);
+            (
+                source.width as f32 * scale,
+                source.height as f32 * scale,
+                source_width * scale,
+            )
+        }
+        LayoutImageFit::Stretch => (
+            placement.width / source_fraction,
+            placement.height,
+            placement.width,
+        ),
+    };
+    let drawn_x = if source_fraction < 1.0 {
+        -placement.width / 2.0 - drawn_width * placement.source_left_fraction.clamp(0.0, 1.0)
+    } else {
+        -placement.width / 2.0
+            + (placement.width - visible_width) * placement.focal_x.clamp(0.0, 1.0)
+    };
+    let drawn_y = -placement.height / 2.0
+        + (placement.height - drawn_height) * (1.0 - placement.focal_y.clamp(0.0, 1.0));
+    Some(ImageDrawGeometry {
+        origin_x: placement.x + placement.width / 2.0 + drawn_x,
+        origin_y: placement.y + placement.height / 2.0 + drawn_y,
+        drawn_width,
+        drawn_height,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_channel_bilinear(
+    samples: &[u8],
+    width: u32,
+    height: u32,
+    channels: usize,
+    channel: usize,
+    x: f32,
+    y: f32,
+) -> u8 {
+    let x = x.clamp(0.0, width.saturating_sub(1) as f32);
+    let y = y.clamp(0.0, height.saturating_sub(1) as f32);
+    let x0 = x.floor() as u32;
+    let y0 = y.floor() as u32;
+    let x1 = (x0 + 1).min(width - 1);
+    let y1 = (y0 + 1).min(height - 1);
+    let tx = x - x0 as f32;
+    let ty = y - y0 as f32;
+    let sample = |column: u32, row: u32| {
+        f32::from(samples[(row as usize * width as usize + column as usize) * channels + channel])
+    };
+    let top = sample(x0, y0) * (1.0 - tx) + sample(x1, y0) * tx;
+    let bottom = sample(x0, y1) * (1.0 - tx) + sample(x1, y1) * tx;
+    (top * (1.0 - ty) + bottom * ty).round().clamp(0.0, 255.0) as u8
 }
 
 fn flatten_translucent_artifacts_into_lower_art(

@@ -504,6 +504,16 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.True(releasePlacement.IsExcluded);
                 var migratedCover = Assert.Single(await db.PublicationCoverDesigns.AsNoTracking().ToListAsync());
                 Assert.Contains("perfect-bound-outside", migratedCover.SurfaceScenesJson, StringComparison.Ordinal);
+                Assert.Contains("description", migratedCover.SurfaceScenesJson, StringComparison.Ordinal);
+                Assert.DoesNotContain("backCopy", migratedCover.SurfaceScenesJson, StringComparison.Ordinal);
+                var coverColumns = new HashSet<string>(StringComparer.Ordinal);
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "PRAGMA table_info('PublicationCoverDesigns');";
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync()) coverColumns.Add(reader.GetString(1));
+                }
+                Assert.DoesNotContain("BackCopy", coverColumns);
                 Assert.Single(await db.PublicationEditionAuditEntries.AsNoTracking().ToListAsync());
                 Assert.Single(await db.PublicationPageMapEntries.AsNoTracking().ToListAsync());
                 Assert.Equal("Preserve this publishing decision.", (await db.PublishMessages.AsNoTracking().SingleAsync()).Content);
