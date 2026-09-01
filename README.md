@@ -160,22 +160,19 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   manual Generate panel can select existing library images or upload new images
   as ordered visual references, with an explicit role for each reference carried
   into the saved generation request. It also accepts an optional Minimum DPI and
-  resolves that effective placement density into provider-valid pixels. Editor
-  and Publish use 300 DPI for layout-bound generation. When no single
-  provider-compatible raster can meet that DPI, Lorekeeper generates at the
-  largest compatible raster and deterministically upscales the finished image
-  (Lanczos3, no invented detail) to the exact print raster, flagging the result
-  as print-upscaled; only targets whose aspect no provider raster can represent
-  fail before generation with a multi-panel plan for Designed Pages and covers,
-  and independently generated panels require deliberate layout and visual
-  inspection rather than an assumed seamless join. Same-aspect
+  resolves that effective placement density into provider-valid pixels. Publish
+  image tools instead expose only the selected target, its aspect, and protected
+  copy regions: Lorekeeper chooses the native generation request and prepares the
+  output asset for that target internally. Very narrow or wide targets use a
+  crop-safe generated aspect and still fill their canvas rather than turning into
+  an assistant-managed panel plan. Same-aspect
   generative up-resolution preserves the complete framing and reconstructs
   detail, while deterministic resizing changes dimensions without adding detail.
   Target-bound generation, accessibility state, and layout diagnostics remain
-  available. Image frames
-  retain the raster's aspect ratio by default, can fill the largest proportional
-  canvas area in one action, and permit deliberate stretching only when the user
-  disables that constraint. Legacy cropped placement remains repositionable.
+  available. Publish image placement defaults to proportional Cover so artwork
+  fills its target; Contain remains available when showing the complete uncropped
+  image matters, and deliberate stretching remains an explicit exception. Legacy
+  cropped placement remains repositionable.
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference
   placement is a separate revision-safe step using that image ID. Generation

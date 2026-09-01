@@ -248,6 +248,8 @@ public sealed class AgentProjectImageWorkflow(
         var printUpscale = geometry is { HasPrintUpscalePlan: true }
             ? (PrintWidth: geometry.PrintWidth!.Value, PrintHeight: geometry.PrintHeight!.Value, TargetDpi: geometry.PrintTargetDpi!.Value)
             : ((int PrintWidth, int PrintHeight, double TargetDpi)?)null;
+        var applicationFillUpscale = geometry is { CropToFill: true, MinimumDpi: not null }
+            && options.Value.PrintUpscale;
         var outputImages = new List<AgentProjectImageOutput>();
         var warningCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var imageId in job.OutputImageIds)
@@ -277,10 +279,13 @@ public sealed class AgentProjectImageWorkflow(
                     outputWarnings.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
                 var outputMinimumDpiMet = geometry?.MinimumDpi is not { } minimumDpi
                     ? (bool?)null
-                    : printUpscale is not null
+                    : printUpscale is not null || applicationFillUpscale
                         ? true
                         : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
-                if (printUpscale is not null)
+                if (printUpscale is not null
+                    || applicationFillUpscale
+                        && effectiveDpi is { } fillDpi
+                        && fillDpi + 1e-9 < geometry!.MinimumDpi)
                     outputWarnings.Add("PRINT_DPI_UPSCALED");
                 else if (outputMinimumDpiMet == false)
                     outputWarnings.Add("MINIMUM_DPI_NOT_MET");
@@ -300,26 +305,38 @@ public sealed class AgentProjectImageWorkflow(
             }
         }
 
-        if (printUpscale is { } plan && providerSucceeded
+        if ((printUpscale is not null || applicationFillUpscale) && providerSucceeded
             && outputImages.Count > 0
             && geometry is { WidthInches: > 0, HeightInches: > 0 })
         {
-            var printRequest = new ProjectImagePrintUpscaleRequest(
-                plan.PrintWidth,
-                plan.PrintHeight,
-                geometry.WidthInches,
-                geometry.HeightInches,
-                plan.TargetDpi);
             for (var index = 0; index < outputImages.Count; index++)
             {
                 var existingOutput = outputImages[index];
+                var plan = geometry.CropToFill
+                    ? LayoutImageSizeResolver.CreateFillPrintUpscalePlan(
+                        geometry.WidthInches,
+                        geometry.HeightInches,
+                        geometry.MinimumDpi!.Value,
+                        new LayoutImageSize(existingOutput.Width, existingOutput.Height),
+                        existingOutput.EffectiveDpi ?? 0)
+                    : new LayoutPrintUpscalePlan(
+                        new LayoutImageSize(existingOutput.Width, existingOutput.Height),
+                        existingOutput.EffectiveDpi ?? 0,
+                        new LayoutImageSize(printUpscale!.Value.PrintWidth, printUpscale.Value.PrintHeight),
+                        printUpscale.Value.TargetDpi);
+                var printRequest = new ProjectImagePrintUpscaleRequest(
+                    plan.PrintRaster.Width,
+                    plan.PrintRaster.Height,
+                    geometry.WidthInches,
+                    geometry.HeightInches,
+                    plan.TargetDpi);
                 var printResult = await images.EnsurePrintUpscaleAsync(projectId, existingOutput.Image.Id, printRequest, cancellationToken);
                 var printView = printResult.Image;
                 outputImages[index] = existingOutput with
                 {
                     PrintImageId = printView.Id,
-                    PrintRaster = $"{plan.PrintWidth}x{plan.PrintHeight}",
-                    PrintEffectiveDpi = Math.Min(plan.PrintWidth / geometry.WidthInches, plan.PrintHeight / geometry.HeightInches),
+                    PrintRaster = plan.PrintRaster.Size,
+                    PrintEffectiveDpi = Math.Min(plan.PrintRaster.Width / geometry.WidthInches, plan.PrintRaster.Height / geometry.HeightInches),
                 };
             }
         }
@@ -410,6 +427,8 @@ public sealed class AgentProjectImageWorkflow(
             MinimumDpi = minimumDpi,
             SurfaceBounds = target.SurfaceBounds,
             MinimumDpiIsSurfaceDefault = true,
+            UseApplicationResolutionPolicy = target.UseApplicationResolutionPolicy,
+            FillTarget = target.FillTarget,
         };
     }
 
@@ -440,6 +459,9 @@ public sealed class AgentProjectImageWorkflow(
                     && layoutValue.GetBoolean();
             var minimumDpi = TryReadPositiveDouble(root, "minimumDpi")
                 ?? TryReadPositiveDouble(root, "requestedMinimumDpi");
+            var cropToFill = root.TryGetProperty("cropToFill", out var cropToFillValue)
+                && cropToFillValue.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                && cropToFillValue.GetBoolean();
             int? printWidth = null;
             int? printHeight = null;
             double? printTargetDpi = null;
@@ -462,6 +484,7 @@ public sealed class AgentProjectImageWorkflow(
                 aspect,
                 layoutBound,
                 minimumDpi,
+                cropToFill,
                 printWidth,
                 printHeight,
                 printTargetDpi);
@@ -515,6 +538,7 @@ public sealed class AgentProjectImageWorkflow(
         string AspectRatio,
         bool LayoutBound,
         double? MinimumDpi,
+        bool CropToFill,
         int? PrintWidth = null,
         int? PrintHeight = null,
         double? PrintTargetDpi = null)

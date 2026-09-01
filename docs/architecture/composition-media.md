@@ -92,14 +92,15 @@ shared Core Book page-to-provider-raster default used by prompt compilation,
 direct job creation, and the manual Images UI. A
 `LayoutGenerationTargetDescriptor` is
 used only when art must honor physical regions such as a page, frame, or cover.
-It carries exact aspect, provider-valid final-DPI recommendation plus moderate
-provider-valid default raster guidance, effective-DPI expectation, geometry
+It carries exact aspect, application-owned resolution guidance, geometry
 fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or reserved-text
-regions. An assistant may select a proportional larger provider size when the
-requested quality warrants it, or request a positive integer `minimumDpi` and
+regions. Publish projects only target identity, aspect, protected regions, and
+optional exact surface bounds into `PublishImageGenerationTarget`; size and
+minimum-density fields never enter its tool schema or result contract. Other image
+surfaces may select a proportional larger provider size when the requested quality
+warrants it, or request a positive integer `minimumDpi` and
 let Lorekeeper select the smallest provider-valid raster that meets that
-effective DPI at the physical target size. Editor and Publish apply a 300-DPI
-default to concrete layout targets; Images and Outline retain their moderate
+effective DPI at the physical target size. Images and Outline retain their moderate
 concept-art defaults while exposing explicit `minimumDpi` and optional custom
 aspect controls to their assistants. Free-standing explicit-DPI work uses the
 exact Core Book page as its physical basis, or the largest rectangle of the
@@ -108,7 +109,7 @@ requested aspect that fits inside it. A concrete `size` and explicit
 must still satisfy its surface default. DPI is pixels divided by intended
 placement inches, not a PNG/JPEG density header.
 
-Minimum-DPI resolution is a pre-dispatch acceptance boundary. When edge,
+Explicit minimum-DPI resolution outside Publish is a pre-dispatch acceptance boundary. When edge,
 megapixel, aspect, or alignment constraints make the requested DPI impossible
 as one native provider raster, but the physical target's aspect is still
 provider-representable, `ResolveMinimumDpi` returns a
@@ -135,6 +136,16 @@ Page, Core-cover, or release-cover surface subregion; its physical dimensions,
 transformed protected regions, and bounds participate in the geometry
 fingerprint. It is not valid for semantic Project Pages, Figures, or existing
 image frames.
+
+Publish uses the separate application resolution policy. `ResolveFillMinimumDpi`
+chooses the smallest supported native raster that can cover the target at its
+internal output expectation. If the target aspect is outside provider limits, it
+clamps only the generated aspect, preserves a centered crop-safe target window,
+and derives a same-aspect production raster large enough to cover both physical
+edges. If native output is insufficient or differs from the requested raster,
+`AgentProjectImageWorkflow` performs the same application-owned fill preparation
+from the decoded output. This path returns one placement-ready image ID and never
+returns a panel plan to Publish.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. The result

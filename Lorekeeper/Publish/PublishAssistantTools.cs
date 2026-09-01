@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Context;
@@ -11,7 +12,6 @@ using Lorekeeper.Composition;
 using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace Lorekeeper.Publish;
@@ -75,6 +75,22 @@ public sealed record PublicationSectionToolInput(
     PublicationSectionStartSide StartSide = PublicationSectionStartSide.Next,
     long? ExpectedRevision = null);
 
+public sealed class PublishImageGenerationTarget
+{
+    [Description("Release ID for a release cover target. Omit for Core cover, page, Figure, and free-standing targets.")]
+    public Guid? EditionId { get; init; }
+    [Description("ProjectPage, Figure, PageFrame, PageSurface, CoreCoverFrame, CoreCoverSurface, CoverFrame, or CoverSurface. Omit for free-standing art.")]
+    public string TargetKind { get; init; } = string.Empty;
+    [Description("Stable target ID returned by the target read. Omit for free-standing art.")]
+    public Guid? TargetId { get; init; }
+    [Description("Exact page variant ID returned by the target read. Required for PageFrame and PageSurface targets.")]
+    public Guid? VariantId { get; init; }
+    [Description("Desired W:H, W/H, or decimal aspect for free-standing art. A bound target derives its aspect from Lorekeeper.")]
+    public string AspectRatio { get; init; } = string.Empty;
+    [Description("Optional canvas-local percentage bounds returned or verified for a PageSurface, CoverSurface, or CoreCoverSurface subregion.")]
+    public CompositionBounds? SurfaceBounds { get; init; }
+}
+
 public interface IPublishAssistantTools
 {
     Task<IList<AITool>> BuildAsync(
@@ -104,8 +120,7 @@ public sealed class PublishAssistantTools(
     ICompositionService? compositions = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
     IProjectSearchService? projectSearch = null,
-    IReferenceVisualService? referenceVisuals = null,
-    IOptions<ProjectImageGenerationOptions>? imageOptions = null) : IPublishAssistantTools
+    IReferenceVisualService? referenceVisuals = null) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -315,13 +330,13 @@ public sealed class PublishAssistantTools(
                 name: "fill_publication_section_page_image_canvas",
                 description: "Make one image object cover the entire active publication-section page canvas. With retainAspectRatio=true it uses proportional crop-to-fill; false stretches the raster. Reread and require imageCoversCanvas=true before reporting success."),
             AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePublicationSectionPageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, int? readingOrder = null) => PlacePublicationSectionPageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_publication_section_page_frame",
-                description: "Place an existing project-image ID into one existing image frame on the active publication-section page. Generation remains separate. Provide Contain, Cover, or Stretch and an alt-text or explicit decorative decision."),
+                description: "Place an existing project-image ID into one existing image frame on the active publication-section page. Defaults to Cover so the image crop-fills the frame. Use Contain only when the complete uncropped image matters, or Stretch only when distortion is intentional. Provide alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPublicationSectionPageImageAsync(context, context.SelectedEditionId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, CompositionBounds? bounds = null, int? readingOrder = null) => AddPublicationSectionPageImageAsync(context, context.SelectedEditionId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_publication_section_page",
-                description: "Add an existing project-image ID to a publication-section Designed Page. Generation remains separate; provide fit and an alt-text or decorative decision."),
+                description: "Add an existing project-image ID to a publication-section Designed Page. Defaults to Cover at 0,0,100,100 so the image crop-fills the complete canvas; supply bounds only for a smaller intentional frame. Provide alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StagePublicationSectionPageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_publication_section_page_composition",
@@ -349,26 +364,21 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null, string? surfaceRole = null, string? regionRole = null, CompositionBounds? surfaceBounds = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId, surfaceRole, regionRole, surfaceBounds),
                 name: "read_publication_generation_target",
-                description: "Resolve composition geometry, the 300-DPI publication default, protected regions, provider constraints, and the resolved 300-DPI raster for a Figure, page, cover surface/frame, or exact cover region. CoverRegion requires releaseId and regionRole Back, Spine, or Front. Pass surfaceBounds only for a verified PageSurface, CoverSurface, or CoreCoverSurface subregion; bounds become the physical target and protected regions are localized. If a full surface or region is infeasible, use returned exact panel bounds with the same surface target, generate deliberate panels/collage, and validate annotated and clean full-wrap/page previews—never claim seamless panorama continuity. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. Generate outputs unattached and inspect actualRaster/effectiveDpi before placement."),
+                description: "Resolve the aspect, protected regions, and reusable generationTarget for a Figure, page, cover surface/frame, or exact cover region. CoverRegion requires releaseId and regionRole Back, Spine, or Front. Pass surfaceBounds only for a verified PageSurface, CoverSurface, or CoreCoverSurface subregion. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame with a releaseId for a release cover. Lorekeeper chooses the generation resolution and prepares the target asset internally."),
             AIFunctionFactory.Create(
                 method: (Guid variantId) => ValidateCompositionAsync(context, context.SelectedEditionId, variantId),
                 name: "validate_publication_page_composition",
-                description: "Validate one publication-section Designed Page against the protected active Core/release target for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, and font readiness."),
+                description: "Validate one publication-section Designed Page against the protected active Core/release target for geometry, semantic coverage, reading order, accessibility, overflow, image readiness, and font readiness."),
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "generate_project_image",
-                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with its exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes before placement. Inspect the returned image, then apply its project-image ID with a focused cover tool or edit the relevant publication section during this turn."),
+                description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn."),
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "edit_project_image",
-                description: "Edit one project image and wait for a terminal result. Use the original source directly for one coherent desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned subregion. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes; keep undersized output unattached and do not place it as publication-compliant."),
-            AIFunctionFactory.Create(
-                method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
-                    ResizeProjectImageAsync(context, sourceImageId, width, height, fileName, altText),
-                name: "resize_project_image",
-                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This local pixel transform creates a new unattached source-linked image and adds no visual detail; it is not publication-quality enhancement. Use edit_project_image with the original source for same-aspect up-resolution that preserves complete framing while reconstructing detail, or use intentional outpainting when expanding framing."),
+                description: "Edit one project image and wait for a terminal result. Use the original source for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source."),
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
                 name: "read_project_image_job",
@@ -419,13 +429,13 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_core_cover_element",
                 description: "Revision-check and patch one stable Core cover object, layer, or style with changed fields only. Core cover geometry comes from project page setup, and artwork remains below canonical cover copy."),
             AIFunctionFactory.Create(
-                method: (long expectedBookRevision, long expectedCoverRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                method: (long expectedBookRevision, long expectedCoverRevision, Guid targetId, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, int? readingOrder = null) => PlaceCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_core_cover",
-                description: "Place an existing project-image ID into one existing Core cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
+                description: "Place an existing project-image ID into one existing Core cover image object. Defaults to Cover so the image crop-fills the object. Use Contain only when the complete uncropped image matters, or Stretch only when distortion is intentional. Requires alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
-                method: (long expectedBookRevision, long expectedCoverRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                method: (long expectedBookRevision, long expectedCoverRevision, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_core_cover",
-                description: "Add an existing project-image ID as a new Core cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
+                description: "Add an existing project-image ID as a new Core cover image object. Defaults to Cover at 0,0,100,100 so the image crop-fills the complete cover; supply bounds only for a smaller intentional frame. Requires alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, CompositionScene scene) => StageCoreCoverCompositionAsync(context, expectedBookRevision, expectedCoverRevision, scene),
                 name: "stage_publication_core_cover_composition",
@@ -456,21 +466,21 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_cover_surface_element",
                 description: "Revision-check and patch one object, layer, or style on an exact outside, inside, case, or jacket surface. Read and visually preview that surface first; preserve every other surface."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, int? readingOrder = null) => PlaceCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_release_cover_surface",
-                description: "Place an existing project-image ID into one existing image object on the exact outside, inside, case, or jacket surface. This does not affect other surfaces and remains separate from image generation."),
+                description: "Place an existing project-image ID into one image object on the exact outside, inside, case, or jacket surface. Defaults to Cover so the image crop-fills the object. This does not affect other surfaces."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_release_cover_surface",
-                description: "Add an existing project-image ID as a new object on the exact outside, inside, case, or jacket surface. This does not affect other surfaces and remains separate from image generation."),
+                description: "Add an existing project-image ID to the exact outside, inside, case, or jacket surface. Defaults to Cover at 0,0,100,100 so the image crop-fills the complete surface; supply bounds only for a smaller intentional frame. This does not affect other surfaces."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_release_cover",
-                description: "Place an existing project-image ID into one existing release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
+                description: "Place an existing project-image ID into one release-cover image object. Defaults to Cover so the image crop-fills the object. Use Contain only when the complete uncropped image matters. Requires alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverImageAsync(context, releaseId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                method: (Guid releaseId, long expectedRevision, Guid imageId, FigureImageFit fit = FigureImageFit.Cover, string? altText = null, bool decorative = false, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverImageAsync(context, releaseId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_release_cover",
-                description: "Add an existing project-image ID as a new release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
+                description: "Add an existing project-image ID as a new release-cover image object. Defaults to Cover at 0,0,100,100 so the image crop-fills the complete cover; supply bounds only for a smaller intentional frame. Requires alt text or an explicit decorative decision."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene, string? surfaceRole = null) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene, surfaceRole),
@@ -1314,7 +1324,7 @@ public sealed class PublishAssistantTools(
         PublishAssistantContext context,
         ImageGenerationBrief brief,
         ImageReferenceUse[]? references,
-        ImageGenerationTarget? geometryGuidance,
+        PublishImageGenerationTarget? geometryGuidance,
         string? altText,
         string? quality,
         string? outputFormat,
@@ -1328,24 +1338,25 @@ public sealed class PublishAssistantTools(
                 context.ProjectId,
                 brief,
                 references,
-                geometryGuidance,
+                ToApplicationImageTarget(geometryGuidance),
                 altText,
                 quality,
                 outputFormat,
                 outputCompression,
                 "Publish image",
                 context.TrackImageJob,
-                context.TurnCancellationToken,
-                defaultMinimumDpi: 300);
+                context.TurnCancellationToken);
             return ImageResult(context, result);
         }
-        catch (MinimumDpiUnachievableException ex)
+        catch (MinimumDpiUnachievableException)
         {
-            return SerializeMinimumDpiRejection(ex);
+            return Serialize(new { ok = false, code = "TARGET_PREPARATION_FAILED", summary = "Lorekeeper could not prepare an image for this target. Keep the image unattached and report the application error without proposing manual resolution workarounds." });
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            return Serialize(new { ok = false, code = "GENERATION_REJECTED", summary = ex.Message });
+            return IsLayoutBound(geometryGuidance)
+                ? Serialize(new { ok = false, code = "TARGET_PREPARATION_FAILED", summary = "Lorekeeper could not prepare an image for this target. Keep the image unattached and report the application error without proposing manual resolution workarounds." })
+                : Serialize(new { ok = false, code = "GENERATION_REJECTED", summary = ex.Message });
         }
     }
 
@@ -1354,7 +1365,7 @@ public sealed class PublishAssistantTools(
         Guid sourceImageId,
         ImageEditBrief brief,
         ImageReferenceUse[]? references,
-        ImageGenerationTarget? geometryGuidance,
+        PublishImageGenerationTarget? geometryGuidance,
         string? altText,
         string? quality,
         string? outputFormat,
@@ -1370,86 +1381,25 @@ public sealed class PublishAssistantTools(
                 brief,
                 null,
                 references,
-                geometryGuidance,
+                ToApplicationImageTarget(geometryGuidance),
                 altText,
                 quality,
                 outputFormat,
                 outputCompression,
                 "Publish image edit",
                 context.TrackImageJob,
-                context.TurnCancellationToken,
-                defaultMinimumDpi: 300);
+                context.TurnCancellationToken);
             return ImageResult(context, result);
         }
-        catch (MinimumDpiUnachievableException ex)
+        catch (MinimumDpiUnachievableException)
         {
-            return SerializeMinimumDpiRejection(ex);
+            return Serialize(new { ok = false, code = "TARGET_PREPARATION_FAILED", summary = "Lorekeeper could not prepare the edited image for this target. Keep the image unattached and report the application error without proposing manual resolution workarounds." });
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            return Serialize(new { ok = false, code = "EDIT_REJECTED", summary = ex.Message });
-        }
-    }
-
-    private async Task<string> ResizeProjectImageAsync(
-        PublishAssistantContext context,
-        Guid sourceImageId,
-        int width,
-        int height,
-        string? fileName,
-        string? altText)
-    {
-        try
-        {
-            var image = await projectImages.ResizeAsync(
-                context.ProjectId,
-                sourceImageId,
-                new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
-                context.TurnCancellationToken);
-            context.AddVisual(new EntityVisualContextReference(
-                image.Id,
-                null,
-                "ProjectImage",
-                image.FileName,
-                "deterministically resized project image",
-                0,
-                image.FileName,
-                image.AltText,
-                image.Prompt,
-                IsExplicitImage: true,
-                ImageSource: image.Source));
-            return Serialize(new
-            {
-                ok = true,
-                status = "resized",
-                sourceImageId,
-                targetRaster = $"{width}x{height}",
-                actualRaster = $"{width}x{height}",
-                requestedMinimumDpi = (double?)null,
-                minimumDpiMet = (bool?)null,
-                warningCodes = Array.Empty<string>(),
-                sourceLinked = true,
-                attached = false,
-                interpolation = ProjectImageResize.DeterministicInterpolation,
-                addsNewDetail = false,
-                outputImageIds = new[] { image.Id },
-                image = new
-                {
-                    image.Id,
-                    image.FileName,
-                    image.ContentType,
-                    image.PreviewUrl,
-                    image.AltText,
-                    image.Source,
-                    image.SourceMetadataJson,
-                },
-                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail and is not publication-quality enhancement; use an original-source generative edit for detail reconstruction or intentional outpainting.",
-                nextAction = "Inspect the returned project image, then place its ID with a separate publication tool if the user approves it.",
-            });
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return Serialize(new { ok = false, code = "RESIZE_REJECTED", summary = ex.Message });
+            return IsLayoutBound(geometryGuidance)
+                ? Serialize(new { ok = false, code = "TARGET_PREPARATION_FAILED", summary = "Lorekeeper could not prepare the edited image for this target. Keep the image unattached and report the application error without proposing manual resolution workarounds." })
+                : Serialize(new { ok = false, code = "EDIT_REJECTED", summary = ex.Message });
         }
     }
 
@@ -1490,41 +1440,58 @@ public sealed class PublishAssistantTools(
                 IsExplicitImage: true,
                 ImageSource: image.Source));
         }
+        var placementImageIds = result.Outputs
+            .Select(output => output.PrintImageId ?? output.Image.Id)
+            .ToList();
         return Serialize(new
         {
             ok = result.Succeeded,
             jobId = result.JobId,
-            status = result.Status,
+            status = result.Succeeded ? "completed" : result.IsTerminal ? "failed" : result.Status,
             targetAspect = result.TargetAspect,
-            requestedRaster = result.RequestedRaster,
-            outputImageIds = result.Images.Select(image => image.Id),
-            printImageIds = result.Outputs.Where(output => output.PrintImageId is not null).Select(output => output.PrintImageId!.Value),
-            requestedMinimumDpi = result.RequestedMinimumDpi,
-            minimumDpiMet = result.MinimumDpiMet,
-            warningCodes = result.WarningCodes ?? [],
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], printImageId = output.PrintImageId, printRaster = output.PrintRaster, printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null, output.Image.PreviewUrl }),
-            attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
-            diagnostics = result.Diagnostics.Take(3),
-            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
+            outputImageIds = placementImageIds,
+            images = result.Outputs.Select(output => new
             {
-                code = output.MinimumDpiMet == false
-                    ? "MINIMUM_DPI_NOT_MET"
-                    : !output.RasterMatched && !output.AspectMatched
-                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
-                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
-                message = output.MinimumDpiMet == false
-                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not place or describe it as publication-compliant."
-                    : $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+                imageId = output.PrintImageId ?? output.Image.Id,
+                output.Image.FileName,
+                output.Image.ContentType,
+                output.Image.PreviewUrl,
             }),
-            summary = result.Summary,
-            nextAction = result.MinimumDpiMet == false
-                ? "Inspect the returned image, but keep it unattached and do not place it as publication-compliant; use the suggested panel bounds or a deliberate collage/panel treatment."
-                : result.Succeeded
-                    ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."
+            attached = false,
+            diagnostics = result.Diagnostics.Take(3),
+            summary = result.Succeeded
+                ? $"Created {placementImageIds.Count} unattached project image(s) prepared for the target."
+                : "Image generation did not produce a target-ready image.",
+            nextAction = result.Succeeded
+                ? "Inspect the image, then place its imageId with Cover (crop-to-fill) using the appropriate cover or publication-page tool before completing the request."
                 : null,
         });
     }
+
+    private static ImageGenerationTarget? ToApplicationImageTarget(PublishImageGenerationTarget? target)
+    {
+        if (target is null)
+            return null;
+        var layoutBound = target.TargetId is Guid targetId
+            && targetId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(target.TargetKind);
+        return new ImageGenerationTarget
+        {
+            EditionId = target.EditionId,
+            TargetKind = target.TargetKind,
+            TargetId = target.TargetId,
+            VariantId = target.VariantId,
+            AspectRatio = target.AspectRatio,
+            SurfaceBounds = target.SurfaceBounds,
+            UseApplicationResolutionPolicy = layoutBound,
+            FillTarget = layoutBound,
+        };
+    }
+
+    private static bool IsLayoutBound(PublishImageGenerationTarget? target) =>
+        target?.TargetId is Guid targetId
+        && targetId != Guid.Empty
+        && !string.IsNullOrWhiteSpace(target.TargetKind);
 
     private string ReadPressRuntimeReadiness(PublicationEditionFormat format, PublicationVendor vendor)
     {
@@ -1534,185 +1501,6 @@ public sealed class PublishAssistantTools(
             : null;
         return Serialize(new { readiness, description });
     }
-
-    private static string SerializeMinimumDpiRejection(MinimumDpiUnachievableException exception) =>
-        Serialize(new
-        {
-            ok = false,
-            code = MinimumDpiUnachievableException.Code,
-            stage = exception.Stage,
-            physicalDimensions = new
-            {
-                widthInches = exception.Resolution.WidthInches,
-                heightInches = exception.Resolution.HeightInches,
-            },
-            requestedMinimumDpi = exception.RequestedMinimumDpi,
-            requiredRaster = RasterPayload(exception.RequiredRaster),
-            largestCompatibleRaster = RasterPayload(exception.MaximumRaster),
-            maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
-            bindingProviderLimits = exception.Resolution.BindingProviderLimits,
-            providerConstraints = ProviderConstraintsPayload(),
-            target = new
-            {
-                targetKind = exception.TargetKind,
-                targetId = exception.TargetId,
-                editionId = exception.EditionId,
-                variantId = exception.VariantId,
-                surfaceBounds = exception.SurfaceBounds,
-            },
-            splitSuggestions = exception.SplitSuggestions.Select(PanelSuggestionPayload),
-            partitioningSupported = SupportsDirectSurfacePartition(exception.TargetKind)
-                && exception.SplitSuggestions.Count > 0,
-            automaticPartitioningUnsupported = SupportsDirectSurfacePartition(exception.TargetKind)
-                && exception.SplitSuggestions.Count == 0,
-            summary = exception.Message,
-            recovery = MinimumDpiRecovery(exception.TargetKind),
-        });
-
-    private string SerializeMinimumDpiPreflight(
-        LayoutImageDpiResolution resolution,
-        string targetKind,
-        Guid targetId,
-        Guid? editionId,
-        Guid? variantId,
-        CompositionBounds? surfaceBounds,
-        string? regionRole = null)
-    {
-        if (resolution.PrintUpscalePlan is { } upscalePlan
-            && imageOptions?.Value.PrintUpscale is not false)
-        {
-            return Serialize(new
-            {
-                ok = true,
-                printUpscalePlan = new
-                {
-                    nativeRaster = RasterPayload(upscalePlan.NativeRaster),
-                    nativeEffectiveDpi = Math.Round(upscalePlan.NativeEffectiveDpi, 1),
-                    printRaster = RasterPayload(upscalePlan.PrintRaster),
-                    targetDpi = upscalePlan.TargetDpi,
-                },
-                physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
-                requestedMinimumDpi = resolution.MinimumDpi,
-                target = new { targetKind, targetId, editionId, variantId, regionRole, surfaceBounds },
-                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper creates a deterministic Lanczos3 upscale of the finished image at {upscalePlan.PrintRaster.Size}; the upscale adds no new detail. Proceed with the normal generate tool; place the returned print-upscaled image ID.",
-            });
-        }
-        return Serialize(new
-        {
-            ok = false,
-            code = MinimumDpiUnachievableException.Code,
-            stage = "pre_dispatch",
-            physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
-            requestedMinimumDpi = resolution.MinimumDpi,
-            requiredRaster = RasterPayload(resolution.RequiredRaster),
-            largestCompatibleRaster = RasterPayload(resolution.MaximumRaster),
-            maximumAchievableDpi = Math.Round(resolution.MaximumAchievableDpi, 1),
-            bindingProviderLimits = resolution.BindingProviderLimits,
-            providerConstraints = ProviderConstraintsPayload(),
-            target = new { targetKind, targetId, editionId, variantId, regionRole, surfaceBounds },
-            splitSuggestions = SurfacePanelSuggestions(resolution.PanelSuggestions, targetKind, surfaceBounds).Select(PanelSuggestionPayload),
-            partitioningSupported = SupportsDirectSurfacePartition(targetKind)
-                && resolution.PanelSuggestions.Count > 0,
-            automaticPartitioningUnsupported = SupportsDirectSurfacePartition(targetKind)
-                && resolution.PanelSuggestions.Count == 0,
-            summary = $"The 300-DPI layout target cannot be generated as one provider-compatible image ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches). No image provider request was dispatched.",
-            recovery = MinimumDpiRecovery(targetKind),
-        });
-    }
-
-    private static IReadOnlyList<LayoutImagePanelSuggestion> SurfacePanelSuggestions(
-        IReadOnlyList<LayoutImagePanelSuggestion> suggestions,
-        string targetKind,
-        CompositionBounds? surfaceBounds)
-    {
-        return surfaceBounds is null
-            ? suggestions
-            : !SupportsDirectSurfacePartition(targetKind)
-                ? []
-            : LayoutImageSizeResolver.MapPanelSuggestions(
-                suggestions,
-                surfaceBounds.XPercent,
-                surfaceBounds.YPercent,
-                surfaceBounds.WidthPercent,
-                surfaceBounds.HeightPercent);
-    }
-
-    private static LayoutImageDpiResolution ResolveSurfaceBoundsMinimumDpi(
-        LayoutGenerationTargetDescriptor surface,
-        CompositionBounds bounds,
-        int minimumDpi)
-    {
-        if (!double.IsFinite(bounds.XPercent)
-            || !double.IsFinite(bounds.YPercent)
-            || !double.IsFinite(bounds.WidthPercent)
-            || !double.IsFinite(bounds.HeightPercent)
-            || bounds.XPercent < 0
-            || bounds.YPercent < 0
-            || bounds.WidthPercent <= 0
-            || bounds.HeightPercent <= 0
-            || bounds.XPercent + bounds.WidthPercent > 100
-            || bounds.YPercent + bounds.HeightPercent > 100)
-            throw new ArgumentException("surfaceBounds must use finite positive percentage dimensions inside the 0-100 surface.", nameof(bounds));
-        return LayoutImageSizeResolver.ResolveMinimumDpi(
-            surface.WidthInches * bounds.WidthPercent / 100,
-            surface.HeightInches * bounds.HeightPercent / 100,
-            minimumDpi);
-    }
-
-    private static bool SupportsDirectSurfacePartition(string targetKind) =>
-        NormalizeImageTargetKind(targetKind) is "pagesurface" or "coversurface" or "corecoversurface";
-
-    private static string MinimumDpiRecovery(string targetKind) => NormalizeImageTargetKind(targetKind) switch
-    {
-        "" => "The free-standing Core Book physical basis cannot meet this minimum as one provider image. Use multiple deliberate images for the intended layout, reduce the intended physical size, or use an external higher-resolution source; no exact layout bounds are available from this target.",
-        "figure" => "One Figure block holds one image. Ask the user before replacing it with multiple Figure blocks or converting it to a Designed Page; otherwise reduce the physical placement or use an external higher-resolution source.",
-        "projectpage" => "A semantic Project Page is not a composited surface. Ask the user before using multiple Figure blocks or converting the content to a Designed Page.",
-        "pageframe" or "coverframe" or "corecoverframe" => "An existing image frame holds one image. Recompose the owning PageSurface or cover surface as deliberate image panels, or reduce the frame's physical size; do not retry the same frame target.",
-        "coversurface" or "corecoversurface" => "Do not retry the same infeasible cover target. Prefer Back, Spine, and Front regions, then generate each returned subpanel with its exact CoverSurface bounds. Place every image at those bounds and inspect annotated regions plus the clean whole wrap; do not claim seamless continuity without visual verification.",
-        _ => "Do not retry the same infeasible full-surface request. Generate each returned panel with the exact surfaceBounds, add every unattached image at those bounds, and validate the complete page preview. Use deliberate panels/collage treatment; do not claim seamless panorama continuity.",
-    };
-
-    private static string NormalizeImageTargetKind(string value) =>
-        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-
-    private static object? RasterPayload(LayoutImageSize? raster) => raster is null
-        ? null
-        : new { widthPixels = raster.Width, heightPixels = raster.Height, size = raster.Size };
-
-    private static object RasterPayload(LayoutImageRequiredRaster raster) =>
-        new { widthPixels = raster.Width, heightPixels = raster.Height, size = raster.Size };
-
-    private static object ProviderConstraintsPayload() => new
-    {
-        rasterFormat = "WIDTHxHEIGHT",
-        sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
-        minimumPixels = LayoutImageSizeResolver.MinimumPixels,
-        maximumPixels = LayoutImageSizeResolver.MaximumPixels,
-        maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
-        minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
-        maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-    };
-
-    private static object PanelSuggestionPayload(LayoutImagePanelSuggestion suggestion) => new
-    {
-        rows = suggestion.Rows,
-        columns = suggestion.Columns,
-        panelCount = suggestion.PanelCount,
-        maximumAchievableDpi = Math.Round(suggestion.MaximumAchievableDpi, 1),
-        panels = suggestion.Panels.Select(panel => new
-        {
-            panel.Index,
-            xPercent = panel.XPercent,
-            yPercent = panel.YPercent,
-            widthPercent = panel.WidthPercent,
-            heightPercent = panel.HeightPercent,
-            widthInches = panel.WidthInches,
-            heightInches = panel.HeightInches,
-            panel.AspectRatio,
-            raster = RasterPayload(panel.Raster),
-            effectiveDpi = Math.Round(panel.EffectiveDpi, 1),
-        }),
-    };
 
     private async Task<string> ListNamedStylesAsync(PublishAssistantContext context, int offset, int limit)
     {
@@ -2341,7 +2129,7 @@ public sealed class PublishAssistantTools(
                 throw new KeyNotFoundException("Project image was not found.");
             var result = await compositions!.AddImageObjectAsync(
                 SectionContentTarget(releaseId), context.ProjectId, variantId, expectedRevision,
-                imageId, fit, altText, decorative, bounds, readingOrder, context.TurnCancellationToken);
+                imageId, fit, altText, decorative, bounds ?? new CompositionBounds(), readingOrder, context.TurnCancellationToken);
             return Serialize(new
             {
                 ok = true,
@@ -2670,21 +2458,6 @@ public sealed class PublishAssistantTools(
                     ? await covers.GetAsync(context.ProjectId, regionReleaseId, context.TurnCancellationToken)
                     : await covers.GetSurfaceAsync(context.ProjectId, regionReleaseId, surfaceRole, context.TurnCancellationToken);
                 var region = cover.Regions.Single(item => item.Role == role);
-                var regionDpiResolution = LayoutImageSizeResolver.ResolveMinimumDpi(region.WidthInches, region.HeightInches, 300);
-                if (!regionDpiResolution.MeetsMinimumDpi)
-                    return SerializeMinimumDpiPreflight(
-                        regionDpiResolution,
-                        "CoverSurface",
-                        cover.Id,
-                        regionReleaseId,
-                        null,
-                        region.Bounds,
-                        role.ToString());
-                var raster = LayoutImageSizeResolver.Resolve(region.WidthInches, region.HeightInches);
-                var rasterAspect = (double)raster.Width / raster.Height;
-                var aspectErrorPercent = Math.Abs(rasterAspect / region.AspectRatio - 1) * 100;
-                var expectedCropPercent = (1 - Math.Min(rasterAspect / region.AspectRatio, region.AspectRatio / rasterAspect)) * 100;
-                var effectiveDpi = Math.Min(raster.Width / region.WidthInches, raster.Height / region.HeightInches);
                 return Serialize(new
                 {
                     ok = true,
@@ -2695,60 +2468,30 @@ public sealed class PublishAssistantTools(
                         targetKind = "cover-region",
                         targetId,
                         regionRole = role,
-                        widthInches = region.WidthInches,
-                        heightInches = region.HeightInches,
-                        physicalAspect = region.AspectRatio,
-                        closestSupportedGenerationRaster = raster.Size,
-                        aspectErrorPercent = Math.Round(aspectErrorPercent, 3),
-                        expectedCropPercent = Math.Round(expectedCropPercent, 3),
-                        effectiveDpi = Math.Round(effectiveDpi, 1),
-                        minimumDpi = 300,
-                        minimumDpiRaster = regionDpiResolution.Raster!.Size,
+                        aspectRatio = region.AspectRatio,
                         generationTarget = new
                         {
                             editionId = regionReleaseId,
                             targetKind = "CoverSurface",
                             targetId = cover.Id,
                             surfaceBounds = region.Bounds,
-                            minimumDpi = 300,
                         },
-                        minimumDpiResolution = new
-                        {
-                            physicalDimensions = new { widthInches = regionDpiResolution.WidthInches, heightInches = regionDpiResolution.HeightInches },
-                            requiredRaster = RasterPayload(regionDpiResolution.RequiredRaster),
-                            resolvedRaster = RasterPayload(regionDpiResolution.Raster),
-                            maximumCompatibleRaster = RasterPayload(regionDpiResolution.MaximumRaster),
-                            maximumAchievableDpi = Math.Round(regionDpiResolution.MaximumAchievableDpi, 1),
-                            splitSuggestions = SurfacePanelSuggestions(
-                                regionDpiResolution.PanelSuggestions,
-                                "CoverSurface",
-                                region.Bounds),
-                        },
-                        safeRegions = new { insetInches = region.SafeInsetInches, region.Guides },
+                        protectedRegions = region.Guides,
                         orientation = role == CompositionRegionConstraint.Spine ? cover.SpineReadingDirection.ToString() : "upright",
                         geometryFingerprint = region.GeometryFingerprint,
-                        placement = "Generate unattached, then crop-to-fill without stretching and adjust focal position.",
+                        placement = "Generate edge-to-edge, then place with Cover so the image crop-fills this region without stretching.",
                     },
                 });
             }
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
-            if (surfaceBounds is not null && !SupportsDirectSurfacePartition(targetKind))
+            if (surfaceBounds is not null
+                && !targetKind.Trim().Equals("PageSurface", StringComparison.OrdinalIgnoreCase)
+                && !targetKind.Trim().Equals("CoverSurface", StringComparison.OrdinalIgnoreCase)
+                && !targetKind.Trim().Equals("CoreCoverSurface", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("surfaceBounds requires a PageSurface, CoverSurface, or CoreCoverSurface target.");
-            if (surfaceBounds is not null)
-            {
-                var surface = editionId is Guid boundedReleaseId
-                    ? await service.DescribeGenerationTargetAsync(context.ProjectId, boundedReleaseId, targetKind, targetId, variantId, context.TurnCancellationToken)
-                    : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken);
-                var boundedResolution = ResolveSurfaceBoundsMinimumDpi(surface, surfaceBounds, 300);
-                if (!boundedResolution.MeetsMinimumDpi)
-                    return SerializeMinimumDpiPreflight(boundedResolution, targetKind, targetId, surface.EditionId, surface.VariantId, surfaceBounds);
-            }
             var descriptor = editionId is Guid releaseId
                 ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds)
                 : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds);
-            var dpiResolution = LayoutImageSizeResolver.ResolveMinimumDpi(descriptor.WidthInches, descriptor.HeightInches, 300);
-            if (!dpiResolution.MeetsMinimumDpi)
-                return SerializeMinimumDpiPreflight(dpiResolution, targetKind, targetId, descriptor.EditionId, descriptor.VariantId, surfaceBounds);
             return Serialize(new
             {
                 ok = true,
@@ -2760,36 +2503,20 @@ public sealed class PublishAssistantTools(
                     descriptor.GeometrySource,
                     descriptor.TargetKind,
                     descriptor.TargetId,
-                    descriptor.WidthInches,
-                    descriptor.HeightInches,
                     descriptor.AspectRatio,
-                    descriptor.RecommendedWidthPixels,
-                    descriptor.RecommendedHeightPixels,
-                    descriptor.RequestedWidthPixels,
-                    descriptor.RequestedHeightPixels,
-                    descriptor.RequestedRaster,
-                    descriptor.EffectiveDpiExpectation,
-                    minimumDpi = 300,
-                    effectiveDpi = Math.Round(LayoutImageSizeResolver.EffectiveDpi(
-                        dpiResolution.Raster!,
-                        descriptor.WidthInches,
-                        descriptor.HeightInches), 1),
-                    minimumDpiResolution = new
+                    protectedRegions = descriptor.Regions,
+                    generationTarget = new
                     {
-                        physicalDimensions = new { widthInches = dpiResolution.WidthInches, heightInches = dpiResolution.HeightInches },
-                        requestedMinimumDpi = dpiResolution.MinimumDpi,
-                        requiredRaster = RasterPayload(dpiResolution.RequiredRaster),
-                        resolvedRaster = RasterPayload(dpiResolution.Raster),
-                        maximumCompatibleRaster = RasterPayload(dpiResolution.MaximumRaster),
-                        maximumAchievableDpi = Math.Round(dpiResolution.MaximumAchievableDpi, 1),
-                        splitSuggestions = dpiResolution.PanelSuggestions.Select(PanelSuggestionPayload),
+                        editionId = descriptor.EditionId,
+                        targetKind = descriptor.TargetKind,
+                        targetId = descriptor.TargetId,
+                        variantId = descriptor.VariantId,
+                        surfaceBounds = descriptor.SurfaceBounds,
                     },
-                    descriptor.Regions,
-                    descriptor.Diagnostics,
+                    placement = "Generate edge-to-edge, then place with Cover so the image crop-fills the complete target without stretching.",
                 },
             });
         }
-        catch (MinimumDpiUnachievableException ex) { return SerializeMinimumDpiRejection(ex); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId, summary = ex.Message }); }
     }
 
@@ -3007,8 +2734,8 @@ public sealed class PublishAssistantTools(
                 region,
                 spineReadingDirection = cover.SpineReadingDirection,
                 generationGuidance = role == CompositionRegionConstraint.Spine
-                    ? "Read the 300-DPI region target before generating. If one raster is infeasible, use its exact CoverSurface panel bounds. Generate without baked-in words, preserve a quiet center lane for real title/author text, and inspect the annotated region plus whole wrap after placement."
-                    : "Generate without baked-in copy and preserve quiet zones for real cover typography.",
+                    ? "Read the region generation target, compose edge-to-edge without baked-in words, preserve a quiet center lane for real title and author text, then crop-to-fill the region and inspect both the annotated region and whole wrap."
+                    : "Compose edge-to-edge without baked-in copy, preserve quiet zones for real cover typography, and crop-to-fill the region.",
             });
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -3259,7 +2986,7 @@ public sealed class PublishAssistantTools(
                 throw new DbUpdateConcurrencyException("Core Book or its cover changed; reread the cover before retrying.");
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The Core cover composition is empty.");
-            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds ?? new CompositionBounds(), readingOrder);
             var saved = await books.SaveCoverAsync(
                 context.ProjectId,
                 expectedBookRevision,
@@ -3487,7 +3214,7 @@ public sealed class PublishAssistantTools(
                 throw new DbUpdateConcurrencyException("The cover surface changed; reread it before retrying.");
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The release cover surface is empty.");
-            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds ?? new CompositionBounds(), readingOrder);
             var saved = await covers.SaveSurfaceWorkspaceAsync(
                 context.ProjectId,
                 editionId,
@@ -3546,7 +3273,7 @@ public sealed class PublishAssistantTools(
                 throw new DbUpdateConcurrencyException("The cover changed; reread it before retrying.");
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The release cover composition is empty.");
-            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds ?? new CompositionBounds(), readingOrder);
             var saved = await covers.SaveWorkspaceAsync(
                 context.ProjectId,
                 editionId,

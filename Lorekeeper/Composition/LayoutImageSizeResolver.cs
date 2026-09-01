@@ -229,6 +229,73 @@ public static class LayoutImageSizeResolver
         return full with { PanelSuggestions = suggestions };
     }
 
+    public static LayoutImageDpiResolution ResolveFillMinimumDpi(
+        double widthInches,
+        double heightInches,
+        double minimumDpi)
+    {
+        ValidatePhysicalDimensions(widthInches, heightInches);
+        ValidateMinimumDpi(minimumDpi);
+
+        var targetAspect = widthInches / heightInches;
+        var providerAspect = Math.Clamp(targetAspect, 1d / MaximumAspectRatio, MaximumAspectRatio);
+        var compatible = BuildAspectCompatibleSizes(providerAspect)
+            .Select(size => new CandidateWithDpi(
+                size,
+                Math.Min(size.Width / widthInches, size.Height / heightInches),
+                Math.Abs(Math.Log(((double)size.Width / size.Height) / providerAspect))))
+            .ToList();
+        var requiredRaster = new LayoutImageRequiredRaster(
+            RoundUpToMultiple(widthInches * minimumDpi),
+            RoundUpToMultiple(heightInches * minimumDpi));
+        var maximum = compatible
+            .OrderByDescending(candidate => candidate.EffectiveDpi)
+            .ThenBy(candidate => candidate.AspectError)
+            .ThenBy(candidate => candidate.Size.PixelCount)
+            .ThenBy(candidate => candidate.Size.Width)
+            .ThenBy(candidate => candidate.Size.Height)
+            .FirstOrDefault();
+        var raster = compatible
+            .Where(candidate => candidate.EffectiveDpi + 1e-9 >= minimumDpi)
+            .OrderBy(candidate => candidate.Size.PixelCount)
+            .ThenBy(candidate => candidate.AspectError)
+            .ThenBy(candidate => candidate.EffectiveDpi)
+            .ThenBy(candidate => candidate.Size.Width)
+            .ThenBy(candidate => candidate.Size.Height)
+            .Select(candidate => candidate.Size)
+            .FirstOrDefault();
+
+        LayoutPrintUpscalePlan? printUpscalePlan = null;
+        if (raster is null && maximum is not null)
+        {
+            try
+            {
+                printUpscalePlan = CreateFillPrintUpscalePlan(
+                    widthInches,
+                    heightInches,
+                    minimumDpi,
+                    maximum.Size,
+                    maximum.EffectiveDpi);
+            }
+            catch (ArgumentException)
+            {
+                printUpscalePlan = null;
+            }
+        }
+
+        return new LayoutImageDpiResolution(
+            widthInches,
+            heightInches,
+            minimumDpi,
+            requiredRaster,
+            raster,
+            maximum?.EffectiveDpi ?? 0,
+            maximum?.Size,
+            ResolveBindingProviderLimits(targetAspect, requiredRaster, raster, maximum),
+            [],
+            printUpscalePlan);
+    }
+
     public static double EffectiveDpi(LayoutImageSize raster, double widthInches, double heightInches)
     {
         ValidatePhysicalDimensions(widthInches, heightInches);
@@ -267,6 +334,41 @@ public static class LayoutImageSizeResolver
         nativeEffectiveDpi,
         ResolvePrintRaster(widthInches, heightInches, dpi),
         dpi);
+
+    public static LayoutPrintUpscalePlan CreateFillPrintUpscalePlan(
+        double widthInches,
+        double heightInches,
+        double dpi,
+        LayoutImageSize nativeRaster,
+        double nativeEffectiveDpi)
+    {
+        ValidatePhysicalDimensions(widthInches, heightInches);
+        ValidateMinimumDpi(dpi);
+        ArgumentNullException.ThrowIfNull(nativeRaster);
+        Validate(nativeRaster.Width, nativeRaster.Height);
+
+        var minimum = ResolvePrintRaster(widthInches, heightInches, dpi);
+        var nativeAspect = (double)nativeRaster.Width / nativeRaster.Height;
+        var targetAspect = widthInches / heightInches;
+        int width;
+        int height;
+        if (nativeAspect >= targetAspect)
+        {
+            height = minimum.Height;
+            width = CeilingRasterDimension(height * nativeAspect);
+        }
+        else
+        {
+            width = minimum.Width;
+            height = CeilingRasterDimension(width / nativeAspect);
+        }
+        ValidatePrintRaster(width, height);
+        return new LayoutPrintUpscalePlan(
+            nativeRaster,
+            nativeEffectiveDpi,
+            new LayoutImageSize(width, height),
+            dpi);
+    }
 
     internal static int CeilingRasterDimension(double value)
     {

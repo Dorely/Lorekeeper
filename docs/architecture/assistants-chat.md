@@ -260,13 +260,16 @@ durable image job; another explicit mutation places or associates the completed
 asset. Free-standing generation and unmasked editing default to a provider-valid
 raster with the configured Core Book page aspect; a concrete layout target
 replaces that default when the composition must honor a Figure, page, frame, or
-cover. Editor and Publish request at least 300 effective DPI for layout-bound
-generation unless the caller explicitly asks for a higher minimum. Images and
+cover. Publish exposes only target identity, aspect, protected regions, and exact
+surface bounds to the model; its tool schema has no pixel-size or density controls,
+and its results return the application-prepared placement image ID without native
+or production raster diagnostics. The application selects the target-specific
+native request and any required derivative. Editor, Images, and
 Outline retain the moderate concept-art default unless their tools explicitly
 request `minimumDpi` and an optional custom aspect. Free-standing DPI uses the
 exact Core Book page or its largest fitting custom-aspect rectangle. An
-infeasible minimum fails before job creation with exact provider limits and a
-panel plan; a concrete size cannot bypass the publication minimum.
+infeasible explicit minimum outside Publish fails before job creation; a concrete
+size cannot bypass that explicit minimum.
 The Images workspace refreshes its library and job projections only for an
 explicit image-mutation update; ordinary tool completion, assistant completion,
 and turn errors remain local chat updates and must not reload the workspace.
@@ -288,15 +291,13 @@ including the area outside any guide. Deterministic resize creates a new
 unattached source-linked asset and adds no visual detail; it is never evidence
 of publication-quality enhancement.
 
-When a full Designed Page or cover cannot meet the required DPI as one raster,
-the assistant uses the returned `surfaceBounds` panel plan and generates each
-panel against the same verified surface before adding it at the exact same
-bounds. Independent outputs are treated as deliberate panels or a collage, not
-claimed to be seamless without visual verification. Release covers prefer the
-server-owned Back, Spine, and Front regions and require annotated plus clean
-whole-wrap inspection. A Figure remains one image; replacing it with multiple
-Figure blocks or a Designed Page is a structural change that requires user
-confirmation.
+Publish target-bound generation always uses crop-to-fill. For unusually narrow
+or wide targets, the application chooses the closest supported native aspect,
+keeps important content inside the centered target window, and prepares a
+same-aspect derivative large enough to cover the physical target. The assistant
+does not receive or manage a panel plan. Release covers still prefer server-owned
+Back, Spine, and Front regions and require annotated plus clean whole-wrap
+inspection.
 Failed, cancelled, or stale calls must not create partial destination state. A completed assistant mutation may be captured by the separate
 version-history checkpoint service; that durable Git snapshot history is not
 the process-lifetime Undo/Redo history described by the manuscript chapter.
@@ -358,9 +359,9 @@ profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
 For a full-wrap cover it uses the exact region tools to read and preview Back,
 Spine, or Front before editing, then fills only the selected region or changes
 the persisted spine direction with an expected revision. A narrow spine
-generation target reports either a 300-DPI-compatible raster or a hard
-pre-dispatch rejection with a smaller panel plan, plus safety geometry and its
-fingerprint; generation remains unattached and never stretches to fit. Spine
+generation target reports its aspect, protected geometry, fingerprint, and a
+reusable target token; Lorekeeper prepares the crop-to-fill asset internally.
+Generation remains unattached and never stretches to fit. Spine
 art contains no baked-in words, title/author remain real
 text above the art, US/English defaults to top-to-bottom unless the user asks
 otherwise, and successful mutations are followed by annotated spine and

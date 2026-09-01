@@ -23,7 +23,7 @@ public sealed class ImageGenerationBrief
     public string Setting { get; init; } = string.Empty;
     public string StyleMediumPalette { get; init; } = string.Empty;
     public string CameraFraming { get; init; } = string.Empty;
-    [Description("Placement and visual hierarchy. For page art with editable overlay text, explicitly name the naturally quiet text landing zone and match it to target.reservedTextRegions.")]
+    [Description("Placement and visual hierarchy. For page art with editable overlay text, explicitly name the naturally quiet text landing zone and match the protected regions returned by the target read.")]
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
     [Description("Only meaningful story, continuity, safety, or output constraints. Prefer positive requirements and avoid invented exclusions such as 'and nothing else'.")]
@@ -86,6 +86,8 @@ public sealed class ImageGenerationTarget
     [Description("Optional canvas-local percentage bounds for generating only a subregion of a verified PageSurface, CoverSurface, or CoreCoverSurface. The bounds become the physical target and all protected regions are transformed into that local coordinate system.")]
     public CompositionBounds? SurfaceBounds { get; init; }
     internal bool MinimumDpiIsSurfaceDefault { get; init; }
+    internal bool UseApplicationResolutionPolicy { get; init; }
+    internal bool FillTarget { get; init; }
 }
 
 public sealed class MinimumDpiUnachievableException : InvalidOperationException
@@ -458,11 +460,12 @@ public sealed class ImagePromptComposer(
                 descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
                     projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
             }
-            descriptor = ApplyLayoutRasterOverride(descriptor, target.Size);
-            descriptor = ApplyMinimumDpi(descriptor, target, target.Size);
+            descriptor = target.UseApplicationResolutionPolicy
+                ? ApplyApplicationResolutionPolicy(descriptor, target)
+                : ApplyMinimumDpi(ApplyLayoutRasterOverride(descriptor, target.Size), target, target.Size);
             if (descriptor.RequestedWidthPixels <= 0 || descriptor.RequestedHeightPixels <= 0)
                 throw new ArgumentException("The physical target aspect cannot be represented by one provider-compatible raster. Use a minimum-DPI preflight and its multi-image surface plan, reduce the placement, or choose a compatible frame aspect.", nameof(target));
-            var appendix = BuildLayoutTargetAppendix(descriptor);
+            var appendix = BuildLayoutTargetAppendix(descriptor, target.FillTarget);
             return new(
                 descriptor.RequestedRaster,
                 descriptor.AspectRatio,
@@ -662,6 +665,47 @@ public sealed class ImagePromptComposer(
         throw CreateMinimumDpiException(resolution, null, target);
     }
 
+    private LayoutGenerationTargetDescriptor ApplyApplicationResolutionPolicy(
+        LayoutGenerationTargetDescriptor descriptor,
+        ImageGenerationTarget target)
+    {
+        var targetDpi = descriptor.EffectiveDpiExpectation;
+        var resolution = target.FillTarget
+            ? LayoutImageSizeResolver.ResolveFillMinimumDpi(
+                descriptor.WidthInches,
+                descriptor.HeightInches,
+                targetDpi)
+            : LayoutImageSizeResolver.ResolveMinimumDpi(
+                descriptor.WidthInches,
+                descriptor.HeightInches,
+                targetDpi);
+        if (resolution.Raster is { } raster)
+        {
+            return descriptor with
+            {
+                RequestedWidthPixels = raster.Width,
+                RequestedHeightPixels = raster.Height,
+                RequestedRaster = raster.Size,
+                RequestedMinimumDpi = targetDpi,
+                CropToFill = target.FillTarget,
+            };
+        }
+        if (resolution.PrintUpscalePlan is { } plan && options.Value.PrintUpscale)
+        {
+            return descriptor with
+            {
+                RequestedWidthPixels = plan.NativeRaster.Width,
+                RequestedHeightPixels = plan.NativeRaster.Height,
+                RequestedRaster = plan.NativeRaster.Size,
+                RequestedMinimumDpi = targetDpi,
+                PrintUpscalePlan = plan,
+                CropToFill = target.FillTarget,
+            };
+        }
+
+        throw CreateMinimumDpiException(resolution, null, target);
+    }
+
     private LayoutPrintUpscalePlan? TryCreatePrintUpscalePlan(
         LayoutImageDpiResolution resolution,
         LayoutImageSize nativeRaster,
@@ -782,18 +826,17 @@ public sealed class ImagePromptComposer(
         }
     }
 
-    private static string BuildLayoutTargetAppendix(LayoutGenerationTargetDescriptor descriptor)
+    private static string BuildLayoutTargetAppendix(
+        LayoutGenerationTargetDescriptor descriptor,
+        bool fillTarget)
     {
         var prompt = new StringBuilder();
-        var dpiExpectation = descriptor.RequestedMinimumDpi ?? descriptor.EffectiveDpiExpectation;
         prompt.Append("Layout target: ").Append(descriptor.TargetKind)
-            .Append("; intended frame aspect ratio ").Append(descriptor.AspectRatio)
-            .Append("; physical surface ")
-            .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
-            .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
-            .Append(dpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
-        prompt.Append("Request raster ").Append(descriptor.RequestedRaster)
-            .Append(" and preserve the target aspect exactly if the provider returns different pixel dimensions. Compose edge-to-edge for the complete surface, keep important content within its usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup.").AppendLine();
+            .Append("; intended frame aspect ratio ").Append(descriptor.AspectRatio).AppendLine(".");
+        prompt.Append(fillTarget
+            ? "Compose edge-to-edge so the image can crop-to-fill the complete target. Extend background naturally through any crop margin and keep focal subjects, faces, hands, lettering-safe space, and other essential content within the centered target-aspect window. "
+            : "Compose for the complete target while preserving its intended framing. ");
+        prompt.Append("Keep important content within usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)

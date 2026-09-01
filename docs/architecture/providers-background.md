@@ -249,14 +249,21 @@ minimum DPI, an undersized provider result is retained unattached with
 Free-standing generation
 and unmasked edit callers send a concrete provider-valid raster derived from the
 configured Core Book page by default; layout-bound callers replace it with their
-server-owned target raster. Editor and Publish require 300 effective DPI for
-those concrete layout targets; Images and Outline keep moderate defaults unless
+server-owned target raster. Publish derives that raster entirely behind its tool
+boundary from the target's internal output expectation; the assistant supplies
+only target identity, aspect, and protected geometry. Editor retains its explicit
+layout controls; Images and Outline keep moderate defaults unless
 their callers explicitly request a minimum against the Core Book physical basis.
 When no single provider raster can meet the required DPI, the application-side
 print-upscale pipeline dispatches the largest compatible native raster and, after
 completion, derives a separate print-upscaled asset with deterministic Lanczos3
 sampling; the provider transport is never asked for, or told about, the final
 print raster.
+For Publish crop-to-fill targets, the resolver may use the nearest supported
+provider aspect and prepares a same-aspect derivative that covers both target
+edges. The decoded provider output, rather than an assumed requested raster,
+drives the final fill dimensions. These details stay in provenance and are not
+projected into Publish tool results.
 Same-aspect generative up-resolution preserves the complete framing and asks
 for reconstructed detail, while intentional outpainting separately describes
 the desired larger framing and direction. The provider owns how source pixels

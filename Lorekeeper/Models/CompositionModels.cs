@@ -229,7 +229,8 @@ public sealed record LayoutGenerationTargetDescriptor(
     IReadOnlyList<string> Diagnostics,
     CompositionBounds? SurfaceBounds = null,
     double? RequestedMinimumDpi = null,
-    LayoutPrintUpscalePlan? PrintUpscalePlan = null);
+    LayoutPrintUpscalePlan? PrintUpscalePlan = null,
+    bool CropToFill = false);
 
 public sealed record LayoutValidationDiagnostic(string Severity, string Code, string Message, Guid? ObjectId = null);
 

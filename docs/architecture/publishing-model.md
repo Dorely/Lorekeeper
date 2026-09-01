@@ -89,7 +89,9 @@ returning to Core inheritance.
 The current Core page aspect also supplies the default provider-valid raster for
 free-standing image generation and editing throughout the application; concrete
 Figure, page, frame, and cover targets retain their own exact geometry. Editor
-and Publish resolve layout-bound generation to at least 300 effective DPI,
+retains its existing explicit layout-generation controls. Publish supplies only
+the concrete target aspect and protected regions to the assistant; the managed
+image workflow selects resolution from the target's internal output policy,
 including hardcover targets. Digital-PDF placement validation remains 180 DPI;
 that validation threshold does not lower the authoring-generation default.
 Release creation is explicit: no release or ISBN is created automatically. The
@@ -245,16 +247,14 @@ Release cover reads expose exact Back, Spine, and Front region descriptors with
 bounds, physical aspect, safety/guides, participation, and geometry fingerprints.
 The assistant can read or preview one region, fill it with a project image, set
 spine direction, and request an exact region generation target. Region-targeted
-generation remains unattached and must resolve a 300-DPI-compatible raster
-without stretching. If one native raster cannot satisfy provider limits but the
-target's aspect is provider-representable, the request proceeds through the
-print-upscale pipeline: generation at the largest compatible raster plus a
-deterministic Lanczos3 print upscale to the exact print raster without adding detail. Back, Spine, and
-Front are preferred split boundaries and already resolve natively; when no single
-provider raster can represent a target's aspect, the request fails before
-dispatch with a smallest equal-panel plan, each panel targets exact surface
-bounds, and the assistant must inspect annotated regions plus the clean whole
-wrap without claiming independent generations are seamless.
+generation remains unattached and is composed edge-to-edge for Cover placement.
+The assistant receives aspect and safety geometry but no raster or density
+controls. Lorekeeper chooses a target-specific native request and, when needed,
+creates a deterministic same-aspect derivative large enough to crop-fill the
+region without stretching. Extremely narrow spines use the closest supported
+generated aspect with crop-safe margins rather than an assistant-managed panel
+plan. Back, Spine, and Front remain the preferred semantic regions, and the
+assistant must inspect annotated regions plus the clean whole wrap after placement.
 
 Cover text frames may use literal text or inline canonical tokens:
 `{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`, and `{{backCopy}}`.
