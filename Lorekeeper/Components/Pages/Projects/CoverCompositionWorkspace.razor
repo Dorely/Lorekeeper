@@ -116,10 +116,10 @@
                             var primaryStyle = Resolved(primarySelection);
                             <label>Text<input value="@primarySelection.TextBinding" @onchange="e => Patch(primarySelection with { TextBinding = e.Value?.ToString() ?? string.Empty })" /></label>
                             <label>Insert field<select value="" @onchange="e => AppendBindableToken(primarySelection, e.Value?.ToString())"><option value="">Choose…</option>@foreach (var token in AvailableTokens) { <option value="@token.Token">@token.Label</option> }</select></label>
-                            <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => Patch(primarySelection with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
-                            <label>Size<input class="cover-number" type="number" min="4" max="144" value="@primaryStyle.FontSizePoints" @onchange="e => Patch(primarySelection with { StyleId = null, FontSizePoints = Number(e) })" /></label>
-                            <label>Align<select value="@primaryStyle.TextAlignment" @onchange="e => Patch(primarySelection with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
-                            <label>Text<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label>
+                            <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => PatchLocalStyle(primarySelection, current => current with { FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
+                            <label>Size<input class="cover-number" type="number" min="4" max="144" value="@primaryStyle.FontSizePoints" @onchange="e => PatchLocalStyle(primarySelection, current => current with { FontSizePoints = Number(e) })" /></label>
+                            <label>Align<select value="@primaryStyle.TextAlignment" @onchange="e => PatchLocalStyle(primarySelection, current => current with { TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!, true) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                            <label>Text<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => PatchLocalStyle(primarySelection, current => current with { FillColor = Color(e) })" /></label>
                         }
                         <span class="cover-control-divider" aria-hidden="true"></span>
                         <button type="button" title="Move this object to the back of its artwork or content group" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object to the front of its artwork or content group" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
@@ -194,23 +194,23 @@
                                         <button type="button" title="Append @token.Token to this text box" @onclick="() => AppendBindableToken(selected, token.Token)">@token.Token</button>
                                     }
                                 </div>
-                                <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => Patch(selected with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
-                                <label>Font weight<input type="number" min="100" max="900" step="100" value="@resolved.FontWeight" @onchange="e => Patch(selected with { StyleId = null, FontWeight = (int)Number(e) })" /></label>
-                                <label>Font size<input type="number" min="4" max="144" value="@resolved.FontSizePoints" @onchange="e => Patch(selected with { StyleId = null, FontSizePoints = Number(e) })" /></label>
-                                <label>Line height<input type="number" min=".5" max="4" step=".05" value="@resolved.LineHeight" @onchange="e => Patch(selected with { StyleId = null, LineHeight = Number(e) })" /></label>
-                                <label>Letter spacing (em)<input type="number" min="-1" max="10" step=".01" value="@resolved.LetterSpacingEm" @onchange="e => Patch(selected with { StyleId = null, LetterSpacingEm = Number(e) })" /></label>
-                                <label>Horizontal alignment<select value="@resolved.TextAlignment" @onchange="e => Patch(selected with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
-                                <label>Vertical alignment<select value="@resolved.VerticalAlignment" @onchange="e => Patch(selected with { StyleId = null, VerticalAlignment = Enum.Parse<CompositionVerticalAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionVerticalAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
-                                <label>Text shadow<select value="@resolved.TextShadow" @onchange="e => Patch(selected with { StyleId = null, TextShadow = Enum.Parse<CompositionTextShadow>(e.Value!.ToString()!) })">@foreach (var shadow in Enum.GetValues<CompositionTextShadow>()) { <option value="@shadow">@shadow</option> }</select></label>
-                                <label>Background<input type="color" value="@ColorValue(resolved.BackgroundColor)" @onchange="e => Patch(selected with { StyleId = null, BackgroundColor = Color(e) })" /></label>
-                                <label>Background opacity<input type="range" min="0" max="1" step=".05" value="@resolved.BackgroundOpacity" @onchange="e => Patch(selected with { StyleId = null, BackgroundOpacity = Number(e) })" /></label>
+                                <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => PatchLocalStyle(selected, current => current with { FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
+                                <label>Font weight<input type="number" min="100" max="900" step="100" value="@resolved.FontWeight" @onchange="e => PatchLocalStyle(selected, current => current with { FontWeight = (int)Number(e) })" /></label>
+                                <label>Font size<input type="number" min="4" max="144" value="@resolved.FontSizePoints" @onchange="e => PatchLocalStyle(selected, current => current with { FontSizePoints = Number(e) })" /></label>
+                                <label>Line height<input type="number" min=".5" max="4" step=".05" value="@resolved.LineHeight" @onchange="e => PatchLocalStyle(selected, current => current with { LineHeight = Number(e) })" /></label>
+                                <label>Letter spacing (em)<input type="number" min="-1" max="10" step=".01" value="@resolved.LetterSpacingEm" @onchange="e => PatchLocalStyle(selected, current => current with { LetterSpacingEm = Number(e) })" /></label>
+                                <label>Horizontal alignment<select value="@resolved.TextAlignment" @onchange="e => PatchLocalStyle(selected, current => current with { TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!, true) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                                <label>Vertical alignment<select value="@resolved.VerticalAlignment" @onchange="e => PatchLocalStyle(selected, current => current with { VerticalAlignment = Enum.Parse<CompositionVerticalAlignment>(e.Value!.ToString()!, true) })">@foreach (var alignment in Enum.GetValues<CompositionVerticalAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                                <label>Text shadow<select value="@resolved.TextShadow" @onchange="e => PatchLocalStyle(selected, current => current with { TextShadow = Enum.Parse<CompositionTextShadow>(e.Value!.ToString()!, true) })">@foreach (var shadow in Enum.GetValues<CompositionTextShadow>()) { <option value="@shadow">@shadow</option> }</select></label>
+                                <label>Background<input type="color" value="@ColorValue(resolved.BackgroundColor)" @onchange="e => PatchLocalStyle(selected, current => current with { BackgroundColor = Color(e) })" /></label>
+                                <label>Background opacity<input type="range" min="0" max="1" step=".05" value="@resolved.BackgroundOpacity" @onchange="e => PatchLocalStyle(selected, current => current with { BackgroundOpacity = Number(e) })" /></label>
                             }
                             @if (selected.Kind is CompositionObjectKind.Text or CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse or CompositionObjectKind.Line)
                             {
                                 var resolved = Resolved(selected);
-                                <label>Fill<input type="color" value="@ColorValue(resolved.FillColor)" @onchange="e => Patch(selected with { StyleId = null, FillColor = Color(e) })" /></label>
-                                <label>Stroke<input type="color" value="@ColorValue(resolved.StrokeColor)" @onchange="e => Patch(selected with { StyleId = null, StrokeColor = Color(e) })" /></label>
-                                <label>Stroke width<input type="number" min="0" max="72" step=".25" value="@resolved.StrokeWidthPoints" @onchange="e => Patch(selected with { StyleId = null, StrokeWidthPoints = Number(e) })" /></label>
+                                <label>Fill<input type="color" value="@ColorValue(resolved.FillColor)" @onchange="e => PatchLocalStyle(selected, current => current with { FillColor = Color(e) })" /></label>
+                                <label>Stroke<input type="color" value="@ColorValue(resolved.StrokeColor)" @onchange="e => PatchLocalStyle(selected, current => current with { StrokeColor = Color(e) })" /></label>
+                                <label>Stroke width<input type="number" min="0" max="72" step=".25" value="@resolved.StrokeWidthPoints" @onchange="e => PatchLocalStyle(selected, current => current with { StrokeWidthPoints = Number(e) })" /></label>
                             }
                             <div class="cover-actions"><button type="button" @onclick="() => SendToBack(selected)">Send back</button><button type="button" @onclick="() => BringToFront(selected)">Bring front</button><button type="button" class="danger" @onclick="() => Delete(selected.Id)">Delete</button></div>
                         }
@@ -433,7 +433,18 @@
         _autosaveCancellation?.Cancel();
         _ = SaveAsync();
     }
-    private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) { _objects[index] = item; MarkDirty(); } }
+    private void Patch(CompositionObject item) => Patch(item.Id, _ => item);
+    private void Patch(Guid itemId, Func<CompositionObject, CompositionObject> update)
+    {
+        Snapshot();
+        var index = _objects.FindIndex(candidate => candidate.Id == itemId);
+        if (index < 0)
+            return;
+        _objects[index] = update(_objects[index]);
+        MarkDirty();
+    }
+    private void PatchLocalStyle(CompositionObject item, Func<CompositionObject, CompositionObject> update) =>
+        Patch(item.Id, current => update(Resolved(current) with { StyleId = null }));
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
     private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = ContentLayerId, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = NextFrontZIndex(), TextBinding = semantic ? "Text" : string.Empty, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; MarkDirty(); }
@@ -530,10 +541,24 @@
     private bool IsCropRepositioning(CompositionObject item) => _cropReposition && item.Id == _selectedId && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover;
     private void ToggleCropReposition(CompositionObject item) { if (item.Id != _selectedId) SelectObject(item.Id); _cropReposition = !IsCropRepositioning(item); }
     private void ToggleObjectLock(CompositionObject item) => Patch(item with { Locked = !item.Locked });
-    private void SetObjectStyle(CompositionObject item, ChangeEventArgs e) => Patch(item with { StyleId = Guid.TryParse(e.Value?.ToString(), out var styleId) ? styleId : null });
+    private void SetObjectStyle(CompositionObject item, ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var styleId))
+        {
+            Patch(item.Id, current => current with { StyleId = styleId });
+            return;
+        }
+        Patch(item.Id, current => Resolved(current) with { StyleId = null });
+    }
     private CompositionObject Resolved(CompositionObject item) { var style = item.StyleId is Guid styleId ? _styles.FirstOrDefault(candidate => candidate.Id == styleId) : null; return style is null ? item : item with { FontFamilyKey = style.FontFamilyKey, FontWeight = style.FontWeight, Italic = style.Italic, FontSizePoints = style.FontSizePoints, LineHeight = style.LineHeight, LetterSpacingEm = style.LetterSpacingEm, FillColor = style.FillColor, BackgroundColor = style.BackgroundColor, BackgroundOpacity = style.BackgroundOpacity, StrokeColor = style.StrokeColor, StrokeWidthPoints = style.StrokeWidthPoints, TextAlignment = style.TextAlignment, VerticalAlignment = style.VerticalAlignment, TextShadow = style.TextShadow }; }
     private void CreateStyleFrom(CompositionObject item) { Snapshot(); var resolved = Resolved(item); var style = new CompositionObjectStyle { Id = Guid.NewGuid(), Name = $"Style {_styles.Count + 1}", FontFamilyKey = resolved.FontFamilyKey, FontWeight = resolved.FontWeight, Italic = resolved.Italic, FontSizePoints = resolved.FontSizePoints, LineHeight = resolved.LineHeight, LetterSpacingEm = resolved.LetterSpacingEm, FillColor = resolved.FillColor, BackgroundColor = resolved.BackgroundColor, BackgroundOpacity = resolved.BackgroundOpacity, StrokeColor = resolved.StrokeColor, StrokeWidthPoints = resolved.StrokeWidthPoints, TextAlignment = resolved.TextAlignment, VerticalAlignment = resolved.VerticalAlignment, TextShadow = resolved.TextShadow }; _styles.Add(style); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item with { StyleId = style.Id }; MarkDirty(); }
-    private void DeleteStyle(Guid styleId) { Snapshot(); _styles.RemoveAll(style => style.Id == styleId); _objects = _objects.Select(item => item.StyleId == styleId ? item with { StyleId = null } : item).ToList(); MarkDirty(); }
+    private void DeleteStyle(Guid styleId)
+    {
+        Snapshot();
+        _objects = _objects.Select(item => item.StyleId == styleId ? Resolved(item) with { StyleId = null } : item).ToList();
+        _styles.RemoveAll(style => style.Id == styleId);
+        MarkDirty();
+    }
     private void Ungroup(Guid groupId)
     {
         var group = _objects.FirstOrDefault(item => item.Id == groupId && item.Kind == CompositionObjectKind.Group);
@@ -663,11 +688,15 @@
     private async Task SaveAsync()
     {
         await _saveGate.WaitAsync();
+        PublicationCoverDesignView? baselineCover = null;
+        CompositionScene? baselineScene = null;
         try
         {
             if (!_dirty || _cover is null || _scene is null)
                 return;
             _error = null;
+            baselineCover = _cover;
+            baselineScene = _scene;
             var changeVersion = _changeVersion;
             var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() });
             var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true, _spineDirection);
@@ -690,49 +719,108 @@
                         _cover.EditionId,
                         _cover.EditionId),
                 SerializeHistorySelection());
+            var savedScene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(
+                    _cover.CompositionSceneJson,
+                    ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The saved cover scene is empty."));
+            _scene = savedScene;
             if (_changeVersion == changeVersion)
             {
-                _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
-                    JsonSerializer.Deserialize<CompositionScene>(
-                        _cover.CompositionSceneJson,
-                        ManuscriptCodec.JsonOptions)
-                    ?? throw new InvalidDataException("The saved cover scene is empty."));
-                _objects = _scene.Objects.ToList();
-                _layers = _scene.Layers.ToList();
-                _styles = _scene.Styles.ToList();
+                _objects = savedScene.Objects.ToList();
+                _layers = savedScene.Layers.ToList();
+                _styles = savedScene.Styles.ToList();
                 _dirty = false;
             }
             await Saved.InvokeAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            when (baselineCover is not null && baselineScene is not null)
         {
-            var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
-            _cover = _loadedCoreBook
-                ? await Books.GetCoverAsync(saveProjectId)
-                : await Covers.GetSurfaceAsync(saveProjectId, _loadedEditionId, _surfaceRole);
-            _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
-                JsonSerializer.Deserialize<CompositionScene>(
-                    _cover.CompositionSceneJson,
-                    ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException("The current cover scene is empty."));
-            _objects = _scene.Objects.ToList();
-            _layers = _scene.Layers.ToList();
-            _styles = _scene.Styles.ToList();
-            _title = _cover.Title;
-            _subtitle = _cover.Subtitle;
-            _author = _cover.Author;
-            _spineText = _cover.SpineText;
-            _backCopy = _cover.BackCopy;
-            _background = _cover.BackgroundColor;
-            _barcodeMode = _cover.BarcodeMode;
-            _spineDirection = _cover.SpineReadingDirection;
-            _dirty = false;
-            _error = null;
+            await MergeConcurrentCoverAsync(baselineCover, baselineScene);
+            ScheduleAutosave();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _saveGate.Release(); }
     }
+    private async Task MergeConcurrentCoverAsync(PublicationCoverDesignView baselineCover, CompositionScene baselineScene)
+    {
+        var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
+        var currentCover = _loadedCoreBook
+            ? await Books.GetCoverAsync(saveProjectId)
+            : await Covers.GetSurfaceAsync(saveProjectId, _loadedEditionId, _surfaceRole);
+        var currentScene = CoverCompositionFactory.KeepArtworkBehindCopy(
+            JsonSerializer.Deserialize<CompositionScene>(
+                currentCover.CompositionSceneJson,
+                ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The current cover scene is empty."));
+        var localScene = CoverCompositionFactory.KeepArtworkBehindCopy(
+            baselineScene with
+            {
+                Layers = _layers.ToList(),
+                Styles = _styles.ToList(),
+                Objects = _objects.ToList(),
+            });
+        _layers = MergeConcurrentItems(baselineScene.Layers, localScene.Layers, currentScene.Layers, item => item.Id);
+        _styles = MergeConcurrentItems(baselineScene.Styles, localScene.Styles, currentScene.Styles, item => item.Id);
+        _objects = MergeConcurrentItems(baselineScene.Objects, localScene.Objects, currentScene.Objects, item => item.Id);
+        _title = MergeConcurrentValue(baselineCover.Title, _title, currentCover.Title);
+        _subtitle = MergeConcurrentValue(baselineCover.Subtitle, _subtitle, currentCover.Subtitle);
+        _author = MergeConcurrentValue(baselineCover.Author, _author, currentCover.Author);
+        _spineText = MergeConcurrentValue(baselineCover.SpineText, _spineText, currentCover.SpineText);
+        _backCopy = MergeConcurrentValue(baselineCover.BackCopy, _backCopy, currentCover.BackCopy);
+        _background = MergeConcurrentValue(baselineCover.BackgroundColor, _background, currentCover.BackgroundColor);
+        _barcodeMode = MergeConcurrentValue(baselineCover.BarcodeMode, _barcodeMode, currentCover.BarcodeMode);
+        _spineDirection = MergeConcurrentValue(baselineCover.SpineReadingDirection, _spineDirection, currentCover.SpineReadingDirection);
+        _cover = currentCover;
+        _scene = currentScene;
+        _dirty = true;
+        _changeVersion++;
+        _error = null;
+    }
+    private static List<T> MergeConcurrentItems<T>(
+        IReadOnlyList<T> baseline,
+        IReadOnlyList<T> local,
+        IReadOnlyList<T> current,
+        Func<T, Guid> id)
+    {
+        var baselineById = baseline.ToDictionary(id);
+        var localById = local.ToDictionary(id);
+        var result = current.ToList();
+        foreach (var baselineItem in baseline)
+        {
+            var itemId = id(baselineItem);
+            if (!localById.TryGetValue(itemId, out var localItem))
+            {
+                result.RemoveAll(candidate => id(candidate) == itemId);
+                continue;
+            }
+            if (SameSnapshot(baselineItem, localItem))
+                continue;
+            var currentIndex = result.FindIndex(candidate => id(candidate) == itemId);
+            if (currentIndex < 0)
+                result.Add(localItem);
+            else
+                result[currentIndex] = localItem;
+        }
+        foreach (var localItem in local.Where(item => !baselineById.ContainsKey(id(item))))
+        {
+            var itemId = id(localItem);
+            var currentIndex = result.FindIndex(candidate => id(candidate) == itemId);
+            if (currentIndex < 0)
+                result.Add(localItem);
+            else
+                result[currentIndex] = localItem;
+        }
+        return result;
+    }
+    private static bool SameSnapshot<T>(T left, T right) => string.Equals(
+        JsonSerializer.Serialize(left, ManuscriptCodec.JsonOptions),
+        JsonSerializer.Serialize(right, ManuscriptCodec.JsonOptions),
+        StringComparison.Ordinal);
+    private static T MergeConcurrentValue<T>(T baseline, T local, T current) =>
+        EqualityComparer<T>.Default.Equals(baseline, local) ? current : local;
     public async Task<bool> FlushAsync()
     {
         _autosaveCancellation?.Cancel();

@@ -358,10 +358,16 @@ diagnostics, and secondary settings. It does not expose a permanent inspector
 or layer manager that steals canvas width. Saves are serialized per mounted
 workspace. Each save uses an immutable semantic/scene snapshot, adopts returned
 revisions before the next queued save, and clears dirty state only when no
-newer local mutation exists. Revision-checked assistant mutations acquire the
-project mutation lease, reread tracked state, commit, and return the
-authoritative snapshot. Stale or failed mutations cannot leak tracked entities
-into a later operation.
+newer local mutation exists. A cover object-format override materializes every
+resolved reusable-style value before detaching the style, and applies the
+requested property to the latest mounted object rather than a stale render
+snapshot. If an external or assistant cover save advances the revision while a
+manual save is in flight, the workspace three-way merges unchanged remote
+items and locally changed items against its loaded baseline, adopts the current
+revision, and retries; it must not reload over dirty manual work.
+Revision-checked assistant mutations acquire the project mutation lease, reread
+tracked state, commit, and return the authoritative snapshot. Stale or failed
+mutations cannot leak tracked entities into a later operation.
 
 `ICompositionCanvasPreviewService` renders the exact selected scene revision
 as one transient PNG surface. Clean mode returns the composed artwork;
