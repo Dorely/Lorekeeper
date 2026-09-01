@@ -352,7 +352,7 @@ the live test project; terminate the browser host after the run.
   update and select the affected live canvas object.
 - Confirm paperback shows back, spine, front, bleed/safe/fold guides, and barcode
   reserve, while Digital PDF/EPUB shows only a front surface.
-- Verify canonical title/subtitle/author/spine/back-copy bindings, project font
+- Verify canonical publication-metadata and derived spine-text bindings, project font
   selection, image crop-position state, shapes, layers, grouping, styles, and
   logical reading order.
 - Add several cover images and text objects. Confirm artwork remains behind copy,

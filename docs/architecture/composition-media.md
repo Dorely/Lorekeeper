@@ -388,7 +388,7 @@ as one transient PNG surface. Clean mode returns the composed artwork;
 annotated mode adds safe/trim/gutter/center/bleed/object indicators plus
 overflow and clipping diagnostics. Cache keys include semantic and scene
 revisions, referenced image/font bytes, and any resolved cover-copy bindings.
-Cover previews resolve canonical title, subtitle, author, spine, and back-copy
+Cover previews resolve canonical publication metadata and derived spine-text
 bindings at render time without changing the persisted scene; page previews
 retain their existing semantic-manuscript resolution. Editor and Publish
 persist the preview through their transcript visual boundary so the exact image
