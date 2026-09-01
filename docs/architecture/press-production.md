@@ -175,11 +175,13 @@ Text, manuscript-decoration vectors, and images follow the selected interior
 color space; a black-and-white job converts quotation-rule and caption tones to
 gray while preserving color-cover independence.
 
-Composition text uses the scene's Start, Center, End, or Justify alignment.
-Press emits bounded inter-word spacing for justified soft-wrapped non-final
-lines, leaves final and explicit hard-break paragraph-ending lines ragged, and
-applies the same spacing to text-shadow and foreground paint in the layout
-trace and PDF.
+Flowing manuscript and composition text distribute the complete residual line
+width as inter-word spacing for justified soft-wrapped non-final lines. This
+keeps exported composition text consistent with the editor surface while using
+the same full-measure rule for manuscript typography. Final lines and explicit
+hard-break paragraph endings remain ragged. Composition text uses the scene's
+Start, Center, End, or Justify alignment and applies identical spacing to
+text-shadow and foreground paint in the layout trace and PDF.
 
 B&N `bn-print-pdfa1b-v1` emits PDF 1.4 with PDF/A-1b identification, embedded
 fonts, output intent, flattened transparency, and profile-calculated page boxes.

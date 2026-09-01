@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 11);
-    assert_eq!(value["rendererVersion"], "2.1.8");
+    assert_eq!(value["rendererVersion"], "2.1.9");
     assert_eq!(
         value["profiles"],
         json!([
@@ -64,7 +64,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 11);
-    assert_eq!(response["rendererVersion"], "2.1.8");
+    assert_eq!(response["rendererVersion"], "2.1.9");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1206,8 +1206,8 @@ fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data(
     assert!(
         justified_lines.iter().any(|line| line["wordSpacing"]
             .as_f64()
-            .is_some_and(|spacing| spacing > 0.0)),
-        "composition Justify must distribute bounded spacing on wrapped non-final lines"
+            .is_some_and(|spacing| spacing > 12.0 * 0.25)),
+        "composition Justify must distribute the full residual width even when it exceeds the former quarter-em cap"
     );
     let hard_break_line = justified_lines
         .iter()
