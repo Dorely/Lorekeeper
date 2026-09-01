@@ -239,7 +239,7 @@ public static class LayoutImageSizeResolver
 
         var targetAspect = widthInches / heightInches;
         var providerAspect = Math.Clamp(targetAspect, 1d / MaximumAspectRatio, MaximumAspectRatio);
-        var compatible = BuildAspectCompatibleSizes(providerAspect)
+        var compatible = BuildAspectCompatibleSizes(providerAspect, useNearestAspectFallback: true)
             .Select(size => new CandidateWithDpi(
                 size,
                 Math.Min(size.Width / widthInches, size.Height / heightInches),
@@ -345,7 +345,7 @@ public static class LayoutImageSizeResolver
         ValidatePhysicalDimensions(widthInches, heightInches);
         ValidateMinimumDpi(dpi);
         ArgumentNullException.ThrowIfNull(nativeRaster);
-        Validate(nativeRaster.Width, nativeRaster.Height);
+        ValidatePositiveRaster(nativeRaster);
 
         var minimum = ResolvePrintRaster(widthInches, heightInches, dpi);
         var nativeAspect = (double)nativeRaster.Width / nativeRaster.Height;
@@ -582,9 +582,11 @@ public static class LayoutImageSizeResolver
             .ToList();
     }
 
-    private static IReadOnlyList<LayoutImageSize> BuildAspectCompatibleSizes(double aspect)
+    private static IReadOnlyList<LayoutImageSize> BuildAspectCompatibleSizes(
+        double aspect,
+        bool useNearestAspectFallback = false)
     {
-        var sizes = new List<LayoutImageSize>();
+        var candidates = new List<(LayoutImageSize Size, double AspectError)>();
         for (var width = SizeMultiple; width <= MaximumEdge; width += SizeMultiple)
         {
             var nearestHeight = (int)Math.Round(width / aspect / SizeMultiple) * SizeMultiple;
@@ -597,13 +599,32 @@ public static class LayoutImageSizeResolver
                 if (pixels is < MinimumPixels or > MaximumPixels)
                     continue;
                 var actualAspect = (double)width / height;
-                if (actualAspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio
-                    || !AspectMatches(actualAspect, aspect))
+                if (actualAspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
                     continue;
-                sizes.Add(new LayoutImageSize(width, height));
+                candidates.Add((
+                    new LayoutImageSize(width, height),
+                    Math.Abs(Math.Log(actualAspect / aspect))));
             }
         }
-        return sizes;
+
+        var compatible = candidates
+            .Where(candidate => candidate.AspectError <= PreferredAspectError)
+            .Select(candidate => candidate.Size)
+            .ToList();
+        if (compatible.Count > 0 || !useNearestAspectFallback || candidates.Count == 0)
+            return compatible;
+
+        var nearestError = candidates.Min(candidate => candidate.AspectError);
+        return candidates
+            .Where(candidate => Math.Abs(candidate.AspectError - nearestError) <= ExactAspectError)
+            .Select(candidate => candidate.Size)
+            .ToList();
+    }
+
+    private static void ValidatePositiveRaster(LayoutImageSize raster)
+    {
+        if (raster.Width <= 0 || raster.Height <= 0)
+            throw new ArgumentException("Image raster dimensions must be positive.", nameof(raster));
     }
 
     private static long RoundUpToMultiple(double value)

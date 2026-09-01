@@ -260,10 +260,16 @@ completion, derives a separate print-upscaled asset with deterministic Lanczos3
 sampling; the provider transport is never asked for, or told about, the final
 print raster.
 For Publish crop-to-fill targets, the resolver may use the nearest supported
-provider aspect and prepares a same-aspect derivative that covers both target
+provider aspect. It selects aspect-compatible request rasters first, then uses
+the highest effective density that remains within provider edge and pixel caps;
+if the aligned provider grid has no raster inside the preferred aspect
+tolerance, it uses the nearest aligned aspect instead of rejecting the target.
+The application then prepares a same-aspect derivative that covers both target
 edges. The decoded provider output, rather than an assumed requested raster,
-drives the final fill dimensions. These details stay in provenance and are not
-projected into Publish tool results.
+drives the final fill dimensions, and decoded output is required only to have
+positive dimensions: provider responses are not incorrectly revalidated against
+the divisibility, edge, or pixel rules that apply to outbound requests. These
+details stay in provenance and are not projected into Publish tool results.
 Same-aspect generative up-resolution preserves the complete framing and asks
 for reconstructed detail, while intentional outpainting separately describes
 the desired larger framing and direction. The provider owns how source pixels
