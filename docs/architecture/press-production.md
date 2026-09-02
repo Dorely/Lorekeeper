@@ -141,10 +141,27 @@ The renderer rejects absolute paths, traversal, links/reparse points,
 undeclared or changed bytes, corrupt assets, restricted/unsupported fonts,
 existing output, and cancellation before promotion. It creates a fresh
 staging directory, validates every PDF independently, and atomically renames
-only after all checks succeed. It never overwrites previous output. Declared
+only after all checks succeed. Within its own staging directory it never
+overwrites previous output; superseded publication jobs are pruned at the
+application level instead, as described below. Declared
 rasters are decoded and structurally validated once; validated pixels are
 reused only by interior or cover surfaces that reference them. Shared color
 transforms are reused when interior and cover intent match.
+
+Publication render output is retained latest-only per edition and scope. When a
+render job completes successfully, every other terminal (non-Queued/Rendering)
+job in the same project/edition/scope group is deleted, and its artifacts, page
+maps, and evidence disappear through the owning cascades. The new artifact set
+is committed before older jobs are pruned, so there is never a window without a
+usable artifact, and queued or rendering jobs are never touched. Startup
+recovery applies the same prune, keeping the newest artifact-bearing terminal
+job per group; the one-time historical prune was performed by the applied
+`PruneSupersededPublicationRenderJobs` migration, which is immutable applied
+history and not an active code path. Startup also sweeps stale temporary Press
+directories under `%TEMP%\Lorekeeper`: `press-jobs` directories not owned by a
+queued or rendering job are deleted immediately, while `press-previews` and
+`version-history` directories older than 24 hours are removed behind a guard
+against racing live operations.
 
 Press protocol v12 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode

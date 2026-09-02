@@ -312,6 +312,28 @@ app-process coordinators appropriate to their lifetime. The common invariants ar
 7. Reconcile interrupted work according to the feature's documented contract.
    Never apply one generic resume policy to unlike jobs.
 
+### Diagnostic logging and redaction boundary
+
+All provider request/response and tool-argument logging flows through
+`Lorekeeper/Diagnostics/LogRedaction`, a fail-safe redaction of credential
+headers (`authorization`, `api-key`, `x-api-key`, `chatgpt-account-id`, and
+`openai-organization`) and token-like JSON fields (`token`, `access_token`,
+`refresh_token`, `api_key`, `apikey`, and `session_key`); HTTP failure
+exception messages carry redacted bodies. Redaction is structural, not a
+per-call convention: no provider payload reaches a log sink without passing
+through it.
+
+A development-only diagnostic file logger,
+`Lorekeeper/Diagnostics/DevFileLoggerProvider`, writes bounded daily files to
+`%LOCALAPPDATA%\Lorekeeper\dev-logs` under a 14-day / 50 MB retention cap, and
+is registered only when the host environment is Development; production and
+packaged Electron hosts never register it. Render, publication-preparation, and
+image-job services log lifecycle and failure details (profile, fingerprint,
+scope, and `request.json` path) at Debug/Warning in that layer. Because
+terminal job rows — including `RawProviderResponseJson` — are purged on next
+use, provider payload diagnosis lives in these Development logs, not in
+database rows.
+
 Ingest uses an in-process queue, notifier, hosted worker, and scoped processor;
 restart/delete additionally clean source-owned graph/index state. Import uses a
 durable queued upload, notifier, hosted worker, and atomic processor. Embedding
@@ -352,8 +374,9 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 
 Compile and run the normal HTTP startup smoke check after provider or worker source
 changes. Static inspection must confirm registration lifetime, startup-gate use,
-fresh scope/database-operation boundaries, cancellation propagation, redacted
-errors, and no credential logging. A successful build is not evidence that OAuth,
+fresh scope/database-operation boundaries, cancellation propagation, fail-safe
+redaction before any log sink, and no credential logging outside the
+Development-only dev-log layer. A successful build is not evidence that OAuth,
 provider calls, embeddings, web search, guarded fetching, or image generation
 works.
 

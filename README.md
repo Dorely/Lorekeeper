@@ -266,6 +266,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Book PDF with its front cover as page one, searchable/selectable text,
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
+  Publish history shows only the latest artifact set per edition and render
+  scope: a successful render prunes superseded finished jobs together with
+  their artifacts and page maps, so older render outputs are no longer kept.
   Physical **Prepare files** reuses Interior and Cover scopes independently in a
   fixed interior-first order: a cover-only edit regenerates only the cover, while
   an interior change establishes its validated page count before cover work.
@@ -566,6 +569,13 @@ repository also consumes GitHub Actions minutes for its hosted macOS job.
 
 SQLite databases, API keys, OAuth tokens, temporary verification databases, and
 publish output are local state and are ignored by git.
+
+Development builds (the host environment must be Development) write diagnostic
+logs to bounded daily files under
+`%LOCALAPPDATA%\Lorekeeper\dev-logs`, retained for 14 days or 50 MB. These
+files carry redacted provider request/response and tool-argument detail used to
+diagnose render and image-job failures; production and packaged Electron builds
+never write them.
 
 Every launch begins with Lorekeeper's application-owned startup screen. It
 shows ordinary workspace initialization and names each database compatibility

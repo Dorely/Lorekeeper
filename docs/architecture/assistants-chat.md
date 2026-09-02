@@ -85,6 +85,11 @@ that surface's normal initial greeting in one owning database write, and leaves
 the root available for the panel's existing full reload path. The maintenance
 lease prevents an active or newly starting turn from racing this replacement.
 
+Chat data is the retained exception to the disposable job-history rule applied
+elsewhere: transcripts, tool-call rows, and their visual BLOBs persist until
+the author presses Reset, which permanently deletes them through the owning
+cascades. Compaction is in-memory only and never rewrites persisted rows.
+
 The composer stores unsent text in unencrypted browser/Electron local storage,
 keyed by project and surface. Drafts survive remounts, navigation, and circuit
 reloads without crossing project or assistant boundaries and are deleted on

@@ -100,10 +100,17 @@ The application stores local state in SQLite through `AppDbContext`, including
 provider/OAuth configuration, projects, Book Briefs, outline/graph state,
 transcripts, review/contest state, writing samples, ingest/import jobs, images,
 masks, entity visual links, fonts, publication state, composition, and binary
-assets. Image-generation partials are durable job-owned binary artifacts until
-explicit promotion moves one into the ordinary project image library. SQLite
+assets. Image-generation partials are job-owned binary artifacts until
+explicit promotion moves one into the ordinary project image library; SQLite
 deletes unpromoted partials associated with a final image when that image is
-deleted, while orphan partials remain job-owned. SQLite startup uses a busy
+deleted. Job history is disposable operational state and follows a
+terminal-sibling purge on next use: creating an image-generation, ingest,
+editor-revision, import, or publication-preparation job first deletes terminal
+sibling jobs for the same project/edition, with their child rows removed by
+cascade, and startup recovery sweeps unpromoted partials left by terminal jobs.
+The applied `PurgeTerminalJobsWithChildren` migration removed orphaned child
+rows once; migrations are immutable applied history, not active code paths.
+SQLite startup uses a busy
 timeout and WAL journal mode. sqlite-vec and
 internal FTS5 structures are initialized outside ordinary EF migrations and are
 regenerable indexes, not authoritative project data.

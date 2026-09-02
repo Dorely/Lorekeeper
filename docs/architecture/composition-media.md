@@ -214,18 +214,23 @@ implicitly.
 Every valid streamed partial is retained as exact job-owned PNG, JPEG, or WebP
 bytes, identified by output, request attempt, and provider partial index. A
 successful final output associates its partials with that output image; partials
-from interrupted, failed, or cancelled outputs remain on their job. The Images
-workspace exposes them behind the owning image or job card. Promotion is an
+from interrupted, failed, or cancelled outputs remain on their job only while
+that job's terminal row survives. Job history follows a terminal-sibling purge
+on next use: creating a new image-generation job for the same project/edition
+deletes terminal sibling jobs together with their partials, and startup
+recovery sweeps unpromoted partials that terminal jobs leave behind. The Images
+workspace exposes surviving partials behind the owning image or job card. Promotion is an
 explicit atomic transfer: the partial is normalized through the ordinary image
 asset boundary, stored as a separate unattached project image with provenance,
 and removed from the partial collection. It never inherits entity associations
 or a placement. Deleting a final image also deletes every unpromoted partial
-still associated with that image; already promoted images and unrelated orphan
-partials remain independent. Active jobs alone use an animated progress preview;
+still associated with that image; already promoted images remain independent.
+Unpromoted partials orphaned by a terminal job are swept during startup
+recovery. Active jobs alone use an animated progress preview;
 cancelled and failed jobs display their persisted terminal state and any latest
-partial. An author may delete a terminal request card and its unpromoted partials;
-this removes those job-owned previews while retaining the hidden terminal job as
-durable audit state.
+partial. An author may delete a terminal request card and its unpromoted
+partials; the hidden terminal job itself is disposable operational state and
+disappears, with its partials, when a later sibling job is created.
 
 The shared prompt composer gives generation and editing the same spatial
 discipline. Regional-guide mode focuses the requested change in the indicated
