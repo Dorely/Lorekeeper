@@ -1099,8 +1099,7 @@ public sealed class PublicationCoverService(
                     "COVER_BARCODE_OVERLAP",
                     $"Object {item.Id:N} places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.",
                     item.Id);
-            if (item.Decorative || item.SemanticRole == CompositionSemanticRole.Artifact) continue;
-            if (IsFullSurfaceArtwork(item, geometry)) continue;
+            if (item.Kind != CompositionObjectKind.Text) continue;
             var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
             var insetX = item.RegionConstraint == CompositionRegionConstraint.Spine
                 ? region.WidthPercent * .05
@@ -1137,23 +1136,6 @@ public sealed class PublicationCoverService(
         string code,
         string message,
         Guid? objectId = null) => diagnostics.Add(new(severity, code, message, objectId));
-
-    private static bool IsFullSurfaceArtwork(CompositionObject item, CoverGeometry geometry)
-    {
-        if (item.Kind != CompositionObjectKind.Image
-            || item.RegionConstraint is not (CompositionRegionConstraint.Page or CompositionRegionConstraint.Front))
-            return false;
-        var surface = new CompositionBounds();
-        if (item.RegionConstraint == CompositionRegionConstraint.Page
-            && Contains(surface, item.Bounds)
-            && Contains(item.Bounds, surface))
-            return true;
-        var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
-        return region.WidthPercent > .001
-            && region.HeightPercent > .001
-            && Contains(region, item.Bounds)
-            && Contains(item.Bounds, region);
-    }
 
     private static bool Intersects(CompositionBounds left, CompositionBounds right) =>
         left.XPercent < right.XPercent + right.WidthPercent

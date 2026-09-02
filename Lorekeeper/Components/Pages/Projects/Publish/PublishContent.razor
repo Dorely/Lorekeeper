@@ -14,6 +14,7 @@
 @inject IPublicationPaginationService Pagination
 @inject IPublicationDiagnosticPresentationService DiagnosticPresentation
 @inject IPublicationRenderService Renders
+@inject IPublicationCoverPreviewService CoverPreviews
 @inject IProjectPageSetupService PageSetups
 @inject IPrintArtifactProfileRegistry PrintArtifactProfiles
 @inject IPrintGeometryService PrintGeometry
@@ -82,6 +83,7 @@ else
                                                    RequestedSelectionId="_coverSelectionId"
                                                    InteractionLocked="_assistantRunning"
                                                    Saved="HandleCoverSavedAsync"
+                                                   PreviewRequested="OpenCoverPreviewAsync"
                                                    Back="CloseCoverEditorAsync" />
                     }
                     else if (_selectedReleaseId is null && _core is not null)
@@ -160,6 +162,62 @@ else
                                        ArtifactId="previewArtifact.Id"
                                        PageCount="@(previewArtifact.PageCount ?? 0)" />
             }
+        </section>
+    </div>
+}
+
+@if (_coverPreview is { } coverPreview && Project is not null
+    && coverPreview.Documents.FirstOrDefault(document => document.Index == _coverPreviewDocumentIndex) is { } previewDocument)
+{
+    <div class="publish-modal-backdrop" role="presentation" @onclick="CloseCoverPreview">
+        <section class="publish-modal pdf-preview-modal" role="dialog" aria-modal="true" aria-labelledby="cover-preview-title" @onclick:stopPropagation="true">
+            <header>
+                <div><span class="eyebrow">Transient cover preview</span><h2 id="cover-preview-title">@previewDocument.Label</h2><small>@previewDocument.FileName · @previewDocument.PageCount @(previewDocument.PageCount == 1 ? "page" : "pages")</small></div>
+                <button class="btn-close" aria-label="Close cover preview" @onclick="CloseCoverPreview"></button>
+            </header>
+            @if (previewDocument.Kind == "perfect-bound-cover-pdf" && previewDocument.PageCount > 1)
+            {
+                <div class="cover-preview-tabs" role="tablist" aria-label="Cover preview surfaces">
+                    <button type="button"
+                            role="tab"
+                            aria-selected="@(_coverPreviewPageNumber == 1)"
+                            class="btn btn-sm @(_coverPreviewPageNumber == 1 ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => _coverPreviewPageNumber = 1">Outside</button>
+                    <button type="button"
+                            role="tab"
+                            aria-selected="@(_coverPreviewPageNumber == 2)"
+                            class="btn btn-sm @(_coverPreviewPageNumber == 2 ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => _coverPreviewPageNumber = 2">Inside</button>
+                </div>
+            }
+            else if (coverPreview.Documents.Count > 1)
+            {
+                <div class="cover-preview-tabs" role="tablist" aria-label="Cover preview documents">
+                    @foreach (var document in coverPreview.Documents)
+                    {
+                        <button type="button"
+                                role="tab"
+                                aria-selected="@(document.Index == _coverPreviewDocumentIndex)"
+                                class="btn btn-sm @(document.Index == _coverPreviewDocumentIndex ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick="() => SelectCoverPreviewDocument(document.Index)">@document.Label</button>
+                    }
+                </div>
+            }
+            @if (coverPreview.Diagnostics.Count > 0)
+            {
+                <details class="cover-preview-warnings">
+                    <summary>@coverPreview.Diagnostics.Count preview @(coverPreview.Diagnostics.Count == 1 ? "warning" : "warnings")</summary>
+                    @foreach (var diagnostic in coverPreview.Diagnostics)
+                    {
+                        <p><strong>@diagnostic.Code</strong> @PublicationDiagnosticText.SanitizeUserFacing(diagnostic.Message)</p>
+                    }
+                </details>
+            }
+            <PublicationPdfPreview @key="CoverPreviewKey(coverPreview.Token, previewDocument.Index)"
+                                   ProjectId="Project.Id"
+                                   PageBaseUrl="@CoverPreviewPageBaseUrl(coverPreview.Token, previewDocument.Index)"
+                                   PageCount="previewDocument.PageCount"
+                                   VisiblePages="@CoverPreviewPages(previewDocument)" />
         </section>
     </div>
 }
@@ -258,6 +316,9 @@ else
     private int? _preparedCoverPageCount;
     private string? _preparedCoverPaginationFingerprint;
     private PublicationArtifactView? _previewArtifact;
+    private PublicationCoverPreviewView? _coverPreview;
+    private int _coverPreviewDocumentIndex;
+    private int _coverPreviewPageNumber = 1;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
     private bool _pageSetupDirty;
@@ -2263,6 +2324,42 @@ else
             _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, _selectedReleaseId.Value, _dispose.Token);
             _releases = await Releases.ListAsync(Project.Id);
         }
+    }
+
+    private async Task OpenCoverPreviewAsync(string surfaceRole)
+    {
+        if (Project is null)
+            return;
+        _coverPreview = await CoverPreviews.GenerateAsync(
+            Project.Id,
+            _selectedReleaseId,
+            surfaceRole,
+            _dispose.Token);
+        _coverPreviewDocumentIndex = _coverPreview.Documents.First().Index;
+        _coverPreviewPageNumber = 1;
+    }
+
+    private string CoverPreviewPageBaseUrl(Guid token, int documentIndex) =>
+        $"/projects/{Project!.Id:N}/publish/cover-previews/{token:N}/documents/{documentIndex}/pages";
+
+    private static string CoverPreviewKey(Guid token, int documentIndex) => $"{token:N}:{documentIndex}";
+
+    private IReadOnlyList<int>? CoverPreviewPages(PublicationCoverPreviewDocument document) =>
+        document.Kind == "perfect-bound-cover-pdf" && document.PageCount > 1
+            ? [_coverPreviewPageNumber]
+            : null;
+
+    private void SelectCoverPreviewDocument(int documentIndex)
+    {
+        _coverPreviewDocumentIndex = documentIndex;
+        _coverPreviewPageNumber = 1;
+    }
+
+    private void CloseCoverPreview()
+    {
+        _coverPreview = null;
+        _coverPreviewDocumentIndex = 0;
+        _coverPreviewPageNumber = 1;
     }
 
     private async Task CloseCoverEditorAsync()

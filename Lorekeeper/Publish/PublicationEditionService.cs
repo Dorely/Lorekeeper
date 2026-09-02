@@ -431,6 +431,185 @@ public sealed class PublicationEditionService(
         CancellationToken cancellationToken = default) =>
         await FingerprintAsync(projectId, editionId, cancellationToken);
 
+    public async Task<string> GetInteriorFingerprintAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default)
+    {
+        var paginationFingerprint = await FingerprintAsync(
+            projectId,
+            editionId,
+            cancellationToken,
+            includeCover: false);
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var settings = await databaseOperation.Db.PublicationEditions.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.Id == editionId)
+            .Select(item => new
+            {
+                item.Format,
+                item.Vendor,
+                item.VendorProfileVersion,
+                item.PrintArtifactRegistryVersion,
+                item.PrintArtifactProfileKey,
+                item.Bleed,
+            })
+            .SingleAsync(cancellationToken);
+        return HashCanonical(new { Pagination = paginationFingerprint, Production = settings });
+    }
+
+    public async Task<string> GetCoverFingerprintAsync(
+        Guid projectId,
+        Guid editionId,
+        int interiorPageCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (interiorPageCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(interiorPageCount));
+
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        var edition = await db.PublicationEditions.AsNoTracking()
+            .SingleAsync(item => item.ProjectId == projectId && item.Id == editionId, cancellationToken);
+        var project = await db.Projects.AsNoTracking()
+            .Where(item => item.Id == projectId)
+            .Select(item => new { item.Name, item.Slug })
+            .SingleAsync(cancellationToken);
+        var coverDesign = await db.PublicationCoverDesigns.AsNoTracking()
+            .Where(item => item.EditionId == editionId)
+            .Select(item => new
+            {
+                item.Title,
+                item.Subtitle,
+                item.Author,
+                item.SpineText,
+                item.BackgroundColor,
+                item.BarcodeMode,
+                item.ImageCropXPercent,
+                item.ImageCropYPercent,
+                item.SpineReadingDirection,
+                item.CompositionSceneJson,
+                item.SurfaceScenesJson,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var coreCover = edition.InheritsCoreCover
+            ? await db.PublicationBookCoverDesigns.AsNoTracking()
+                .Where(item => item.ProjectId == projectId)
+                .Select(item => new
+                {
+                    item.BackgroundColor,
+                    item.CompositionSceneJson,
+                    item.Revision,
+                })
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
+
+        var referencedAssetIds = new HashSet<Guid>();
+        if (edition.SelectedCoverImageId is { } selectedCoverImageId)
+            referencedAssetIds.Add(selectedCoverImageId);
+        if (coverDesign is not null)
+        {
+            CollectReferencedImageIds(coverDesign.CompositionSceneJson, referencedAssetIds);
+            CollectReferencedImageIds(coverDesign.SurfaceScenesJson, referencedAssetIds);
+        }
+        if (coreCover is not null)
+            CollectReferencedImageIds(coreCover.CompositionSceneJson, referencedAssetIds);
+        var referencedFontFamilyIds = new HashSet<Guid>();
+        if (coverDesign is not null)
+        {
+            CollectReferencedFontFamilyIds(coverDesign.CompositionSceneJson, referencedFontFamilyIds);
+            CollectReferencedFontFamilyIds(coverDesign.SurfaceScenesJson, referencedFontFamilyIds);
+        }
+        if (coreCover is not null)
+            CollectReferencedFontFamilyIds(coreCover.CompositionSceneJson, referencedFontFamilyIds);
+        var assets = await db.PublishAssets.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && referencedAssetIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id,
+                item.FileName,
+                item.ContentType,
+                item.AltText,
+                item.Data,
+                item.SourceMetadataJson,
+            })
+            .ToListAsync(cancellationToken);
+        var fonts = await db.ProjectFontFamilies.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && referencedFontFamilyIds.Contains(item.Id))
+            .OrderBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.EmbeddingRightsConfirmed,
+                item.RightsDeclaration,
+                Faces = item.Faces.OrderBy(face => face.Id).Select(face => new
+                {
+                    face.Id,
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    face.Data,
+                }),
+            })
+            .ToListAsync(cancellationToken);
+        var canonicalCover = coverDesign is null ? null : new
+        {
+            coverDesign.Title,
+            coverDesign.Subtitle,
+            coverDesign.Author,
+            coverDesign.SpineText,
+            coverDesign.BackgroundColor,
+            coverDesign.BarcodeMode,
+            coverDesign.ImageCropXPercent,
+            coverDesign.ImageCropYPercent,
+            coverDesign.SpineReadingDirection,
+            CompositionSceneJson = NormalizeCoverSceneJson(coverDesign.CompositionSceneJson),
+            SurfaceScenesJson = NormalizeCoverSurfaceScenesJson(coverDesign.SurfaceScenesJson),
+        };
+        var canonicalCoreCover = coreCover is null ? null : new
+        {
+            coreCover.BackgroundColor,
+            CompositionSceneJson = NormalizeCoverSceneJson(coreCover.CompositionSceneJson),
+            coreCover.Revision,
+        };
+        return HashCanonical(new
+        {
+            Project = project,
+            Edition = new
+            {
+                edition.Format,
+                edition.Vendor,
+                edition.VendorProfileVersion,
+                edition.TitleOverride,
+                edition.Subtitle,
+                edition.Author,
+                edition.Language,
+                edition.Publisher,
+                edition.Copyright,
+                edition.Isbn,
+                edition.Description,
+                edition.PrintArtifactRegistryVersion,
+                edition.PrintArtifactProfileKey,
+                edition.PrintCoverMode,
+                edition.PrintProjectUse,
+                edition.PrintIdentifierMode,
+                edition.PrintCoverSubmissionMode,
+                edition.Bleed,
+                edition.PageWidthInches,
+                edition.PageHeightInches,
+                edition.InheritsCoreCover,
+                edition.SelectedCoverImageId,
+            },
+            InteriorPageCount = interiorPageCount,
+            Cover = canonicalCover,
+            CoreCover = canonicalCoreCover,
+            Assets = assets,
+            Fonts = fonts,
+        });
+    }
+
     public async Task<string> GetPaginationFingerprintAsync(
         Guid projectId,
         Guid editionId,
@@ -623,29 +802,19 @@ public sealed class PublicationEditionService(
                 style.Revision,
             })
             .ToListAsync(cancellationToken);
-        var fonts = await db.ProjectFontFamilies.AsNoTracking()
-            .Where(family => family.ProjectId == projectId)
-            .OrderBy(family => family.Id)
-            .Select(family => new
-            {
-                family.Id,
-                family.Name,
-                family.EmbeddingRightsConfirmed,
-                family.RightsDeclaration,
-                Faces = family.Faces
-                    .OrderBy(face => face.Id)
-                    .Select(face => new
-                    {
-                        face.Id,
-                        face.SubfamilyName,
-                        face.FileName,
-                        face.ContentType,
-                        face.Weight,
-                        face.Italic,
-                        face.Data,
-                    }),
-            })
-            .ToListAsync(cancellationToken);
+        var referencedFontFamilyIds = new HashSet<Guid>();
+        foreach (var chapter in chapters)
+            CollectReferencedFontFamilyIds(chapter.ManuscriptJson, referencedFontFamilyIds);
+        foreach (var item in publicationSections)
+            CollectReferencedFontFamilyIds(item.ManuscriptJson, referencedFontFamilyIds);
+        foreach (var composition in compositions)
+        {
+            CollectReferencedFontFamilyIds(composition.SemanticManuscriptJson, referencedFontFamilyIds);
+            foreach (var variant in composition.Variants)
+                CollectReferencedFontFamilyIds(variant.SceneJson, referencedFontFamilyIds);
+        }
+        foreach (var style in styles)
+            CollectReferencedFontFamilyIds(style.DefinitionJson, referencedFontFamilyIds);
         var coverDesign = await db.PublicationCoverDesigns.AsNoTracking()
             .Where(design => design.EditionId == editionId)
             .Select(design => new
@@ -687,6 +856,38 @@ public sealed class PublicationEditionService(
         var normalizedCoreCoverScene = inheritedCoreCover is null
             ? null
             : NormalizeCoverSceneJson(inheritedCoreCover.CompositionSceneJson);
+        if (includeCover)
+        {
+            if (normalizedCoreCoverScene is not null)
+                CollectReferencedFontFamilyIds(normalizedCoreCoverScene, referencedFontFamilyIds);
+            if (normalizedReleaseSurfaceScenes is not null)
+                CollectReferencedFontFamilyIds(normalizedReleaseSurfaceScenes, referencedFontFamilyIds);
+            else if (normalizedReleaseCoverScene is not null)
+                CollectReferencedFontFamilyIds(normalizedReleaseCoverScene, referencedFontFamilyIds);
+        }
+        var fonts = await db.ProjectFontFamilies.AsNoTracking()
+            .Where(family => family.ProjectId == projectId && referencedFontFamilyIds.Contains(family.Id))
+            .OrderBy(family => family.Id)
+            .Select(family => new
+            {
+                family.Id,
+                family.Name,
+                family.EmbeddingRightsConfirmed,
+                family.RightsDeclaration,
+                Faces = family.Faces
+                    .OrderBy(face => face.Id)
+                    .Select(face => new
+                    {
+                        face.Id,
+                        face.SubfamilyName,
+                        face.FileName,
+                        face.ContentType,
+                        face.Weight,
+                        face.Italic,
+                        face.Data,
+                    }),
+            })
+            .ToListAsync(cancellationToken);
         object? canonicalCoverDesign = null;
         if (includeCover && inheritedCoreCover is not null)
         {
@@ -839,6 +1040,12 @@ public sealed class PublicationEditionService(
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
+    private static string HashCanonical(object value)
+    {
+        var canonical = JsonSerializer.Serialize(value, ManuscriptCodec.JsonOptions);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
     private static void CollectReferencedImageIds(string json, ISet<Guid> target)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -868,6 +1075,37 @@ public sealed class PublicationEditionService(
                 foreach (var item in element.EnumerateArray())
                     Visit(item);
             }
+        }
+    }
+
+    private static void CollectReferencedFontFamilyIds(string json, ISet<Guid> target)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+        using var document = JsonDocument.Parse(json);
+        Visit(document.RootElement);
+        return;
+
+        void Visit(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.NameEquals("fontFamilyKey")
+                        && property.Value.ValueKind == JsonValueKind.String
+                        && property.Value.GetString() is { } key
+                        && key.StartsWith("project:", StringComparison.OrdinalIgnoreCase)
+                        && Guid.TryParse(key["project:".Length..], out var familyId))
+                        target.Add(familyId);
+                    Visit(property.Value);
+                }
+                return;
+            }
+            if (element.ValueKind != JsonValueKind.Array)
+                return;
+            foreach (var item in element.EnumerateArray())
+                Visit(item);
         }
     }
 

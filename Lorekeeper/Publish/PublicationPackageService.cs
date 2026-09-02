@@ -40,6 +40,9 @@ public sealed record PublicationPreflightReport(
 {
     [JsonIgnore]
     internal IReadOnlyList<Guid> ValidatedArtifactIds { get; init; } = [];
+    [JsonIgnore]
+    internal IReadOnlyDictionary<Guid, string> ValidatedArtifactFingerprints { get; init; } =
+        new Dictionary<Guid, string>();
 }
 
 public sealed record PublicationValidatedArtifact(
@@ -154,6 +157,7 @@ public sealed class PublicationPackageService(
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         edition.Language = PublicationLanguage.Normalize(edition.Language);
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
+        var interiorFingerprint = await editions.GetInteriorFingerprintAsync(projectId, editionId, cancellationToken);
         var artifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
@@ -166,9 +170,16 @@ public sealed class PublicationPackageService(
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
-        var interior = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
+        var interior = artifacts.FirstOrDefault(artifact =>
+            artifact.Kind == PublicationArtifactKind.InteriorPdf
+            && artifact.SourceFingerprint == interiorFingerprint);
+        var coverFingerprint = interior?.PageCount is > 0
+            ? await editions.GetCoverFingerprintAsync(projectId, editionId, interior.PageCount.Value, cancellationToken)
+            : string.Empty;
         var physicalArtifacts = new List<PublicationArtifact>();
-        var bookArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
+        var bookArtifact = artifacts.FirstOrDefault(artifact =>
+            artifact.Kind == PublicationArtifactKind.BookPdf
+            && artifact.SourceFingerprint == fingerprint);
         var items = new List<PublicationPreflightItem>();
         var profile = ResolveProfile(edition);
         if (!string.Equals(edition.VendorProfileVersion, profile.Version, StringComparison.Ordinal))
@@ -202,7 +213,7 @@ public sealed class PublicationPackageService(
                         items.Add(Error("PRESS_PROFILE_STALE", "The selected profile is not available in the installed Lorekeeper Press runtime."));
                 }
             }
-            ValidatePdf(interior, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
+            ValidatePdf(interior, interiorFingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
             PrintArtifactProfile product;
             try
             {
@@ -217,19 +228,21 @@ public sealed class PublicationPackageService(
             {
                 var requiredKinds = RequiredArtifactKinds(product, edition);
                 physicalArtifacts = requiredKinds
-                    .Select(kind => artifacts.FirstOrDefault(item => item.Kind == kind))
+                    .Select(kind => artifacts.FirstOrDefault(item => item.Kind == kind
+                        && item.SourceFingerprint == coverFingerprint))
                     .Where(item => item is not null)
                     .Cast<PublicationArtifact>()
                     .ToList();
                 foreach (var requiredKind in requiredKinds)
                 {
-                    var artifact = artifacts.FirstOrDefault(item => item.Kind == requiredKind);
+                    var artifact = artifacts.FirstOrDefault(item => item.Kind == requiredKind
+                        && item.SourceFingerprint == coverFingerprint);
                     if (requiredKind == PublicationArtifactKind.PrintSetupManifest)
                     {
-                        ValidateStoredArtifact(artifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, "CLOTH_SETUP", items);
+                        ValidateStoredArtifact(artifact, coverFingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, "CLOTH_SETUP", items);
                         continue;
                     }
-                    ValidatePdf(artifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, requiredKind.ToString().ToUpperInvariant(), items);
+                    ValidatePdf(artifact, coverFingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, requiredKind.ToString().ToUpperInvariant(), items);
                     var expectedPages = requiredKind == PublicationArtifactKind.PerfectBoundCoverPdf
                         && edition.PrintCoverMode == PrintCoverMode.Duplex ? 2 : 1;
                     if (artifact is not null && artifact.PageCount != expectedPages)
@@ -370,6 +383,10 @@ public sealed class PublicationPackageService(
                     .Where(id => id != Guid.Empty)
                     .ToList()
                 : [],
+            ValidatedArtifactFingerprints = new[] { primaryPdf }.Where(item => item is not null)
+                .Cast<PublicationArtifact>()
+                .Concat(physicalArtifacts)
+                .ToDictionary(item => item.Id, item => item.SourceFingerprint),
         };
     }
 
@@ -406,7 +423,9 @@ public sealed class PublicationPackageService(
                     && validatedArtifactIds.Contains(artifact.Id))
                 .ToListAsync(cancellationToken);
             if (sourceArtifacts.Count != validatedArtifactIds.Count
-                || sourceArtifacts.Any(artifact => !ArtifactBytesMatch(artifact)))
+                || sourceArtifacts.Any(artifact => !ArtifactBytesMatch(artifact)
+                    || !report.ValidatedArtifactFingerprints.TryGetValue(artifact.Id, out var expectedFingerprint)
+                    || !string.Equals(artifact.SourceFingerprint, expectedFingerprint, StringComparison.Ordinal)))
             {
                 throw new InvalidOperationException("A preflighted press artifact is missing or failed its hash check.");
             }
@@ -539,24 +558,16 @@ public sealed class PublicationPackageService(
         var finalFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         if (!string.Equals(finalFingerprint, report.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed while its publication package was being built. Run preflight again.");
+        var validatedIds = report.ValidatedArtifactIds;
         var latestArtifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && !artifact.IsLegacy
-                && artifact.SourceFingerprint == report.SourceFingerprint
-                && (artifact.Kind == PublicationArtifactKind.InteriorPdf
-                    || artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf
-                    || artifact.Kind == PublicationArtifactKind.CaseCoverPdf
-                    || artifact.Kind == PublicationArtifactKind.DustJacketPdf
-                    || artifact.Kind == PublicationArtifactKind.FrontCoverPdf
-                    || artifact.Kind == PublicationArtifactKind.BackCoverPdf
-                    || artifact.Kind == PublicationArtifactKind.PrintSetupManifest
-                    || artifact.Kind == PublicationArtifactKind.BookPdf))
-            .OrderByDescending(artifact => artifact.CreatedAt)
+                && validatedIds.Contains(artifact.Id))
             .ToListAsync(cancellationToken);
-        latestArtifacts = latestArtifacts
-            .GroupBy(artifact => artifact.Kind)
-            .Select(group => group.First())
-            .ToList();
+        if (latestArtifacts.Count != validatedIds.Count
+            || latestArtifacts.Any(artifact => !report.ValidatedArtifactFingerprints.TryGetValue(artifact.Id, out var expectedFingerprint)
+                || !string.Equals(artifact.SourceFingerprint, expectedFingerprint, StringComparison.Ordinal)))
+            throw new InvalidOperationException("The preflighted press artifacts changed while the publication package was being built.");
         var finalPackageIdentity = PackageIdentity(
             profile,
             report.SourceFingerprint,
@@ -1363,23 +1374,29 @@ public sealed class PublicationPackageService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        if (interior?.RenderJobId is not Guid renderJobId
+        if (interior?.RenderJobId is not Guid interiorRenderJobId
             || physicalArtifacts.Count == 0
-            || physicalArtifacts.Any(item => item.RenderJobId != renderJobId))
+            || physicalArtifacts[0].RenderJobId is not Guid coverRenderJobId
+            || physicalArtifacts.Any(item => item.RenderJobId != coverRenderJobId))
         {
-            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current PDFs must come from the same completed press render."));
+            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current interior and cover files must each come from completed scoped Press renders."));
             return;
         }
-        var job = await db.PublicationRenderJobs.AsNoTracking().FirstOrDefaultAsync(
-            candidate => candidate.Id == renderJobId
+        var jobs = await db.PublicationRenderJobs.AsNoTracking().Where(
+            candidate => (candidate.Id == interiorRenderJobId || candidate.Id == coverRenderJobId)
                 && candidate.EditionId == edition.Id
-                && candidate.Status == PublicationRenderStatus.Completed,
-            cancellationToken);
-        if (job is null)
+                && candidate.Status == PublicationRenderStatus.Completed)
+            .ToListAsync(cancellationToken);
+        var interiorJob = jobs.FirstOrDefault(candidate => candidate.Id == interiorRenderJobId
+            && candidate.Scope == PublicationRenderScope.Interior);
+        var job = jobs.FirstOrDefault(candidate => candidate.Id == coverRenderJobId
+            && candidate.Scope == PublicationRenderScope.Cover);
+        if (interiorJob is null || job is null)
         {
-            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current PDFs do not have completed press evidence."));
+            items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current interior or cover files do not have completed scoped Press evidence."));
             return;
         }
+        ValidateInteriorEvidence(edition, interiorJob, currentRendererVersion, items);
         if (currentRendererVersion is not null
             && !string.Equals(job.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
         {
@@ -1445,7 +1462,7 @@ public sealed class PublicationPackageService(
                 RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The Ingram PDF contains transparency.", items);
                 if (!root.TryGetProperty("outputIntentCount", out var outputIntentCount)
                     || outputIntentCount.ValueKind != JsonValueKind.Number
-                    || outputIntentCount.GetInt32() != 1 + physicalArtifacts.Count(item => item.MediaType == "application/pdf"))
+                    || outputIntentCount.GetInt32() != physicalArtifacts.Count(item => item.MediaType == "application/pdf"))
                 {
                     items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "Every Ingram PDF requires its own output intent."));
                 }
@@ -1490,6 +1507,69 @@ public sealed class PublicationPackageService(
         catch (JsonException)
         {
             items.Add(Error("PRESS_EVIDENCE_INVALID", "Stored press evidence could not be read."));
+        }
+    }
+
+    private void ValidateInteriorEvidence(
+        PublicationEdition edition,
+        PublicationRenderJob job,
+        string? currentRendererVersion,
+        List<PublicationPreflightItem> items)
+    {
+        if (currentRendererVersion is not null
+            && !string.Equals(job.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
+            items.Add(Error("PRESS_RENDERER_STALE", "The interior evidence belongs to a different Lorekeeper Press renderer."));
+        if (!string.Equals(job.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+            items.Add(Error("PRESS_PROFILE_STALE", "The interior evidence belongs to a different publication profile."));
+        try
+        {
+            var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
+                job.DiagnosticsJson,
+                JsonOptions) ?? [];
+            items.AddRange(diagnostics.Select(diagnostic => new PublicationPreflightItem(
+                diagnostic.Severity,
+                diagnostic.Code,
+                diagnostic.Message,
+                PublicationArtifactKind.InteriorPdf,
+                diagnostic.Page,
+                diagnostic.SourceKind,
+                diagnostic.SourceId)));
+            using var evidence = JsonDocument.Parse(job.EvidenceJson);
+            var root = evidence.RootElement;
+            if (!root.TryGetProperty("validationStatus", out var validation)
+                || validation.GetString() != "validated")
+                items.Add(Error("PRESS_EVIDENCE_INVALID", "Lorekeeper Press did not record a validated interior result."));
+            RequireTrue(root, "interiorPageBoxesConsistent", "INTERIOR_PAGE_BOXES", "Interior page boxes are inconsistent.", items);
+            RequireFalse(root, "hasEncryption", "PDF_ENCRYPTED", "The interior PDF must not be encrypted.", items);
+            RequireFalse(root, "hasForbiddenActions", "PDF_FORBIDDEN_ACTIONS", "The interior PDF contains forbidden actions.", items);
+            RequireZero(root, "annotationCount", "PDF_ANNOTATIONS", "The interior PDF contains annotations.", items);
+            RequireDimension(root, "interiorWidthPoints", edition.PageWidthInches * 72, "INTERIOR_WIDTH", items);
+            RequireDimension(root, "interiorHeightPoints", edition.PageHeightInches * 72, "INTERIOR_HEIGHT", items);
+            if (!root.TryGetProperty("fonts", out var fonts)
+                || fonts.ValueKind != JsonValueKind.Array
+                || fonts.GetArrayLength() == 0
+                || fonts.EnumerateArray().Any(font =>
+                    !font.TryGetProperty("embedded", out var embedded) || embedded.ValueKind != JsonValueKind.True))
+                items.Add(Error("PDF_FONTS_NOT_EMBEDDED", "Every interior PDF font must be embedded."));
+            if (edition.Vendor == PublicationVendor.IngramSpark)
+            {
+                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The Ingram interior PDF contains transparency.", items);
+                if (!root.TryGetProperty("outputIntentCount", out var outputIntentCount)
+                    || outputIntentCount.ValueKind != JsonValueKind.Number
+                    || outputIntentCount.GetInt32() != 1)
+                    items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "The Ingram interior PDF requires an output intent."));
+                ValidateIngramColorSpaces(root, items);
+            }
+            if (printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).InteriorProcess == PrintInteriorProcess.BlackAndWhite
+                && root.TryGetProperty("interiorImageCount", out var imageCount)
+                && imageCount.GetInt32() > 0
+                && (!root.TryGetProperty("interiorImageColorSpace", out var colorSpace)
+                    || colorSpace.GetString() != "DeviceGray"))
+                items.Add(Error("PDF_BLACK_AND_WHITE_INTERIOR_REQUIRED", "Black-and-white editions require grayscale interior image content."));
+        }
+        catch (JsonException)
+        {
+            items.Add(Error("PRESS_EVIDENCE_INVALID", "Stored interior Press evidence could not be read."));
         }
     }
 

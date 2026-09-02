@@ -305,6 +305,11 @@ Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
 spacing on soft-wrapped non-final lines; final lines and explicit hard-break
 paragraph endings remain ragged. The canvas, transient preview, EPUB projection,
 and Press layout trace share that alignment behavior.
+Composition enum values at the renderer boundary are matched independently of
+JSON casing. In particular, Center/End alignment, vertical alignment, image fit,
+and text-shadow values must preserve editor geometry after rotation; a centered
+90-degree spine title rotates around the same frame center in the PDF as it does
+on the canvas.
 Publication text bindings use one canonical catalog for `title`, `subtitle`,
 `author`, `publisher`, `copyright`, `description`, and `isbn`. Designed Page text
 frames bind semantically to one catalog field and expose the selector in the
@@ -337,6 +342,12 @@ interaction uses measured native image geometry rather than a generation
 request's guessed aspect. Press clips valid out-of-surface paint to the page;
 the authoring editor reports overflow and clipping without silently resizing
 art.
+
+Cover safe-area blocking applies only to visible text objects. Images and vector
+shapes may deliberately extend through safe-area guides to trim or bleed edges,
+regardless of image alternative text or decorative state. Physical-surface
+bounds, barcode/no-ink reservations, accessibility decisions, reading order,
+and vendor-specific constraints remain independent validation rules.
 
 Physical covers additionally expose exact Back, Spine, and Front regions.
 `FillRegion` constrains a selected image to one region, defaults to proportional
@@ -398,6 +409,17 @@ inspect the same current revision before another visual mutation, then validate
 and inspect a clean preview for final verification. Text justification in the
 preview follows the shared composition alignment contract, including ragged
 final and hard-break lines.
+
+The manual cover editor also exposes a PDF **Preview** action. It flushes its
+serialized save queue, obtains fresh transient pagination for print geometry,
+and asks Press for only the selected production surface. Duplex outside/inside
+surfaces share their two-page PDF, B&N separate-panel output exposes Front and
+Back documents, and Core/Digital covers produce a one-page front PDF. The result
+is held only in a bounded expiring in-memory cache and displayed through the
+shared PDF page viewer; it creates no render job, artifact, package, image
+replacement, or database row. Manifest-only cloth setup remains visible but
+disabled. Production-only blockers that do not prevent layout appear as preview
+warnings, while **Prepare files** retains strict production validation.
 
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and

@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 11);
+    assert_eq!(value["protocolVersion"], 12);
     assert_eq!(value["rendererVersion"], "2.1.10");
     assert_eq!(
         value["profiles"],
@@ -54,6 +54,72 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
 }
 
 #[test]
+fn interior_scope_emits_only_validated_interior_artifacts() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["renderScope"] = json!("interior");
+    job.write_request();
+
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let response = response(&output);
+    let kinds = response["artifacts"]
+        .as_array()
+        .expect("artifact array")
+        .iter()
+        .map(|artifact| artifact["kind"].as_str().expect("artifact kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["interior-pdf"]);
+    assert_eq!(response["evidence"]["validationStatus"], "validated");
+}
+
+#[test]
+fn cover_scope_requires_trusted_pagination_and_emits_only_the_cover_set() {
+    let mut missing_count = PreparedJob::new("kdp-paperback-v1");
+    missing_count.request["renderScope"] = json!("cover");
+    missing_count.write_request();
+    let failed = missing_count.render();
+    assert!(!failed.status.success());
+    assert!(has_diagnostic(
+        &response(&failed),
+        "PRESS_INTERIOR_PAGE_COUNT_REQUIRED"
+    ));
+
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["renderScope"] = json!("cover");
+    job.request["interiorPageCount"] = json!(64);
+    job.write_request();
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let response = response(&output);
+    let kinds = response["artifacts"]
+        .as_array()
+        .expect("artifact array")
+        .iter()
+        .map(|artifact| artifact["kind"].as_str().expect("artifact kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["perfect-bound-cover-pdf"]);
+    assert!(response["pageMap"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn cover_preview_returns_pdf_warnings_without_production_evidence() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["renderScope"] = json!("cover");
+    job.request["renderMode"] = json!("preview");
+    job.request["interiorPageCount"] = json!(64);
+    job.request["cover"]["isbn"] = json!("9780306406158");
+    job.write_request();
+
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let response = response(&output);
+    assert_eq!(response["evidence"], Value::Null);
+    assert!(has_diagnostic(&response, "PRESS_IMAGE_DPI_LOW"));
+    assert!(has_diagnostic(&response, "PRESS_EAN13_INVALID"));
+    assert_eq!(response["artifacts"][0]["kind"], "perfect-bound-cover-pdf");
+}
+
+#[test]
 fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     let job = PreparedJob::new("kdp-paperback-v1");
     let output = job.render();
@@ -64,7 +130,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 11);
+    assert_eq!(response["protocolVersion"], 12);
     assert_eq!(response["rendererVersion"], "2.1.10");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -1146,7 +1212,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v12_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -4591,9 +4657,9 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v11.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v12.json"))
                 .expect("canonical request");
-        request["protocolVersion"] = json!(11);
+        request["protocolVersion"] = json!(12);
         let profile = match profile {
             "generic-paperback-v1" => "generic-print-v2",
             "kdp-paperback-v1" => "kdp-paperback-v2",

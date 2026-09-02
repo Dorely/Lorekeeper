@@ -37,6 +37,10 @@ Electron.NET, EF Core with SQLite, sqlite-vec and SQLite FTS5,
 `Lorekeeper.Press` executable is packaged into the application runtime but its
 protocol and publishing behavior belong to
 [Press production](press-production.md).
+The packaged descriptor and every managed invocation require Press protocol
+v12. Durable render workers use its scoped production requests; transient cover
+preview calls execute in the request scope, clean their bounded temporary job
+directory, and retain only expiring in-memory PDF bytes outside the database.
 
 ## Current architecture and invariants
 

@@ -23,6 +23,7 @@ public interface IPublicationImagePreparationService
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId,
+        PublicationRenderScope renderScope,
         string capturedFingerprint,
         CancellationToken cancellationToken = default);
 }
@@ -81,11 +82,12 @@ public sealed class PublicationImagePreparationService(
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId,
+        PublicationRenderScope renderScope,
         string capturedFingerprint,
         CancellationToken cancellationToken = default)
     {
         var threshold = await ResolveThresholdAsync(projectId, targetKind, editionId, cancellationToken);
-        var currentFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, cancellationToken);
+        var currentFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, renderScope, cancellationToken);
         EnsureFingerprint(capturedFingerprint, currentFingerprint, threshold);
 
         // EPUB has no raster transformation. It still participates in the
@@ -98,6 +100,7 @@ public sealed class PublicationImagePreparationService(
             projectId,
             targetKind,
             editionId,
+            renderScope,
             threshold,
             document,
             cancellationToken);
@@ -112,7 +115,7 @@ public sealed class PublicationImagePreparationService(
             .ToList();
         if (required.Count == 0)
         {
-            var unchangedFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, cancellationToken);
+            var unchangedFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, renderScope, cancellationToken);
             EnsureFingerprint(capturedFingerprint, unchangedFingerprint, threshold);
             return new(SuccessSummary(threshold), unchangedFingerprint, Committed: false);
         }
@@ -141,7 +144,7 @@ public sealed class PublicationImagePreparationService(
             var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             try
             {
-                var beforeCommitFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, cancellationToken);
+                var beforeCommitFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, renderScope, cancellationToken);
                 EnsureFingerprint(capturedFingerprint, beforeCommitFingerprint, threshold);
 
                 foreach (var asset in required)
@@ -194,6 +197,7 @@ public sealed class PublicationImagePreparationService(
                     projectId,
                     targetKind,
                     editionId,
+                    renderScope,
                     document,
                     replacementIds,
                     historyTargets,
@@ -217,7 +221,7 @@ public sealed class PublicationImagePreparationService(
             }
         }
 
-        var afterCommitFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, CancellationToken.None);
+        var afterCommitFingerprint = await SourceFingerprintAsync(projectId, targetKind, editionId, renderScope, CancellationToken.None);
         var postFailures = new List<PublicationImagePreparationFailure>();
         try
         {
@@ -230,6 +234,7 @@ public sealed class PublicationImagePreparationService(
                 projectId,
                 targetKind,
                 editionId,
+                renderScope,
                 threshold,
                 postDocument,
                 CancellationToken.None);
@@ -244,6 +249,7 @@ public sealed class PublicationImagePreparationService(
                 projectId,
                 targetKind,
                 editionId,
+                renderScope,
                 CancellationToken.None);
             if (!string.Equals(postAnalysisFingerprint, afterCommitFingerprint, StringComparison.Ordinal))
             {
@@ -296,10 +302,49 @@ public sealed class PublicationImagePreparationService(
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId,
+        PublicationRenderScope renderScope,
         CancellationToken cancellationToken) =>
         targetKind == PublicationTargetKind.CoreBook
             ? await books.GetSourceFingerprintAsync(projectId, cancellationToken)
-            : await editions.GetSourceFingerprintAsync(projectId, editionId!.Value, cancellationToken);
+            : renderScope switch
+            {
+                PublicationRenderScope.Interior => await editions.GetInteriorFingerprintAsync(projectId, editionId!.Value, cancellationToken),
+                PublicationRenderScope.Cover => await editions.GetCoverFingerprintAsync(
+                    projectId,
+                    editionId!.Value,
+                    await CurrentInteriorPageCountAsync(projectId, editionId.Value, cancellationToken),
+                    cancellationToken),
+                _ => await editions.GetSourceFingerprintAsync(projectId, editionId!.Value, cancellationToken),
+            };
+
+    private async Task<int> CurrentInteriorPageCountAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var interiorFingerprint = await editions.GetInteriorFingerprintAsync(
+            projectId,
+            editionId,
+            cancellationToken);
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var pageCount = await operation.Db.PublicationArtifacts.AsNoTracking()
+            .Where(item => item.ProjectId == projectId
+                && item.EditionId == editionId
+                && item.Kind == PublicationArtifactKind.InteriorPdf
+                && !item.IsLegacy
+                && item.SourceFingerprint == interiorFingerprint
+                && item.RenderJob != null
+                && !item.RenderJob.IsLegacy
+                && item.RenderJob.Scope == PublicationRenderScope.Interior
+                && item.RenderJob.Status == PublicationRenderStatus.Completed
+                && item.PageCount != null)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => item.PageCount!.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+        return pageCount > 0
+            ? pageCount
+            : throw new InvalidOperationException("Prepare the current interior before preparing cover images.");
+    }
 
     private static void EnsureFingerprint(string captured, string current, double threshold)
     {
@@ -327,6 +372,7 @@ public sealed class PublicationImagePreparationService(
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId,
+        PublicationRenderScope renderScope,
         double threshold,
         PublishDocument document,
         CancellationToken cancellationToken)
@@ -445,6 +491,7 @@ public sealed class PublicationImagePreparationService(
             }
         }
 
+        if (renderScope != PublicationRenderScope.Cover)
         foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
         {
             foreach (var block in chapter.Manuscript.Content.Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
@@ -464,6 +511,7 @@ public sealed class PublicationImagePreparationService(
                     AddSceneOccurrences(variant.Scene, "designed-page", null, AddOccurrence);
         }
 
+        if (renderScope != PublicationRenderScope.Cover)
         foreach (var section in document.PublicationSections)
         {
             foreach (var block in section.Manuscript.Content.Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
@@ -483,7 +531,7 @@ public sealed class PublicationImagePreparationService(
                     AddSceneOccurrences(variant.Scene, "publication-section", null, AddOccurrence);
         }
 
-        if (document.Cover is not null)
+        if (renderScope != PublicationRenderScope.Interior && document.Cover is not null)
         {
             AddSceneOccurrences(
                 document.Cover.Scene,
@@ -494,7 +542,7 @@ public sealed class PublicationImagePreparationService(
                 fallbackHeightPoints: document.Profile.PageHeightInches * 72);
         }
 
-        if (document.CoverAsset is { } coverAsset)
+        if (renderScope != PublicationRenderScope.Interior && document.CoverAsset is { } coverAsset)
             AddOccurrence(
                 coverAsset.Id,
                 "selected-cover",
@@ -503,6 +551,7 @@ public sealed class PublicationImagePreparationService(
                 document.Profile.PageHeightInches * 72,
                 FigureImageFit.Cover);
 
+        if (renderScope != PublicationRenderScope.Interior)
         foreach (var (surface, scene) in document.CoverSurfaceScenes)
             AddSceneOccurrences(scene, surface, null, AddOccurrence);
 
@@ -707,6 +756,7 @@ public sealed class PublicationImagePreparationService(
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId,
+        PublicationRenderScope renderScope,
         PublishDocument document,
         IReadOnlyDictionary<Guid, Guid> replacements,
         ICollection<AuthoringHistoryTarget> historyTargets,
@@ -724,7 +774,9 @@ public sealed class PublicationImagePreparationService(
         var releaseChanged = false;
         var now = DateTime.UtcNow;
 
-        var chapterIds = document.Sections.SelectMany(item => item.Chapters).Select(item => item.Id).Distinct().ToList();
+        var chapterIds = renderScope == PublicationRenderScope.Cover
+            ? []
+            : document.Sections.SelectMany(item => item.Chapters).Select(item => item.Id).Distinct().ToList();
         var chapters = await db.Chapters.Where(item => item.ProjectId == projectId && chapterIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, cancellationToken);
         var edition = targetKind == PublicationTargetKind.Release
             ? await db.PublicationEditions.SingleAsync(item => item.ProjectId == projectId && item.Id == editionId, cancellationToken)
@@ -770,7 +822,9 @@ public sealed class PublicationImagePreparationService(
             changed += count;
         }
 
-        var sectionIds = document.PublicationSections.Select(item => item.Id).Distinct().ToList();
+        var sectionIds = renderScope == PublicationRenderScope.Cover
+            ? []
+            : document.PublicationSections.Select(item => item.Id).Distinct().ToList();
         var sections = await db.PublicationSections.Where(item => item.ProjectId == projectId && sectionIds.Contains(item.Id)).ToListAsync(cancellationToken);
         foreach (var section in sections)
         {
@@ -791,9 +845,11 @@ public sealed class PublicationImagePreparationService(
             .SelectMany(chapter => chapter.PageCompositions
                 .SelectMany(composition => composition.Variants.Select(variant => (variant.Id, ChapterId: chapter.Id))))
             .ToDictionary(item => item.Id, item => item.ChapterId);
-        var variants = document.Sections.SelectMany(item => item.Chapters).SelectMany(item => item.PageCompositions)
-            .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions))
-            .SelectMany(item => item.Variants).Select(item => item.Id).Distinct().ToList();
+        var variants = renderScope == PublicationRenderScope.Cover
+            ? []
+            : document.Sections.SelectMany(item => item.Chapters).SelectMany(item => item.PageCompositions)
+                .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions))
+                .SelectMany(item => item.Variants).Select(item => item.Id).Distinct().ToList();
         var variantRows = await db.PageCompositionVariants
             .Include(item => item.Composition)
             .Where(item => variants.Contains(item.Id))
@@ -826,7 +882,8 @@ public sealed class PublicationImagePreparationService(
 
         var book = await db.PublicationBooks.Include(item => item.CoverDesign)
             .SingleAsync(item => item.ProjectId == projectId, cancellationToken);
-        if (targetKind == PublicationTargetKind.Release && edition!.SelectedCoverImageId is Guid selected
+        if (renderScope != PublicationRenderScope.Interior
+            && targetKind == PublicationTargetKind.Release && edition!.SelectedCoverImageId is Guid selected
             && replacements.TryGetValue(selected, out var selectedReplacement))
         {
             edition.SelectedCoverImageId = selectedReplacement;
@@ -835,7 +892,7 @@ public sealed class PublicationImagePreparationService(
         }
 
         var useCoreCover = targetKind == PublicationTargetKind.CoreBook || edition?.InheritsCoreCover == true;
-        if (useCoreCover)
+        if (renderScope != PublicationRenderScope.Interior && useCoreCover)
         {
             if (book.CoverDesign is not null)
             {
@@ -857,7 +914,7 @@ public sealed class PublicationImagePreparationService(
                 }
             }
         }
-        else
+        else if (renderScope != PublicationRenderScope.Interior)
         {
             var cover = await db.PublicationCoverDesigns.SingleOrDefaultAsync(item => item.EditionId == editionId, cancellationToken);
             if (cover is not null)

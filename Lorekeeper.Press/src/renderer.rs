@@ -17,7 +17,7 @@ use crate::model::{
     Artifact, CoverSurfaceEvidence, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence,
     LayoutDocument, LayoutImage, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
     LayoutSemanticRole, LayoutShape, LayoutShapeKind, OutputPurpose, PageKind, PageMapEntry,
-    RenderRequest, RenderResponse, ValidationEvidence,
+    RenderMode, RenderRequest, RenderResponse, RenderScope, ValidationEvidence,
 };
 use crate::pdf::{
     PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable_with_progress,
@@ -342,6 +342,12 @@ fn physical_cover_surfaces(
     product
         .required_cover_surfaces
         .iter()
+        .filter(|role| {
+            request
+                .cover
+                .as_ref()
+                .is_some_and(|cover| cover.surfaces.contains(role))
+        })
         .filter_map(|role| {
             let geometry = match role.as_str() {
                 "perfect-bound-outside" | "perfect-bound-inside"
@@ -508,13 +514,43 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let output = job_root.join("output");
     let staging = StagingDirectory::create(job_root.join(".output-staging"))?;
 
-    let tolerance = LayoutTolerance {
-        allow_pending_accessibility: request.output_purpose == OutputPurpose::ReadingCopy,
-        ..LayoutTolerance::default()
+    let tolerance = if request.render_mode == RenderMode::Preview {
+        LayoutTolerance::authoring_preview()
+    } else {
+        LayoutTolerance {
+            allow_pending_accessibility: request.output_purpose == OutputPurpose::ReadingCopy,
+            ..LayoutTolerance::default()
+        }
     };
-    report_progress(job_root, request, 22, "Paginating book");
-    let mut layout = paginate_with_cancellation(request, Some(job_root), tolerance)?;
-    if let Some(product) = request.print_artifact_profile.as_ref() {
+    let cover_only = request.render_scope == RenderScope::Cover;
+    let interior_only = request.render_scope == RenderScope::Interior;
+    report_progress(
+        job_root,
+        request,
+        22,
+        if cover_only {
+            "Using current interior geometry"
+        } else {
+            "Paginating book"
+        },
+    );
+    let mut layout = if cover_only {
+        LayoutDocument {
+            pages: (0..request.interior_page_count.unwrap_or_default())
+                .map(|_| empty_body_page())
+                .collect(),
+            page_map: Vec::new(),
+            features: Vec::new(),
+            diagnostics: Vec::new(),
+            toc_converged: true,
+        }
+    } else {
+        paginate_with_cancellation(request, Some(job_root), tolerance)?
+    };
+    if request.render_mode == RenderMode::Preview {
+        append_preview_cover_warnings(request, &mut layout.diagnostics);
+    }
+    if !cover_only && let Some(product) = request.print_artifact_profile.as_ref() {
         while layout.pages.len() < product.minimum_pages {
             let mut manufacturing_page = empty_body_page();
             manufacturing_page.kind = PageKind::Blank;
@@ -545,13 +581,17 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             .as_ref()
             .is_some_and(|cover| !cover.spine_text.trim().is_empty())
     {
-        return Err(Box::new(RenderResponse::failed(
-            "rejected",
-            Diagnostic::error(
-                "PRESS_BN_SPINE_TEXT_INELIGIBLE",
-                "B&N covers cannot contain spine text at 50 pages or fewer.",
-            ),
-        )));
+        let diagnostic = Diagnostic::error(
+            "PRESS_BN_SPINE_TEXT_INELIGIBLE",
+            "B&N covers cannot contain spine text at 50 pages or fewer.",
+        );
+        if request.render_mode == RenderMode::Preview {
+            layout
+                .diagnostics
+                .push(Diagnostic::warning(&diagnostic.code, diagnostic.message));
+        } else {
+            return Err(Box::new(RenderResponse::failed("rejected", diagnostic)));
+        }
     }
     if request
         .print_artifact_profile
@@ -563,20 +603,24 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             .as_ref()
             .is_some_and(|cover| !cover.spine_text.trim().is_empty())
     {
-        return Err(Box::new(RenderResponse::failed(
-            "rejected",
-            Diagnostic::error(
-                "PRESS_LULU_SPINE_TEXT_INELIGIBLE",
-                "Lulu covers cannot contain spine text below 100 pages.",
-            ),
-        )));
+        let diagnostic = Diagnostic::error(
+            "PRESS_LULU_SPINE_TEXT_INELIGIBLE",
+            "Lulu covers cannot contain spine text below 100 pages.",
+        );
+        if request.render_mode == RenderMode::Preview {
+            layout
+                .diagnostics
+                .push(Diagnostic::warning(&diagnostic.code, diagnostic.message));
+        } else {
+            return Err(Box::new(RenderResponse::failed("rejected", diagnostic)));
+        }
     }
     report_progress(job_root, request, 38, "Composing cover surfaces");
     let is_digital_pdf = request.profile == "generic-digital-pdf-v1";
     let mut cover_width = 0.0;
     let mut spine_width = 0.0;
     let mut physical_covers = Vec::<(PhysicalCoverSurface, LayoutPage)>::new();
-    let cover_page = if request.cover.is_some() {
+    let cover_page = if !interior_only && request.cover.is_some() {
         if is_digital_pdf {
             cover_width = request.trim.width_inches * 72.0;
             Some(
@@ -726,7 +770,59 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             .max(cover_background_total_ink_percent(&cover.background_color));
     }
     let interior_options = PdfOptions::interior(request, is_pdfx, is_pdfa);
-    let (mut artifacts, interior_inspection) = if is_digital_pdf {
+    let (mut artifacts, interior_inspection) = if cover_only && is_digital_pdf {
+        let cover = cover_page.as_ref().ok_or_else(|| {
+            Box::new(RenderResponse::failed(
+                "rejected",
+                Diagnostic::error(
+                    "PRESS_DIGITAL_COVER_REQUIRED",
+                    "Cover preview requires a front cover.",
+                ),
+            ))
+        })?;
+        let options = PdfOptions::cover(
+            request,
+            false,
+            false,
+            request.trim.width_inches * 72.0,
+            request.trim.height_inches * 72.0,
+            0.0,
+        );
+        let bytes = write_pdf_cancellable_with_progress(
+            std::slice::from_ref(cover),
+            &fonts,
+            &interior_images,
+            &options,
+            || job_root.join("cancel.requested").exists(),
+            |completed, total| {
+                report_fraction(
+                    job_root,
+                    request,
+                    70,
+                    92,
+                    completed,
+                    total,
+                    "Writing cover preview",
+                );
+            },
+        )
+        .map_err(pdf_failure)?;
+        let path = staging.path().join("front-cover.pdf");
+        fs::write(&path, &bytes).map_err(io_failure)?;
+        let inspection = inspect::validate(&path, &options)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?;
+        (
+            vec![artifact(
+                "front-cover-pdf",
+                "output/front-cover.pdf",
+                &bytes,
+                1,
+            )],
+            inspection,
+        )
+    } else if cover_only {
+        (Vec::new(), inspect::InspectionEvidence::default())
+    } else if is_digital_pdf {
         let cover = cover_page.as_ref().ok_or_else(|| {
             Box::new(RenderResponse::failed(
                 "rejected",
@@ -814,7 +910,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         )
     };
     let mut cover_inspections = Vec::new();
-    if !is_digital_pdf {
+    if !is_digital_pdf && !interior_only {
         for (index, (surface, rendered_cover)) in physical_covers.iter().enumerate() {
             if surface.role == "perfect-bound-inside" {
                 continue;
@@ -1084,6 +1180,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         .pages
         .iter()
         .chain(physical_covers.iter().map(|(_, page)| page))
+        .skip(if cover_only { layout.pages.len() } else { 0 })
         .enumerate()
         .flat_map(|(page_index, page)| {
             let page_images = if page.kind == PageKind::Cover {
@@ -1124,14 +1221,14 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 11,
+        protocol_version: 12,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
         artifacts,
         page_map: layout.page_map,
         diagnostics,
-        evidence: Some(ValidationEvidence {
+        evidence: (request.render_mode == RenderMode::Production).then_some(ValidationEvidence {
             validation_status: "validated".to_owned(),
             claimed_standard: if is_pdfx {
                 Some("PDF/X-1a:2001".to_owned())
@@ -1167,10 +1264,22 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                     .iter()
                     .map(|inspection| inspection.annotation_count)
                     .sum::<usize>(),
-            fonts_embedded: interior_inspection.fonts_embedded,
-            to_unicode_maps_present: interior_inspection.to_unicode,
+            fonts_embedded: if cover_only {
+                cover_inspections
+                    .iter()
+                    .all(|inspection| inspection.fonts_embedded)
+            } else {
+                interior_inspection.fonts_embedded
+            },
+            to_unicode_maps_present: if cover_only {
+                cover_inspections
+                    .iter()
+                    .all(|inspection| inspection.to_unicode)
+            } else {
+                interior_inspection.to_unicode
+            },
             output_intent_count: if is_pdfx || is_pdfa {
-                1 + cover_inspections.len()
+                usize::from(!cover_only) + cover_inspections.len()
             } else {
                 0
             },
@@ -1230,26 +1339,35 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 }
                 spaces
             },
-            interior_image_color_space: layout
-                .pages
-                .iter()
-                .any(|page| !page.images.is_empty())
-                .then(|| {
-                    (if request.ink == "BlackAndWhite" {
-                        "DeviceGray"
-                    } else if is_pdfx {
-                        "DeviceCMYK"
-                    } else {
-                        "DeviceRGB"
-                    })
-                    .to_owned()
-                }),
-            cover_image_color_space: cover_page
+            interior_image_color_space: (!cover_only
+                && layout.pages.iter().any(|page| !page.images.is_empty()))
+            .then(|| {
+                (if request.ink == "BlackAndWhite" {
+                    "DeviceGray"
+                } else if is_pdfx {
+                    "DeviceCMYK"
+                } else {
+                    "DeviceRGB"
+                })
+                .to_owned()
+            }),
+            cover_image_color_space: (cover_page
                 .as_ref()
                 .is_some_and(|page| !page.images.is_empty())
-                .then(|| (if is_pdfx { "DeviceCMYK" } else { "DeviceRGB" }).to_owned()),
-            interior_image_count: layout.pages.iter().map(|page| page.images.len()).sum(),
-            cover_image_count: cover_page.as_ref().map_or(0, |page| page.images.len()),
+                || physical_covers
+                    .iter()
+                    .any(|(_, page)| !page.images.is_empty()))
+            .then(|| (if is_pdfx { "DeviceCMYK" } else { "DeviceRGB" }).to_owned()),
+            interior_image_count: if cover_only {
+                0
+            } else {
+                layout.pages.iter().map(|page| page.images.len()).sum()
+            },
+            cover_image_count: cover_page.as_ref().map_or(0, |page| page.images.len())
+                + physical_covers
+                    .iter()
+                    .map(|(_, page)| page.images.len())
+                    .sum::<usize>(),
             image_count: request.assets.len(),
             minimum_effective_dpi,
             images: image_evidence,
@@ -1336,7 +1454,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
-                "protocolVersion": 11,
+                "protocolVersion": 12,
                 "rendererVersion": env!("CARGO_PKG_VERSION"),
                 "jobId": request.job_id,
                 "pageCount": layout.pages.len(),
@@ -1439,7 +1557,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 11,
+            "protocolVersion": 12,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1555,10 +1673,10 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    if request.protocol_version != 11 {
+    if request.protocol_version != 12 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 11.",
+            "Lorekeeper Press requires protocol version 12.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1588,6 +1706,22 @@ fn validate_request(
         return reject(
             "PRESS_OUTPUT_PURPOSE_INVALID",
             "Reading-copy output is supported only by the generic Digital PDF profile.",
+        );
+    }
+    if request.render_mode == RenderMode::Preview && request.render_scope != RenderScope::Cover {
+        return reject(
+            "PRESS_RENDER_MODE_INVALID",
+            "Preview mode is supported only for cover rendering.",
+        );
+    }
+    if request.render_scope == RenderScope::Cover
+        && request
+            .interior_page_count
+            .is_none_or(|pages| pages == 0 || pages > MAX_PAGES)
+    {
+        return reject(
+            "PRESS_INTERIOR_PAGE_COUNT_REQUIRED",
+            "Cover rendering requires a trusted interior page count.",
         );
     }
     if !matches!(
@@ -1621,10 +1755,11 @@ fn validate_request(
             || product.maximum_pages < product.minimum_pages
             || product.artifact_profile_key.is_empty()
             || request.cover.as_ref().is_some_and(|cover| {
-                product
-                    .required_cover_surfaces
-                    .iter()
-                    .any(|surface| !cover.surfaces.contains(surface))
+                request.render_mode == RenderMode::Production
+                    && product
+                        .required_cover_surfaces
+                        .iter()
+                        .any(|surface| !cover.surfaces.contains(surface))
             })
         {
             return reject(
@@ -1643,17 +1778,19 @@ fn validate_request(
             "The requested layout trace mode is unsupported.",
         );
     }
-    let language = request
-        .document
-        .get("language")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    assert_supported_language(language)
-        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    validate_inline_languages(&request.document)
-        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    validate_caption_bounds(&request.document, &request.document, &request.trim)
-        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+    if request.render_scope != RenderScope::Cover {
+        let language = request
+            .document
+            .get("language")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_supported_language(language)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        validate_inline_languages(&request.document)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        validate_caption_bounds(&request.document, &request.document, &request.trim)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+    }
     if request.assets.len() > MAX_ASSETS {
         return reject(
             "PRESS_ASSET_LIMIT",
@@ -1661,26 +1798,29 @@ fn validate_request(
         );
     }
     if let Some(cover) = &request.cover {
-        if !matches!(
-            cover.spine_reading_direction.as_str(),
-            "TopToBottom" | "BottomToTop" | "Horizontal"
-        ) {
+        if request.render_mode == RenderMode::Production
+            && !matches!(
+                cover.spine_reading_direction.as_str(),
+                "TopToBottom" | "BottomToTop" | "Horizontal"
+            )
+        {
             return reject(
                 "PRESS_SPINE_DIRECTION_INVALID",
                 "Spine reading direction must be TopToBottom, BottomToTop, or Horizontal.",
             );
         }
-        if request
-            .print_artifact_profile
-            .as_ref()
-            .is_some_and(|product| {
-                product.vendor == "BarnesAndNoblePress"
-                    && (cover.barcode_mode != "VendorOverlay"
-                        || product.project_use == "PersonalUse"
-                            && product.identifier_mode != "VendorSku"
-                        || product.project_use == "ForSale"
-                            && product.identifier_mode == "VendorSku")
-            })
+        if request.render_mode == RenderMode::Production
+            && request
+                .print_artifact_profile
+                .as_ref()
+                .is_some_and(|product| {
+                    product.vendor == "BarnesAndNoblePress"
+                        && (cover.barcode_mode != "VendorOverlay"
+                            || product.project_use == "PersonalUse"
+                                && product.identifier_mode != "VendorSku"
+                            || product.project_use == "ForSale"
+                                && product.identifier_mode == "VendorSku")
+                })
         {
             return reject(
                 "PRESS_BN_IDENTIFIER_BARCODE_INVALID",
@@ -1702,13 +1842,14 @@ fn validate_request(
             ) && !(request.profile == "ingram-print-pdfx1a-v2"
                 && cover.barcode_mode == "VendorOverlay")
         };
-        if !barcode_mode_is_valid {
+        if request.render_mode == RenderMode::Production && !barcode_mode_is_valid {
             return reject(
                 "PRESS_BARCODE_MODE_INVALID",
                 "The barcode mode is unsupported for the selected profile.",
             );
         }
-        if cover.barcode_mode == "LorekeeperBarcode"
+        if request.render_mode == RenderMode::Production
+            && cover.barcode_mode == "LorekeeperBarcode"
             && cover.isbn.as_deref().and_then(ean13_modules).is_none()
         {
             return reject(
@@ -1725,18 +1866,19 @@ fn validate_request(
                 "Cover bleed or crop geometry is outside supported bounds.",
             );
         }
-        if cover.title.chars().count() > 240
-            || cover.subtitle.chars().count() > 400
-            || cover.author.chars().count() > 240
-            || cover.spine_text.chars().count() > 240
-            || cover.description.chars().count() > 100_000
+        if request.render_mode == RenderMode::Production
+            && (cover.title.chars().count() > 240
+                || cover.subtitle.chars().count() > 400
+                || cover.author.chars().count() > 240
+                || cover.spine_text.chars().count() > 240
+                || cover.description.chars().count() > 100_000)
         {
             return reject(
                 "PRESS_COVER_TEXT_OVERFLOW",
                 "Cover copy exceeds the bounded full-wrap template capacity.",
             );
         }
-        if !is_hex_color(&cover.background_color) {
+        if request.render_mode == RenderMode::Production && !is_hex_color(&cover.background_color) {
             return reject(
                 "PRESS_COVER_COLOR_INVALID",
                 "Cover background colors must use six-digit hexadecimal notation.",
@@ -1886,8 +2028,10 @@ fn validate_request(
         .iter()
         .map(|font| font.family_key.to_ascii_lowercase())
         .collect::<BTreeSet<_>>();
-    validate_font_family_references(&request.document, &declared_families)?;
-    validate_asset_references(&request.document, &declared_ids)?;
+    if request.render_scope != RenderScope::Cover {
+        validate_font_family_references(&request.document, &declared_families)?;
+        validate_asset_references(&request.document, &declared_ids)?;
+    }
     if let Some(asset_id) = request
         .cover
         .as_ref()
@@ -1910,6 +2054,82 @@ fn validate_request(
         );
     }
     Ok(validated_assets)
+}
+
+fn append_preview_cover_warnings(request: &RenderRequest, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(cover) = request.cover.as_ref() else {
+        return;
+    };
+    if !matches!(
+        cover.spine_reading_direction.as_str(),
+        "TopToBottom" | "BottomToTop" | "Horizontal"
+    ) {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_SPINE_DIRECTION_INVALID",
+            "Spine reading direction must be TopToBottom, BottomToTop, or Horizontal.",
+        ));
+    }
+    if request
+        .print_artifact_profile
+        .as_ref()
+        .is_some_and(|product| {
+            product.vendor == "BarnesAndNoblePress"
+                && (cover.barcode_mode != "VendorOverlay"
+                    || product.project_use == "PersonalUse"
+                        && product.identifier_mode != "VendorSku"
+                    || product.project_use == "ForSale" && product.identifier_mode == "VendorSku")
+        })
+    {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_BN_IDENTIFIER_BARCODE_INVALID",
+            "B&N project use, identifier mode, and vendor-overlay barcode behavior are inconsistent.",
+        ));
+    }
+    let barcode_mode_is_valid = if request.profile == "generic-digital-pdf-v1" {
+        cover.barcode_mode == "None"
+    } else if request
+        .print_artifact_profile
+        .as_ref()
+        .is_some_and(|product| product.vendor == "Lulu")
+    {
+        matches!(cover.barcode_mode.as_str(), "None" | "LorekeeperBarcode")
+    } else {
+        matches!(
+            cover.barcode_mode.as_str(),
+            "LorekeeperBarcode" | "VendorOverlay"
+        ) && !(request.profile == "ingram-print-pdfx1a-v2" && cover.barcode_mode == "VendorOverlay")
+    };
+    if !barcode_mode_is_valid {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_BARCODE_MODE_INVALID",
+            "The barcode mode is unsupported for the selected profile.",
+        ));
+    }
+    if cover.barcode_mode == "LorekeeperBarcode"
+        && cover.isbn.as_deref().and_then(ean13_modules).is_none()
+    {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_EAN13_INVALID",
+            "Lorekeeper barcode generation requires a valid ISBN/EAN-13 checksum.",
+        ));
+    }
+    if cover.title.chars().count() > 240
+        || cover.subtitle.chars().count() > 400
+        || cover.author.chars().count() > 240
+        || cover.spine_text.chars().count() > 240
+        || cover.description.chars().count() > 100_000
+    {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_COVER_TEXT_OVERFLOW",
+            "Cover copy exceeds the bounded full-wrap template capacity.",
+        ));
+    }
+    if !is_hex_color(&cover.background_color) {
+        diagnostics.push(Diagnostic::warning(
+            "PRESS_COVER_COLOR_INVALID",
+            "Cover background colors must use six-digit hexadecimal notation.",
+        ));
+    }
 }
 
 fn validate_font_embedding(font: &crate::model::FontDeclaration, bytes: &[u8]) -> RenderResult<()> {
@@ -3663,15 +3883,16 @@ fn designed_page(
                     });
                     page.paint_order.push(LayoutPaint::Shape(shape_index));
                 }
+                let vertical_alignment = scene_style_value(scene, &item, "verticalAlignment")
+                    .and_then(Value::as_str)
+                    .unwrap_or("top")
+                    .to_ascii_lowercase();
                 let vertical_offset = if text_overflows_vertically {
                     0.0
                 } else {
-                    match scene_style_value(scene, &item, "verticalAlignment")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Top")
-                    {
-                        "Center" => (height * scene_height - text_height) / 2.0,
-                        "Bottom" => height * scene_height - text_height,
+                    match vertical_alignment.as_str() {
+                        "center" => (height * scene_height - text_height) / 2.0,
+                        "bottom" => height * scene_height - text_height,
                         _ => 0.0,
                     }
                 };
@@ -3728,13 +3949,14 @@ fn designed_page(
                     }
                     let alignment = scene_style_value(scene, &item, "textAlignment")
                         .and_then(Value::as_str)
-                        .unwrap_or("Start");
+                        .unwrap_or("start")
+                        .to_ascii_lowercase();
                     let whitespace_count = line_text
                         .chars()
                         .filter(|character| character.is_whitespace())
                         .count();
                     let word_spacing = justified_word_spacing(
-                        alignment == "Justify",
+                        alignment == "justify",
                         line_index + 1 == wrapped_line_count,
                         ends_paragraph,
                         whitespace_count,
@@ -3742,18 +3964,19 @@ fn designed_page(
                         width * scene_width,
                     );
                     let line_x = x * scene_width
-                        + match alignment {
-                            "Center" => (width * scene_width - measured_width) / 2.0,
-                            "End" => width * scene_width - measured_width,
+                        + match alignment.as_str() {
+                            "center" => (width * scene_width - measured_width) / 2.0,
+                            "end" => width * scene_width - measured_width,
                             _ => 0.0,
                         };
                     let shadow = scene_style_value(scene, &item, "textShadow")
                         .and_then(Value::as_str)
-                        .unwrap_or("None");
+                        .unwrap_or("none")
+                        .to_ascii_lowercase();
                     let baseline_offset_points = line_baseline_offset_points(size, face, &runs);
-                    if shadow != "None" {
+                    if shadow != "none" {
                         let shadow_index = page.lines.len();
-                        let shadow_offset = if shadow == "Strong" { 2.0 } else { 1.0 };
+                        let shadow_offset = if shadow == "strong" { 2.0 } else { 1.0 };
                         page.lines.push(LayoutLine {
                             text: line_text.clone(),
                             runs: runs.clone(),
@@ -3774,7 +3997,7 @@ fn designed_page(
                             ),
                             opacity: item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0)
                                 as f32
-                                * if shadow == "Glow" { 0.35 } else { 0.55 },
+                                * if shadow == "glow" { 0.35 } else { 0.55 },
                             light_text: false,
                             fill_rgb: Some([0.0, 0.0, 0.0]),
                             semantic_role: LayoutSemanticRole::Paragraph,
@@ -4453,10 +4676,10 @@ fn layout_semantic_role(value: &str) -> LayoutSemanticRole {
 }
 
 fn layout_image_fit(value: &str) -> LayoutImageFit {
-    match value {
-        "Contain" => LayoutImageFit::Contain,
-        "Cover" => LayoutImageFit::Cover,
-        "Stretch" => LayoutImageFit::Stretch,
+    match value.to_ascii_lowercase().as_str() {
+        "contain" => LayoutImageFit::Contain,
+        "cover" => LayoutImageFit::Cover,
+        "stretch" => LayoutImageFit::Stretch,
         _ => LayoutImageFit::Contain,
     }
 }
@@ -7966,9 +8189,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 11,
+            protocol_version: 12,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
+            render_scope: RenderScope::Book,
+            render_mode: RenderMode::Production,
+            interior_page_count: None,
             ink: "BlackAndWhite".to_owned(),
             print_artifact_profile: None,
             output_purpose: OutputPurpose::Publication,
@@ -9053,6 +9279,65 @@ mod tests {
         assert!((spine.x - expected_center).abs() < 0.01);
     }
 
+    #[test]
+    fn cover_text_advance_matches_the_editor_font_metrics() {
+        let width = crate::font::measure_text(FontFace::SerifBold, "Falanaras, Blood Knight", 19.0);
+
+        assert!((width - 213.921).abs() < 0.01, "measured width was {width}");
+    }
+
+    #[test]
+    fn rotated_cover_text_honors_editor_serialized_center_alignment() {
+        let scene_width = 943.7256_f32;
+        let composition = serde_json::json!({
+            "id": "cover",
+            "name": "Cover",
+            "semanticBlocks": [],
+            "variants": [{ "scene": {
+                "surface": { "kind": "SinglePage", "widthPoints": scene_width, "heightPoints": 666 },
+                "layers": [{ "id": "copy", "order": 0, "visible": true }],
+                "objects": [{
+                    "id": "spine-title",
+                    "layerId": "copy",
+                    "kind": "Text",
+                    "bounds": { "xPercent": 36, "yPercent": 24.339, "widthPercent": 28, "heightPercent": 8.5 },
+                    "rotationDegrees": 90,
+                    "textBinding": "Falanaras, Blood Knight",
+                    "fontFamilyKey": "builtin:lora",
+                    "fontWeight": 700,
+                    "fontSizePoints": 19,
+                    "lineHeight": 1.05,
+                    "textAlignment": "center",
+                    "verticalAlignment": "center",
+                    "textShadow": "none",
+                    "semanticRole": "Heading2",
+                    "readingOrder": 1
+                }]
+            }}]
+        });
+        let page = designed_page(
+            &composition,
+            &serde_json::json!({}),
+            &standard_trim(),
+            LayoutTolerance::default(),
+            &mut Vec::new(),
+        )
+        .expect("cover text layout");
+        let line = page.lines.first().expect("spine title line");
+        let frame_x = scene_width * 0.36;
+        let frame_width = scene_width * 0.28;
+        let text_width =
+            crate::font::measure_text(FontFace::SerifBold, "Falanaras, Blood Knight", 19.0);
+
+        assert!((line.x - (frame_x + (frame_width - text_width) / 2.0)).abs() < 0.01);
+        assert_eq!(line.rotation_degrees, 90.0);
+        assert_eq!(
+            page.lines.len(),
+            1,
+            "textShadow=none must not add a paint line"
+        );
+    }
+
     fn standard_trim() -> crate::model::Trim {
         crate::model::Trim {
             width_inches: 6.0,
@@ -9070,9 +9355,12 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 11,
+            protocol_version: 12,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
+            render_scope: RenderScope::Book,
+            render_mode: RenderMode::Production,
+            interior_page_count: None,
             ink: "BlackAndWhite".to_owned(),
             print_artifact_profile: None,
             output_purpose: OutputPurpose::Publication,

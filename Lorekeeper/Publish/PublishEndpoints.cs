@@ -92,6 +92,38 @@ public static class PublishEndpoints
             });
 
         endpoints.MapGet(
+            "/projects/{projectId:guid}/publish/cover-previews/{token:guid}/documents/{documentIndex:int}/pages/{pageNumber:int}.png",
+            async (
+                Guid projectId,
+                Guid token,
+                int documentIndex,
+                int pageNumber,
+                int? width,
+                HttpContext httpContext,
+                IPublicationCoverPreviewService previews,
+                CancellationToken cancellationToken) =>
+            {
+                var page = await previews.RenderPageAsync(
+                    projectId,
+                    token,
+                    documentIndex,
+                    pageNumber,
+                    width ?? 1200,
+                    cancellationToken);
+                if (page is null)
+                    return Results.NotFound();
+                httpContext.Response.Headers.CacheControl = "private, no-store";
+                var etag = new EntityTagHeaderValue(
+                    $"\"sha256-{page.ArtifactSha256}-page-{page.PageNumber}-w-{page.Width}\"");
+                return Results.File(
+                    page.Data,
+                    "image/png",
+                    fileDownloadName: null,
+                    lastModified: page.CreatedAt,
+                    entityTag: etag);
+            });
+
+        endpoints.MapGet(
             "/projects/{projectId:guid}/publish/artifacts/{artifactId:guid}/epub/{**resourcePath}",
             async (
                 Guid projectId,

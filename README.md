@@ -266,6 +266,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Book PDF with its front cover as page one, searchable/selectable text,
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
+  Physical **Prepare files** reuses Interior and Cover scopes independently in a
+  fixed interior-first order: a cover-only edit regenerates only the cover, while
+  an interior change establishes its validated page count before cover work.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools, canvas-aligned resize handles for rotated objects, justified text
   alignment, and reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
@@ -281,6 +284,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout needed to obtain that current page count; the editor opens only after
   the calculated spine is available, without requiring a full prepared interior
   PDF first.
+  The cover editor's **Preview** button flushes current edits and opens a
+  transient Press-rendered PDF in the existing page viewer without creating a
+  durable render job, artifact, package, image replacement, or database row.
+  Images and shapes may extend through cover safe-area guides; only text outside
+  the safe area blocks production, while physical bounds, barcode/no-ink, and
+  accessibility checks remain enforced.
   B&N covers remain one connected Back/Spine/Front composition; choosing a
   region is confined to the Fill selected region dialog while ordinary editing,
   crop, generation guidance, and spine direction stay whole-canvas. They can prepare

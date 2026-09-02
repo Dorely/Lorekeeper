@@ -28,8 +28,12 @@ public class PublicationPreparationJob
     public PublicationTargetKind TargetKind { get; set; }
     public Guid? EditionId { get; set; }
     public PublicationEdition? Edition { get; set; }
-    public Guid? RenderJobId { get; set; }
-    public PublicationRenderJob? RenderJob { get; set; }
+    public Guid? BookRenderJobId { get; set; }
+    public PublicationRenderJob? BookRenderJob { get; set; }
+    public Guid? InteriorRenderJobId { get; set; }
+    public PublicationRenderJob? InteriorRenderJob { get; set; }
+    public Guid? CoverRenderJobId { get; set; }
+    public PublicationRenderJob? CoverRenderJob { get; set; }
     public PublicationPreparationStatus Status { get; set; } = PublicationPreparationStatus.Queued;
     public string Step { get; set; } = "Queued";
     public int ProgressPercent { get; set; }

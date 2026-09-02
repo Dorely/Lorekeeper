@@ -141,16 +141,17 @@ content.
 Physical-release cover entry and artifact preparation are pagination boundaries.
 After flushing the current release, Publish automatically runs the compact Press
 interior layout needed to obtain the current page count and opens the cover only
-after that snapshot succeeds. Independently, the background render processor
-ensures the same current snapshot before loading or validating a physical cover.
-The release cover, its assistant tools, and preparation therefore use the
-calculated spine rather than minimum-page placeholder geometry, including after
-renderer-version invalidation. The persisted page count survives release,
-printer, paper, cover, identifier, and other changes that cannot affect interior
-pagination. While the cover is open, Publish compares the pagination fingerprint
-after an assistant mutation and closes the editor only when the interior layout
-identity actually changed; reopening then refreshes pagination before further
-cover work.
+after that snapshot succeeds. A production cover render has a stronger boundary:
+it requires a current validated Interior PDF and captures that artifact's trusted
+page count. Preparation always establishes that interior first, then prepares the
+cover, and never invokes interior validation or rendering when the interior scope
+is already current. An interior regeneration whose validated page count is
+unchanged does not by itself stale an otherwise-current cover. The release cover,
+its assistant tools, and preparation therefore use calculated spine geometry
+rather than a minimum-page placeholder. While the cover is open, Publish compares
+the pagination fingerprint after an assistant mutation and closes the editor only
+when the interior layout identity actually changed; reopening then refreshes
+pagination before further cover work.
 
 Release-specific manuscript content is opt-in. An untouched release chapter
 reads current Core live. Its first text or layout mutation creates a complete
@@ -333,6 +334,17 @@ changes stale only the artifacts they affect. Archived releases are immutable
 at owning mutation boundaries; existing artifacts remain readable/exportable,
 and cloning creates the editable continuation.
 
+Physical artifacts use separate interior and cover fingerprints. The interior
+identity includes effective manuscript, sections, interior compositions,
+referenced assets/fonts, trim, color, and applicable print-profile inputs while
+excluding cover scenes and copy. The cover identity includes its scenes and bound
+copy, referenced assets/fonts, production geometry, barcode settings, and the
+trusted interior page count. Package identity and inseparable Core, Digital PDF,
+and EPUB output retain the complete-book fingerprint. One preparation job records
+separate Book, Interior, and Cover render links so package preflight can consume
+validated scopes from different completed jobs while requiring every cover file
+in one release package to come from one matching cover job.
+
 Version-history snapshots capture the canonical Core Book, publication editions,
 and publication sections so authored publication intent can be restored. They
 exclude preparation jobs, render/package bytes, page maps, audits, migration
@@ -340,7 +352,9 @@ journals, and other derived or operational production state; those artifacts
 are regenerated after restore through the Press boundary.
 
 Publication preparation runs permanent image preparation after basic readiness
-checks and before reusable-render lookup. EPUB records no DPI transformation;
+checks and before each applicable scoped render lookup. Cover-only preparation
+analyzes and may replace only cover references; it never traverses or rewrites
+manuscript image references. EPUB records no DPI transformation;
 Core and Digital PDF use 180 DPI, while every print profile uses 300 DPI. The
 managed publication model resolves each included placement's effective geometry
 and a maximum proportional raster per source asset before staging Press. If any included placement is undersized, one suitable
@@ -371,7 +385,7 @@ and its fingerprint describe the permanent replacement references.
 | Path or family | Primary responsibility |
 |---|---|
 | `Lorekeeper/Publish/PublicationBookService.cs` | Core Book creation, metadata/presentation patches, chapter inclusion, reusable cover coordination, revisions, source fingerprints, and Core-plus-release effective configuration resolution. |
-| `Lorekeeper/Publish/IPublicationEditionService.cs` / `PublicationEditionService.cs` | Release lifecycle, sparse overrides, naming, cloning, archiving, comparison, and effective fingerprints. |
+| `Lorekeeper/Publish/IPublicationEditionService.cs` / `PublicationEditionService.cs` | Release lifecycle, sparse overrides, naming, cloning, archiving, comparison, and complete/interior/cover fingerprints. |
 | `Lorekeeper/Publish/PublicationSectionService.cs` | Core/release section lifecycle, inclusion, anchors, prose/designed boundaries, bindings, in-process manual history, and release materialization. |
 | `Lorekeeper/Publish/EditionContentService.cs` | Opt-in release content, chapter reset/discard, Core-drift differences, and release Designed Page diagnostics. |
 | `Lorekeeper/Publish/PublicationReleasePresetService.cs` | Safe release defaults for paperback, hardcover, EPUB ebook, and PDF ebook products. |
@@ -381,6 +395,7 @@ and its fingerprint describe the permanent replacement references.
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishContent.razor` | Progressive Core/release workspace, Front/Main/Back flow, readiness, inclusion/order controls, and downloads. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishChatPanel.razor` | Refresh-safe Publish chat adapter, flush-before-turn context, streaming, attachments, and workspace callbacks. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublicationPdfPreview.razor` | Lorekeeper-owned immutable PDF page/facing preview surface. |
+| `Lorekeeper/Publish/PublicationCoverPreviewService.cs` / `PublishEndpoints.cs` | Bounded expiring transient cover-PDF cache and project/token-scoped page endpoints; no durable artifact or job ownership. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublicationEpubPreview.razor` | Artifact-backed sandboxed EPUB reader and spine/navigation inspection. |
 | `Lorekeeper/Publish/PublicationPreparationService.cs` | Persisted one-action Core/release preparation, progress, blockers, cancellation, and retained Core warnings. |
 | `Lorekeeper/Publish/PublicationDiagnosticPresentationService.cs` | Safe user-facing resolution of Press/preparation diagnostics to chapters, sections, pages, covers, and editor links. |

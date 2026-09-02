@@ -6,7 +6,7 @@ use lopdf::{Dictionary, Document, Object};
 use crate::model::Diagnostic;
 use crate::pdf::PdfOptions;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InspectionEvidence {
     pub fonts_embedded: bool,
     pub to_unicode: bool,

@@ -82,7 +82,12 @@ public sealed class PublicationArtifactPreviewService(
                 return cached;
 
             cancellationToken.ThrowIfCancellationRequested();
-            var preview = RenderPage(artifact, pageNumber, requestedWidth);
+            var preview = RenderPage(
+                artifact.Data,
+                artifact.Sha256,
+                artifact.CreatedAt,
+                pageNumber,
+                requestedWidth);
             cache.Set(
                 cacheKey,
                 preview,
@@ -99,12 +104,14 @@ public sealed class PublicationArtifactPreviewService(
         }
     }
 
-    private static PublicationArtifactPreviewPage RenderPage(
-        Lorekeeper.Models.PublicationArtifact artifact,
+    internal static PublicationArtifactPreviewPage RenderPage(
+        byte[] pdfData,
+        string artifactSha256,
+        DateTime createdAt,
         int pageNumber,
         int widthPixels)
     {
-        using var pdf = PdfDocument.Open(artifact.Data);
+        using var pdf = PdfDocument.Open(pdfData);
         if (pageNumber > pdf.NumberOfPages)
             throw new ArgumentOutOfRangeException(nameof(pageNumber));
 
@@ -118,7 +125,7 @@ public sealed class PublicationArtifactPreviewService(
         var smallerDimension = Math.Min(widthPixels, heightPixels);
         var largerDimension = Math.Max(widthPixels, heightPixels);
         using var documentReader = DocLib.Instance.GetDocReader(
-            artifact.Data,
+            pdfData,
             new PageDimensions(smallerDimension, largerDimension));
         using var pageReader = documentReader.GetPageReader(pageNumber - 1);
         var rawBytes = pageReader.GetImage();
@@ -131,8 +138,8 @@ public sealed class PublicationArtifactPreviewService(
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 95);
         return new(
             encoded.ToArray(),
-            artifact.Sha256,
-            artifact.CreatedAt,
+            artifactSha256,
+            createdAt,
             pageNumber,
             renderedWidth,
             renderedHeight);

@@ -138,7 +138,9 @@ public sealed class PublicationPreparationService(
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
         return (await db.PublicationPreparationJobs.AsNoTracking()
-                    .Include(item => item.RenderJob)
+                    .Include(item => item.BookRenderJob)
+                    .Include(item => item.InteriorRenderJob)
+                    .Include(item => item.CoverRenderJob)
                     .Where(item => item.ProjectId == projectId
                     && item.TargetKind == targetKind && item.EditionId == editionId)
                     .OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(View).ToList();
@@ -164,7 +166,11 @@ public sealed class PublicationPreparationService(
             job.CompletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
             cancellationRegistry.Cancel(jobId);
-            if (job.RenderJobId is Guid renderJobId)
+            var renderJobIds = new[] { job.BookRenderJobId, job.InteriorRenderJobId, job.CoverRenderJobId }
+                .OfType<Guid>()
+                .Distinct()
+                .ToList();
+            foreach (var renderJobId in renderJobIds)
             {
                 if (job.TargetKind == PublicationTargetKind.CoreBook)
                     await renders.CancelCoreAsync(projectId, renderJobId, CancellationToken.None);
@@ -179,12 +185,13 @@ public sealed class PublicationPreparationService(
     {
         var diagnostics = DeserializeDiagnostics(job.DiagnosticsJson);
         var imageSummary = DeserializeImagePreparationSummary(job.ImagePreparationSummaryJson);
-        if (job.RenderJob is not null
+        var lastRenderJob = job.CoverRenderJob ?? job.InteriorRenderJob ?? job.BookRenderJob;
+        if (lastRenderJob is not null
             && (diagnostics.Count == 0
                 || diagnostics.Any(item => !IsUsable(item)
                     || item.Code is "PREPARATION_FAILED" or "PREPARATION_DIAGNOSTICS_INVALID")))
         {
-            var renderDiagnostics = DeserializeRenderDiagnostics(job.RenderJob.DiagnosticsJson);
+            var renderDiagnostics = DeserializeRenderDiagnostics(lastRenderJob.DiagnosticsJson);
             if (renderDiagnostics.Count > 0)
                 diagnostics = renderDiagnostics;
         }
@@ -321,27 +328,43 @@ public sealed class PublicationPreparationWorker(
         }
 
         var preparationDiagnostics = new List<PublicationPreflightItem>();
-        var imagePreparation = await PrepareImagesOrBlockAsync(job, scope.ServiceProvider, cancellationToken);
-        if (imagePreparation is null || await IsCancelledAsync(jobId, CancellationToken.None))
-            return;
-
         if (job.TargetKind == PublicationTargetKind.CoreBook)
         {
+            var imagePreparation = await PrepareImagesOrBlockAsync(
+                job,
+                scope.ServiceProvider,
+                PublicationRenderScope.Book,
+                job.SourceFingerprint,
+                "Preparing reading-copy images",
+                8,
+                cancellationToken);
+            if (imagePreparation is null || await IsCancelledAsync(jobId, CancellationToken.None))
+                return;
             var renders = scope.ServiceProvider.GetRequiredService<IPublicationRenderService>();
             var current = (await renders.ListCoreAsync(job.ProjectId, cancellationToken)).FirstOrDefault(item =>
                 item.Status == PublicationRenderStatus.Completed && item.Artifacts.Any(artifact => artifact.Kind == PublicationArtifactKind.ReadingPdf && !artifact.IsStale));
             var render = current ?? await renders.RequestCoreAsync(job.ProjectId, cancellationToken);
-            job.RenderJobId = render.Id;
+            job.BookRenderJobId = render.Id;
             await UpdateJobAsync(jobId, candidate =>
             {
-                candidate.RenderJobId = render.Id;
+                candidate.BookRenderJobId = render.Id;
                 candidate.Step = "Typesetting and validating reading PDF";
                 candidate.ProgressPercent = 10;
             }, cancellationToken);
-            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, cancellationToken));
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 10, 85, cancellationToken));
         }
         else if (job.Edition!.Format == PublicationEditionFormat.Epub)
         {
+            var imagePreparation = await PrepareImagesOrBlockAsync(
+                job,
+                scope.ServiceProvider,
+                PublicationRenderScope.Book,
+                job.SourceFingerprint,
+                "Preparing EPUB images",
+                8,
+                cancellationToken);
+            if (imagePreparation is null || await IsCancelledAsync(jobId, CancellationToken.None))
+                return;
             await UpdateJobAsync(jobId, candidate =>
             {
                 candidate.Step = "Exporting and validating EPUB";
@@ -358,20 +381,39 @@ public sealed class PublicationPreparationWorker(
             }, cancellationToken);
             await packages.BuildFromPreflightAsync(job.ProjectId, job.EditionId!.Value, report, cancellationToken);
         }
+        else if (job.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+        {
+            if (!await PreparePhysicalReleaseAsync(job, scope.ServiceProvider, preparationDiagnostics, cancellationToken))
+                return;
+        }
         else
         {
+            var imagePreparation = await PrepareImagesOrBlockAsync(
+                job,
+                scope.ServiceProvider,
+                PublicationRenderScope.Book,
+                job.SourceFingerprint,
+                "Preparing publication images",
+                8,
+                cancellationToken);
+            if (imagePreparation is null || await IsCancelledAsync(jobId, CancellationToken.None))
+                return;
             var renders = scope.ServiceProvider.GetRequiredService<IPublicationRenderService>();
             var current = (await renders.ListAsync(job.ProjectId, job.EditionId!.Value, cancellationToken)).FirstOrDefault(item =>
                 item.Status == PublicationRenderStatus.Completed && item.Artifacts.Any() && item.Artifacts.All(artifact => !artifact.IsStale));
-            var render = current ?? await renders.RequestAsync(job.ProjectId, job.EditionId.Value, cancellationToken);
-            job.RenderJobId = render.Id;
+            var render = current ?? await renders.RequestAsync(
+                job.ProjectId,
+                job.EditionId.Value,
+                PublicationRenderScope.Book,
+                cancellationToken: cancellationToken);
+            job.BookRenderJobId = render.Id;
             await UpdateJobAsync(jobId, candidate =>
             {
-                candidate.RenderJobId = render.Id;
+                candidate.BookRenderJobId = render.Id;
                 candidate.Step = "Rendering and validating publication files";
                 candidate.ProgressPercent = 10;
             }, cancellationToken);
-            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, cancellationToken));
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 10, 75, cancellationToken));
             await UpdateJobAsync(jobId, candidate =>
             {
                 candidate.Step = "Checking publication files";
@@ -389,6 +431,11 @@ public sealed class PublicationPreparationWorker(
             await packages.BuildFromPreflightAsync(job.ProjectId, job.EditionId!.Value, report, cancellationToken);
         }
 
+        var completedFingerprint = job.TargetKind == PublicationTargetKind.CoreBook
+            ? await scope.ServiceProvider.GetRequiredService<IPublicationBookService>()
+                .GetSourceFingerprintAsync(job.ProjectId, cancellationToken)
+            : await scope.ServiceProvider.GetRequiredService<IPublicationEditionService>()
+                .GetSourceFingerprintAsync(job.ProjectId, job.EditionId!.Value, cancellationToken);
         await UpdateJobAsync(jobId, candidate =>
         {
             if (candidate.CancellationRequested || candidate.Status == PublicationPreparationStatus.Cancelled)
@@ -399,20 +446,212 @@ public sealed class PublicationPreparationWorker(
             candidate.Message = candidate.TargetKind == PublicationTargetKind.CoreBook
                 ? preparationDiagnostics.Count > 0 ? "Reading PDF ready with warnings" : "Reading PDF ready"
                 : "Publication files ready";
+            candidate.SourceFingerprint = completedFingerprint;
             candidate.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
             candidate.CompletedAt = DateTime.UtcNow;
         }, cancellationToken);
     }
 
+    private async Task<bool> PreparePhysicalReleaseAsync(
+        PublicationPreparationJob job,
+        IServiceProvider services,
+        List<PublicationPreflightItem> preparationDiagnostics,
+        CancellationToken cancellationToken)
+    {
+        var editionId = job.EditionId!.Value;
+        var editions = services.GetRequiredService<IPublicationEditionService>();
+        var renders = services.GetRequiredService<IPublicationRenderService>();
+        var interiorFingerprint = await editions.GetInteriorFingerprintAsync(job.ProjectId, editionId, cancellationToken);
+        var renderJobs = await renders.ListAsync(job.ProjectId, editionId, cancellationToken);
+        var interiorRender = renderJobs.FirstOrDefault(candidate =>
+            candidate.Status == PublicationRenderStatus.Completed
+            && candidate.Scope == PublicationRenderScope.Interior
+            && candidate.SourceFingerprint == interiorFingerprint
+            && candidate.Artifacts.Any(artifact =>
+                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                && !artifact.IsLegacy
+                && !artifact.IsStale));
+        var interior = interiorRender?.Artifacts.First(artifact =>
+            artifact.Kind == PublicationArtifactKind.InteriorPdf
+            && !artifact.IsLegacy
+            && !artifact.IsStale);
+
+        if (interior is null)
+        {
+            var imagePreparation = await PrepareImagesOrBlockAsync(
+                job,
+                services,
+                PublicationRenderScope.Interior,
+                interiorFingerprint,
+                "Preparing interior images",
+                8,
+                cancellationToken);
+            if (imagePreparation is null || await IsCancelledAsync(job.Id, CancellationToken.None))
+                return false;
+
+            var render = await renders.RequestAsync(
+                job.ProjectId,
+                editionId,
+                PublicationRenderScope.Interior,
+                cancellationToken: cancellationToken);
+            job.InteriorRenderJobId = render.Id;
+            await UpdateJobAsync(job.Id, candidate =>
+            {
+                candidate.InteriorRenderJobId = render.Id;
+                candidate.Step = "Rendering and validating interior PDF";
+                candidate.ProgressPercent = 12;
+            }, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 12, 36, cancellationToken));
+            preparationDiagnostics.Add(new(
+                "info",
+                "PREPARATION_INTERIOR_RENDERED",
+                "The interior PDF was regenerated and validated."));
+            interiorRender = await renders.GetAsync(job.ProjectId, editionId, render.Id, cancellationToken);
+            interior = interiorRender.Artifacts.FirstOrDefault(artifact =>
+                artifact.Kind == PublicationArtifactKind.InteriorPdf
+                && !artifact.IsLegacy
+                && !artifact.IsStale
+                && artifact.SourceFingerprint == interiorFingerprint);
+            if (interior is null)
+                throw new InvalidOperationException("The validated interior PDF was not available after rendering.");
+        }
+        else
+        {
+            job.InteriorRenderJobId = interiorRender!.Id;
+            preparationDiagnostics.Add(new(
+                "info",
+                "PREPARATION_INTERIOR_REUSED",
+                "The existing validated interior PDF is still current and was reused."));
+            await UpdateJobAsync(job.Id, candidate =>
+            {
+                candidate.InteriorRenderJobId = interiorRender.Id;
+                candidate.Step = "Interior PDF is current";
+                candidate.ProgressPercent = 48;
+            }, cancellationToken);
+        }
+
+        var pageCount = interior.PageCount
+            ?? throw new InvalidOperationException("The current interior PDF has no page count.");
+        var coverFingerprint = await editions.GetCoverFingerprintAsync(
+            job.ProjectId,
+            editionId,
+            pageCount,
+            cancellationToken);
+        var requiredCoverKinds = RequiredCoverArtifactKinds(
+            job.Edition!,
+            services.GetRequiredService<IPrintArtifactProfileRegistry>());
+        renderJobs = await renders.ListAsync(job.ProjectId, editionId, cancellationToken);
+        var coverRender = renderJobs.FirstOrDefault(candidate =>
+            candidate.Status == PublicationRenderStatus.Completed
+            && candidate.Scope == PublicationRenderScope.Cover
+            && candidate.InteriorPageCount == pageCount
+            && candidate.SourceFingerprint == coverFingerprint
+            && requiredCoverKinds.All(kind => candidate.Artifacts.Any(artifact =>
+                artifact.Kind == kind
+                && !artifact.IsLegacy
+                && !artifact.IsStale
+                && artifact.SourceFingerprint == coverFingerprint)));
+        if (coverRender is null)
+        {
+            var imagePreparation = await PrepareImagesOrBlockAsync(
+                job,
+                services,
+                PublicationRenderScope.Cover,
+                coverFingerprint,
+                "Preparing cover images",
+                50,
+                cancellationToken);
+            if (imagePreparation is null || await IsCancelledAsync(job.Id, CancellationToken.None))
+                return false;
+
+            var render = await renders.RequestAsync(
+                job.ProjectId,
+                editionId,
+                PublicationRenderScope.Cover,
+                pageCount,
+                cancellationToken);
+            job.CoverRenderJobId = render.Id;
+            await UpdateJobAsync(job.Id, candidate =>
+            {
+                candidate.CoverRenderJobId = render.Id;
+                candidate.Step = "Rendering and validating cover files";
+                candidate.ProgressPercent = 52;
+            }, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 52, 33, cancellationToken));
+            preparationDiagnostics.Add(new(
+                "info",
+                "PREPARATION_COVER_RENDERED",
+                "The cover files were regenerated and validated."));
+        }
+        else
+        {
+            job.CoverRenderJobId = coverRender.Id;
+            preparationDiagnostics.Add(new(
+                "info",
+                "PREPARATION_COVER_REUSED",
+                "The existing validated cover files are still current and were reused."));
+            await UpdateJobAsync(job.Id, candidate =>
+            {
+                candidate.CoverRenderJobId = coverRender.Id;
+                candidate.Step = "Cover files are current";
+                candidate.ProgressPercent = 85;
+            }, cancellationToken);
+        }
+
+        await UpdateJobAsync(job.Id, candidate =>
+        {
+            candidate.Step = "Checking publication files";
+            candidate.ProgressPercent = 88;
+        }, cancellationToken);
+        var packages = services.GetRequiredService<IPublicationPackageService>();
+        var report = await PreflightOrBlockAsync(job, packages, cancellationToken);
+        if (report is null)
+            return false;
+        await UpdateJobAsync(job.Id, candidate =>
+        {
+            candidate.Step = "Building publication package";
+            candidate.ProgressPercent = 92;
+        }, cancellationToken);
+        await packages.BuildFromPreflightAsync(job.ProjectId, editionId, report, cancellationToken);
+        return true;
+    }
+
+    private static IReadOnlyList<PublicationArtifactKind> RequiredCoverArtifactKinds(
+        PublicationEdition edition,
+        IPrintArtifactProfileRegistry profiles)
+    {
+        var profile = profiles.GetRequired(edition.PrintArtifactProfileKey);
+        var kinds = new List<PublicationArtifactKind>();
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            && edition.PrintCoverSubmissionMode == PrintCoverSubmissionMode.SeparatePanelsVendorSpine)
+        {
+            kinds.Add(PublicationArtifactKind.FrontCoverPdf);
+            kinds.Add(PublicationArtifactKind.BackCoverPdf);
+        }
+        else
+        {
+            if (profile.RequiresPerfectBoundCover) kinds.Add(PublicationArtifactKind.PerfectBoundCoverPdf);
+            if (profile.RequiresCaseCover) kinds.Add(PublicationArtifactKind.CaseCoverPdf);
+            if (profile.RequiresDustJacket) kinds.Add(PublicationArtifactKind.DustJacketPdf);
+        }
+        if (profile.RequiresClothManifest || edition.Vendor == PublicationVendor.BarnesAndNoblePress)
+            kinds.Add(PublicationArtifactKind.PrintSetupManifest);
+        return kinds;
+    }
+
     private async Task<PublicationImagePreparationResult?> PrepareImagesOrBlockAsync(
         PublicationPreparationJob job,
         IServiceProvider services,
+        PublicationRenderScope renderScope,
+        string expectedFingerprint,
+        string step,
+        int progressPercent,
         CancellationToken cancellationToken)
     {
         await UpdateJobAsync(job.Id, candidate =>
         {
-            candidate.Step = "Preparing publication images";
-            candidate.ProgressPercent = 8;
+            candidate.Step = step;
+            candidate.ProgressPercent = progressPercent;
         }, cancellationToken);
 
         PublicationImagePreparationResult result;
@@ -422,7 +661,8 @@ public sealed class PublicationPreparationWorker(
                 job.ProjectId,
                 job.TargetKind,
                 job.EditionId,
-                job.SourceFingerprint,
+                renderScope,
+                expectedFingerprint,
                 cancellationToken);
         }
         catch (PublicationImagePreparationException exception)
@@ -500,18 +740,20 @@ public sealed class PublicationPreparationWorker(
 
     private async Task<IReadOnlyList<PublicationPreflightItem>> WaitForRenderAsync(
         PublicationPreparationJob preparation,
+        Guid renderJobId,
+        int progressStart,
+        int progressRange,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             await using var operation = await database.OpenWriteAsync(cancellationToken);
             var db = operation.Db;
-            var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == preparation.RenderJobId, cancellationToken);
+            var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == renderJobId, cancellationToken);
             var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
                 state.DiagnosticsJson,
                 PublicationPreparationService.DiagnosticsJsonOptions) ?? [];
-            var renderRange = preparation.TargetKind == PublicationTargetKind.CoreBook ? 85 : 75;
-            var mappedProgress = 10 + state.ProgressPercent * renderRange / 100;
+            var mappedProgress = progressStart + state.ProgressPercent * progressRange / 100;
             await db.PublicationPreparationJobs
                 .Where(item => item.Id == preparation.Id
                     && item.Status == PublicationPreparationStatus.Preparing

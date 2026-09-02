@@ -319,6 +319,8 @@ builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>()
 builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
 builder.Services.AddSingleton<PublicationArtifactPreviewCache>();
 builder.Services.AddScoped<IPublicationArtifactPreviewService, PublicationArtifactPreviewService>();
+builder.Services.AddSingleton<PublicationCoverPreviewCache>();
+builder.Services.AddScoped<IPublicationCoverPreviewService, PublicationCoverPreviewService>();
 builder.Services.AddSingleton<PublicationEpubPreviewCache>();
 builder.Services.AddScoped<IPublicationEpubPreviewService, PublicationEpubPreviewService>();
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();

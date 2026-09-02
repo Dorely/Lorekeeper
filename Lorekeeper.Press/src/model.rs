@@ -43,6 +43,12 @@ pub struct RenderRequest {
     pub protocol_version: u32,
     pub job_id: String,
     pub profile: String,
+    #[serde(default)]
+    pub render_scope: RenderScope,
+    #[serde(default)]
+    pub render_mode: RenderMode,
+    #[serde(default)]
+    pub interior_page_count: Option<usize>,
     pub ink: String,
     pub print_artifact_profile: Option<PrintArtifactProfile>,
     #[serde(default)]
@@ -154,6 +160,23 @@ pub struct PrintArtifactProfile {
     pub required_cover_surfaces: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RenderScope {
+    #[default]
+    Book,
+    Interior,
+    Cover,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RenderMode {
+    #[default]
+    Production,
+    Preview,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhysicalSpineModel {
@@ -237,7 +260,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 11,
+            protocol_version: 12,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),

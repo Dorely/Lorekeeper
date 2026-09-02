@@ -2,7 +2,7 @@
 
 ## When to read
 
-Read this chapter when a change touches the owned native renderer, protocol v11,
+Read this chapter when a change touches the owned native renderer, protocol v12,
 render requests, deterministic pagination or shaping, Press runtime packaging,
 print-artifact profile registry entries, stock/spine/cover geometry, cover surfaces,
 PDF versions/output intent/color/ink/transparency, tagged Digital PDF,
@@ -86,12 +86,18 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 `PublicationRenderProcessor` owns the bounded child process. `PublicationPackageService`
 owns final format-specific preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
+Physical preparation is an ordered Interior-then-Cover pipeline. It reuses each
+scope independently, reports the reused/regenerated phase, and packages one
+validated Interior job with a complete cover set from one validated Cover job.
+Production cover requests fail closed when that current Interior evidence and
+trusted page count are absent; a cover fingerprint depends on page count rather
+than interior artifact identity, so an unchanged count permits cover reuse.
 Managed request assembly resolves every cover text template against the
 effective Core/release title, subtitle, author, spine text, and Description before
 protocol serialization. Press therefore receives concrete selectable text and
 does not own application metadata-token semantics.
 
-The native `Lorekeeper.Press` project owns protocol v11, shaping, pagination,
+The native `Lorekeeper.Press` project owns protocol v12, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
 The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
@@ -113,8 +119,14 @@ official B&N cover generator. User-imported template state and generic caliper f
 are not permitted.
 
 Requests explicitly identify `outputPurpose` as `publication` or
-`reading-copy`. Reading-copy output is accepted only by the generic Digital
-PDF profile used by Core Book and cannot weaken a publication profile.
+`reading-copy`, `renderScope` as `book`, `interior`, or `cover`, and `renderMode`
+as `production` or `preview`. Reading-copy output is accepted only by the generic
+Digital PDF profile used by Core Book and cannot weaken a publication profile.
+Physical production uses independent Interior and Cover requests; a Cover
+request carries the trusted validated interior page count and emits only its
+required cover artifact set. Book remains the inseparable Core/Digital PDF
+scope. Preview is cover-only, returns validated transient PDFs plus warning
+diagnostics without production evidence, and never establishes artifact claims.
 Terminal responses echo protocol version and job identity. If malformed input
 prevents the body from being decoded and no identity can be recovered, the
 application preserves the Press diagnostic rather than inventing an identity
@@ -131,7 +143,7 @@ rasters are decoded and structurally validated once; validated pixels are
 reused only by interior or cover surfaces that reference them. Shared color
 transforms are reused when interior and cover intent match.
 
-Press protocol v11 owns deterministic layout, English/Latin shaping and glyph
+Press protocol v12 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode
 maps, bounded pagination, headings/TOC, stable block/page maps, inline
 typography, sparse paragraph presentation, flowing Figures, crop positioning,
@@ -139,6 +151,10 @@ bleed, captions, structured Designed Pages and cover scenes, reusable styles,
 vector shapes, reading order, page-size overrides for eligible Digital PDFs,
 full-wrap geometry, EAN-13 bars, and PDF serialization. Structured text
 remains selectable text rather than a rasterized page image.
+Scope-specific staging, containment, cancellation, inspection, and atomic
+promotion retain the same limits as complete rendering. Interior scope does not
+load or validate cover content. Cover scope does not paginate the manuscript and
+uses only declared cover assets/fonts plus its trusted page-count dependency.
 The versioned `assets/manuscript-typography-v2.json` contract is embedded by
 both Press and the application. It owns bundled family aliases and default
 metrics for body text, heading levels 1-6, captions, lists, scene breaks, and
@@ -233,6 +249,9 @@ Composition rotation remains clockwise-positive in the editor, Skia previews,
 layout traces, and persisted scenes. The PDF writer negates that angle only
 when crossing into PDF's bottom-up page coordinate system, so the final visual
 direction matches the canvas without changing the shared scene contract.
+Cover text alignment, vertical alignment, shadow, and image-fit values are
+normalized at the protocol boundary so canonical or camel-case enum JSON
+produces the same centered rotation origin and advance geometry as the editor.
 
 Digital PDF jobs produce one immutable Book PDF whose front cover is page one,
 followed by publication sections and manuscript content. Tagged structure,
@@ -332,14 +351,14 @@ Press's existing 256 MiB containment boundary.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v11 request/response, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v12 request/response, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |
 | `Lorekeeper.Press/src/image.rs` | Bounded raster decoding, alpha/color conversion, crop positioning, and total-ink enforcement. |
 | `Lorekeeper.Press/src/inspect.rs` | Independent post-write geometry, font, color, output-intent, transparency, security, annotation, and tagged-PDF inspection. |
-| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v11 render CLI, and testable library surface. |
-| `Lorekeeper.Press/tests/conformance_v11.rs` | Protocol, containment, atomicity, determinism, layout, publication, artifact-profile, cover, typography, color, PDF, and negative evidence harness. |
+| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v12 render CLI, and testable library surface. |
+| `Lorekeeper.Press/tests/conformance_v12.rs` | Protocol, containment, atomicity, determinism, layout, publication, artifact-profile, cover, typography, color, PDF, and negative evidence harness. |
 | `Lorekeeper.Press/fixtures/` | Frozen full-model, negative protocol, malformed raw-PDF, and test asset fixtures. |
 | `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, canonical print-artifact profile registry, and shared manuscript typography defaults. |
 | `Lorekeeper/Publish/PrintArtifactProfileRegistry.cs` | Application loader/validator for registry version/hash and profiles plus submitted/normalized/reported page counts, spine, paper thickness, surfaces, cover regions, barcode, duplex, case, jacket, and cloth geometry. |

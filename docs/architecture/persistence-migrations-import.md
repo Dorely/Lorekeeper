@@ -310,6 +310,15 @@ exact-surface scene bindings to `description`, then drops the obsolete
 from each release's Description and rewrites the bindings back so the historical
 runtime remains internally consistent.
 
+The scoped-publication forward migration adds render scope and trusted cover
+page-count dependency to render jobs and replaces each preparation's single
+render link with Book, Interior, and Cover links. Existing artifact bytes,
+hashes, rows, and digital/Core Book history are preserved. Previous combined
+physical render jobs and their artifacts are marked legacy so they remain
+downloadable historical data but cannot satisfy scoped production preflight;
+non-physical preparation links move to the Book slot. Interrupted legacy
+physical jobs are not recovered into the v12 queue.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |
@@ -335,6 +344,7 @@ runtime remains internally consistent.
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v26 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |
+| `Lorekeeper.Tests/ScopedPublicationRenderingMigrationTests.cs` | Combined-physical legacy classification, artifact byte/hash preservation, and unaffected Digital PDF Book-link migration. |
 | `Lorekeeper/Models/OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs` | Credential/configuration persistence; secrets remain in provider-owned rows. |
 | `.gitignore` | Ignored local databases, migration backups, verification databases, temporary output, and repository-root publish artifacts. |
 

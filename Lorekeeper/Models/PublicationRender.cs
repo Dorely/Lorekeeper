@@ -12,6 +12,14 @@ public enum PublicationRenderStatus
     Cancelled,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<PublicationRenderScope>))]
+public enum PublicationRenderScope
+{
+    Book,
+    Interior,
+    Cover,
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationArtifactKind>))]
 public enum PublicationArtifactKind
 {
@@ -40,6 +48,8 @@ public class PublicationRenderJob
     public Guid? EditionId { get; set; }
     public PublicationEdition? Edition { get; set; }
     public PublicationRenderStatus Status { get; set; } = PublicationRenderStatus.Queued;
+    public PublicationRenderScope Scope { get; set; } = PublicationRenderScope.Book;
+    public int? InteriorPageCount { get; set; }
     public string SourceFingerprint { get; set; } = string.Empty;
     public string PaginationFingerprint { get; set; } = string.Empty;
     public string RendererVersion { get; set; } = string.Empty;

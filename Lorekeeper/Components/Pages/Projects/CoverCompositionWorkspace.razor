@@ -46,6 +46,11 @@
                             }
                         </div>
                     }
+                    <button type="button"
+                            class="cover-preview"
+                            disabled="@(!CanPreview || _previewing)"
+                            title="@PreviewTitle"
+                            @onclick="PreviewAsync">@(_previewing ? "Generating…" : "Preview")</button>
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
                         <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
@@ -274,6 +279,7 @@
     [Parameter] public bool InteractionLocked { get; set; }
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Back { get; set; }
+    [Parameter] public EventCallback<string> PreviewRequested { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
     private Lorekeeper.Authoring.AuthoringHistoryState _history = new(false, false, null, null);
@@ -286,6 +292,7 @@
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
     private string _title = "", _subtitle = "", _author = "", _publisher = "", _copyright = "", _spineText = "", _description = "", _isbn = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
+    private bool _previewing;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
     private Guid? _fillRegionTargetId;
@@ -394,6 +401,31 @@
         "digital-cloth-setup" => "Cloth setup",
         _ => "Front",
     };
+    private bool CanPreview => !InteractionLocked
+        && !string.Equals(_surfaceRole, "digital-cloth-setup", StringComparison.Ordinal);
+    private string PreviewTitle => InteractionLocked
+        ? "Cover editing is temporarily unavailable"
+        : CanPreview
+            ? "Generate a temporary PDF preview of this cover"
+            : "Cloth setup produces a manifest rather than a cover PDF";
+    private async Task PreviewAsync()
+    {
+        if (!CanPreview || _previewing || !await FlushAsync()) return;
+        _previewing = true;
+        _error = null;
+        try
+        {
+            await PreviewRequested.InvokeAsync(_surfaceRole);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _previewing = false;
+        }
+    }
     private async Task SelectSurfaceAsync(string role)
     {
         if (role == _surfaceRole || !_surfaceRoles.Contains(role, StringComparer.Ordinal)) return;

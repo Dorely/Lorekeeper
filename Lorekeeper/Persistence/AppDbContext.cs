@@ -1415,6 +1415,7 @@ public class AppDbContext(
             entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.EditionId, e.CreatedAt });
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.Scope).HasConversion<string>();
             entity.Property(e => e.TargetKind).HasConversion<string>();
             entity.HasOne(e => e.Project)
                 .WithMany(e => e.PublicationRenderJobs)
@@ -1467,8 +1468,12 @@ public class AppDbContext(
                 .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Edition).WithMany()
                 .HasForeignKey(e => e.EditionId).OnDelete(DeleteBehavior.SetNull);
-            entity.HasOne(e => e.RenderJob).WithMany()
-                .HasForeignKey(e => e.RenderJobId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.BookRenderJob).WithMany()
+                .HasForeignKey(e => e.BookRenderJobId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.InteriorRenderJob).WithMany()
+                .HasForeignKey(e => e.InteriorRenderJobId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.CoverRenderJob).WithMany()
+                .HasForeignKey(e => e.CoverRenderJobId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<PublicationPageMapEntry>(entity =>
