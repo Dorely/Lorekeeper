@@ -396,6 +396,28 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
         }
     }
 
+    public void MaterializeTree(
+        Guid repositoryId,
+        string destinationDirectory,
+        string? commitSha = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(destinationDirectory))
+            throw new ArgumentException("A destination directory is required.", nameof(destinationDirectory));
+
+        var repositoryPath = GetRepositoryPath(repositoryId);
+        var root = Path.GetFullPath(destinationDirectory);
+        Directory.CreateDirectory(root);
+        EnsureNoReparsePoints(root);
+        lock (GetRepositoryLock(repositoryPath))
+        {
+            using var repository = OpenRepository(repositoryPath);
+            var commit = ResolveCommit(repository, commitSha)
+                ?? throw new InvalidOperationException("The repository has no commit at the requested revision.");
+            MaterializeTree(commit.Tree, root, prefix: string.Empty, cancellationToken);
+        }
+    }
+
     public GitCommitMetadata GetCommitMetadata(Guid repositoryId, string commitSha)
     {
         var repositoryPath = GetRepositoryPath(repositoryId);
@@ -685,6 +707,71 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
                     throw new InvalidDataException($"The Git tree contains an unsupported entry: {path}");
             }
         }
+    }
+
+    private static void MaterializeTree(
+        Tree tree,
+        string root,
+        string prefix,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in tree)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateTreeSegment(entry.Name);
+            var path = string.IsNullOrEmpty(prefix) ? entry.Name : $"{prefix}/{entry.Name}";
+            ValidateGitPath(path);
+
+            switch (entry.TargetType)
+            {
+                case TreeEntryTargetType.Tree:
+                    if (entry.Mode != Mode.Directory || entry.Target is not Tree subtree)
+                        throw new InvalidDataException($"The Git tree contains an invalid directory entry: {path}");
+                    MaterializeTree(subtree, root, path, cancellationToken);
+                    break;
+
+                case TreeEntryTargetType.Blob:
+                    if (entry.Mode != Mode.NonExecutableFile || entry.Target is not Blob blob)
+                        throw new InvalidDataException($"The Git tree contains a non-regular file entry: {path}");
+                    var destination = ResolveTreeDestination(root, path);
+                    var parent = Path.GetDirectoryName(destination)
+                        ?? throw new InvalidDataException($"The Git tree contains an invalid path: {path}");
+                    Directory.CreateDirectory(parent);
+                    EnsureNoReparsePoints(parent);
+                    using (var source = blob.GetContentStream())
+                    using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        var buffer = new byte[81_920];
+                        while (true)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var read = source.Read(buffer, 0, buffer.Length);
+                            if (read == 0)
+                                break;
+                            output.Write(buffer, 0, read);
+                        }
+                    }
+                    break;
+
+                default:
+                    throw new InvalidDataException($"The Git tree contains an unsupported entry: {path}");
+            }
+        }
+    }
+
+    private static string ResolveTreeDestination(string root, string relativePath)
+    {
+        var destination = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var relative = Path.GetRelativePath(root, destination);
+        if (Path.IsPathRooted(relative)
+            || relative.Equals("..", GetPathComparison())
+            || relative.StartsWith($"..{Path.DirectorySeparatorChar}", GetPathComparison())
+            || relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", GetPathComparison()))
+        {
+            throw new InvalidDataException($"The Git tree path escaped the destination: {relativePath}");
+        }
+
+        return destination;
     }
 
     private static byte[] ReadBlob(Blob blob)

@@ -16,15 +16,32 @@ public interface IVersionHistorySnapshotComparer
 
 /// <summary>
 /// Controls how much readable text the comparison embeds in its entries. The
-/// default bounds readable text so review surfaces stay lightweight; callers
-/// that render full diffs (the History workspace) request unbounded text.
+/// default bounds readable text so Review surfaces stay lightweight. History
+/// summaries suppress text and request one exact entry only when it is opened.
 /// </summary>
 public sealed record VersionHistoryCompareOptions
 {
     public static VersionHistoryCompareOptions Default { get; } = new();
 
-    public bool UnboundedReadableText { get; init; }
+    public bool IncludeBoundedReadableText { get; init; } = true;
+
+    public VersionHistorySnapshotEntryKey? UnboundedReadableTextEntry { get; init; }
+
+    internal string? Area { get; init; }
+
+    internal VersionHistoryCompareOptions ForArea(string area) => this with { Area = area };
+
+    internal bool Includes(string category, string key) =>
+        IncludeBoundedReadableText || IsUnbounded(category, key);
+
+    internal bool IsUnbounded(string category, string key) =>
+        UnboundedReadableTextEntry is { } entry
+        && string.Equals(entry.Area, Area, StringComparison.Ordinal)
+        && string.Equals(entry.Category, category, StringComparison.Ordinal)
+        && string.Equals(entry.Key, key, StringComparison.Ordinal);
 }
+
+public sealed record VersionHistorySnapshotEntryKey(string Area, string Category, string Key);
 
 /// <summary>
 /// Compares canonical snapshot payloads without touching Git, the database, or
@@ -52,14 +69,14 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         var compareOptions = options ?? VersionHistoryCompareOptions.Default;
         var areas = new List<VersionHistorySnapshotAreaComparison>
         {
-            CompareProject(baseline, candidate, compareOptions),
-            CompareNarrative(baseline, candidate, compareOptions),
-            CompareGraph(baseline, candidate, compareOptions),
-            CompareSources(baseline, candidate, compareOptions),
-            CompareAssets(baseline, candidate, compareOptions),
-            CompareManuscript(baseline, candidate, compareOptions),
-            CompareComposition(baseline, candidate, compareOptions),
-            ComparePublication(baseline, candidate, compareOptions),
+            CompareProject(baseline, candidate, compareOptions.ForArea("project")),
+            CompareNarrative(baseline, candidate, compareOptions.ForArea("narrative")),
+            CompareGraph(baseline, candidate, compareOptions.ForArea("graph")),
+            CompareSources(baseline, candidate, compareOptions.ForArea("sources")),
+            CompareAssets(baseline, candidate, compareOptions.ForArea("assets")),
+            CompareManuscript(baseline, candidate, compareOptions.ForArea("manuscript")),
+            CompareComposition(baseline, candidate, compareOptions.ForArea("composition")),
+            ComparePublication(baseline, candidate, compareOptions.ForArea("publication")),
         };
 
         return new(
@@ -484,7 +501,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                     manuscriptHash is not null,
                     metadataHash is not null,
                     binaryHash is not null,
-                    afterText: ReadableText(options, readableText?.Invoke(afterItem!))));
+                    afterText: ProjectReadableText(options, category, itemKey, readableText, afterItem!)));
                 continue;
             }
 
@@ -503,7 +520,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                     manuscriptHash is not null,
                     metadataHash is not null,
                     binaryHash is not null,
-                    beforeText: ReadableText(options, readableText?.Invoke(beforeItem!))));
+                    beforeText: ProjectReadableText(options, category, itemKey, readableText, beforeItem!)));
                 continue;
             }
 
@@ -524,10 +541,11 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             var afterBinaryHash = binaryHash?.Invoke(afterItem!);
             var manuscriptChanged = manuscriptHash is not null
                 && !string.Equals(beforeManuscriptHash, afterManuscriptHash, StringComparison.Ordinal);
-            string? beforeText = readableText is not null && (manuscriptHash is null || manuscriptChanged)
+            var includeReadableText = options.Includes(category, itemKey);
+            string? beforeText = includeReadableText && readableText is not null && (manuscriptHash is null || manuscriptChanged)
                 ? readableText(beforeItem!)
                 : null;
-            string? afterText = readableText is not null && (manuscriptHash is null || manuscriptChanged)
+            string? afterText = includeReadableText && readableText is not null && (manuscriptHash is null || manuscriptChanged)
                 ? readableText(afterItem!)
                 : null;
             entries.Add(CreateEntry(
@@ -542,8 +560,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                 manuscriptChanged,
                 metadataHash is not null && !string.Equals(beforeMetadataHash, afterMetadataHash, StringComparison.Ordinal),
                 binaryHash is not null && !string.Equals(beforeBinaryHash, afterBinaryHash, StringComparison.Ordinal),
-                beforeText: ReadableText(options, beforeText),
-                afterText: ReadableText(options, afterText)));
+                beforeText: ReadableText(options, category, itemKey, beforeText),
+                afterText: ReadableText(options, category, itemKey, afterText)));
         }
 
         return new(added, removed, changed, unchanged, entries);
@@ -725,12 +743,29 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
     private static string ManuscriptPlainText(string json, Guid id, long revision) =>
         ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(json, id, revision));
 
-    private static BoundedText? ReadableText(VersionHistoryCompareOptions options, string? value)
+    private static BoundedText? ProjectReadableText<T>(
+        VersionHistoryCompareOptions options,
+        string category,
+        string key,
+        Func<T, string?>? projector,
+        T item)
+    {
+        if (projector is null || !options.Includes(category, key))
+            return null;
+
+        return ReadableText(options, category, key, projector(item));
+    }
+
+    private static BoundedText? ReadableText(
+        VersionHistoryCompareOptions options,
+        string category,
+        string key,
+        string? value)
     {
         if (value is null)
             return null;
 
-        return options.UnboundedReadableText ? new(value, false) : BoundText(value);
+        return options.IsUnbounded(category, key) ? new(value, false) : BoundText(value);
     }
 
     private static BoundedText? BoundText(string? value)

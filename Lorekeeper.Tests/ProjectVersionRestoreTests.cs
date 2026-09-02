@@ -115,6 +115,129 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void SnapshotReaderLightweightModeValidatesAssetsWithoutRetainingBinaryData()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imageId = Guid.NewGuid();
+            var familyId = Guid.NewGuid();
+            var faceId = Guid.NewGuid();
+            byte[] imageData = [1, 3, 5, 7];
+            byte[] fontData = [2, 4, 6, 8, 10];
+            var image = new VersionHistoryImageAsset(
+                imageId,
+                "image.png",
+                "image/png",
+                $"assets/images/{imageId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex(imageData),
+                imageData.LongLength,
+                "Image",
+                PublishAssetSource.Uploaded,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var face = new VersionHistoryFontFace(
+                faceId,
+                "Regular",
+                "font.ttf",
+                "font/ttf",
+                400,
+                false,
+                $"assets/fonts/{familyId:N}/faces/{faceId:N}/content.ttf",
+                VersionHistoryCanonicalJson.Sha256Hex(fontData),
+                fontData.LongLength);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea(
+                    [image],
+                    [],
+                    [new VersionHistoryFontFamily(familyId, "Family", true, "Owned", [face])]),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = imageData },
+                FontFaceData = new Dictionary<Guid, byte[]> { [faceId] = fontData },
+            };
+            WriteSnapshotTree(root, payload);
+
+            var reader = new VersionHistorySnapshotReader();
+            var lightweight = reader.Read(
+                root,
+                payload.RepositoryId,
+                payload.ProjectId,
+                new VersionHistorySnapshotReadOptions { IncludeAssetData = false });
+            var full = reader.Read(root, payload.RepositoryId, payload.ProjectId);
+
+            Assert.Empty(lightweight.Payload.ImageData);
+            Assert.Empty(lightweight.Payload.FontFaceData);
+            Assert.Equal(imageData, full.Payload.ImageData[imageId]);
+            Assert.Equal(fontData, full.Payload.FontFaceData[faceId]);
+            Assert.Equal(image.Sha256, Assert.Single(lightweight.Payload.Assets.Images).Sha256);
+            Assert.Equal(face.Sha256, Assert.Single(Assert.Single(lightweight.Payload.Assets.FontFamilies).Faces).Sha256);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SnapshotReaderLightweightModeRejectsCorruptOrLengthMismatchedAsset(bool changeLength)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imageId = Guid.NewGuid();
+            byte[] imageData = [1, 2, 3, 4];
+            var image = new VersionHistoryImageAsset(
+                imageId,
+                "image.png",
+                "image/png",
+                $"assets/images/{imageId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex(imageData),
+                imageData.LongLength,
+                "Image",
+                PublishAssetSource.Uploaded,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([image], [], []),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = imageData },
+            };
+            WriteSnapshotTree(root, payload);
+            File.WriteAllBytes(
+                Path.Combine(root, image.BlobPath.Replace('/', Path.DirectorySeparatorChar)),
+                changeLength ? [9, 9, 9, 9, 9] : [9, 9, 9, 9]);
+
+            var exception = Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(
+                root,
+                payload.RepositoryId,
+                payload.ProjectId,
+                new VersionHistorySnapshotReadOptions { IncludeAssetData = false }));
+
+            Assert.Contains(changeLength ? "length" : "SHA-256", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SnapshotReaderPreservesChapterMetadataAndUsesDirectManuscriptJson()
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
@@ -430,6 +553,57 @@ public sealed class ProjectVersionRestoreTests
         Assert.Equal(current.Graph.Nodes.Select(item => item.Key), merged.Graph.Nodes.Select(item => item.Key));
         Assert.Equal(current.RepositoryId, merged.RepositoryId);
         Assert.Equal(current.ProjectId, merged.ProjectId);
+    }
+
+    [Fact]
+    public void SelectiveRestoreChoosesCurrentOrTargetAssetBytesAndHashes()
+    {
+        var repositoryId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+        byte[] currentData = [1, 2, 3];
+        byte[] targetData = [7, 8, 9, 10];
+        var currentImage = new VersionHistoryImageAsset(
+            imageId,
+            "current.png",
+            "image/png",
+            $"assets/images/{imageId:N}/content.png",
+            VersionHistoryCanonicalJson.Sha256Hex(currentData),
+            currentData.LongLength,
+            "Current",
+            PublishAssetSource.Uploaded,
+            string.Empty,
+            string.Empty,
+            "{}",
+            null,
+            null,
+            null,
+            null,
+            null);
+        var targetImage = currentImage with
+        {
+            FileName = "target.png",
+            Sha256 = VersionHistoryCanonicalJson.Sha256Hex(targetData),
+            ByteLength = targetData.LongLength,
+        };
+        var current = CreatePayload(repositoryId, projectId) with
+        {
+            Assets = new VersionHistorySnapshotAssetsArea([currentImage], [], []),
+            ImageData = new Dictionary<Guid, byte[]> { [imageId] = currentData },
+        };
+        var target = CreatePayload(repositoryId, projectId) with
+        {
+            Assets = new VersionHistorySnapshotAssetsArea([targetImage], [], []),
+            ImageData = new Dictionary<Guid, byte[]> { [imageId] = targetData },
+        };
+
+        var assetsRestored = Merge(current, target, VersionHistoryRestoreSelection.ForMajorAreas(["assets"]));
+        var assetsUnchanged = Merge(current, target, VersionHistoryRestoreSelection.ForMajorAreas(["narrative"]));
+
+        Assert.Equal(targetData, assetsRestored.ImageData[imageId]);
+        Assert.Equal(targetImage.Sha256, Assert.Single(assetsRestored.Assets.Images).Sha256);
+        Assert.Equal(currentData, assetsUnchanged.ImageData[imageId]);
+        Assert.Equal(currentImage.Sha256, Assert.Single(assetsUnchanged.Assets.Images).Sha256);
     }
 
     [Fact]
@@ -1228,6 +1402,8 @@ public sealed class ProjectVersionRestoreTests
         public Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockAsync(Guid projectId, ProjectVersionReviewTarget target, string blockId, string text, ProjectVersionReviewConcurrencyToken expectedToken, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
+
+        public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
 
         private static Task<T> Unsupported<T>() => Task.FromException<T>(new NotSupportedException());
     }

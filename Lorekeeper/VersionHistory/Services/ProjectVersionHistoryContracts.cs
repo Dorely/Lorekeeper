@@ -494,6 +494,11 @@ public interface IProjectVersionHistoryService
         Guid projectId,
         string commitSha,
         CancellationToken cancellationToken = default);
+
+    Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(
+        Guid projectId,
+        string commitSha,
+        CancellationToken cancellationToken = default);
 }
 
 public enum ProjectVersionReconciliationState

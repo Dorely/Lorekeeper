@@ -33,6 +33,12 @@ public interface IGitRepositoryStore
 
     IReadOnlyDictionary<string, byte[]> ReadTree(Guid repositoryId, string? commitSha = null);
 
+    void MaterializeTree(
+        Guid repositoryId,
+        string destinationDirectory,
+        string? commitSha = null,
+        CancellationToken cancellationToken = default);
+
     GitCommitMetadata GetCommitMetadata(Guid repositoryId, string commitSha);
 
     IReadOnlyList<GitCommitMetadata> ListCommits(Guid repositoryId, int maxCount = 100);
