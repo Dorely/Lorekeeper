@@ -1,5 +1,5 @@
 {
-  "registryVersion": "2026.09.2",
+  "registryVersion": "2026.09.3",
   "reviewedAtUtc": "2026-09-02T00:00:00Z",
   "sources": [
     "https://kdp.amazon.com/en_US/help/topic/G201834180",
@@ -322,6 +322,10 @@
     {
       "key": "lulu-pb-bw-60-cream",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "BlackAndWhite",
@@ -369,6 +373,10 @@
     {
       "key": "lulu-pb-bw-60-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "BlackAndWhite",
@@ -416,6 +424,10 @@
     {
       "key": "lulu-pb-stdcolor-60-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "StandardColor",
@@ -463,6 +475,10 @@
     {
       "key": "lulu-pb-bw-80-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "BlackAndWhite",
@@ -510,6 +526,10 @@
     {
       "key": "lulu-pb-premcolor-80-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "PremiumColor",
@@ -557,6 +577,10 @@
     {
       "key": "lulu-hc-case-bw-80-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "BlackAndWhite",
@@ -2161,6 +2185,10 @@
     {
       "key": "lulu-hc-case-stdcolor-80-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "StandardColor",
@@ -3765,6 +3793,10 @@
     {
       "key": "lulu-hc-case-premcolor-80-white",
       "vendor": "Lulu",
+      "coverSafetyInches": 0.5,
+      "barcodeWidthInches": 3.622,
+      "barcodeHeightInches": 1.26,
+      "barcodeInsetInches": 0.5,
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "PremiumColor",

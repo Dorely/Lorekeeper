@@ -56,6 +56,10 @@ public sealed record PrintArtifactProfile(
     int MaximumPages,
     string PdfProfile,
     PrintSpineModel SpineModel,
+    decimal CoverSafetyInches = 0.25m,
+    decimal BarcodeWidthInches = 2m,
+    decimal BarcodeHeightInches = 1.2m,
+    decimal BarcodeInsetInches = 0.25m,
     int? MinimumSubmittedPages = null,
     int? MaximumSubmittedPages = null,
     IReadOnlyList<PrintProjectUse>? SupportedProjectUses = null,
@@ -89,7 +93,7 @@ public interface IPrintArtifactProfileRegistry
 
 public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
 {
-    public const string CurrentVersion = "2026.09.2";
+    public const string CurrentVersion = "2026.09.3";
     private const string ResourceSuffix = "PrintArtifactProfiles.print-artifact-profiles-v1.json";
     private readonly PrintArtifactProfileRegistrySnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, PrintArtifactProfile> _profiles;
@@ -117,6 +121,10 @@ public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
                 || string.IsNullOrWhiteSpace(profile.Key)
                 || profile.MinimumPages <= 0
                 || profile.MaximumPages < profile.MinimumPages
+                || profile.CoverSafetyInches <= 0
+                || profile.BarcodeWidthInches <= 0
+                || profile.BarcodeHeightInches <= 0
+                || profile.BarcodeInsetInches < 0
                 || (profile.MinimumSubmittedPages ?? profile.MinimumPages) <= 0
                 || (profile.MaximumSubmittedPages ?? profile.MaximumPages) < (profile.MinimumSubmittedPages ?? profile.MinimumPages)
                 || profile.CoverModes.Count == 0

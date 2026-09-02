@@ -924,8 +924,19 @@ where
                 content.begin_marked_content(Name(b"Artifact"));
             }
             let module_width = 1.15;
-            let origin_x = page_width * 0.08;
-            let origin_y = page_height * 0.10;
+            let barcode_width = modules.len() as f32 * module_width + 18.0;
+            let barcode_height = 66.0;
+            let [reserve_x, reserve_y, reserve_width, reserve_height] =
+                page_model.barcode_bounds.unwrap_or([
+                    page_width * 0.08 - 9.0,
+                    page_height * 0.90 - 48.0,
+                    barcode_width,
+                    barcode_height,
+                ]);
+            let origin_x = reserve_x + ((reserve_width - barcode_width) / 2.0).max(0.0) + 9.0;
+            let reserve_bottom = page_height - reserve_y - reserve_height;
+            let origin_y =
+                reserve_bottom + ((reserve_height - barcode_height) / 2.0).max(0.0) + 18.0;
             if options.pdf_x {
                 content.set_fill_cmyk(0.0, 0.0, 0.0, 0.0);
             } else {
@@ -935,8 +946,8 @@ where
                 .rect(
                     origin_x - 9.0,
                     origin_y - 18.0,
-                    modules.len() as f32 * module_width + 18.0,
-                    66.0,
+                    barcode_width,
+                    barcode_height,
                 )
                 .fill_nonzero();
             if options.pdf_x {

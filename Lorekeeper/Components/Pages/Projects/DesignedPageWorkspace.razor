@@ -38,9 +38,15 @@
                     @if (_showGuides)
                     {
                         <div class="composition-ruler composition-ruler-x"></div><div class="composition-ruler composition-ruler-y"></div>
-                        <div class="composition-guide composition-guide-y" style="left:50%"></div>
+                        @foreach (var center in SurfaceCenterGuidePositions)
+                        {
+                            <div class="composition-guide composition-guide-y" style="@CenterGuideStyle(center)"></div>
+                        }
                         <div class="composition-guide composition-guide-x" style="top:50%"></div>
-                        <div class="composition-safe"></div>
+                        @foreach (var surface in PageSurfaceBounds)
+                        {
+                            <div class="composition-safe" style="@BoundsStyle(SafePageSurfaceBounds(surface))"></div>
+                        }
                         @if (_scene.Surface.Kind == CompositionSurfaceKind.FacingSpread)
                         {
                             <div class="composition-gutter"></div>
@@ -152,6 +158,14 @@
                         {
                             var primaryStyle = Resolved(primarySelection);
                             <label>Fill<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label><label>Border<input type="color" value="@ColorValue(primaryStyle.StrokeColor)" @onchange="e => Patch(primarySelection with { StyleId = null, StrokeColor = Color(e) })" /></label>
+                        }
+                        @if (primarySelection.Kind is CompositionObjectKind.Text or CompositionObjectKind.Image)
+                        {
+                            <button type="button" title="Expand this frame to the full width of its current page without stretching artwork" @onclick="() => FitSelectionWidth(primarySelection)">Fit width</button>
+                            <button type="button" title="Center this frame within its current page" @onclick="() => CenterSelection(primarySelection, false)">Center</button>
+                            <button type="button" title="Center this frame within the safe page margins" @onclick="() => CenterSelection(primarySelection, true)">Center safe</button>
+                            <button type="button" title="Rotate this frame clockwise by 90 degrees" @onclick="() => Patch(CompositionObjectLayout.RotateQuarterTurn(primarySelection))">Rotate 90°</button>
+                            <button type="button" disabled="@(Math.Abs(primarySelection.RotationDegrees) <= .001)" title="Reset this frame to zero degrees" @onclick="() => Patch(CompositionObjectLayout.ResetRotation(primarySelection))">Reset rotation</button>
                         }
                         <span class="composition-control-divider" aria-hidden="true"></span>
                         <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" disabled="@IsProtectedBoundText(primarySelection)" title="@(IsProtectedBoundText(primarySelection) ? "Generated publication fields cannot be removed" : "Delete selected object")" @onclick="() => Delete(primarySelection.Id)">Delete</button>
@@ -1097,6 +1111,44 @@
 
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) =>
         Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent, CompositionGuideAxis.Vertical), YPercent = Snap(y ?? item.Bounds.YPercent, CompositionGuideAxis.Horizontal), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
+    private void FitSelectionWidth(CompositionObject item) =>
+        Patch(CompositionObjectLayout.FitWidth(item, PageSurfaceFor(item)));
+    private void CenterSelection(CompositionObject item, bool useSafeArea)
+    {
+        var surface = PageSurfaceFor(item);
+        Patch(CompositionObjectLayout.Center(item, useSafeArea ? SafePageSurfaceBounds(surface) : surface));
+    }
+    private CompositionBounds PageSurfaceFor(CompositionObject item)
+    {
+        var center = item.Bounds.XPercent + item.Bounds.WidthPercent / 2;
+        return PageSurfaceBounds.FirstOrDefault(bounds => center >= bounds.XPercent
+                && center <= bounds.XPercent + bounds.WidthPercent)
+            ?? PageSurfaceBounds[0];
+    }
+    private IReadOnlyList<CompositionBounds> PageSurfaceBounds => _scene!.Surface.Kind == CompositionSurfaceKind.FacingSpread
+        ?
+        [
+            new CompositionBounds { WidthPercent = 50 },
+            new CompositionBounds { XPercent = 50, WidthPercent = 50 },
+        ]
+        : [new CompositionBounds()];
+    private IReadOnlyList<double> SurfaceCenterGuidePositions => _scene!.Surface.Kind == CompositionSurfaceKind.FacingSpread
+        ? [25, 75]
+        : [50];
+    private CompositionBounds SafePageSurfaceBounds(CompositionBounds surface)
+    {
+        var insetX = Math.Clamp(_scene!.Surface.SafeInsetPoints / _scene.Surface.WidthPoints * 100, 0, surface.WidthPercent / 2);
+        var insetY = Math.Clamp(_scene.Surface.SafeInsetPoints / _scene.Surface.HeightPoints * 100, 0, 49);
+        return surface with
+        {
+            XPercent = surface.XPercent + insetX,
+            YPercent = insetY,
+            WidthPercent = Math.Max(0, surface.WidthPercent - insetX * 2),
+            HeightPercent = 100 - insetY * 2,
+        };
+    }
+    private static string BoundsStyle(CompositionBounds bounds) => FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%");
+    private static string CenterGuideStyle(double center) => FormattableString.Invariant($"left:{center}%");
     private double Snap(double value, CompositionGuideAxis? axis = null)
     {
         var grid = Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2;
@@ -1364,7 +1416,7 @@
     };
     private string LineStyle(CompositionObject item) { var resolved = Resolved(item); return FormattableString.Invariant($"border-top:{resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100:R}cqw solid {resolved.StrokeColor}"); }
     private static string FontCssName(string key) => $"lk-{new string(key.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray())}";
-    private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:swap;}}")));
+    private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:block;}}")));
     private ProjectImageView? Image(Guid id) => _images.FirstOrDefault(image => image.Id == id);
     private string RenderedInlineHtml(CompositionObject item)
     {

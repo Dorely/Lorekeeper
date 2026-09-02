@@ -365,6 +365,14 @@ lost capture, coalesces movement to the latest position while one UI update is
 in flight, applies the final pointer position, and then saves the completed
 gesture once. The full connected scene is preserved even when a provider package
 derives separate front/back pages.
+Every page and cover region exposes a center guide. Contextual text/image actions
+can fit a frame to the current page or constrained cover region width, center it
+within that surface or its safe bounds, rotate it clockwise by 90 degrees, or
+reset its rotation. Full-width image fitting switches the frame to proportional
+containment so logos are neither stretched nor converted to full-height crops.
+Cover guides use the resolved print-artifact profile rather than CSS percentages;
+profile changes therefore reflow older saved scenes even when their outer width
+and height did not change.
 Spine copy remains real text above artwork. Persisted direction supports
 top-to-bottom (the US/English default), bottom-to-top, and horizontal layouts;
 the user can override the default. The assistant must inspect annotated spine
@@ -431,6 +439,9 @@ Git blobs, but do not create a live-asset deletion blocker.
 Browser, Read preview, EPUB, cover, and Press all stage the same referenced
 faces rather than substituting a machine font. Font changes affect manuscript,
 composition, Core/release fingerprints, and artifact freshness.
+Visual editors block initial text display until the requested project font face
+is available and disable synthetic bold/italic faces, keeping spine advances and
+line spacing aligned with canvas preview and Press.
 
 Publication-time image preparation uses the same idempotent upscale contract as
 generation-time output. `EnsurePrintUpscaleAsync` resolves the non-upscaled root,

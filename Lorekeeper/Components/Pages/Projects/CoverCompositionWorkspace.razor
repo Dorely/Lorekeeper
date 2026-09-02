@@ -59,14 +59,20 @@
             </Toolbar>
             <Canvas>
                 <div class="cover-stage" style="@StageStyle()" @ref="_stageElement">
-                    @if (_guides) { <div class="cover-guide cover-guide-x"></div><div class="cover-guide cover-guide-y"></div> }
-                    <div class="cover-safe"></div>
+                    @if (_guides)
+                    {
+                        @foreach (var region in GuideRegions)
+                        {
+                            <div class="cover-safe" style="@SafeRegionStyle(region)"></div>
+                            <div class="cover-surface-center" style="@RegionCenterStyle(region)"></div>
+                        }
+                    }
                     @if (IsPrint)
                     {
                         <div class="cover-panel cover-panel-back" style="@BackStyle">Back</div>
                         <div class="cover-panel cover-panel-spine" style="@SpineStyle">Spine</div>
                         <div class="cover-panel cover-panel-front" style="@FrontStyle">Front</div>
-                        <div class="cover-barcode" style="@BarcodeStyle">@(_surfaceRole == "perfect-bound-inside" ? "No-ink spine area" : "Barcode reserve")</div>
+                        <div class="cover-barcode" style="@(_surfaceRole == "perfect-bound-inside" ? SpineStyle : BarcodeStyle)">@(_surfaceRole == "perfect-bound-inside" ? "No-ink spine area" : "Barcode reserve")</div>
                     }
                     @foreach (var item in _objects.Where(IsVisible))
                     {
@@ -129,6 +135,14 @@
                             <label title="Choose the text box background color">Background<input type="color" aria-label="Text box background color" value="@ColorValue(primaryStyle.BackgroundColor)" @onchange="e => PatchLocalStyle(primarySelection, current => current with { BackgroundColor = Color(e) })" /></label>
                             <label class="cover-background-opacity" title="Set text box background opacity; 0% is fully transparent">Opacity<span><input type="range" aria-label="Text box background opacity" min="0" max="1" step=".05" value="@primaryStyle.BackgroundOpacity" @onchange="e => PatchLocalStyle(primarySelection, current => current with { BackgroundOpacity = Number(e) })" /><output>@Math.Round(Math.Clamp(primaryStyle.BackgroundOpacity, 0, 1) * 100)%</output></span></label>
                             <button type="button" class="cover-no-background @(primaryStyle.BackgroundOpacity <= 0 ? "selected" : null)" title="Make the text box background fully transparent" @onclick="() => PatchLocalStyle(primarySelection, current => current with { BackgroundOpacity = 0 })">No background</button>
+                        }
+                        @if (primarySelection.Kind is CompositionObjectKind.Text or CompositionObjectKind.Image)
+                        {
+                            <button type="button" title="Expand this frame to the full width of its constrained cover surface without stretching artwork" @onclick="() => FitSelectionWidth(primarySelection)">Fit width</button>
+                            <button type="button" title="Center this frame within its constrained cover surface" @onclick="() => CenterSelection(primarySelection, false)">Center</button>
+                            <button type="button" title="Center this frame within the safe margins of its constrained cover surface" @onclick="() => CenterSelection(primarySelection, true)">Center safe</button>
+                            <button type="button" title="Rotate this frame clockwise by 90 degrees" @onclick="() => Patch(CompositionObjectLayout.RotateQuarterTurn(primarySelection))">Rotate 90°</button>
+                            <button type="button" disabled="@(Math.Abs(primarySelection.RotationDegrees) <= .001)" title="Reset this frame to zero degrees" @onclick="() => Patch(CompositionObjectLayout.ResetRotation(primarySelection))">Reset rotation</button>
                         }
                         <span class="cover-control-divider" aria-hidden="true"></span>
                         <button type="button" title="Move this object to the back of its artwork or content group" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object to the front of its artwork or content group" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
@@ -300,6 +314,9 @@
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
     private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
+    private IReadOnlyList<CompositionRegionConstraint> GuideRegions => IsPrint
+        ? [CompositionRegionConstraint.Back, CompositionRegionConstraint.Spine, CompositionRegionConstraint.Front]
+        : [CompositionRegionConstraint.Page];
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
     private IEnumerable<PublicationTextBindingDefinition> AvailableTokens => PublicationTextBindings.Definitions
@@ -550,6 +567,14 @@
         Patch(CompositionImageLayout.FillCanvas(item, RetainsAspectRatio(item)));
         return Task.CompletedTask;
     }
+    private void FitSelectionWidth(CompositionObject item) =>
+        Patch(CompositionObjectLayout.FitWidth(item, RegionBounds(item.RegionConstraint)));
+    private void CenterSelection(CompositionObject item, bool useSafeArea) =>
+        Patch(CompositionObjectLayout.Center(
+            item,
+            useSafeArea
+                ? CoverCompositionFactory.SafeRegionBoundsPercent(item.RegionConstraint, _scene!.Surface)
+                : RegionBounds(item.RegionConstraint)));
     private void OpenFillRegionPicker(CompositionObject item)
     {
         if (item.Kind == CompositionObjectKind.Image && IsPrint)
@@ -926,11 +951,42 @@
     }
     private void HandleKeyDown(KeyboardEventArgs e) { if (InteractionLocked || Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; if (IsCropRepositioning(selected)) { switch (e.Key) { case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break; case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break; case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break; case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break; } return; } switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private string StageStyle() => $"--cover-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--cover-zoom:{_zoom:R};--cover-bg:{_background}";
-    private string FrontStyle => RegionStyle(_cover!.Template.BleedInches + _cover.Template.TrimWidthInches + _cover.Template.SpineWidthInches, _cover.Template.BleedInches, _cover.Template.TrimWidthInches, _cover.Template.TrimHeightInches);
-    private string BackStyle => RegionStyle(_cover!.Template.BleedInches, _cover.Template.BleedInches, _cover.Template.TrimWidthInches, _cover.Template.TrimHeightInches);
-    private string SpineStyle => RegionStyle(_cover!.Template.BleedInches + _cover.Template.TrimWidthInches, _cover.Template.BleedInches, Math.Max(_cover.Template.SpineWidthInches, .001), _cover.Template.TrimHeightInches);
-    private string BarcodeStyle => RegionStyle(_cover!.Template.BleedInches + .25, _cover.Template.FullHeightInches - _cover.Template.BleedInches - 1.45, 2, 1.2);
-    private string RegionStyle(double x, double y, double w, double h) => FormattableString.Invariant($"left:{x / _cover!.Template.FullWidthInches * 100}%;top:{y / _cover.Template.FullHeightInches * 100}%;width:{w / _cover.Template.FullWidthInches * 100}%;height:{h / _cover.Template.FullHeightInches * 100}%");
+    private string FrontStyle => BoundsStyle(RegionBounds(CompositionRegionConstraint.Front));
+    private string BackStyle => BoundsStyle(RegionBounds(CompositionRegionConstraint.Back));
+    private string SpineStyle => BoundsStyle(RegionBounds(CompositionRegionConstraint.Spine));
+    private string BarcodeStyle => BoundsStyle(BarcodeBounds);
+    private CompositionBounds BarcodeBounds
+    {
+        get
+        {
+            var back = RegionBounds(CompositionRegionConstraint.Back);
+            var width = _cover!.Template.BarcodeWidthInches / _cover.Template.FullWidthInches * 100;
+            var height = _cover.Template.BarcodeHeightInches / _cover.Template.FullHeightInches * 100;
+            var insetX = _cover.Template.BarcodeInsetInches / _cover.Template.FullWidthInches * 100;
+            var insetY = _cover.Template.BarcodeInsetInches / _cover.Template.FullHeightInches * 100;
+            return new CompositionBounds
+            {
+                XPercent = Math.Max(back.XPercent, back.XPercent + back.WidthPercent - insetX - width),
+                YPercent = Math.Max(back.YPercent, back.YPercent + back.HeightPercent - insetY - height),
+                WidthPercent = Math.Min(width, back.WidthPercent),
+                HeightPercent = Math.Min(height, back.HeightPercent),
+            };
+        }
+    }
+    private CompositionBounds RegionBounds(CompositionRegionConstraint region) =>
+        region == CompositionRegionConstraint.BarcodeReserve
+            ? BarcodeBounds
+            :
+        CoverRegions.FirstOrDefault(item => item.Role == region)?.Bounds
+        ?? CoverCompositionFactory.RegionBoundsPercent(region, _scene!.Surface);
+    private string SafeRegionStyle(CompositionRegionConstraint region) =>
+        BoundsStyle(CoverCompositionFactory.SafeRegionBoundsPercent(region, _scene!.Surface));
+    private string RegionCenterStyle(CompositionRegionConstraint region)
+    {
+        var bounds = RegionBounds(region);
+        return FormattableString.Invariant($"left:{bounds.XPercent + bounds.WidthPercent / 2}%;top:{bounds.YPercent}%;height:{bounds.HeightPercent}%");
+    }
+    private static string BoundsStyle(CompositionBounds bounds) => FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%");
     private string ObjectStyle(CompositionObject item) { var resolved = Resolved(item); var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null; var bounds = group is null ? item.Bounds : EffectiveBounds(item, group); var rotation = item.RotationDegrees + (group?.RotationDegrees ?? 0); var background = item.Kind == CompositionObjectKind.Text ? CssColor(resolved.BackgroundColor, resolved.BackgroundOpacity) : item.Kind is CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse ? resolved.FillColor : "transparent"; var strokeCqw = resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100; var fontCqw = resolved.FontSizePoints / _scene.Surface.WidthPoints * 100; var border = item.Kind == CompositionObjectKind.Line ? "0" : $"{strokeCqw:R}cqw solid {resolved.StrokeColor}"; var radius = item.Kind == CompositionObjectKind.Ellipse ? "50%" : "0"; return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%;opacity:{item.Opacity * (group?.Opacity ?? 1)};transform:rotate({rotation}deg);z-index:{item.ZIndex + (group?.ZIndex ?? 0)};background:{background};border:{border};border-radius:{radius};color:{resolved.FillColor};font-family:{FontCssName(resolved.FontFamilyKey)};font-size:{fontCqw:R}cqw;font-style:{(resolved.Italic ? "italic" : "normal")};font-weight:{resolved.FontWeight};line-height:{resolved.LineHeight};letter-spacing:{resolved.LetterSpacingEm}em;text-align:{CssTextAlignment(resolved.TextAlignment)};justify-content:{CssVerticalAlignment(resolved.VerticalAlignment)};text-shadow:{CssTextShadow(resolved.TextShadow)}"); }
     private string SelectionFrameStyle(CompositionObject item)
     {
@@ -942,7 +998,7 @@
     private static string ImageFitCss(FigureImageFit fit) => fit switch { FigureImageFit.Cover => "cover", FigureImageFit.Stretch => "fill", _ => "contain" };
     private string LineStyle(CompositionObject item) { var resolved = Resolved(item); return FormattableString.Invariant($"border-top:{resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100:R}cqw solid {resolved.StrokeColor}"); }
     private static string FontCssName(string key) => $"lk-{new string(key.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray())}";
-    private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:swap;}}")));
+    private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:block;}}")));
     private static string CssTextAlignment(CompositionTextAlignment alignment) => alignment switch { CompositionTextAlignment.Center => "center", CompositionTextAlignment.End => "right", CompositionTextAlignment.Justify => "justify", _ => "left" };
     private static string CssVerticalAlignment(CompositionVerticalAlignment alignment) => alignment switch { CompositionVerticalAlignment.Center => "center", CompositionVerticalAlignment.Bottom => "flex-end", _ => "flex-start" };
     private static string CssTextShadow(CompositionTextShadow shadow) => shadow switch { CompositionTextShadow.Soft => "0 1px 2px #0006", CompositionTextShadow.Strong => "0 2px 4px #000b", CompositionTextShadow.Glow => "0 0 4px currentColor", _ => "none" };

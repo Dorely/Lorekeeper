@@ -156,6 +156,14 @@ pub struct PrintArtifactProfile {
     #[serde(default)]
     pub maximum_submitted_pages: Option<usize>,
     pub spine_model: PhysicalSpineModel,
+    #[serde(default = "default_cover_safety_inches")]
+    pub cover_safety_inches: f32,
+    #[serde(default = "default_barcode_width_inches")]
+    pub barcode_width_inches: f32,
+    #[serde(default = "default_barcode_height_inches")]
+    pub barcode_height_inches: f32,
+    #[serde(default = "default_barcode_inset_inches")]
+    pub barcode_inset_inches: f32,
     #[serde(default)]
     pub required_cover_surfaces: Vec<String>,
 }
@@ -198,6 +206,22 @@ pub struct PhysicalSpineAnchor {
 
 fn default_focal() -> f32 {
     50.0
+}
+
+fn default_cover_safety_inches() -> f32 {
+    0.25
+}
+
+fn default_barcode_width_inches() -> f32 {
+    2.0
+}
+
+fn default_barcode_height_inches() -> f32 {
+    1.2
+}
+
+fn default_barcode_inset_inches() -> f32 {
+    0.25
 }
 
 fn default_project_use() -> String {
@@ -414,6 +438,8 @@ pub struct LayoutPage {
     pub shapes: Vec<LayoutShape>,
     pub paint_order: Vec<LayoutPaint>,
     pub barcode_modules: Option<Vec<bool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub barcode_bounds: Option<[f32; 4]>,
     pub page_label: Option<String>,
     pub bookmark: Option<String>,
 }

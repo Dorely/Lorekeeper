@@ -942,6 +942,7 @@ mod tests {
             shapes: Vec::new(),
             paint_order: Vec::new(),
             barcode_modules: None,
+            barcode_bounds: None,
             page_label: Some("1".to_owned()),
             bookmark: None,
         };

@@ -31,14 +31,12 @@
 .cover-shapes-menu[open] > div { position: absolute; z-index: 70; right: 0; bottom: calc(100% + .25rem); display: grid; gap: .25rem; min-width: 7rem; padding: .35rem; border: 1px solid var(--lk-border-strong); border-radius: .45rem; background: var(--lk-surface); box-shadow: var(--lk-shadow-md); }
 
 .cover-stage { position: relative; width: min(calc((100cqh - 1.8rem) * var(--cover-ratio)),calc(100cqw - 1.8rem)); aspect-ratio: var(--cover-ratio); container-type: size; overflow: visible; background: var(--cover-bg); box-shadow: 0 .45rem 1.35rem #18203230; transform: scale(var(--cover-zoom)); transform-origin: center; touch-action: none; user-select: none; }
-.cover-safe { position: absolute; inset: 3%; z-index: 1000; border: 1px dashed #36a278; pointer-events: none; }
+.cover-safe { position: absolute; z-index: 1000; border: 1px dashed #36a278; pointer-events: none; }
 .cover-panel { position: absolute; z-index: 999; display: grid; place-items: center; border: 1px dashed #355b9b; color: #355b9b; font-size: .65rem; pointer-events: none; }
 .cover-panel-spine { background: #355b9b16; writing-mode: vertical-rl; }
 .cover-barcode { position: absolute; z-index: 1000; display: grid; place-items: center; border: 1px dashed #a63345; background: #fff9; color: #a63345; font-size: .6rem; pointer-events: none; }
-.cover-guide { position: absolute; z-index: 1001; pointer-events: none; }
-.cover-guide-x { top: 50%; left: 0; width: 100%; border-top: 1px solid #2f80ed88; }
-.cover-guide-y { top: 0; left: 50%; height: 100%; border-left: 1px solid #2f80ed88; }
-.cover-object { position: absolute; overflow: hidden; padding: 0; display: flex; flex-direction: column; color: inherit; cursor: move; touch-action: none; }
+.cover-surface-center { position: absolute; z-index: 1001; border-left: 1px solid #2f80ed88; pointer-events: none; }
+.cover-object { position: absolute; overflow: hidden; padding: 0; display: flex; flex-direction: column; color: inherit; font-synthesis: none; cursor: move; touch-action: none; }
 .cover-object.selected { overflow: visible; outline: 2px solid #4568d4; outline-offset: 1px; will-change: left,top,width,height,transform; }
 .cover-object--image { display: grid; place-items: center; padding: 0; background: #aebbd0; }
 .cover-object--image > img { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; max-width: none; max-height: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }
@@ -76,6 +74,7 @@
 .cover-selection-controls button { min-height: 1.85rem; padding: .24rem .45rem; border: 1px solid var(--lk-border-strong); border-radius: .35rem; background: var(--lk-surface); color: var(--lk-ink); font-size: .68rem; white-space: nowrap; }
 .cover-selection-controls > button,.cover-selection-controls > .cover-fit-choice { align-self: flex-end; }
 .cover-selection-controls button:hover { border-color: var(--lk-accent); }
+.cover-selection-controls button:disabled { opacity: .42; }
 .cover-selection-controls button.selected,.cover-fit-choice button.selected { border-color: var(--lk-accent); background: var(--lk-accent-soft); color: var(--lk-accent-hover); }
 .cover-selection-controls button.danger { color: var(--lk-danger); }
 .cover-selection-controls label { flex: 0 0 auto; display: grid; gap: .15rem; align-self: stretch; align-content: end; color: var(--lk-muted); font-size: .58rem; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .04em; }

@@ -82,6 +82,7 @@ public static class CoverCompositionFactory
             sourceScene.Surface.BleedPoints,
             sourceScene.Surface.SpineWidthPoints)
         {
+            SafeInsetPoints = sourceScene.Surface.SafeInsetPoints,
             BackRegionWidthPoints = sourceScene.Surface.BackRegionWidthPoints,
             FrontRegionWidthPoints = sourceScene.Surface.FrontRegionWidthPoints,
             CoverRegionYPoints = sourceScene.Surface.CoverRegionYPoints,
@@ -113,6 +114,7 @@ public static class CoverCompositionFactory
                 WidthPoints = coreGeometry.WidthPoints,
                 HeightPoints = coreGeometry.HeightPoints,
                 BleedPoints = 0,
+                SafeInsetPoints = coreGeometry.SafeInsetPoints,
                 TrimWidthPoints = coreGeometry.TrimWidthPoints,
                 TrimHeightPoints = coreGeometry.TrimHeightPoints,
                 SpineWidthPoints = 0,
@@ -155,6 +157,7 @@ public static class CoverCompositionFactory
                     WidthPoints = geometry.WidthPoints,
                     HeightPoints = geometry.HeightPoints,
                     BleedPoints = 0,
+                    SafeInsetPoints = geometry.SafeInsetPoints,
                     TrimWidthPoints = geometry.TrimWidthPoints,
                     TrimHeightPoints = geometry.TrimHeightPoints,
                     SpineWidthPoints = 0,
@@ -229,7 +232,7 @@ public static class CoverCompositionFactory
                 WidthPoints = geometry.WidthPoints,
                 HeightPoints = geometry.HeightPoints,
                 BleedPoints = edition.Bleed ? 9 : 0,
-                SafeInsetPoints = 18,
+                SafeInsetPoints = geometry.SafeInsetPoints,
                 TrimWidthPoints = geometry.TrimWidthPoints,
                 TrimHeightPoints = geometry.TrimHeightPoints,
                 SpineWidthPoints = geometry.SpineWidthPoints,
@@ -259,6 +262,7 @@ public static class CoverCompositionFactory
                 scene.Surface.BleedPoints,
                 scene.Surface.SpineWidthPoints)
             {
+                SafeInsetPoints = scene.Surface.SafeInsetPoints,
                 BackRegionWidthPoints = scene.Surface.BackRegionWidthPoints,
                 FrontRegionWidthPoints = scene.Surface.FrontRegionWidthPoints,
                 CoverRegionYPoints = scene.Surface.CoverRegionYPoints,
@@ -304,6 +308,7 @@ public static class CoverCompositionFactory
                 WidthPoints = newGeometry.WidthPoints,
                 HeightPoints = newGeometry.HeightPoints,
                 BleedPoints = edition.Bleed ? 9 : 0,
+                SafeInsetPoints = newGeometry.SafeInsetPoints,
                 TrimWidthPoints = newGeometry.TrimWidthPoints,
                 TrimHeightPoints = newGeometry.TrimHeightPoints,
                 SpineWidthPoints = newGeometry.SpineWidthPoints,
@@ -335,6 +340,10 @@ public static class CoverCompositionFactory
             (double)physical.BleedInches * 72,
             (double)physical.SpineWidthInches * 72)
         {
+            SafeInsetPoints = (double)product.CoverSafetyInches * 72,
+            BarcodeWidthPoints = (double)product.BarcodeWidthInches * 72,
+            BarcodeHeightPoints = (double)product.BarcodeHeightInches * 72,
+            BarcodeInsetPoints = (double)product.BarcodeInsetInches * 72,
             BackRegionWidthPoints = (double)physical.BackRegionWidthInches * 72,
             FrontRegionWidthPoints = (double)physical.FrontRegionWidthInches * 72,
             CoverRegionYPoints = (double)physical.CoverRegionYInches * 72,
@@ -350,17 +359,14 @@ public static class CoverCompositionFactory
 
     private static CoverRegion BarcodeRegion(CoverGeometry geometry)
     {
-        const double safeInset = 18;
-        const double barcodeWidth = 144;
-        const double barcodeHeight = 86.4;
         var back = geometry.HasMeasuredRegions
             ? new CoverRegion(MeasuredBackRegionX(geometry), geometry.CoverRegionYPoints, geometry.BackRegionWidthPoints, geometry.CoverRegionHeightPoints)
             : new CoverRegion(geometry.BleedPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints);
         return new(
-            Math.Max(back.X, back.X + back.Width - safeInset - barcodeWidth),
-            Math.Max(back.Y, back.Y + back.Height - safeInset - barcodeHeight),
-            Math.Min(barcodeWidth, back.Width),
-            Math.Min(barcodeHeight, back.Height));
+            Math.Max(back.X, back.X + back.Width - geometry.BarcodeInsetPoints - geometry.BarcodeWidthPoints),
+            Math.Max(back.Y, back.Y + back.Height - geometry.BarcodeInsetPoints - geometry.BarcodeHeightPoints),
+            Math.Min(geometry.BarcodeWidthPoints, back.Width),
+            Math.Min(geometry.BarcodeHeightPoints, back.Height));
     }
 
     private static CoverRegion Region(CompositionRegionConstraint region, CoverGeometry geometry) => region switch
@@ -371,7 +377,11 @@ public static class CoverCompositionFactory
         CompositionRegionConstraint.Back => new(geometry.BleedPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
         CompositionRegionConstraint.Spine => new(geometry.BleedPoints + geometry.TrimWidthPoints, geometry.BleedPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.TrimHeightPoints),
         CompositionRegionConstraint.Front => new(geometry.WidthPoints - geometry.BleedPoints - geometry.TrimWidthPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
-        CompositionRegionConstraint.SafeArea => new(18, 18, Math.Max(1, geometry.WidthPoints - 36), Math.Max(1, geometry.HeightPoints - 36)),
+        CompositionRegionConstraint.SafeArea => new(
+            geometry.BleedPoints + geometry.SafeInsetPoints,
+            geometry.BleedPoints + geometry.SafeInsetPoints,
+            Math.Max(1, geometry.WidthPoints - (geometry.BleedPoints + geometry.SafeInsetPoints) * 2),
+            Math.Max(1, geometry.HeightPoints - (geometry.BleedPoints + geometry.SafeInsetPoints) * 2)),
         CompositionRegionConstraint.BarcodeReserve => BarcodeRegion(geometry),
         _ => new(0, 0, geometry.WidthPoints, geometry.HeightPoints),
     };
@@ -397,6 +407,52 @@ public static class CoverCompositionFactory
             surface.BleedPoints,
             surface.SpineWidthPoints)
         {
+            SafeInsetPoints = surface.SafeInsetPoints,
+            BackRegionWidthPoints = surface.BackRegionWidthPoints,
+            FrontRegionWidthPoints = surface.FrontRegionWidthPoints,
+            CoverRegionYPoints = surface.CoverRegionYPoints,
+            CoverRegionHeightPoints = surface.CoverRegionHeightPoints,
+        });
+
+    public static CompositionBounds SafeRegionBoundsPercent(
+        CompositionRegionConstraint region,
+        CoverGeometry geometry)
+    {
+        var bounds = RegionBoundsPercent(region, geometry);
+        var insetX = region switch
+        {
+            CompositionRegionConstraint.SafeArea => 0,
+            CompositionRegionConstraint.Spine => bounds.WidthPercent * .05,
+            CompositionRegionConstraint.Page => (geometry.BleedPoints + geometry.SafeInsetPoints) / geometry.WidthPoints * 100,
+            _ => geometry.SafeInsetPoints / geometry.WidthPoints * 100,
+        };
+        var insetY = region switch
+        {
+            CompositionRegionConstraint.SafeArea => 0,
+            CompositionRegionConstraint.Page => (geometry.BleedPoints + geometry.SafeInsetPoints) / geometry.HeightPoints * 100,
+            _ => geometry.SafeInsetPoints / geometry.HeightPoints * 100,
+        };
+        return bounds with
+        {
+            XPercent = bounds.XPercent + insetX,
+            YPercent = bounds.YPercent + insetY,
+            WidthPercent = Math.Max(0, bounds.WidthPercent - insetX * 2),
+            HeightPercent = Math.Max(0, bounds.HeightPercent - insetY * 2),
+        };
+    }
+
+    public static CompositionBounds SafeRegionBoundsPercent(
+        CompositionRegionConstraint region,
+        CompositionSurface surface) =>
+        SafeRegionBoundsPercent(region, new CoverGeometry(
+            surface.WidthPoints,
+            surface.HeightPoints,
+            surface.TrimWidthPoints,
+            surface.TrimHeightPoints,
+            surface.BleedPoints,
+            surface.SpineWidthPoints)
+        {
+            SafeInsetPoints = surface.SafeInsetPoints,
             BackRegionWidthPoints = surface.BackRegionWidthPoints,
             FrontRegionWidthPoints = surface.FrontRegionWidthPoints,
             CoverRegionYPoints = surface.CoverRegionYPoints,
@@ -468,6 +524,10 @@ public sealed record CoverGeometry(
     double BleedPoints,
     double SpineWidthPoints)
 {
+    public double SafeInsetPoints { get; init; } = 18;
+    public double BarcodeWidthPoints { get; init; } = 144;
+    public double BarcodeHeightPoints { get; init; } = 86.4;
+    public double BarcodeInsetPoints { get; init; } = 18;
     public double BackRegionWidthPoints { get; init; }
     public double FrontRegionWidthPoints { get; init; }
     public double CoverRegionYPoints { get; init; }

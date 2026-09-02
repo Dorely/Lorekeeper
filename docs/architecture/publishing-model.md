@@ -277,6 +277,11 @@ region without stretching. Extremely narrow spines use the closest supported
 generated aspect with crop-safe margins rather than an assistant-managed panel
 plan. Back, Spine, and Front remain the preferred semantic regions, and the
 assistant must inspect annotated regions plus the clean whole wrap after placement.
+The profile registry also owns cover text-safety and barcode-reserve dimensions.
+Lulu surfaces apply a 0.5-inch text-safety inset from trim and reserve the
+3.622-by-1.26-inch lower-right barcode area with a 0.5-inch inset. These values
+flow through template reads, scene reflow, authoring guides, validation, and the
+Press request; a generic quarter-inch safe area cannot satisfy a Lulu profile.
 
 Publication text uses one canonical binding catalog for title, subtitle, author,
 publisher, copyright, description, and ISBN. Designed Page frames store these as

@@ -4357,6 +4357,22 @@ fn lulu_paperback_uses_the_registry_caliper_and_full_wrap_geometry() {
         ),
     );
     job.request["document"]["sections"] = lulu_chapters(150);
+    assert_eq!(
+        job.request["printArtifactProfile"]["coverSafetyInches"],
+        json!(0.5)
+    );
+    assert_eq!(
+        job.request["printArtifactProfile"]["barcodeWidthInches"],
+        json!(3.622)
+    );
+    assert_eq!(
+        job.request["printArtifactProfile"]["barcodeHeightInches"],
+        json!(1.26)
+    );
+    assert_eq!(
+        job.request["printArtifactProfile"]["barcodeInsetInches"],
+        json!(0.5)
+    );
     job.write_request();
 
     let output = job.render();
@@ -4373,6 +4389,32 @@ fn lulu_paperback_uses_the_registry_caliper_and_full_wrap_geometry() {
     let cover = inspect(&job.artifact(&response, "cover-pdf"));
     assert_eq!(cover.page_count, 1);
     assert!((cover.page_width / 72.0 - (12.25 + expected_spine)).abs() < 0.01);
+}
+
+#[test]
+fn lulu_rejects_cover_safety_geometry_that_differs_from_the_registry() {
+    let mut job = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut job,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    job.request["printArtifactProfile"]["coverSafetyInches"] = json!(0.25);
+    job.write_request();
+
+    let output = job.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH"
+    ));
 }
 
 #[test]
@@ -4703,6 +4745,10 @@ impl PreparedJob {
                 "maximumPages": catalog["maximumPages"],
                 "minimumSubmittedPages": catalog["minimumSubmittedPages"],
                 "maximumSubmittedPages": catalog["maximumSubmittedPages"],
+                "coverSafetyInches": catalog.get("coverSafetyInches").cloned().unwrap_or_else(|| json!(0.25)),
+                "barcodeWidthInches": catalog.get("barcodeWidthInches").cloned().unwrap_or_else(|| json!(2.0)),
+                "barcodeHeightInches": catalog.get("barcodeHeightInches").cloned().unwrap_or_else(|| json!(1.2)),
+                "barcodeInsetInches": catalog.get("barcodeInsetInches").cloned().unwrap_or_else(|| json!(0.25)),
                 "spineModel": catalog["spineModel"],
                 "requiredCoverSurfaces": ["perfect-bound-outside"]
             });
@@ -4750,6 +4796,10 @@ impl PreparedJob {
             "maximumPages": catalog["maximumPages"],
             "minimumSubmittedPages": catalog["minimumSubmittedPages"],
             "maximumSubmittedPages": catalog["maximumSubmittedPages"],
+            "coverSafetyInches": catalog.get("coverSafetyInches").cloned().unwrap_or_else(|| json!(0.25)),
+            "barcodeWidthInches": catalog.get("barcodeWidthInches").cloned().unwrap_or_else(|| json!(2.0)),
+            "barcodeHeightInches": catalog.get("barcodeHeightInches").cloned().unwrap_or_else(|| json!(1.2)),
+            "barcodeInsetInches": catalog.get("barcodeInsetInches").cloned().unwrap_or_else(|| json!(0.25)),
             "spineModel": catalog["spineModel"],
             "requiredCoverSurfaces": surfaces,
         });

@@ -19,7 +19,7 @@ fn main() {
                 serde_json::to_string(&json!({
                     "protocolVersion": 12,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
-                    "printArtifactProfileRegistryVersion": "2026.09.2",
+                    "printArtifactProfileRegistryVersion": "2026.09.3",
                     "printArtifactProfileRegistrySha256": registry_hash,
                     "profiles": [
                         "generic-print-v2",

@@ -63,6 +63,7 @@ public sealed record PublicationCoverTemplate(
     string Fingerprint,
     bool IsAcknowledged)
 {
+    public double BarcodeInsetInches { get; init; } = 0.25;
     public double BackRegionWidthInches { get; init; }
     public double FrontRegionWidthInches { get; init; }
     public double CoverRegionYInches { get; init; }
@@ -1107,18 +1108,7 @@ public sealed class PublicationCoverService(
                     $"Object {item.Id:N} places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.",
                     item.Id);
             if (item.Kind != CompositionObjectKind.Text) continue;
-            var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
-            var insetX = item.RegionConstraint == CompositionRegionConstraint.Spine
-                ? region.WidthPercent * .05
-                : scene.Surface.SafeInsetPoints / scene.Surface.WidthPoints * 100;
-            var insetY = scene.Surface.SafeInsetPoints / scene.Surface.HeightPoints * 100;
-            var safe = region with
-            {
-                XPercent = region.XPercent + insetX,
-                YPercent = region.YPercent + insetY,
-                WidthPercent = Math.Max(0, region.WidthPercent - insetX * 2),
-                HeightPercent = Math.Max(0, region.HeightPercent - insetY * 2),
-            };
+            var safe = CoverCompositionFactory.SafeRegionBoundsPercent(item.RegionConstraint, geometry);
             if (!Contains(safe, item.Bounds))
                 AddDiagnostic(diagnostics, "error", "COVER_SAFE_AREA_OVERFLOW", $"Object {item.Id:N} extends outside the safe area for its {item.RegionConstraint} region.", item.Id);
         }
@@ -1197,12 +1187,17 @@ public sealed class PublicationCoverService(
         var geometryPages = pages > 0
             ? pages
             : printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).MinimumPages;
+        var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
         var geometry = printGeometry.Calculate(edition, geometryPages, surfaceRole);
         return new(pages, edition.PageWidthInches, edition.PageHeightInches, (double)geometry.BleedInches,
             (double)geometry.SpineWidthInches, (double)geometry.SurfaceWidthInches, (double)geometry.SurfaceHeightInches,
-            0.25, 2, 1.2, geometry.GeometryFingerprint,
+            (double)product.CoverSafetyInches,
+            (double)product.BarcodeWidthInches,
+            (double)product.BarcodeHeightInches,
+            geometry.GeometryFingerprint,
             string.Equals(geometry.GeometryFingerprint, design.AcknowledgedTemplateFingerprint, StringComparison.Ordinal))
         {
+            BarcodeInsetInches = (double)product.BarcodeInsetInches,
             BackRegionWidthInches = (double)geometry.BackRegionWidthInches,
             FrontRegionWidthInches = (double)geometry.FrontRegionWidthInches,
             CoverRegionYInches = (double)geometry.CoverRegionYInches,
@@ -1337,8 +1332,7 @@ public sealed class PublicationCoverService(
             && double.IsFinite(scene.Surface.HeightPoints)
             && scene.Surface.WidthPoints > 0
             && scene.Surface.HeightPoints > 0
-            && (Math.Abs(scene.Surface.WidthPoints - expected.WidthPoints) > .01
-                || Math.Abs(scene.Surface.HeightPoints - expected.HeightPoints) > .01);
+            && !SurfaceMatches(scene.Surface, expected);
         if (!geometryChanged)
             return scene;
 
@@ -1352,6 +1346,19 @@ public sealed class PublicationCoverService(
             surfaceRole);
     }
 
+    private static bool SurfaceMatches(CompositionSurface surface, CoverGeometry expected) =>
+        Math.Abs(surface.WidthPoints - expected.WidthPoints) <= .01
+        && Math.Abs(surface.HeightPoints - expected.HeightPoints) <= .01
+        && Math.Abs(surface.TrimWidthPoints - expected.TrimWidthPoints) <= .01
+        && Math.Abs(surface.TrimHeightPoints - expected.TrimHeightPoints) <= .01
+        && Math.Abs(surface.BleedPoints - expected.BleedPoints) <= .01
+        && Math.Abs(surface.SafeInsetPoints - expected.SafeInsetPoints) <= .01
+        && Math.Abs(surface.SpineWidthPoints - expected.SpineWidthPoints) <= .01
+        && Math.Abs(surface.BackRegionWidthPoints - expected.BackRegionWidthPoints) <= .01
+        && Math.Abs(surface.FrontRegionWidthPoints - expected.FrontRegionWidthPoints) <= .01
+        && Math.Abs(surface.CoverRegionYPoints - expected.CoverRegionYPoints) <= .01
+        && Math.Abs(surface.CoverRegionHeightPoints - expected.CoverRegionHeightPoints) <= .01;
+
     internal static void ValidateAuthoringScene(
         CompositionScene scene,
         PublicationEdition edition,
@@ -1359,8 +1366,7 @@ public sealed class PublicationCoverService(
     {
         var expected = CoverCompositionFactory.Geometry(edition, template.PageCount);
         if (scene.SchemaVersion != CompositionScene.CurrentSchemaVersion
-            || Math.Abs(scene.Surface.WidthPoints - expected.WidthPoints) > .01
-            || Math.Abs(scene.Surface.HeightPoints - expected.HeightPoints) > .01)
+            || !SurfaceMatches(scene.Surface, expected))
             throw new InvalidDataException("The cover composition does not match the edition's current cover geometry.");
         var layerIds = scene.Layers.Select(item => item.Id).ToHashSet();
         if (layerIds.Count != scene.Layers.Count || layerIds.Contains(Guid.Empty))

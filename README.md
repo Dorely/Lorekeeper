@@ -271,7 +271,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   an interior change establishes its validated page count before cover work.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools, canvas-aligned resize handles for rotated objects, justified text
-  alignment, and reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
+  alignment, per-surface center and safe-area guides, one-action full-width fit,
+  surface/safe-area centering, quarter-turn rotation and rotation reset, and
+  reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
   `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
   paper weight/thickness, color process, construction, and cover mode. Paper
@@ -292,6 +294,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Images and shapes may extend through cover safe-area guides; only text outside
   the safe area blocks production, while physical bounds, barcode/no-ink, and
   accessibility checks remain enforced.
+  Lulu cover profiles use the provider template's 0.5-inch text safety inset
+  and lower-right 3.622-by-1.26-inch barcode reserve rather than generic cover
+  defaults. Editor typography waits for the exact project font face, avoiding
+  temporary fallback spacing that differs from the generated cover.
   B&N covers remain one connected Back/Spine/Front composition; choosing a
   region is confined to the Fill selected region dialog while ordinary editing,
   crop, generation guidance, and spine direction stay whole-canvas. They can prepare

@@ -231,7 +231,10 @@ even page count in range. Spine text is only allowed at 100 pages or more so one
 rule covers both the print network and Global Distribution. Personal-use
 releases require no ISBN and ship without a barcode; for-sale releases use a
 user-supplied ISBN-13 with an EAN-13 barcode generated in the reserved
-bottom-right area. No `print-setup.json` is produced for Lulu. See
+bottom-right area. Registry version `2026.09.3` additionally freezes Lulu's
+0.5-inch text-safety inset and 3.622-by-1.26-inch barcode reserve positioned
+0.5 inch from the back-cover trim; Press fails closed when request geometry
+differs from that bundled profile. No `print-setup.json` is produced for Lulu. See
 [docs/research/lulu-print-requirements.md](../research/lulu-print-requirements.md).
 
 Composition opacity rules preserve Digital PDF appearance with bounded

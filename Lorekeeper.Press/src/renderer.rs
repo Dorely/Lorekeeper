@@ -77,6 +77,22 @@ fn validate_registry_profile(
             == product.minimum_submitted_pages.map(|value| value as u64)
         && catalog["maximumSubmittedPages"].as_u64()
             == product.maximum_submitted_pages.map(|value| value as u64)
+        && (catalog["coverSafetyInches"].as_f64().unwrap_or(0.25) as f32
+            - product.cover_safety_inches)
+            .abs()
+            < 0.000_001
+        && (catalog["barcodeWidthInches"].as_f64().unwrap_or(2.0) as f32
+            - product.barcode_width_inches)
+            .abs()
+            < 0.000_001
+        && (catalog["barcodeHeightInches"].as_f64().unwrap_or(1.2) as f32
+            - product.barcode_height_inches)
+            .abs()
+            < 0.000_001
+        && (catalog["barcodeInsetInches"].as_f64().unwrap_or(0.25) as f32
+            - product.barcode_inset_inches)
+            .abs()
+            < 0.000_001
         && catalog["coverModes"].as_array().is_some_and(|items| {
             items
                 .iter()
@@ -3484,6 +3500,7 @@ fn designed_page(
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     };
@@ -4592,6 +4609,7 @@ fn split_facing_spread(page: LayoutPage, leaf_width: f32) -> Vec<LayoutPage> {
                 shapes,
                 paint_order: Vec::new(),
                 barcode_modules: None,
+                barcode_bounds: None,
                 page_label: None,
                 bookmark: None,
             };
@@ -5314,6 +5332,7 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     }
@@ -5459,6 +5478,7 @@ fn build_toc_pages_with_limit(
                 shapes: Vec::new(),
                 paint_order: Vec::new(),
                 barcode_modules: None,
+                barcode_bounds: None,
                 page_label: None,
                 bookmark: None,
             });
@@ -5515,6 +5535,7 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     }
@@ -6353,6 +6374,7 @@ fn empty_body_page() -> LayoutPage {
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     }
@@ -7098,6 +7120,7 @@ fn dedicated_figure_page_with_layout(
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     }
@@ -7113,6 +7136,7 @@ fn blank_cover_layout(width: f32, height: f32) -> LayoutPage {
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: None,
         bookmark: None,
     }
@@ -7132,10 +7156,33 @@ fn cover_layout(
     let spine_width = (width - bleed * 2.0 - request.trim.width_inches * 144.0).max(0.0);
     let spine_center = bleed + request.trim.width_inches * 72.0 + spine_width / 2.0;
     let panel_width = request.trim.width_inches * 72.0;
-    let safe_margin = 36.0;
+    let product = request.print_artifact_profile.as_ref();
+    let safe_margin = product.map_or(36.0, |value| value.cover_safety_inches * 72.0);
     let safe_width = panel_width - safe_margin * 2.0;
     let front_x = bleed + panel_width + spine_width + safe_margin;
     let back_x = bleed + safe_margin;
+    let barcode_bounds = (cover.barcode_mode == "LorekeeperBarcode")
+        .then(|| {
+            product.map(|value| {
+                let geometry = CoverRegionGeometry {
+                    back_x: bleed,
+                    back_width: panel_width,
+                    front_width: panel_width,
+                    spine_width,
+                    y: bleed,
+                    height: request.trim.height_inches * 72.0,
+                    bleed,
+                    safe_inset: value.cover_safety_inches * 72.0,
+                    barcode_width: value.barcode_width_inches * 72.0,
+                    barcode_height: value.barcode_height_inches * 72.0,
+                    barcode_inset: value.barcode_inset_inches * 72.0,
+                };
+                let (x, y, width, height) =
+                    cover_region("BarcodeReserve", width, height, &geometry, false);
+                [x, y, width, height]
+            })
+        })
+        .flatten();
     let mut lines = cover_text_lines(
         &cover.title,
         FontFace::SansBold,
@@ -7226,12 +7273,19 @@ fn cover_layout(
         && let Some(isbn) = cover.isbn.as_deref()
     {
         let runs = single_run(isbn, FontFace::MonoRegular);
+        let [reserve_x, reserve_y, reserve_width, reserve_height] =
+            barcode_bounds.unwrap_or([width * 0.08 - 9.0, height * 0.90 - 48.0, 127.25, 66.0]);
+        let barcode_width =
+            ean13_modules(isbn).map_or(127.25, |modules| modules.len() as f32 * 1.15 + 18.0);
+        let origin_x = reserve_x + ((reserve_width - barcode_width) / 2.0).max(0.0) + 9.0;
+        let reserve_bottom = height - reserve_y - reserve_height;
+        let origin_y = reserve_bottom + ((reserve_height - 66.0) / 2.0).max(0.0) + 18.0;
         lines.push(LayoutLine {
             text: isbn.to_owned(),
             runs: runs.clone(),
             size: 8.0,
-            x: width * 0.08,
-            y: height * 0.10 - 12.0,
+            x: origin_x,
+            y: origin_y - 12.0,
             baseline_offset_points: line_baseline_offset_points(8.0, FontFace::MonoRegular, &runs),
             word_spacing: 0.0,
             character_spacing: 0.0,
@@ -7291,6 +7345,7 @@ fn cover_layout(
         } else {
             None
         },
+        barcode_bounds,
         page_label: None,
         bookmark: None,
     })
@@ -7382,6 +7437,7 @@ fn digital_cover_layout(
         shapes: Vec::new(),
         paint_order: Vec::new(),
         barcode_modules: None,
+        barcode_bounds: None,
         page_label: Some("Cover".to_owned()),
         bookmark: None,
     })
@@ -7413,6 +7469,11 @@ fn cover_scene_layout(
         cover.bleed_inches * 72.0
     };
     let panel = request.trim.width_inches * 72.0;
+    let product = request.print_artifact_profile.as_ref();
+    let cover_safety = product.map_or(18.0, |value| value.cover_safety_inches * 72.0);
+    let barcode_width = product.map_or(144.0, |value| value.barcode_width_inches * 72.0);
+    let barcode_height = product.map_or(86.4, |value| value.barcode_height_inches * 72.0);
+    let barcode_inset = product.map_or(18.0, |value| value.barcode_inset_inches * 72.0);
     let bn_profile = request
         .print_artifact_profile
         .as_ref()
@@ -7441,6 +7502,10 @@ fn cover_scene_layout(
             y: ((height - panel_height) / 2.0).max(0.0),
             height: panel_height,
             bleed,
+            safe_inset: cover_safety,
+            barcode_width,
+            barcode_height,
+            barcode_inset,
         }
     } else {
         CoverRegionGeometry {
@@ -7459,6 +7524,10 @@ fn cover_scene_layout(
                 height - bleed * 2.0
             },
             bleed,
+            safe_inset: cover_safety,
+            barcode_width,
+            barcode_height,
+            barcode_inset,
         }
     };
     let surface = &scene["surface"];
@@ -7509,6 +7578,12 @@ fn cover_scene_layout(
             .filter(|value| *value > 0.0)
             .unwrap_or(new_regions.height as f64) as f32,
         bleed: old_bleed,
+        safe_inset: surface["safeInsetPoints"]
+            .as_f64()
+            .unwrap_or(new_regions.safe_inset as f64) as f32,
+        barcode_width: new_regions.barcode_width,
+        barcode_height: new_regions.barcode_height,
+        barcode_inset: new_regions.barcode_inset,
     };
     scene["surface"]["widthPoints"] = Value::from(width);
     scene["surface"]["heightPoints"] = Value::from(height);
@@ -7517,6 +7592,7 @@ fn cover_scene_layout(
     scene["surface"]["spineWidthPoints"] = Value::from(new_regions.spine_width);
     scene["surface"]["coverRegionYPoints"] = Value::from(new_regions.y);
     scene["surface"]["coverRegionHeightPoints"] = Value::from(new_regions.height);
+    scene["surface"]["safeInsetPoints"] = Value::from(new_regions.safe_inset);
     let objects = scene
         .get_mut("objects")
         .and_then(Value::as_array_mut)
@@ -7624,6 +7700,9 @@ fn cover_scene_layout(
     page.page_label = digital.then(|| "Cover".to_owned());
     if !digital && cover.barcode_mode == "LorekeeperBarcode" {
         page.barcode_modules = cover.isbn.as_deref().and_then(ean13_modules);
+        let (x, y, width, height) =
+            cover_region("BarcodeReserve", width, height, &new_regions, false);
+        page.barcode_bounds = Some([x, y, width, height]);
     }
     Ok(page)
 }
@@ -7637,6 +7716,10 @@ struct CoverRegionGeometry {
     y: f32,
     height: f32,
     bleed: f32,
+    safe_inset: f32,
+    barcode_width: f32,
+    barcode_height: f32,
+    barcode_inset: f32,
 }
 
 fn cover_region(
@@ -7669,16 +7752,20 @@ fn cover_region(
             geometry.height,
         ),
         "SafeArea" => (
-            geometry.bleed + 18.0,
-            geometry.bleed + 18.0,
-            width - geometry.bleed * 2.0 - 36.0,
-            height - geometry.bleed * 2.0 - 36.0,
+            geometry.bleed + geometry.safe_inset,
+            geometry.bleed + geometry.safe_inset,
+            width - (geometry.bleed + geometry.safe_inset) * 2.0,
+            height - (geometry.bleed + geometry.safe_inset) * 2.0,
         ),
         "BarcodeReserve" => (
-            (geometry.back_x + geometry.back_width - 18.0 - 144.0).max(geometry.back_x),
-            (geometry.y + geometry.height - 18.0 - 86.4).max(geometry.y),
-            144.0_f32.min(geometry.back_width),
-            86.4_f32.min(geometry.height),
+            (geometry.back_x + geometry.back_width
+                - geometry.barcode_inset
+                - geometry.barcode_width)
+                .max(geometry.back_x),
+            (geometry.y + geometry.height - geometry.barcode_inset - geometry.barcode_height)
+                .max(geometry.y),
+            geometry.barcode_width.min(geometry.back_width),
+            geometry.barcode_height.min(geometry.height),
         ),
         _ => (0.0, 0.0, width, height),
     }
@@ -7761,6 +7848,7 @@ fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim, leading_p
             shapes: Vec::new(),
             paint_order: Vec::new(),
             barcode_modules: None,
+            barcode_bounds: None,
             page_label: None,
             bookmark: None,
         });
@@ -8009,6 +8097,10 @@ mod tests {
             y: 0.0,
             height: 9.5 * 72.0,
             bleed: 18.0,
+            safe_inset: 18.0,
+            barcode_width: 144.0,
+            barcode_height: 86.4,
+            barcode_inset: 18.0,
         };
         let reserve = cover_region(
             "BarcodeReserve",
