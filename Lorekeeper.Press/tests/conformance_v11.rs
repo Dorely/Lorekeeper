@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 11);
-    assert_eq!(value["rendererVersion"], "2.1.9");
+    assert_eq!(value["rendererVersion"], "2.1.10");
     assert_eq!(
         value["profiles"],
         json!([
@@ -65,7 +65,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 11);
-    assert_eq!(response["rendererVersion"], "2.1.9");
+    assert_eq!(response["rendererVersion"], "2.1.10");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -4506,6 +4506,34 @@ fn lulu_print_output_is_pdf_17_with_embedded_fonts_and_srgb_flattened_art() {
     );
     job.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
     job.request["cover"]["isbn"] = json!("9780306406157");
+    job.request["cover"]["scene"] = json!({
+        "surface": { "widthPoints": 900.0, "heightPoints": 666.0 },
+        "layers": [{ "id": "art", "name": "Artwork", "order": 0 }],
+        "objects": [
+            {
+                "id": "background",
+                "layerId": "art",
+                "kind": "Rectangle",
+                "bounds": { "xPercent": 0.0, "yPercent": 0.0, "widthPercent": 100.0, "heightPercent": 100.0 },
+                "fillColor": "#16324f",
+                "opacity": 1.0,
+                "zIndex": 0,
+                "decorative": true,
+                "semanticRole": "Artifact"
+            },
+            {
+                "id": "translucent-art",
+                "layerId": "art",
+                "kind": "Rectangle",
+                "bounds": { "xPercent": 10.0, "yPercent": 10.0, "widthPercent": 20.0, "heightPercent": 20.0 },
+                "fillColor": "#f0a020",
+                "opacity": 0.5,
+                "zIndex": 1,
+                "decorative": true,
+                "semanticRole": "Artifact"
+            }
+        ]
+    });
     job.write_request();
     let output = job.render();
     assert!(

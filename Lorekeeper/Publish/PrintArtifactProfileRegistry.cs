@@ -314,7 +314,7 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
             return decimal.Round(unrounded / increment, 0, MidpointRounding.AwayFromZero) * increment;
         }
         if (product.SpineModel.Kind == "Caliper" && product.SpineModel.InchesPerPage is decimal inchesPerPage)
-            return decimal.Round(inchesPerPage * pages, 5, MidpointRounding.AwayFromZero);
+            return decimal.Round(inchesPerPage * pages + product.SpineModel.BaseInches, 5, MidpointRounding.AwayFromZero);
         var anchors = product.SpineModel.Anchors?.OrderBy(item => item.Pages).ToArray() ?? [];
         if (anchors.Length == 0)
             throw new InvalidOperationException($"Print artifact profile '{product.Key}' has no spine evidence.");

@@ -553,6 +553,10 @@ public sealed class PublicationPackageService(
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
+        latestArtifacts = latestArtifacts
+            .GroupBy(artifact => artifact.Kind)
+            .Select(group => group.First())
+            .ToList();
         var finalPackageIdentity = PackageIdentity(
             profile,
             report.SourceFingerprint,
@@ -1454,7 +1458,7 @@ public sealed class PublicationPackageService(
             }
             else
             {
-                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The KDP PDFs contain transparency.", items);
+                RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The print PDFs contain transparency.", items);
             }
             if (currentRendererVersion is not null
                 && printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).InteriorProcess == PrintInteriorProcess.BlackAndWhite)

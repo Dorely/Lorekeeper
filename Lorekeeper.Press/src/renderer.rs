@@ -7242,19 +7242,33 @@ fn cover_scene_layout(
     let old_bleed = surface["bleedPoints"]
         .as_f64()
         .unwrap_or(new_regions.bleed as f64) as f32;
-    let has_old_measured_regions = surface["backRegionWidthPoints"].as_f64().is_some()
-        && surface["frontRegionWidthPoints"].as_f64().is_some()
-        && surface["spineWidthPoints"].as_f64().is_some();
-    let old_back_width = surface["backRegionWidthPoints"]
+    let has_old_measured_regions = surface["backRegionWidthPoints"]
         .as_f64()
-        .unwrap_or(new_regions.back_width as f64) as f32;
-    let old_front_width = surface["frontRegionWidthPoints"]
-        .as_f64()
-        .unwrap_or(new_regions.front_width as f64) as f32;
-    let old_spine_width = surface["spineWidthPoints"]
-        .as_f64()
-        .unwrap_or((old_width - old_bleed * 2.0 - old_back_width - old_front_width).max(0.0) as f64)
-        as f32;
+        .is_some_and(|value| value > 0.0)
+        && surface["frontRegionWidthPoints"]
+            .as_f64()
+            .is_some_and(|value| value > 0.0)
+        && surface["spineWidthPoints"]
+            .as_f64()
+            .is_some_and(|value| value > 0.0)
+        && surface["coverRegionHeightPoints"]
+            .as_f64()
+            .is_some_and(|value| value > 0.0);
+    let old_back_width = if has_old_measured_regions {
+        surface["backRegionWidthPoints"].as_f64().unwrap() as f32
+    } else {
+        new_regions.back_width
+    };
+    let old_front_width = if has_old_measured_regions {
+        surface["frontRegionWidthPoints"].as_f64().unwrap() as f32
+    } else {
+        new_regions.front_width
+    };
+    let old_spine_width = if has_old_measured_regions {
+        surface["spineWidthPoints"].as_f64().unwrap() as f32
+    } else {
+        (old_width - old_bleed * 2.0 - old_back_width - old_front_width).max(0.0)
+    };
     let old_regions = CoverRegionGeometry {
         back_x: if has_old_measured_regions {
             ((old_width - old_back_width - old_spine_width - old_front_width) / 2.0).max(0.0)
@@ -8541,6 +8555,72 @@ mod tests {
             expanded.lines[0].x > unchanged.lines[0].x,
             "front-bound group must move with an expanded spine"
         );
+    }
+
+    #[test]
+    fn cover_reflow_uses_trim_regions_when_serialized_measurements_are_zero() {
+        let mut request = request_with_document(serde_json::json!({}));
+        let panel = request.trim.width_inches * 72.0;
+        let bleed = 9.0;
+        let spine = 57.4056;
+        let width = panel * 2.0 + spine + bleed * 2.0;
+        let height = request.trim.height_inches * 72.0 + bleed * 2.0;
+        request.profile = "lulu-print-v1".to_owned();
+        request.cover = Some(crate::model::Cover {
+            bleed_inches: 0.125,
+            description: "Back-cover copy".to_owned(),
+            title: String::new(),
+            subtitle: String::new(),
+            author: String::new(),
+            spine_text: String::new(),
+            spine_reading_direction: "TopToBottom".to_owned(),
+            background_color: "#ffffff".to_owned(),
+            isbn: None,
+            barcode_mode: "None".to_owned(),
+            asset_id: None,
+            image_crop_x_percent: 50.0,
+            image_crop_y_percent: 50.0,
+            scene: Some(serde_json::json!({
+                "surface": {
+                    "widthPoints": width,
+                    "heightPoints": height,
+                    "bleedPoints": bleed,
+                    "trimWidthPoints": panel,
+                    "trimHeightPoints": request.trim.height_inches * 72.0,
+                    "spineWidthPoints": spine,
+                    "backRegionWidthPoints": 0.0,
+                    "frontRegionWidthPoints": 0.0,
+                    "coverRegionYPoints": 0.0,
+                    "coverRegionHeightPoints": 0.0
+                },
+                "layers": [{ "id": "layer", "name": "Content", "order": 0 }],
+                "objects": [{
+                    "id": "back-copy",
+                    "layerId": "layer",
+                    "kind": "Text",
+                    "regionConstraint": "Back",
+                    "textBinding": "description",
+                    "fontSizePoints": 13.0,
+                    "semanticRole": "Paragraph",
+                    "readingOrder": 1,
+                    "bounds": {
+                        "xPercent": 4.0,
+                        "yPercent": 12.0,
+                        "widthPercent": 40.0,
+                        "heightPercent": 33.5
+                    }
+                }]
+            })),
+            scenes: Default::default(),
+            surfaces: Vec::new(),
+        });
+
+        let page = cover_scene_layout(&request, width, height, false, false, &mut Vec::new(), None)
+            .expect("zero measured-region fields must use trim-region geometry");
+
+        assert_eq!(page.lines.len(), 1);
+        assert!(page.lines[0].x.is_finite());
+        assert!(page.lines[0].x < panel);
     }
 
     #[test]

@@ -84,7 +84,10 @@ impl PdfOptions {
         Self {
             pdf_x,
             pdf_a,
-            flatten_transparency: pdf_x || pdf_a || request.profile.starts_with("kdp-"),
+            flatten_transparency: pdf_x
+                || pdf_a
+                || request.profile.starts_with("kdp-")
+                || request.profile == "lulu-print-v1",
             width,
             height,
             trim: Rect::new(0.0, 0.0, width, height),
@@ -146,7 +149,10 @@ impl PdfOptions {
         Self {
             pdf_x,
             pdf_a,
-            flatten_transparency: pdf_x || pdf_a || request.profile.starts_with("kdp-"),
+            flatten_transparency: pdf_x
+                || pdf_a
+                || request.profile.starts_with("kdp-")
+                || request.profile == "lulu-print-v1",
             width,
             height,
             trim: Rect::new(

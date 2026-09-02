@@ -4,7 +4,7 @@ Last reviewed: 2026-08-27
 
 ## Scope
 
-Lorekeeper Press 2.1.9 targets English/Latin, left-to-right paperback and
+Lorekeeper Press 2.1.10 targets English/Latin, left-to-right paperback and
 hardcover interiors, product-specific cover surfaces, and tagged Digital PDF
 books with front cover page one. Physical print jobs resolve through the
 checked-in registry `2026.08.4`; digital output uses

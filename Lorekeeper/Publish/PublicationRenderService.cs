@@ -1330,7 +1330,8 @@ public sealed class PublicationRenderProcessor(
         "kdp-paperback-v2" or
         "kdp-hardcover-v1" or
         "ingram-print-pdfx1a-v2" or
-        "bn-print-pdfa1b-v1";
+        "bn-print-pdfa1b-v1" or
+        "lulu-print-v1";
 
     private static string[] RequiredCoverSurfaces(PrintArtifactProfile product, PrintCoverMode coverMode)
     {
