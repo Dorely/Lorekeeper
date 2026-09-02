@@ -2098,8 +2098,10 @@ public sealed class ProjectVersionRestoreService(
         {
             return key switch
             {
-                "generic-perfectbound-template" => "generic-perfectbound-v1",
-                "generic-casebound-template" => "generic-casebound-v1",
+                "generic-perfectbound-template" => "generic-pb-bw-50-white",
+                "generic-perfectbound-v1" => "generic-pb-bw-50-white",
+                "generic-casebound-template" => "generic-case-bw-50-white",
+                "generic-casebound-v1" => "generic-case-bw-50-white",
                 "kdp-pb-bw-white" => "kdp-pb-bw-50-2252",
                 "kdp-pb-bw-cream" => "kdp-pb-bw-50-2500",
                 "kdp-pb-bw-groundwood" => "kdp-pb-bw-45-2350",
@@ -2127,14 +2129,16 @@ public sealed class ProjectVersionRestoreService(
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-50-2225",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-50-2009",
-            (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-v1",
+            (PublicationEditionFormat.Paperback, _, LegacyPublicationPaper.Cream, _) => "generic-pb-bw-60-cream",
+            (PublicationEditionFormat.Paperback, _, _, _) => "generic-pb-bw-50-white",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-50-2500",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-50-2224",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-50-2009",
-            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-v1",
+            (PublicationEditionFormat.Hardcover, _, LegacyPublicationPaper.Cream, _) => "generic-case-bw-60-cream",
+            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-case-bw-50-white",
             _ => string.Empty,
         };
     }

@@ -3688,18 +3688,19 @@ fn every_specific_frozen_spine_table_has_an_exact_even_page_measurement() {
 fn generic_print_fails_without_a_supported_artifact_profile() {
     let mut job = PreparedJob::new("generic-paperback-v1");
     job.configure_physical((
-        "generic-perfectbound-v1",
+        "generic-pb-bw-50-white",
         "Generic",
         "Paperback",
         "PrintedCover",
         &["perfect-bound-outside"],
     ));
+    job.request["printArtifactProfile"]["artifactProfileKey"] = json!("generic-perfectbound-v1");
     job.write_request();
     let output = job.render();
     assert!(!output.status.success());
     assert!(has_diagnostic(
         &response(&output),
-        "PRESS_SPINE_MODEL_UNSUPPORTED"
+        "PRESS_PRINT_ARTIFACT_PROFILE_UNKNOWN"
     ));
 }
 
@@ -4295,7 +4296,7 @@ impl PreparedJob {
                 .expect("catalog product");
             request["cover"]["surfaces"] = json!(["perfect-bound-outside"]);
             request["printArtifactProfile"] = json!({
-                "registryVersion": "2026.08.4",
+                "registryVersion": registry["registryVersion"],
                 "registrySha256": hex_hash(include_bytes!("../assets/print-artifact-profiles-v1.json")),
                 "artifactProfileKey": artifact_profile_key,
                 "vendor": catalog["vendor"],
@@ -4342,7 +4343,7 @@ impl PreparedJob {
             .find(|item| item["key"] == artifact_profile_key)
             .expect("catalog product");
         self.request["printArtifactProfile"] = json!({
-            "registryVersion": "2026.08.4",
+            "registryVersion": registry["registryVersion"],
             "registrySha256": hex_hash(include_bytes!("../assets/print-artifact-profiles-v1.json")),
             "artifactProfileKey": artifact_profile_key,
             "vendor": vendor,

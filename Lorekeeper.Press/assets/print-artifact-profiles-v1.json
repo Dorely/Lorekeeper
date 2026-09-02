@@ -1,6 +1,6 @@
 {
-  "registryVersion": "2026.08.4",
-  "reviewedAtUtc": "2026-08-30T00:00:00Z",
+  "registryVersion": "2026.09.1",
+  "reviewedAtUtc": "2026-09-02T00:00:00Z",
   "sources": [
     "https://kdp.amazon.com/en_US/help/topic/G201834180",
     "https://kdp.amazon.com/en_US/help/topic/G201857950",
@@ -14,17 +14,19 @@
     "https://help-press.barnesandnoble.com/hc/en-us/articles/5359031189787-Cover-Interior-Not-Accepted",
     "https://www2.nookassets.com/npassets-spb/pod/resources/BN-Press-Formatting-Guide.pdf",
     "https://press.barnesandnoble.com/book-cover-template-generator",
-    "https://press.barnesandnoble.com/bnpress-blog/?p=12423"
+    "https://press.barnesandnoble.com/bnpress-blog/?p=12423",
+    "https://kdp.amazon.com/en_US/help/topic/G201953020",
+    "https://help.api.lulu.com/en/support/solutions/articles/64000254616-how-is-spine-width-calculated-"
   ],
   "profiles": [
     {
-      "key": "generic-perfectbound-v1",
+      "key": "generic-pb-bw-50-white",
       "vendor": "Generic",
       "format": "Paperback",
       "binding": "PerfectBound",
-      "interiorProcess": "Declared",
-      "basisWeightPounds": null,
-      "gsm": null,
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 50,
+      "gsm": 74,
       "coverMaterial": "PrintedCover",
       "coverModes": [
         "Simplex",
@@ -36,20 +38,96 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Unsupported"
+        "kind": "Caliper",
+        "inchesPerPage": 0.002252
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-casebound-v1",
+      "key": "generic-pb-bw-60-cream",
+      "vendor": "Generic",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex",
+        "Duplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0025
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-pb-stdcolor-60-white",
+      "vendor": "Generic",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "StandardColor",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex",
+        "Duplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.002252
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-pb-premcolor-80-white",
+      "vendor": "Generic",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "PremiumColor",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex",
+        "Duplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.002347
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-case-bw-50-white",
       "vendor": "Generic",
       "format": "Hardcover",
       "binding": "CaseBound",
-      "interiorProcess": "Declared",
-      "basisWeightPounds": null,
-      "gsm": null,
-      "coverMaterial": "Declared",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 50,
+      "gsm": 74,
+      "coverMaterial": "CaseLaminate",
       "coverModes": [
         "Simplex"
       ],
@@ -59,7 +137,80 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Unsupported"
+        "kind": "Caliper",
+        "inchesPerPage": 0.002252
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-case-bw-60-cream",
+      "vendor": "Generic",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0025
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-case-stdcolor-60-white",
+      "vendor": "Generic",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "StandardColor",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.002252
+      },
+      "minimumSubmittedPages": 2,
+      "maximumSubmittedPages": 10000
+    },
+    {
+      "key": "generic-case-premcolor-80-white",
+      "vendor": "Generic",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "PremiumColor",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [],
+      "allowsCustomTrim": true,
+      "minimumPages": 2,
+      "maximumPages": 10000,
+      "pdfProfile": "generic-print-v2",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.002347
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000

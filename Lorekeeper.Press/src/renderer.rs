@@ -158,8 +158,6 @@ fn validate_registry_profile(
             vec!["dust-jacket"]
         }
         "JacketedCaseLaminate" => vec!["case-wrap", "dust-jacket"],
-        "Declared" if product.binding == "PerfectBound" => vec!["perfect-bound-outside"],
-        "Declared" if product.binding == "CaseBound" => vec!["case-wrap"],
         _ => Vec::new(),
     };
     let surfaces_match = expected_surfaces.len() == product.required_cover_surfaces.len()
@@ -300,7 +298,7 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
         return product
             .spine_model
             .inches_per_page
-            .map(|caliper| caliper * pages as f32)
+            .map(|caliper| caliper * pages as f32 + product.spine_model.base_inches)
             .ok_or_else(|| {
                 Diagnostic::error(
                     "PRESS_SPINE_MODEL_INVALID",

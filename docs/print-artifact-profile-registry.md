@@ -37,9 +37,14 @@ not by paper color.
   rounded page-count formulas; the 45 lb groundwood paperback uses B&N's
   published 408 PPI value. Full-wrap and panel dimensions are owned by the
   profile and were checked against the official B&N cover generator.
-- Generic paperback and hardcover remain selectable destinations but fail
-  closed during preparation until an application-owned artifact profile exists
-  for their geometry. They never claim named-vendor conformance.
+- Generic (other-printer) paperback and hardcover: Lorekeeper-owned profiles for
+  the four paper × ink families (50 lb white and 60 lb cream black-and-white,
+  60 lb standard color, 80 lb premium color) with `Caliper` spine models built
+  from Lorekeeper-declared calipers (0.002252 in/page white and standard color,
+  0.0025 in/page cream, 0.002347 in/page premium color; corroborated against
+  KDP's published per-paper spine formulas and Lulu's independent 444 PPI
+  figure). These calipers are estimates to verify with the final printer before
+  production; generic profiles never claim named-vendor conformance.
 
 Submitted, normalized cover-calculation, and reported production page counts
 remain distinct. The final interior layout determines the spine and full-cover

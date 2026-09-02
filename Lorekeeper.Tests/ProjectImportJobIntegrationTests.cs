@@ -410,7 +410,7 @@ public sealed class ProjectImportJobIntegrationTests
             Language = "en",
             Isbn = "9780306406157",
             PrintArtifactRegistryVersion = "2026.08.1",
-            PrintArtifactProfileKey = "generic-perfectbound-v1",
+            PrintArtifactProfileKey = "generic-pb-bw-50-white",
             PrintCoverMode = PrintCoverMode.Simplex,
             PageWidthInches = 6,
             PageHeightInches = 9,

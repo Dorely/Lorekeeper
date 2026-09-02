@@ -644,7 +644,7 @@ else
                     {
                         <label class="field"><span>Interior printing</span><select class="form-select" value="@selectedArtifactProfile.InteriorProcess" @onchange="ReleaseInteriorProcessChanged">@foreach (var process in InteriorProcessOptions()){<option value="@process">@InteriorProcessLabel(process)</option>}</select><small>This changes the PDF color contract.</small></label>
                         <label class="field"><span>Cover construction</span><select class="form-select" value="@selectedArtifactProfile.CoverMaterial" @onchange="ReleaseCoverConstructionChanged">@foreach (var material in CoverConstructionOptions()){<option value="@material">@CoverConstructionLabel(material)</option>}</select><small>This determines which cover surfaces Lorekeeper prepares.</small></label>
-                        <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small></label>
+                        <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small>@if (_releaseDraft.Vendor == PublicationVendor.Generic){<small>Thickness values are Lorekeeper-owned estimates; verify them with your final printer before production.</small>}</label>
                         @if (selectedArtifactProfile.TrimSizes.Count > 0)
                         {
                             <label class="field"><span>Trim size</span><select @key="_releaseDraft.PrintArtifactProfileKey" class="form-select" value="@CurrentTrimKey()" @onchange="PrintTrimChanged">@foreach (var trim in selectedArtifactProfile.TrimSizes){<option value="@trim">@(trim.Replace("x", " x ")) in</option>}@if(selectedArtifactProfile.AllowsCustomTrim){<option value="custom">Custom printer trim</option>}</select></label>
@@ -2676,7 +2676,7 @@ else
         PrintInteriorProcess.BlackAndWhite => "Black and white",
         PrintInteriorProcess.StandardColor => "Standard color",
         PrintInteriorProcess.PremiumColor => "Premium color",
-        _ => "Not specified",
+        _ => throw new ArgumentOutOfRangeException(nameof(process), process, null),
     };
     private static string CoverConstructionLabel(PrintCoverMaterial material) => material switch
     {
@@ -2685,7 +2685,7 @@ else
         PrintCoverMaterial.DigitalCloth => "Cloth case",
         PrintCoverMaterial.DigitalClothWithJacket => "Cloth case with dust jacket",
         PrintCoverMaterial.JacketedCaseLaminate => "Printed case with dust jacket",
-        _ => "Not specified",
+        _ => throw new ArgumentOutOfRangeException(nameof(material), material, null),
     };
     private static decimal? EffectiveCaliper(PrintArtifactProfile profile)
     {

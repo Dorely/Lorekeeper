@@ -20,8 +20,15 @@ public sealed class PrintArtifactProfileMigrationService(
     public const string MigrationName = "vendor-print-products-v1";
     public const string AdditiveMigrationId = "20260813004817_VendorPrintProductsV27";
     public const string CleanupMigrationId = "20260813010000_RemoveLegacyPrintProductColumnsV28";
+    public const string GenericProfileMigrationName = "generic-print-profiles-v1";
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
+    {
+        await ApplyVendorPrintProductsAsync(db, cancellationToken);
+        await ApplyGenericProfileRemapAsync(db, cancellationToken);
+    }
+
+    private async Task ApplyVendorPrintProductsAsync(AppDbContext db, CancellationToken cancellationToken)
     {
         if (await db.PublicationEditionMigrationJournals.AsNoTracking().AnyAsync(
                 item => item.MigrationName == MigrationName && item.Status == "Completed",
@@ -47,10 +54,10 @@ public sealed class PrintArtifactProfileMigrationService(
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Ink = 'Color' THEN 'ingram-pb-premium70'
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-50-2225'
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-50-2009'
-                        WHEN Format = 'Paperback' THEN 'generic-perfectbound-template'
+                        WHEN Format = 'Paperback' THEN 'generic-pb-bw-50-white'
                         WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-50-2252'
                         WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-50-2009'
-                        WHEN Format = 'Hardcover' THEN 'generic-casebound-template'
+                        WHEN Format = 'Hardcover' THEN 'generic-case-bw-50-white'
                         ELSE ''
                     END,
                     PrintFinish = 'Matte',
@@ -141,6 +148,72 @@ public sealed class PrintArtifactProfileMigrationService(
             logger.LogError(exception, "Print artifact-profile migration failed; protected backup {BackupPath} remains available.", backupPath);
             db.ChangeTracker.Clear();
             await recovery.EnterRecoveryModeAsync(db, backupPath, MigrationName, 19, 20, exception, cancellationToken);
+        }
+    }
+
+    private async Task ApplyGenericProfileRemapAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        if (await db.PublicationEditionMigrationJournals.AsNoTracking().AnyAsync(
+                item => item.MigrationName == GenericProfileMigrationName && item.Status == "Completed",
+                cancellationToken))
+            return;
+
+        var source = await SnapshotAsync(db, cancellationToken);
+        var backupPath = await recovery.CreateBackupAsync("publishing", "pre-generic-print-profiles", cancellationToken);
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE PublicationEditions
+                SET PrintArtifactProfileKey = CASE
+                        WHEN Format = 'Paperback' AND PrintArtifactProfileKey = 'generic-perfectbound-v1' THEN 'generic-pb-bw-50-white'
+                        WHEN Format = 'Hardcover' AND PrintArtifactProfileKey = 'generic-casebound-v1' THEN 'generic-case-bw-50-white'
+                        ELSE PrintArtifactProfileKey
+                    END,
+                    PrintArtifactRegistryVersion = CASE
+                        WHEN Format IN ('Paperback','Hardcover') THEN {registry.Version}
+                        ELSE PrintArtifactRegistryVersion
+                    END
+                WHERE PrintArtifactProfileKey IN ('generic-perfectbound-v1','generic-casebound-v1');
+                """,
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            var target = await SnapshotAsync(db, cancellationToken);
+            if (source.EditionCount != target.EditionCount
+                || source.ArtifactCount != target.ArtifactCount
+                || !string.Equals(source.ArtifactBytesHash, target.ArtifactBytesHash, StringComparison.Ordinal))
+                throw new InvalidDataException("Print artifact-profile migration changed release counts or immutable artifact bytes/hashes.");
+
+            db.PublicationEditionMigrationJournals.Add(new PublicationEditionMigrationJournal
+            {
+                MigrationName = GenericProfileMigrationName,
+                Status = "Completed",
+                BackupPath = backupPath,
+                SourceProfileCount = source.EditionCount,
+                EditionCount = target.EditionCount,
+                SourcePlacementCount = source.ArtifactCount,
+                PlacementCount = target.ArtifactCount,
+                SourceHash = source.ArtifactBytesHash,
+                TargetHash = target.ArtifactBytesHash,
+                ValidationReportJson = JsonSerializer.Serialize(new
+                {
+                    registryVersion = registry.Version,
+                    registrySha256 = registry.Sha256,
+                    releases = "preserved",
+                    artifactBytesAndHashes = "preserved",
+                    genericProfiles = "remapped",
+                }),
+                CompletedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Generic print artifact-profile remap failed; protected backup {BackupPath} remains available.", backupPath);
+            db.ChangeTracker.Clear();
+            await recovery.EnterRecoveryModeAsync(db, backupPath, GenericProfileMigrationName, 19, 20, exception, cancellationToken);
         }
     }
 
