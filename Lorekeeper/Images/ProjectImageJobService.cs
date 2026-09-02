@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Composition;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -16,7 +17,8 @@ public sealed class ProjectImageJobService(
     IAppDatabaseOperationFactory database,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageDefaultRasterResolver defaultRasters,
-    IOptions<ProjectImageGenerationOptions> options) : IProjectImageJobService
+    IOptions<ProjectImageGenerationOptions> options,
+    ILogger<ProjectImageJobService> logger) : IProjectImageJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -367,6 +369,7 @@ public sealed class ProjectImageJobService(
         await db.ProjectImageGenerationJobs.AddAsync(job, cancellationToken);
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Image generate job {JobId} created for project {ProjectId}: {Count} output(s), size={Size}, model={ImageModel}", job.Id, projectId, job.Count, job.Size, job.ImageModel);
         return ToView(job);
     }
 
@@ -473,6 +476,7 @@ public sealed class ProjectImageJobService(
         await db.ProjectImageGenerationJobs.AddAsync(job, cancellationToken);
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Image edit job {JobId} created for project {ProjectId}: {Count} output(s), size={Size}, source={SourceImageId}, mask={MaskId}", job.Id, projectId, job.Count, job.Size, job.SourceImageId, job.MaskId);
         return ToView(job);
     }
 
@@ -493,6 +497,7 @@ public sealed class ProjectImageJobService(
         job.StartedAt ??= DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Image job {JobId} started for project {ProjectId}", job.Id, projectId);
         return ToWorkItem(job);
     }
 
@@ -544,6 +549,7 @@ public sealed class ProjectImageJobService(
         job.CompletedAt = now;
         job.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Image job {JobId} cancelled for project {ProjectId}", jobId, projectId);
     }
 
     public async Task MarkOutputStateAsync(Guid projectId, Guid jobId, ProjectImageOutputStateView outputState, CancellationToken cancellationToken = default)
@@ -601,6 +607,18 @@ public sealed class ProjectImageJobService(
                 CompletedAt: DateTime.UtcNow)));
         job.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogWarning(
+            "Image output {OutputIndex} failed for job {JobId} ({ErrorKind}, lastEvent={LastEventType}, events={EventCount}): {Error}",
+            outputError.OutputIndex,
+            jobId,
+            outputError.ErrorKind,
+            outputError.LastEventType,
+            outputError.EventCount,
+            LogRedaction.RedactJson(outputError.Error));
+        logger.LogDebug(
+            "Image provider failure raw response for job {JobId}: {Error}",
+            jobId,
+            LogRedaction.RedactJson(outputError.Error));
     }
 
     public async Task<ProjectImageView> SaveGeneratedOutputAsync(
@@ -795,6 +813,7 @@ public sealed class ProjectImageJobService(
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Image job {JobId} completed with status {Status} (succeeded={SucceededCount}, failed={FailedCount})", jobId, job.Status, succeeded, failed);
     }
 
     public async Task MarkInterruptedRunningJobsFailedAsync(CancellationToken cancellationToken = default)
@@ -819,6 +838,7 @@ public sealed class ProjectImageJobService(
 
         await db.SaveChangesAsync(cancellationToken);
         await DeleteTerminalJobPartialsAsync(db, running.Select(job => job.Id).ToList(), cancellationToken);
+        logger.LogWarning("Marked {Count} interrupted image job(s) as failed", running.Count);
     }
 
     private static async Task PurgeTerminalJobsAsync(AppDbContext db, Guid projectId, CancellationToken cancellationToken)

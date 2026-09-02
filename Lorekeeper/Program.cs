@@ -6,6 +6,7 @@ using Lorekeeper.ChatTurns;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.Desktop;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
@@ -61,6 +62,10 @@ if (minimumStartupSplashMilliseconds is < 0 or > 10_000)
     throw new InvalidOperationException("Startup:MinimumSplashMilliseconds must be between zero and 10000.");
 
 // Add services to the container.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddProvider(new DevFileLoggerProvider());
+}
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddHubOptions(options => options.MaximumReceiveMessageSize = maxInteractiveServerMessageSize);

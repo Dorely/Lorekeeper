@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 using SkiaSharp;
 
@@ -177,8 +178,10 @@ public sealed class VisionModelClientFactory(
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            logger.LogError("Codex vision API error {StatusCode}: {Body}", (int)response.StatusCode, errorBody);
-            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Codex vision request", (int)response.StatusCode, errorBody));
+            var redactedErrorBody = LogRedaction.RedactJson(errorBody);
+            logger.LogError("Codex vision API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
+            logger.LogDebug("Codex vision API error response body: {Body}", redactedErrorBody);
+            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Codex vision request", (int)response.StatusCode, redactedErrorBody));
         }
 
         var result = new StringBuilder();
@@ -326,8 +329,9 @@ public sealed class VisionModelClientFactory(
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            logger.LogError("Vision chat-completions API error {StatusCode}: {Body}", (int)response.StatusCode, responseBody);
-            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Vision request", (int)response.StatusCode, responseBody));
+            logger.LogError("Vision chat-completions API error {StatusCode}: {Body}", (int)response.StatusCode, LogRedaction.RedactJson(responseBody));
+            logger.LogDebug("Vision chat-completions error response body: {Body}", LogRedaction.RedactJson(responseBody));
+            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Vision request", (int)response.StatusCode, LogRedaction.RedactJson(responseBody)));
         }
 
         try

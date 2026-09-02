@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Llm;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -341,13 +342,22 @@ public sealed class ChatTurnEngine(
         {
             var resolvedFunction = function
                 ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
+            logger.LogDebug(
+                "Chat tool '{Tool}' invoked. Arguments: {ArgumentsJson}",
+                call.Name,
+                LogRedaction.RedactJson(call.ArgumentsJson));
             var result = await resolvedFunction.InvokeAsync(
                 ToolCallArguments.Create(call.Content.Arguments, call.ArgumentsJson),
                 cancellationToken);
             if (cancellationToken.IsCancellationRequested)
                 return new ChatToolInvocationOutcome(string.Empty, Error: null, Cancelled: true);
 
-            return new ChatToolInvocationOutcome(result?.ToString() ?? string.Empty, Error: null, Cancelled: false);
+            var outcomeText = result?.ToString() ?? string.Empty;
+            logger.LogDebug(
+                "Chat tool '{Tool}' completed. Result: {ResultSummary}",
+                call.Name,
+                Truncate(outcomeText, 500));
+            return new ChatToolInvocationOutcome(outcomeText, Error: null, Cancelled: false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -355,9 +365,16 @@ public sealed class ChatTurnEngine(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Chat tool '{Tool}' failed", call.Name);
+            logger.LogWarning(ex, "Chat tool '{Tool}' failed. Arguments: {ArgumentsJson}", call.Name, LogRedaction.RedactJson(call.ArgumentsJson));
             return new ChatToolInvocationOutcome($"Error: {ex.Message}", ex.Message, Cancelled: false);
         }
+    }
+
+    private static string Truncate(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var trimmed = value.Trim();
+        return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
 
     public static List<AIContent> BuildAssistantContents(

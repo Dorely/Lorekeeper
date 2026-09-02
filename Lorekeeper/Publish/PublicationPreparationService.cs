@@ -84,7 +84,8 @@ public sealed class PublicationPreparationService(
     IPublicationBookService books,
     IPublicationEditionService editions,
     IPublicationRenderService renders,
-    PublicationPreparationCancellationRegistry cancellationRegistry) : IPublicationPreparationService
+    PublicationPreparationCancellationRegistry cancellationRegistry,
+    ILogger<PublicationPreparationService> logger) : IPublicationPreparationService
 {
     internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
@@ -133,6 +134,9 @@ public sealed class PublicationPreparationService(
         db.PublicationPreparationJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
         await queue.EnqueueAsync(job.Id, CancellationToken.None);
+        logger.LogDebug(
+            "Preparation job {JobId} requested for project {ProjectId}, edition {EditionId}: targetKind={TargetKind}, fingerprint={Fingerprint}",
+            job.Id, projectId, editionId, targetKind, fingerprint);
         return View(job);
     }
 
@@ -319,6 +323,9 @@ public sealed class PublicationPreparationWorker(
             job.Step = "Checking readiness";
             job.ProgressPercent = 5;
             job.StartedAt = DateTime.UtcNow;
+            logger.LogDebug(
+                "Preparation job {JobId} started: targetKind={TargetKind}, edition={EditionId}, fingerprint={Fingerprint}",
+                jobId, job.TargetKind, job.EditionId, job.SourceFingerprint);
 
             var blockers = await ReadinessBlockersAsync(database, db, job, cancellationToken);
             if (blockers.Count > 0)
@@ -328,6 +335,7 @@ public sealed class PublicationPreparationWorker(
                 job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
                 job.CompletedAt = DateTime.UtcNow;
                 await operation.SaveChangesAsync(cancellationToken);
+                logger.LogWarning("Preparation job {JobId} blocked: {Message}", jobId, blockers[0].Message);
                 return;
             }
 
@@ -457,6 +465,7 @@ public sealed class PublicationPreparationWorker(
             candidate.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
             candidate.CompletedAt = DateTime.UtcNow;
         }, cancellationToken);
+        logger.LogInformation("Preparation job {JobId} ready (diagnostics={DiagnosticCount})", jobId, preparationDiagnostics.Count);
     }
 
     private async Task<bool> PreparePhysicalReleaseAsync(
@@ -846,6 +855,7 @@ public sealed class PublicationPreparationWorker(
             PublicationPreparationService.DiagnosticsJsonOptions);
         job.CompletedAt = DateTime.UtcNow;
         await operation.SaveChangesAsync(cancellationToken);
+        logger.LogWarning("Preparation job {JobId} marked blocked: {Message}", jobId, exception.Message);
     }
 
     private async Task UpdateJobAsync(

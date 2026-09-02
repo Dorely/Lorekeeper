@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Llm;
@@ -67,9 +68,9 @@ public sealed class ModelCatalogService(
         {
             logger.LogWarning(
                 "Model catalog request to {Endpoint} for provider {Provider} failed: {Status} {Body}",
-                endpoint, provider.Name, (int)response.StatusCode, responseBody);
+                endpoint, provider.Name, (int)response.StatusCode, LogRedaction.RedactJson(responseBody));
             throw new HttpRequestException(
-                LlmErrorNormalizer.SummarizeHttpError("Model list request", (int)response.StatusCode, responseBody));
+                LlmErrorNormalizer.SummarizeHttpError("Model list request", (int)response.StatusCode, LogRedaction.RedactJson(responseBody)));
         }
 
         try

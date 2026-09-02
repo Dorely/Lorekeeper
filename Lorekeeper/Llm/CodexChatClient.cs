@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 
@@ -113,7 +114,7 @@ public sealed class CodexChatClient : IChatClient
         var json = JsonSerializer.Serialize(body);
         var toolCount = options?.Tools?.Count ?? 0;
 
-        _logger.LogDebug("Codex request body: {Body}", json);
+        _logger.LogDebug("Codex request body: {Body}", LogRedaction.RedactJson(json));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
@@ -139,8 +140,10 @@ public sealed class CodexChatClient : IChatClient
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Codex API error {StatusCode}: {Body}", (int)response.StatusCode, errorBody);
-            throw new HttpRequestException($"Codex API returned {(int)response.StatusCode}: {errorBody}");
+            var redactedErrorBody = LogRedaction.RedactJson(errorBody);
+            _logger.LogError("Codex API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
+            _logger.LogDebug("Codex API error response body: {Body}", redactedErrorBody);
+            throw new HttpRequestException($"Codex API returned {(int)response.StatusCode}: {redactedErrorBody}");
         }
 
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -333,7 +336,7 @@ public sealed class CodexChatClient : IChatClient
                         functionCallCount,
                         _model,
                         json.Length,
-                        Truncate(lastEventData, 2000));
+                        LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
                     throw new InvalidOperationException(responseFailedMessage);
 
                 case "error":
@@ -346,7 +349,7 @@ public sealed class CodexChatClient : IChatClient
                         functionCallCount,
                         _model,
                         json.Length,
-                        Truncate(lastEventData, 2000));
+                        LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
                     throw new InvalidOperationException($"Codex error: {errorMessage}");
 
                 default:

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Llm;
@@ -132,7 +133,7 @@ public sealed class EmbeddingClient(
         return client;
     }
 
-    private static async Task EnsureSuccessAsync(
+    private async Task EnsureSuccessAsync(
         HttpResponseMessage response,
         string operation,
         bool isCodex,
@@ -140,15 +141,22 @@ public sealed class EmbeddingClient(
     {
         if (response.IsSuccessStatusCode) return;
         var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        var redactedErrorBody = LogRedaction.RedactJson(errorBody);
+        logger.LogWarning(
+            "Embedding request to {Operation} failed ({StatusCode}): {Body}",
+            operation,
+            (int)response.StatusCode,
+            redactedErrorBody);
+        logger.LogDebug("Embedding request error response body: {Body}", redactedErrorBody);
         if (isCodex && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             throw new HttpRequestException(
-                $"{operation} failed ({response.StatusCode}): the Codex OAuth token was rejected by the OpenAI platform embeddings endpoint {CodexProvider.PlatformEmbeddingsEndpoint}. Reconnect OpenAI Codex and try again; if it still fails, this account token cannot be reused for platform embeddings. Response: {errorBody}",
+                $"{operation} failed ({response.StatusCode}): the Codex OAuth token was rejected by the OpenAI platform embeddings endpoint {CodexProvider.PlatformEmbeddingsEndpoint}. Reconnect OpenAI Codex and try again; if it still fails, this account token cannot be reused for platform embeddings. Response: {redactedErrorBody}",
                 null,
                 response.StatusCode);
         }
 
-        throw new HttpRequestException($"{operation} failed ({response.StatusCode}): {errorBody}", null, response.StatusCode);
+        throw new HttpRequestException($"{operation} failed ({response.StatusCode}): {redactedErrorBody}", null, response.StatusCode);
     }
 
     private static string OllamaBaseUrl(string endpointUrl)

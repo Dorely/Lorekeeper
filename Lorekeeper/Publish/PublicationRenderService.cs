@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Lorekeeper.Composition;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
@@ -12,6 +13,8 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Publish;
@@ -170,7 +173,8 @@ public sealed class PublicationRenderService(
     IPublicationEditionService editions,
     IPublicationBookService books,
     IPublicationRenderQueue queue,
-    IPublicationPressRuntime pressRuntime) : IPublicationRenderService
+    IPublicationPressRuntime pressRuntime,
+    ILogger<PublicationRenderService> logger) : IPublicationRenderService
 {
     private static readonly Expression<Func<PublicationArtifact, PublicationArtifact>> ArtifactMetadataProjection =
         artifact => new PublicationArtifact
@@ -199,7 +203,8 @@ public sealed class PublicationRenderService(
         IPublicationEditionService editions,
         IPublicationRenderQueue queue,
         IPublicationPressRuntime pressRuntime)
-        : this(database, editions, new PublicationBookService(database), queue, pressRuntime)
+        : this(database, editions, new PublicationBookService(database), queue, pressRuntime,
+            NullLogger<PublicationRenderService>.Instance)
     {
     }
 
@@ -250,6 +255,9 @@ public sealed class PublicationRenderService(
         db.PublicationRenderJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
         await queue.EnqueueAsync(job.Id, cancellationToken);
+        logger.LogDebug(
+            "Render job {JobId} requested for project {ProjectId} (core book): profile={ProfileId}, fingerprint={Fingerprint}",
+            job.Id, projectId, job.ProfileId, job.SourceFingerprint);
         return View(job, [], job.SourceFingerprint, CurrentRendererVersion());
     }
 
@@ -360,6 +368,9 @@ public sealed class PublicationRenderService(
         db.PublicationRenderJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
         await queue.EnqueueAsync(job.Id, CancellationToken.None);
+        logger.LogDebug(
+            "Render job {JobId} requested for project {ProjectId}, edition {EditionId}: targetKind={TargetKind}, scope={Scope}, profile={ProfileId}, fingerprint={Fingerprint}, interiorPageCount={InteriorPageCount}",
+            job.Id, projectId, editionId, job.TargetKind, job.Scope, job.ProfileId, job.SourceFingerprint, job.InteriorPageCount);
         return View(job, [], job.SourceFingerprint, job.RendererVersion);
     }
 
@@ -923,6 +934,7 @@ public sealed class PublicationRenderWorker(
         job.DiagnosticsJson = JsonSerializer.Serialize(new[] { FailureDiagnostic(exception) });
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogWarning("Render job {JobId} marked failed: {FailureDiagnostic}", jobId, FailureDiagnostic(exception).Message);
     }
 
     internal static PublicationRenderDiagnostic FailureDiagnostic(Exception exception) =>
@@ -950,8 +962,11 @@ public sealed class PublicationRenderProcessor(
     IPublicationPressRuntime pressRuntime,
     IPrintArtifactProfileRegistry printArtifactProfiles,
     IOptions<PublicationPressOptions> options,
-    IOptions<ProjectImageGenerationOptions>? imageOptions = null) : IPublicationPaginationService
+    IOptions<ProjectImageGenerationOptions>? imageOptions = null,
+    ILogger<PublicationRenderProcessor>? logger = null) : IPublicationPaginationService
 {
+    private readonly ILogger<PublicationRenderProcessor> _logger = logger ?? NullLogger<PublicationRenderProcessor>.Instance;
+
     public PublicationRenderProcessor(
         IAppDatabaseOperationFactory database,
         IPublishService publishing,
@@ -1199,6 +1214,9 @@ public sealed class PublicationRenderProcessor(
         job.ProgressMessage = "Preparing semantic manuscript";
         job.StartedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation(
+            "Render job {JobId} started: targetKind={TargetKind}, scope={Scope}, profile={ProfileId}, rendererVersion={RendererVersion}, fingerprint={Fingerprint}",
+            job.Id, job.TargetKind, job.Scope, job.ProfileId, job.RendererVersion, job.SourceFingerprint);
 
         var document = coreTarget
             ? await publishing.GetCoreDocumentAsync(job.ProjectId, cancellationToken)
@@ -1300,6 +1318,7 @@ public sealed class PublicationRenderProcessor(
                 job.ProgressPercent = mapped;
                 job.ProgressMessage = progress.Message;
                 await db.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Render job {JobId} progress {Percent}%: {Message}", job.Id, mapped, progress.Message);
             },
             cancellationToken);
         if (result.ProtocolVersion != 12)
@@ -1318,6 +1337,12 @@ public sealed class PublicationRenderProcessor(
             result.Diagnostics,
             result.Evidence))
         {
+            _logger.LogWarning(
+                "Render job {JobId} reached terminal status {Status}: {ProgressMessage}; diagnostics: {Diagnostics}",
+                job.Id,
+                job.Status,
+                job.ProgressMessage,
+                result.Diagnostics is { Length: > 0 } ? string.Join("; ", result.Diagnostics.Select(d => $"{d.Severity}:{d.Code}:{d.Message}")) : "(none)");
             await db.SaveChangesAsync(cancellationToken);
             Cleanup(job.Id);
             return;
@@ -2138,6 +2163,9 @@ public sealed class PublicationRenderProcessor(
             Path.Combine(inputRoot, "request.json"),
             SerializeRequest(request.Payload),
             cancellationToken);
+        _logger.LogDebug(
+            "Render job {JobId} staged request.json at {RequestPath}: assets={AssetCount}, fonts={FontCount}",
+            jobId, Path.Combine(inputRoot, "request.json"), request.Assets.Count, request.Fonts.Count);
         var start = pressRuntime.CreateStartInfo(jobId, jobRoot);
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The configured press renderer could not be started.");
@@ -2221,6 +2249,9 @@ public sealed class PublicationRenderProcessor(
 
         var start = pressRuntime.CreateStartInfo(jobId, jobRoot);
         start.ArgumentList[0] = "layout";
+        _logger.LogDebug(
+            "Pagination job {JobId} staged request.json at {RequestPath}: assets={AssetCount}, fonts={FontCount}",
+            jobId, Path.Combine(inputRoot, "request.json"), request.Assets.Count, request.Fonts.Count);
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The configured press renderer could not be started.");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(
