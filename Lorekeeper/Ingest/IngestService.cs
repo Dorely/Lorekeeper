@@ -8,6 +8,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Ingest;
 
@@ -248,6 +249,13 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             EncodingName = request.EncodingName?.Trim(),
             CurrentMessage = "Queued.",
         };
+        var terminalJobs = await databaseOperation.Db.IngestJobs
+            .Where(item => item.ProjectId == projectId
+                && item.Status != IngestJobStatus.Queued
+                && item.Status != IngestJobStatus.Running
+                && item.Status != IngestJobStatus.StopRequested)
+            .ToListAsync(cancellationToken);
+        databaseOperation.Db.IngestJobs.RemoveRange(terminalJobs);
         await ingest.AddJobAsync(job, cancellationToken);
 
         foreach (var sourceChunk in sourceChunks)

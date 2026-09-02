@@ -114,6 +114,13 @@ public sealed class PublicationPreparationService(
             && item.TargetKind == targetKind && item.EditionId == editionId
             && (item.Status == PublicationPreparationStatus.Queued || item.Status == PublicationPreparationStatus.Preparing), cancellationToken))
             throw new InvalidOperationException("This target already has an active file-preparation job.");
+        var terminalJobs = await db.PublicationPreparationJobs
+            .Where(item => item.ProjectId == projectId
+                && item.TargetKind == targetKind && item.EditionId == editionId
+                && item.Status != PublicationPreparationStatus.Queued
+                && item.Status != PublicationPreparationStatus.Preparing)
+            .ToListAsync(cancellationToken);
+        db.PublicationPreparationJobs.RemoveRange(terminalJobs);
         var job = new PublicationPreparationJob
         {
             ProjectId = projectId,

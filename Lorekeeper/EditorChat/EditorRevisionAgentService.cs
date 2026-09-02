@@ -49,6 +49,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 chaptersById[assignment.ChapterId] = chapter;
             }
 
+            var terminalJobs = await databaseOperation.Db.EditorRevisionJobs
+                .Where(job => job.ProjectId == request.ProjectId
+                    && job.Status != EditorRevisionJobStatus.Queued
+                    && job.Status != EditorRevisionJobStatus.Running)
+                .ToListAsync(cancellationToken);
+            databaseOperation.Db.EditorRevisionJobs.RemoveRange(terminalJobs);
+
             var job = new EditorRevisionJob
             {
                 ProjectId = request.ProjectId,

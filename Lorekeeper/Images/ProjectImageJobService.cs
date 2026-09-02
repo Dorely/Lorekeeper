@@ -363,6 +363,7 @@ public sealed class ProjectImageJobService(
             UpdatedAt = now,
         };
 
+        await PurgeTerminalJobsAsync(db, projectId, cancellationToken);
         await db.ProjectImageGenerationJobs.AddAsync(job, cancellationToken);
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
@@ -466,6 +467,7 @@ public sealed class ProjectImageJobService(
             UpdatedAt = now,
         };
 
+        await PurgeTerminalJobsAsync(db, projectId, cancellationToken);
         if (mask is not null)
             await db.ProjectImageMasks.AddAsync(mask, cancellationToken);
         await db.ProjectImageGenerationJobs.AddAsync(job, cancellationToken);
@@ -815,6 +817,36 @@ public sealed class ProjectImageJobService(
             job.UpdatedAt = now;
         }
 
+        await db.SaveChangesAsync(cancellationToken);
+        await DeleteTerminalJobPartialsAsync(db, running.Select(job => job.Id).ToList(), cancellationToken);
+    }
+
+    private static async Task PurgeTerminalJobsAsync(AppDbContext db, Guid projectId, CancellationToken cancellationToken)
+    {
+        var terminalJobs = await db.ProjectImageGenerationJobs
+            .Where(job => job.ProjectId == projectId
+                && job.Status != ProjectImageGenerationJobStatus.Queued
+                && job.Status != ProjectImageGenerationJobStatus.Running)
+            .ToListAsync(cancellationToken);
+        if (terminalJobs.Count == 0)
+            return;
+
+        db.ProjectImageGenerationJobs.RemoveRange(terminalJobs);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task DeleteTerminalJobPartialsAsync(AppDbContext db, IReadOnlyList<Guid> terminalJobIds, CancellationToken cancellationToken)
+    {
+        if (terminalJobIds.Count == 0)
+            return;
+
+        var partials = await db.ProjectImagePartials
+            .Where(partial => partial.FinalOutputImageId == null && terminalJobIds.Contains(partial.JobId))
+            .ToListAsync(cancellationToken);
+        if (partials.Count == 0)
+            return;
+
+        db.ProjectImagePartials.RemoveRange(partials);
         await db.SaveChangesAsync(cancellationToken);
     }
 

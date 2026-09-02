@@ -807,9 +807,59 @@ public sealed class PublicationRenderWorker(
         await db.SaveChangesAsync(cancellationToken);
         await PruneSupersededTerminalJobsAsync(db, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        SweepOrphanTempDirectories(await db.PublicationRenderJobs.AsNoTracking()
+            .Where(job => !job.IsLegacy
+                && (job.Status == PublicationRenderStatus.Queued
+                || job.Status == PublicationRenderStatus.Rendering))
+            .Select(job => job.Id)
+            .ToListAsync(cancellationToken));
         await operation.DisposeAsync();
         foreach (var jobId in recoveredIds)
             await queue.EnqueueAsync(jobId, cancellationToken);
+    }
+
+    private static void SweepOrphanTempDirectories(IReadOnlyCollection<Guid> activeJobIds)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper");
+        var active = activeJobIds.ToHashSet();
+        foreach (var directory in ListTempDirectories(Path.Combine(root, "press-jobs")))
+        {
+            if (Guid.TryParseExact(Path.GetFileName(directory), "N", out var jobId) && active.Contains(jobId))
+                continue;
+            PublicationRenderProcessor.TryDeleteDirectory(directory);
+        }
+        // Skip recently created preview/history dirs: a concurrent operation may have just created one.
+        var cutoff = DateTime.UtcNow.AddHours(-24);
+        foreach (var directory in ListTempDirectories(Path.Combine(root, "press-previews")))
+        {
+            if (Directory.GetLastWriteTimeUtc(directory) >= cutoff)
+                continue;
+            PublicationRenderProcessor.TryDeleteDirectory(directory);
+        }
+        foreach (var directory in ListTempDirectories(Path.Combine(root, "version-history")))
+        {
+            if (Directory.GetLastWriteTimeUtc(directory) >= cutoff)
+                continue;
+            PublicationRenderProcessor.TryDeleteDirectory(directory);
+        }
+    }
+
+    private static IReadOnlyList<string> ListTempDirectories(string root)
+    {
+        try
+        {
+            return Directory.Exists(root)
+                ? Directory.EnumerateDirectories(root).ToList()
+                : [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     private async Task PruneSupersededTerminalJobsAsync(AppDbContext db, CancellationToken cancellationToken)
@@ -2355,7 +2405,7 @@ public sealed class PublicationRenderProcessor(
 
     internal static void Cleanup(Guid jobId) => TryDeleteDirectory(JobRoot(jobId));
 
-    private static void TryDeleteDirectory(string path)
+    internal static void TryDeleteDirectory(string path)
     {
         try
         {

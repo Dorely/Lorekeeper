@@ -423,6 +423,12 @@ public sealed class ProjectImportExportService(
             CurrentMessage = "Queued for import.",
         };
 
+        var terminalJobs = await databaseOperation.Db.ProjectImportJobs
+            .Where(item => item.ProjectId == projectId
+                && item.Status != ProjectImportJobStatus.Queued
+                && item.Status != ProjectImportJobStatus.Running)
+            .ToListAsync(cancellationToken);
+        databaseOperation.Db.ProjectImportJobs.RemoveRange(terminalJobs);
         await imports.AddJobAsync(job, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         importQueue.Enqueue(job.Id);
