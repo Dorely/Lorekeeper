@@ -805,9 +805,47 @@ public sealed class PublicationRenderWorker(
             recoveredIds.Add(job.Id);
         }
         await db.SaveChangesAsync(cancellationToken);
+        await PruneSupersededTerminalJobsAsync(db, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         await operation.DisposeAsync();
         foreach (var jobId in recoveredIds)
             await queue.EnqueueAsync(jobId, cancellationToken);
+    }
+
+    private async Task PruneSupersededTerminalJobsAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        var terminalJobs = await db.PublicationRenderJobs
+            .Where(job => job.Status != PublicationRenderStatus.Queued
+                && job.Status != PublicationRenderStatus.Rendering)
+            .Select(job => new
+            {
+                job.Id,
+                job.ProjectId,
+                job.EditionId,
+                job.Scope,
+                job.CreatedAt,
+                HasArtifacts = db.PublicationArtifacts
+                    .Any(artifact => artifact.RenderJobId == job.Id),
+            })
+            .ToListAsync(cancellationToken);
+        var keepIds = terminalJobs
+            .Where(job => job.HasArtifacts)
+            .GroupBy(job => (job.ProjectId, job.EditionId, job.Scope))
+            .Select(group => group
+                .OrderByDescending(job => job.CreatedAt)
+                .ThenByDescending(job => job.Id)
+                .First()
+                .Id)
+            .ToHashSet();
+        var supersededIds = terminalJobs
+            .Where(job => !keepIds.Contains(job.Id))
+            .Select(job => job.Id)
+            .ToList();
+        if (supersededIds.Count == 0)
+            return;
+        await db.PublicationRenderJobs
+            .Where(job => supersededIds.Contains(job.Id))
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     private async Task MarkCancelledAsync(Guid jobId, CancellationToken cancellationToken)
@@ -1452,8 +1490,25 @@ public sealed class PublicationRenderProcessor(
                 ? "Reading PDF ready with warnings"
                 : "Lorekeeper validated";
         job.CompletedAt = DateTime.UtcNow;
+        await PruneSupersededTerminalJobsAsync(db, job, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         Cleanup(job.Id);
+    }
+
+    private static async Task PruneSupersededTerminalJobsAsync(
+        AppDbContext db,
+        PublicationRenderJob currentJob,
+        CancellationToken cancellationToken)
+    {
+        var superseded = await db.PublicationRenderJobs
+            .Where(job => job.Id != currentJob.Id
+                && job.ProjectId == currentJob.ProjectId
+                && job.EditionId == currentJob.EditionId
+                && job.Scope == currentJob.Scope
+                && job.Status != PublicationRenderStatus.Queued
+                && job.Status != PublicationRenderStatus.Rendering)
+            .ToListAsync(cancellationToken);
+        db.PublicationRenderJobs.RemoveRange(superseded);
     }
 
     private static PublicationCoverDesignView CoreCoverView(PublishDocument document)
