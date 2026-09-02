@@ -11,6 +11,7 @@ public static class PublicationReleaseNaming
             PublicationVendor.AmazonKdp => "Amazon KDP Paperback",
             PublicationVendor.IngramSpark => "IngramSpark Paperback",
             PublicationVendor.BarnesAndNoblePress => "B&N Press Paperback",
+            PublicationVendor.Lulu => "Lulu Paperback",
             _ => "Generic Paperback",
         },
         PublicationEditionFormat.Hardcover => vendor switch
@@ -18,6 +19,7 @@ public static class PublicationReleaseNaming
             PublicationVendor.AmazonKdp => "Amazon KDP Hardcover",
             PublicationVendor.IngramSpark => "IngramSpark Hardcover",
             PublicationVendor.BarnesAndNoblePress => "B&N Press Hardcover",
+            PublicationVendor.Lulu => "Lulu Hardcover",
             _ => "Generic Hardcover",
         },
         PublicationEditionFormat.Epub => "EPUB Ebook",

@@ -166,12 +166,20 @@ selected candidate draft, compared commit metadata, and concurrency tokens.
 Review loading captures the live project at most once per request and uses the
 snapshot writer's validated artifact directly; it must not reread the emitted
 temporary tree merely to recover its hash or payload. Immutable approved Git
-artifacts are reused through an application-level bounded cache keyed by
-repository and commit SHA, while historical scans reuse adjacent commit
-snapshots locally and retain a bounded `(HEAD SHA, chapter, target, maxCommits)`
-result cache across short-lived dependency scopes. Live SQLite snapshots are
-never cached. Initial checkpoint status, pending-target discovery, manuscript
-Review projection, historical lookup, and Designed Page preview work starts
+artifacts used by status, Review, History comparison, and historical scans are
+materialized directly from Git into a validated temporary tree and read in
+lightweight mode. Lightweight reads still validate the exact file set,
+canonical JSON, declared lengths, per-file SHA-256 values, asset metadata
+hashes, and the overall content hash, but stream image and font blobs without
+retaining their bytes. These binary-free artifacts are reused through an
+eight-entry application-level bounded cache keyed by repository and commit SHA,
+while historical scans reuse adjacent commit snapshots locally and retain a
+bounded `(HEAD SHA, chapter, target, maxCommits)` result cache across short-lived
+dependency scopes. Live SQLite snapshots are never cached. Restore and
+exact-checkout paths always perform full, uncached checkpoint loads so image and
+font bytes remain complete and exact. Initial checkpoint status,
+pending-target discovery, manuscript Review projection, historical lookup, and
+Designed Page preview work starts
 after the owning surface renders and runs in a fresh dependency scope outside
 the Blazor circuit; cancellation and project/chapter/target generations prevent
 stale results from reaching the UI. The top-bar pending result also supplies the
@@ -222,9 +230,26 @@ Other change as pending. A project-wide approval checkpoints the complete live
 snapshot.
 
 The History workspace provides the message-bearing checkpoint form. Its timeline
-can compare two checkpoints in chronological order with bounded, readable before/after panes derived
-from semantic manuscript content; raw semantic JSON and binary assets are never
-rendered. Failed operation notices remain durable journal rows for reconciliation,
+can compare two checkpoints in chronological order with a review-style
+comparison: changed chapters and non-manuscript dependency groups are listed as
+targets, and selecting one renders read-only red/green hunks with line numbers
+and inline word-level highlighting, zoomed to the changed sections with context
+instead of full before/after panes. History retains the two lightweight,
+binary-free payloads while a comparison is active. Its initial semantic summary
+contains no readable before/after text. Chapter diff preparation and an opened
+Other entry's exact unbounded readable text run outside the Blazor circuit in a
+fresh dependency scope with cancellation and comparison-generation guards.
+Other entries are controlled, collapsed disclosures; a collapsed entry has only
+its summary and no prepared diff or diff DOM. Prepared sections are capped at
+400 rows before inline processing, pair changed rows once within contiguous
+change runs, and use a 250,000-cell per-pair and 1,000,000-cell per-section token
+budget. Rows beyond either inline budget use deterministic whole-line
+highlighting. Razor renders the prepared rows only and performs no section
+construction, matching, tokenization, similarity scoring, or LCS work. Chapter
+targets cover core chapters because snapshots carry edition chapter overrides
+as publication data, so override-only changes stay under Other changes. The
+Review path keeps bounded readable text. Raw semantic JSON and binary assets are
+never rendered. Failed operation notices remain durable journal rows for reconciliation,
 but the user can acknowledge and clear them from the sidebar without deleting
 their error or recovery data. Opening Restore focuses the controlled-restore card,
 where whole-project, major-area, and selected-chapter scopes are explicit. The shared

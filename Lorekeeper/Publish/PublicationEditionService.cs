@@ -1020,6 +1020,12 @@ public sealed class PublicationEditionService(
                     && string.IsNullOrWhiteSpace(edition.Isbn))
                     throw new InvalidOperationException("A valid ISBN-13 is required when user-supplied ISBN is selected.");
             }
+            else if (edition.Vendor == PublicationVendor.Lulu
+                && edition.PrintProjectUse == PrintProjectUse.ForSale
+                && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
+            {
+                throw new InvalidOperationException("Lulu for-sale projects require a valid user-supplied ISBN-13.");
+            }
             else if (edition.PrintCoverSubmissionMode != PrintCoverSubmissionMode.FullWrapMeasured)
             {
                 throw new InvalidOperationException("Separate vendor-spine submission is currently supported only for B&N Press.");

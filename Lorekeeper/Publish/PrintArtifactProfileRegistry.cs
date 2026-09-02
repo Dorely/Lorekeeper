@@ -16,7 +16,6 @@ public enum PrintBindingConstruction
 [JsonConverter(typeof(JsonStringEnumConverter<PrintInteriorProcess>))]
 public enum PrintInteriorProcess
 {
-    Declared,
     BlackAndWhite,
     StandardColor,
     PremiumColor,
@@ -25,7 +24,6 @@ public enum PrintInteriorProcess
 [JsonConverter(typeof(JsonStringEnumConverter<PrintCoverMaterial>))]
 public enum PrintCoverMaterial
 {
-    Declared,
     PrintedCover,
     CaseLaminate,
     DigitalCloth,
@@ -91,7 +89,7 @@ public interface IPrintArtifactProfileRegistry
 
 public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
 {
-    public const string CurrentVersion = "2026.08.4";
+    public const string CurrentVersion = "2026.09.2";
     private const string ResourceSuffix = "PrintArtifactProfiles.print-artifact-profiles-v1.json";
     private readonly PrintArtifactProfileRegistrySnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, PrintArtifactProfile> _profiles;
@@ -168,11 +166,13 @@ public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
             (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp) => "kdp-pb-bw-50-2252",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark) => "ingram-pb-bw-50-2009",
             (PublicationEditionFormat.Paperback, PublicationVendor.BarnesAndNoblePress) => "bn-pb-bw-50-6x9",
-            (PublicationEditionFormat.Paperback, _) => "generic-perfectbound-v1",
+            (PublicationEditionFormat.Paperback, PublicationVendor.Lulu) => "lulu-pb-bw-60-white",
+            (PublicationEditionFormat.Paperback, _) => "generic-pb-bw-50-white",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark) => "ingram-hc-case-bw-50-2009",
             (PublicationEditionFormat.Hardcover, PublicationVendor.BarnesAndNoblePress) => "bn-hc-case-bw-50-6x9",
-            (PublicationEditionFormat.Hardcover, _) => "generic-casebound-v1",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.Lulu) => "lulu-hc-case-bw-80-white",
+            (PublicationEditionFormat.Hardcover, _) => "generic-case-bw-50-white",
             _ => throw new InvalidOperationException("Digital releases do not use a print artifact profile."),
         };
         return GetRequired(key);
@@ -223,6 +223,7 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
             PublicationVendor.AmazonKdp => submittedPageCount + (submittedPageCount % 2),
             PublicationVendor.IngramSpark => submittedPageCount + (submittedPageCount % 2),
             PublicationVendor.BarnesAndNoblePress => submittedPageCount + (submittedPageCount % 2),
+            PublicationVendor.Lulu => submittedPageCount + (submittedPageCount % 2),
             _ => submittedPageCount,
         };
         if (submittedPageCount < (product.MinimumSubmittedPages ?? product.MinimumPages)
@@ -267,6 +268,10 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
                     2 * 6.944444444444444444m + spine,
                     trimHeight + 1.5m),
             PublicationVendor.BarnesAndNoblePress =>
+                (0.125m, 0m, 0m, 0m, 0m, 0m,
+                    2 * trimWidth + spine + 0.25m,
+                    trimHeight + 0.25m),
+            PublicationVendor.Lulu =>
                 (0.125m, 0m, 0m, 0m, 0m, 0m,
                     2 * trimWidth + spine + 0.25m,
                     trimHeight + 0.25m),

@@ -10,8 +10,38 @@ public interface IVersionHistorySnapshotComparer
 {
     VersionHistorySnapshotComparison Compare(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate);
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions? options = null);
 }
+
+/// <summary>
+/// Controls how much readable text the comparison embeds in its entries. The
+/// default bounds readable text so Review surfaces stay lightweight. History
+/// summaries suppress text and request one exact entry only when it is opened.
+/// </summary>
+public sealed record VersionHistoryCompareOptions
+{
+    public static VersionHistoryCompareOptions Default { get; } = new();
+
+    public bool IncludeBoundedReadableText { get; init; } = true;
+
+    public VersionHistorySnapshotEntryKey? UnboundedReadableTextEntry { get; init; }
+
+    internal string? Area { get; init; }
+
+    internal VersionHistoryCompareOptions ForArea(string area) => this with { Area = area };
+
+    internal bool Includes(string category, string key) =>
+        IncludeBoundedReadableText || IsUnbounded(category, key);
+
+    internal bool IsUnbounded(string category, string key) =>
+        UnboundedReadableTextEntry is { } entry
+        && string.Equals(entry.Area, Area, StringComparison.Ordinal)
+        && string.Equals(entry.Category, category, StringComparison.Ordinal)
+        && string.Equals(entry.Key, key, StringComparison.Ordinal);
+}
+
+public sealed record VersionHistorySnapshotEntryKey(string Area, string Category, string Key);
 
 /// <summary>
 /// Compares canonical snapshot payloads without touching Git, the database, or
@@ -24,7 +54,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     public VersionHistorySnapshotComparison Compare(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(candidate);
@@ -35,16 +66,17 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         if (baseline.ProjectId == Guid.Empty)
             throw new ArgumentException("Snapshots must reference a project.", nameof(baseline));
 
+        var compareOptions = options ?? VersionHistoryCompareOptions.Default;
         var areas = new List<VersionHistorySnapshotAreaComparison>
         {
-            CompareProject(baseline, candidate),
-            CompareNarrative(baseline, candidate),
-            CompareGraph(baseline, candidate),
-            CompareSources(baseline, candidate),
-            CompareAssets(baseline, candidate),
-            CompareManuscript(baseline, candidate),
-            CompareComposition(baseline, candidate),
-            ComparePublication(baseline, candidate),
+            CompareProject(baseline, candidate, compareOptions.ForArea("project")),
+            CompareNarrative(baseline, candidate, compareOptions.ForArea("narrative")),
+            CompareGraph(baseline, candidate, compareOptions.ForArea("graph")),
+            CompareSources(baseline, candidate, compareOptions.ForArea("sources")),
+            CompareAssets(baseline, candidate, compareOptions.ForArea("assets")),
+            CompareManuscript(baseline, candidate, compareOptions.ForArea("manuscript")),
+            CompareComposition(baseline, candidate, compareOptions.ForArea("composition")),
+            ComparePublication(baseline, candidate, compareOptions.ForArea("publication")),
         };
 
         return new(
@@ -57,7 +89,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareProject(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("project");
         var beforeSettings = new ProjectSettingsValue(
@@ -69,6 +102,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             candidate.Project.PageSetup,
             candidate.Project.ContestModeEnabled);
         accumulator.Add(CompareItems(
+            options,
             "settings",
             [beforeSettings],
             [afterSettings],
@@ -77,6 +111,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             id => Hash(id),
             metadataHash: id => Hash(id)));
         accumulator.Add(CompareItems(
+            options,
             "references",
             baseline.Project.References,
             candidate.Project.References,
@@ -89,10 +124,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareNarrative(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("narrative");
         accumulator.Add(CompareOptional(
+            options,
             "book-brief",
             baseline.Narrative.BookBrief,
             candidate.Narrative.BookBrief,
@@ -102,6 +139,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             metadataHash: Hash,
             readableText: BookBriefReadableText));
         accumulator.Add(CompareItems(
+            options,
             "entity-types",
             baseline.Narrative.EntityTypes,
             candidate.Narrative.EntityTypes,
@@ -110,6 +148,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             Hash,
             metadataHash: Hash));
         accumulator.Add(CompareItems(
+            options,
             "acts",
             baseline.Narrative.Acts,
             candidate.Narrative.Acts,
@@ -118,6 +157,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             Hash,
             metadataHash: Hash));
         accumulator.Add(CompareItems(
+            options,
             "chapters",
             baseline.Narrative.Chapters,
             candidate.Narrative.Chapters,
@@ -128,6 +168,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             metadataHash: ChapterMetadataHash,
             readableText: ChapterReadableText));
         accumulator.Add(CompareItems(
+            options,
             "writing-samples",
             baseline.Narrative.WritingSamples,
             candidate.Narrative.WritingSamples,
@@ -136,8 +177,9 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             Hash,
             manuscriptHash: sample => Hash(new { sample.Body }),
             metadataHash: sample => Hash(new { sample.Title }),
-            readableText: sample => BoundText(sample.Body)));
+            readableText: sample => sample.Body));
         accumulator.Add(CompareItems(
+            options,
             "context-preferences",
             baseline.Narrative.ContextPreferences,
             candidate.Narrative.ContextPreferences,
@@ -146,6 +188,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             Hash,
             metadataHash: Hash));
         accumulator.Add(CompareItems(
+            options,
             "annotations",
             baseline.Narrative.Annotations,
             candidate.Narrative.Annotations,
@@ -159,10 +202,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareGraph(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("graph");
         accumulator.Add(CompareItems(
+            options,
             "nodes",
             baseline.Graph.Nodes,
             candidate.Graph.Nodes,
@@ -172,6 +217,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             metadataHash: Hash,
             readableText: GraphNodeReadableText));
         accumulator.Add(CompareItems(
+            options,
             "edges",
             baseline.Graph.Edges,
             candidate.Graph.Edges,
@@ -185,10 +231,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareSources(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("sources");
         accumulator.Add(CompareItems(
+            options,
             "sources",
             baseline.Sources.Sources,
             candidate.Sources.Sources,
@@ -196,11 +244,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             source => source.Title,
             Hash,
             metadataHash: Hash,
-            readableText: source => BoundText(FormatSourceText(source))));
+            readableText: source => FormatSourceText(source)));
 
         var beforeTitles = baseline.Sources.Sources.ToDictionary(source => source.Id, source => source.Title);
         var afterTitles = candidate.Sources.Sources.ToDictionary(source => source.Id, source => source.Title);
         accumulator.Add(CompareItems(
+            options,
             "canonical-selections",
             baseline.Narrative.BookBriefCanonSourceIds.Distinct().OrderBy(id => id),
             candidate.Narrative.BookBriefCanonSourceIds.Distinct().OrderBy(id => id),
@@ -215,10 +264,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareAssets(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("assets");
         accumulator.Add(CompareItems(
+            options,
             "images",
             baseline.Assets.Images,
             candidate.Assets.Images,
@@ -244,6 +295,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             }),
             binaryHash: image => Hash(new { image.Sha256, image.ByteLength })));
         accumulator.Add(CompareItems(
+            options,
             "font-families",
             baseline.Assets.FontFamilies,
             candidate.Assets.FontFamilies,
@@ -258,6 +310,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                 family.RightsDeclaration,
             })));
         accumulator.Add(CompareItems(
+            options,
             "font-faces",
             FlattenFontFaces(baseline.Assets.FontFamilies),
             FlattenFontFaces(candidate.Assets.FontFamilies),
@@ -276,6 +329,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             }),
             binaryHash: face => Hash(new { face.Face.Sha256, face.Face.ByteLength })));
         accumulator.Add(CompareItems(
+            options,
             "visual-examples",
             baseline.Assets.EntityVisualExamples,
             candidate.Assets.EntityVisualExamples,
@@ -288,10 +342,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareManuscript(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("manuscript");
         accumulator.Add(CompareItems(
+            options,
             "styles",
             baseline.Manuscript.Styles,
             candidate.Manuscript.Styles,
@@ -312,10 +368,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison CompareComposition(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("composition");
         accumulator.Add(CompareItems(
+            options,
             "compositions",
             baseline.Composition.PageCompositions,
             candidate.Composition.PageCompositions,
@@ -330,10 +388,12 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static VersionHistorySnapshotAreaComparison ComparePublication(
         VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate)
+        VersionHistorySnapshotPayload candidate,
+        VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("publication");
         accumulator.Add(CompareOptional(
+            options,
             "core",
             baseline.Publication.PublicationBook,
             candidate.Publication.PublicationBook,
@@ -347,6 +407,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             metadataHash: book => HashWithoutProperties(book, "Matter", "ImagePlacements"),
             readableText: PublicationBookReadableText));
         accumulator.Add(CompareItems(
+            options,
             "editions",
             baseline.Publication.PublicationEditions,
             candidate.Publication.PublicationEditions,
@@ -361,6 +422,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             metadataHash: edition => HashWithoutProperties(edition, "Matter", "ChapterOverrides"),
             readableText: PublicationEditionReadableText));
         accumulator.Add(CompareItems(
+            options,
             "sections",
             baseline.Publication.PublicationSections,
             candidate.Publication.PublicationSections,
@@ -374,6 +436,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
     }
 
     private static ItemComparison CompareOptional<T>(
+        VersionHistoryCompareOptions options,
         string category,
         T? before,
         T? after,
@@ -383,9 +446,10 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         Func<T, string>? manuscriptHash = null,
         Func<T, string>? metadataHash = null,
         Func<T, string>? binaryHash = null,
-        Func<T, BoundedText?>? readableText = null)
+        Func<T, string?>? readableText = null)
         where T : class =>
         CompareItems(
+            options,
             category,
             before is null ? [] : [before],
             after is null ? [] : [after],
@@ -398,6 +462,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             readableText);
 
     private static ItemComparison CompareItems<T>(
+        VersionHistoryCompareOptions options,
         string category,
         IEnumerable<T> beforeItems,
         IEnumerable<T> afterItems,
@@ -407,7 +472,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         Func<T, string>? manuscriptHash = null,
         Func<T, string>? metadataHash = null,
         Func<T, string>? binaryHash = null,
-        Func<T, BoundedText?>? readableText = null)
+        Func<T, string?>? readableText = null)
     {
         var before = BuildIndex(beforeItems, key, category, "baseline");
         var after = BuildIndex(afterItems, key, category, "candidate");
@@ -436,7 +501,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                     manuscriptHash is not null,
                     metadataHash is not null,
                     binaryHash is not null,
-                    afterText: readableText?.Invoke(afterItem!)));
+                    afterText: ProjectReadableText(options, category, itemKey, readableText, afterItem!)));
                 continue;
             }
 
@@ -455,7 +520,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                     manuscriptHash is not null,
                     metadataHash is not null,
                     binaryHash is not null,
-                    beforeText: readableText?.Invoke(beforeItem!)));
+                    beforeText: ProjectReadableText(options, category, itemKey, readableText, beforeItem!)));
                 continue;
             }
 
@@ -476,10 +541,11 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             var afterBinaryHash = binaryHash?.Invoke(afterItem!);
             var manuscriptChanged = manuscriptHash is not null
                 && !string.Equals(beforeManuscriptHash, afterManuscriptHash, StringComparison.Ordinal);
-            var beforeText = readableText is not null && (manuscriptHash is null || manuscriptChanged)
+            var includeReadableText = options.Includes(category, itemKey);
+            string? beforeText = includeReadableText && readableText is not null && (manuscriptHash is null || manuscriptChanged)
                 ? readableText(beforeItem!)
                 : null;
-            var afterText = readableText is not null && (manuscriptHash is null || manuscriptChanged)
+            string? afterText = includeReadableText && readableText is not null && (manuscriptHash is null || manuscriptChanged)
                 ? readableText(afterItem!)
                 : null;
             entries.Add(CreateEntry(
@@ -494,8 +560,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                 manuscriptChanged,
                 metadataHash is not null && !string.Equals(beforeMetadataHash, afterMetadataHash, StringComparison.Ordinal),
                 binaryHash is not null && !string.Equals(beforeBinaryHash, afterBinaryHash, StringComparison.Ordinal),
-                beforeText,
-                afterText));
+                beforeText: ReadableText(options, category, itemKey, beforeText),
+                afterText: ReadableText(options, category, itemKey, afterText)));
         }
 
         return new(added, removed, changed, unchanged, entries);
@@ -572,29 +638,27 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
     private static string ChapterFullHash(ProjectExportChapter chapter) =>
         HashWithoutProperties(chapter, nameof(ProjectExportChapter.Body));
 
-    private static BoundedText ChapterReadableText(ProjectExportChapter chapter) =>
-        ReadManuscriptText(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+    private static string ChapterReadableText(ProjectExportChapter chapter) =>
+        ManuscriptPlainText(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
 
-    private static BoundedText? CompositionReadableText(ProjectExportPageComposition composition) =>
-        ReadManuscriptText(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
+    private static string CompositionReadableText(ProjectExportPageComposition composition) =>
+        ManuscriptPlainText(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
 
-    private static BoundedText GraphNodeReadableText(ProjectExportNode node) =>
-        BoundText(string.Join(
+    private static string GraphNodeReadableText(ProjectExportNode node) =>
+        string.Join(
             "\n",
             new[] { $"Type: {node.NodeType}", $"Key: {node.Key}", $"Label: {node.Label ?? node.Key}" }
                 .Concat(node.Properties
                     .OrderBy(property => property.Key, StringComparer.Ordinal)
-                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}"))))
-        ?? new BoundedText(string.Empty, false);
+                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}")));
 
-    private static BoundedText GraphEdgeReadableText(ProjectExportEdge edge) =>
-        BoundText(string.Join(
+    private static string GraphEdgeReadableText(ProjectExportEdge edge) =>
+        string.Join(
             "\n",
             new[] { $"From: {edge.From.StableKey}", $"To: {edge.To.StableKey}", $"Type: {edge.EdgeType}" }
                 .Concat(edge.Properties
                     .OrderBy(property => property.Key, StringComparer.Ordinal)
-                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}"))))
-        ?? new BoundedText(string.Empty, false);
+                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}")));
 
     private static string ReadableGraphValue(object? value) => value switch
     {
@@ -621,8 +685,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         }
     }
 
-    private static BoundedText BookBriefReadableText(ProjectExportBookBrief brief) =>
-        BoundText(string.Join(
+    private static string BookBriefReadableText(ProjectExportBookBrief brief) =>
+        string.Join(
             "\n\n",
             $"Premise: {brief.Premise}",
             $"Genre: {brief.Genre}",
@@ -637,41 +701,38 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             $"Language locale: {brief.LanguageLocale}",
             $"House style: {brief.HouseStyle}",
             $"Accessibility goals: {brief.AccessibilityGoals}",
-            $"Visual direction: {brief.VisualDirection}"))
-        ?? new BoundedText(string.Empty, false);
+            $"Visual direction: {brief.VisualDirection}");
 
-    private static BoundedText AnnotationReadableText(ProjectExportManuscriptAnnotation annotation) =>
-        BoundText(string.Join(
+    private static string AnnotationReadableText(ProjectExportManuscriptAnnotation annotation) =>
+        string.Join(
             "\n\n",
             $"Note: {annotation.NoteText}",
             $"Original quote: {annotation.OriginalQuote}",
             $"Before: {annotation.ContextBefore}",
-            $"After: {annotation.ContextAfter}"))
-        ?? new BoundedText(string.Empty, false);
+            $"After: {annotation.ContextAfter}");
 
-    private static BoundedText? PublicationBookReadableText(ProjectExportPublicationBook book) =>
-        BoundText(JoinManuscriptTexts(book.Matter));
+    private static string PublicationBookReadableText(ProjectExportPublicationBook book) =>
+        JoinManuscriptTexts(book.Matter);
 
-    private static BoundedText? PublicationEditionReadableText(ProjectExportPublicationEdition edition) =>
-        BoundText(string.Join(
+    private static string PublicationEditionReadableText(ProjectExportPublicationEdition edition) =>
+        string.Join(
             "\n\n",
             (edition.Matter ?? [])
                 .OrderBy(item => item.Id)
-                .Select(item => ReadManuscriptText(item.ManuscriptJson, item.Id, item.Revision).Value)
+                .Select(item => ManuscriptPlainText(item.ManuscriptJson, item.Id, item.Revision))
                 .Concat(edition.ChapterOverrides
                     .OrderBy(item => item.Id)
-                    .Select(item => ReadManuscriptText(item.ManuscriptJson, item.ChapterId, item.Revision).Value))
-            ?? []));
+                    .Select(item => ManuscriptPlainText(item.ManuscriptJson, item.ChapterId, item.Revision))));
 
-    private static BoundedText PublicationSectionReadableText(ProjectExportPublicationSection section) =>
-        ReadManuscriptText(section.ManuscriptJson, section.Id, section.Revision);
+    private static string PublicationSectionReadableText(ProjectExportPublicationSection section) =>
+        ManuscriptPlainText(section.ManuscriptJson, section.Id, section.Revision);
 
     private static string JoinManuscriptTexts(IEnumerable<ProjectExportPublicationMatter>? matters) =>
         string.Join(
             "\n\n",
             matters?
                 .OrderBy(item => item.Id)
-                .Select(item => ReadManuscriptText(item.ManuscriptJson, item.Id, item.Revision).Value)
+                .Select(item => ManuscriptPlainText(item.ManuscriptJson, item.Id, item.Revision))
             ?? []);
 
     private static string FormatSourceText(ProjectExportIngestSource source) =>
@@ -679,9 +740,33 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             ? source.SourceText
             : $"{source.Synopsis}\n\n{source.SourceText}";
 
-    private static BoundedText ReadManuscriptText(string json, Guid id, long revision) =>
-        BoundText(ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(json, id, revision)))
-        ?? new BoundedText(string.Empty, false);
+    private static string ManuscriptPlainText(string json, Guid id, long revision) =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(json, id, revision));
+
+    private static BoundedText? ProjectReadableText<T>(
+        VersionHistoryCompareOptions options,
+        string category,
+        string key,
+        Func<T, string?>? projector,
+        T item)
+    {
+        if (projector is null || !options.Includes(category, key))
+            return null;
+
+        return ReadableText(options, category, key, projector(item));
+    }
+
+    private static BoundedText? ReadableText(
+        VersionHistoryCompareOptions options,
+        string category,
+        string key,
+        string? value)
+    {
+        if (value is null)
+            return null;
+
+        return options.IsUnbounded(category, key) ? new(value, false) : BoundText(value);
+    }
 
     private static BoundedText? BoundText(string? value)
     {

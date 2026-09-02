@@ -116,10 +116,10 @@ else
             <label class="field"><span>Release name</span><input class="form-control" value="@_newReleaseName" @oninput="HandleNewReleaseNameInput" /><small>Defaults to the selected publishing profile. Matching names are numbered automatically.</small></label>
             @if (_newFormat is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
             {
-                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor" @bind:after="HandleNewReleaseProfileChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
-                @if (_newVendor == PublicationVendor.BarnesAndNoblePress)
+                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor" @bind:after="HandleNewReleaseProfileChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Lulu">Lulu</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
+                @if (_newVendor is PublicationVendor.BarnesAndNoblePress or PublicationVendor.Lulu)
                 {
-                    <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.PersonalUse">Personal / non-commercial</button><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.ForSale">For sale / commercial</button></div><small>This selects the B&amp;N identifier and barcode behavior recorded in the prepared setup file.</small></div>
+                    <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.PersonalUse">Personal / non-commercial</button><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.ForSale">For sale / commercial</button></div><small>This selects the identifier and barcode behavior recorded for the release.</small></div>
                 }
                 <div class="field field-wide"><small>Choose trim, interior printing, paper thickness, cover construction, and cover submission after creating the release.</small></div>
             }
@@ -639,12 +639,12 @@ else
                 <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                 @if (_workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 {
-                    <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
+                    <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Lulu">Lulu</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
                     @if (SelectedArtifactProfile() is { } selectedArtifactProfile)
                     {
                         <label class="field"><span>Interior printing</span><select class="form-select" value="@selectedArtifactProfile.InteriorProcess" @onchange="ReleaseInteriorProcessChanged">@foreach (var process in InteriorProcessOptions()){<option value="@process">@InteriorProcessLabel(process)</option>}</select><small>This changes the PDF color contract.</small></label>
                         <label class="field"><span>Cover construction</span><select class="form-select" value="@selectedArtifactProfile.CoverMaterial" @onchange="ReleaseCoverConstructionChanged">@foreach (var material in CoverConstructionOptions()){<option value="@material">@CoverConstructionLabel(material)</option>}</select><small>This determines which cover surfaces Lorekeeper prepares.</small></label>
-                        <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small></label>
+                        <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small>@if (_releaseDraft.Vendor == PublicationVendor.Generic){<small>Thickness values are Lorekeeper-owned estimates; verify them with your final printer before production.</small>}</label>
                         @if (selectedArtifactProfile.TrimSizes.Count > 0)
                         {
                             <label class="field"><span>Trim size</span><select @key="_releaseDraft.PrintArtifactProfileKey" class="form-select" value="@CurrentTrimKey()" @onchange="PrintTrimChanged">@foreach (var trim in selectedArtifactProfile.TrimSizes){<option value="@trim">@(trim.Replace("x", " x ")) in</option>}@if(selectedArtifactProfile.AllowsCustomTrim){<option value="custom">Custom printer trim</option>}</select></label>
@@ -654,10 +654,21 @@ else
                     {
                         <label class="field"><span>Cover printing</span><select class="form-select" @bind="_releaseDraft.PrintCoverMode" @bind:after="MarkReleaseDirty">@foreach (var mode in SelectedArtifactProfile()!.CoverModes){<option value="@mode">@(mode == PrintCoverMode.Duplex ? "Outside and inside" : "Outside only")</option>}</select></label>
                     }
-                    @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
+                    @if (_releaseDraft.Vendor is PublicationVendor.BarnesAndNoblePress or PublicationVendor.Lulu)
                     {
                         <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.PersonalUse)">Personal / non-commercial</button><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.ForSale)">For sale / commercial</button></div><small>Changing use invalidates prepared files and setup manifest, while keeping any entered ISBN available if you switch back.</small></div>
-                        @if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse)
+                        @if (_releaseDraft.Vendor == PublicationVendor.Lulu)
+                        {
+                            @if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse)
+                            {
+                                <div class="plain-setting"><strong>Identifier</strong><span>Lulu print-only projects need no ISBN and the cover ships without a barcode.</span></div>
+                            }
+                            else
+                            {
+                                <div class="plain-setting"><strong>Identifier</strong><span>Enter your ISBN-13 above; Lorekeeper generates the EAN-13 barcode in the reserved cover area.</span></div>
+                            }
+                        }
+                        else if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse)
                         {
                             <div class="plain-setting"><strong>Identifier</strong><span>B&amp;N assigns a vendor SKU. Personal-use preparation does not use an ISBN.</span></div>
                         }
@@ -665,11 +676,16 @@ else
                         {
                             <label class="field"><span>Identifier</span><select class="form-select" @bind="_releaseDraft.PrintIdentifierMode" @bind:after="MarkReleaseDirty"><option value="@PrintIdentifierMode.VendorAssignedIsbn">B&amp;N-assigned ISBN</option><option value="@PrintIdentifierMode.UserSuppliedIsbn">My ISBN</option></select></label>
                         }
-                        <label class="field"><span>Cover upload</span><select class="form-select" @bind="_releaseDraft.PrintCoverSubmissionMode" @bind:after="MarkReleaseDirty"><option value="@PrintCoverSubmissionMode.FullWrapMeasured">Full wrap (includes spine)</option><option value="@PrintCoverSubmissionMode.SeparatePanelsVendorSpine">Separate front/back; B&amp;N spine</option></select></label>
+                        @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
+                        {
+                            <label class="field"><span>Cover upload</span><select class="form-select" @bind="_releaseDraft.PrintCoverSubmissionMode" @bind:after="MarkReleaseDirty"><option value="@PrintCoverSubmissionMode.FullWrapMeasured">Full wrap (includes spine)</option><option value="@PrintCoverSubmissionMode.SeparatePanelsVendorSpine">Separate front/back; B&amp;N spine</option></select></label>
+                        }
                     }
-                    @if (_releaseDraft.Vendor != PublicationVendor.BarnesAndNoblePress
-                        || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
-                            && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
+                    @if (_releaseDraft.Vendor == PublicationVendor.Lulu
+                        ? _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
+                        : _releaseDraft.Vendor != PublicationVendor.BarnesAndNoblePress
+                            || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
+                                && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
                     {
                         <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                     }
@@ -2118,7 +2134,7 @@ else
                 ? PublicationReleaseNaming.DefaultName(_newFormat, vendor)
                 : _newReleaseName.Trim();
             var created = await Releases.CreateAsync(Project.Id, new PublicationEditionCreate(requestedName, _newFormat, vendor));
-            if (_newVendor == PublicationVendor.BarnesAndNoblePress
+            if (_newVendor is PublicationVendor.BarnesAndNoblePress or PublicationVendor.Lulu
                 && created.PrintProjectUse != _newPrintProjectUse)
                 created = await Releases.PatchOverridesAsync(Project.Id, created.Id, new(
                     ExpectedRevision: created.Revision,
@@ -2635,8 +2651,11 @@ else
     {
         _releaseDraft.PrintProjectUse = use;
         _releaseDraft.PrintIdentifierMode = use == PrintProjectUse.PersonalUse
+            && _releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress
             ? PrintIdentifierMode.VendorSku
-            : PrintIdentifierMode.VendorAssignedIsbn;
+            : use == PrintProjectUse.ForSale && _releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress
+                ? PrintIdentifierMode.VendorAssignedIsbn
+                : PrintIdentifierMode.UserSuppliedIsbn;
         MarkReleaseDirty();
     }
 
@@ -2676,7 +2695,7 @@ else
         PrintInteriorProcess.BlackAndWhite => "Black and white",
         PrintInteriorProcess.StandardColor => "Standard color",
         PrintInteriorProcess.PremiumColor => "Premium color",
-        _ => "Not specified",
+        _ => throw new ArgumentOutOfRangeException(nameof(process), process, null),
     };
     private static string CoverConstructionLabel(PrintCoverMaterial material) => material switch
     {
@@ -2685,7 +2704,7 @@ else
         PrintCoverMaterial.DigitalCloth => "Cloth case",
         PrintCoverMaterial.DigitalClothWithJacket => "Cloth case with dust jacket",
         PrintCoverMaterial.JacketedCaseLaminate => "Printed case with dust jacket",
-        _ => "Not specified",
+        _ => throw new ArgumentOutOfRangeException(nameof(material), material, null),
     };
     private static decimal? EffectiveCaliper(PrintArtifactProfile profile)
     {
@@ -2743,7 +2762,7 @@ else
         return kinds;
     }
     private static string ReleaseTypeLabel(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Paperback", PublicationEditionFormat.Hardcover => "Hardcover", PublicationEditionFormat.Epub => "EPUB ebook", _ => "PDF ebook" };
-    private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", _ => "Other printer" }} paperback with printer-ready interior and cover files.", PublicationEditionFormat.Hardcover => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", _ => "Other printer" }} hardcover with construction-specific case or jacket files.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
+    private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", PublicationVendor.Lulu => "Lulu", _ => "Other printer" }} paperback with printer-ready interior and cover files.", PublicationEditionFormat.Hardcover => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", PublicationVendor.Lulu => "Lulu", _ => "Other printer" }} hardcover with construction-specific case or jacket files.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
     private static string CoverEyebrow(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Full-wrap cover", PublicationEditionFormat.Hardcover => "Production cover", _ => "Digital cover" };
     private static string CoverHelp(PublicationEditionFormat format) => format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? "Core artwork supplies the front; this release adds its required back, spine, wrap, jacket, and barcode regions." : "Uses the reusable Core front cover until you customize this release.";
 

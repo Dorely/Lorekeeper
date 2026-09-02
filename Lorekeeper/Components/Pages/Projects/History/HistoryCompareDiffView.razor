@@ -1,0 +1,61 @@
+@using Lorekeeper.Manuscripts
+
+@if (Model is not { } model)
+{
+    <p class="history-compare-diff-empty" role="status">No textual difference</p>
+}
+else
+{
+    <div class="history-compare-diff">
+        @foreach (var diffSection in model.Sections)
+        {
+            <section class="history-compare-diff-section" aria-label="@diffSection.Label">
+                <header>
+                    <strong>@diffSection.Label</strong>
+                    <span class="history-compare-diff-counts">+@diffSection.Additions −@diffSection.Deletions</span>
+                </header>
+                @if (diffSection.Hunks.Count == 0)
+                {
+                    <p class="history-compare-diff-empty" role="status">No textual difference</p>
+                }
+                else
+                {
+                    @foreach (var hunk in diffSection.Hunks)
+                    {
+                        <div class="review-block-diff">
+                            @foreach (var row in hunk.Rows)
+                            {
+                                <div class="@row.CssClass">
+                                    <span class="review-diff-line-number">@row.LineNumber</span>
+                                    <span class="review-diff-marker">@row.Marker</span>
+                                    <span class="review-diff-line-text">
+                                        @foreach (var segment in row.Segments)
+                                        {
+                                            <span class="@SegmentClass(segment.Kind)">@segment.Text</span>
+                                        }
+                                    </span>
+                                    <span class="review-diff-spacer"></span>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (diffSection.Truncated)
+                    {
+                        <p class="history-compare-diff-truncated" role="status">Diff output truncated</p>
+                    }
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public HistoryCompareDiffViewModel? Model { get; set; }
+
+    private static string SegmentClass(DiffSegmentKind kind) => kind switch
+    {
+        DiffSegmentKind.Added => "review-diff-segment review-diff-segment--added",
+        DiffSegmentKind.Removed => "review-diff-segment review-diff-segment--removed",
+        _ => "review-diff-segment",
+    };
+}

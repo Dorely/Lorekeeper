@@ -208,6 +208,7 @@ public sealed class ProjectVersionRestoreService(
         string targetCommitSha,
         VersionHistoryRestoreSelection selection,
         string? safetyMessage = null,
+        bool discardQueuedWork = false,
         CancellationToken cancellationToken = default)
     {
         if (projectId == Guid.Empty)
@@ -248,7 +249,8 @@ public sealed class ProjectVersionRestoreService(
         {
             var db = operation.Db;
             await ValidateDatabaseIdentityAsync(db, restorePayload, cancellationToken);
-            await RefuseQueuedWorkAsync(db, projectId, cancellationToken);
+            if (!discardQueuedWork)
+                await RefuseQueuedWorkAsync(db, projectId, cancellationToken);
             await ClearOperationalStateAsync(db, projectId, cancellationToken);
             await ReplaceCanonicalStateAsync(db, restorePayload, unresolved, warnings, cancellationToken);
             await operation.SaveChangesAsync(cancellationToken);
@@ -1220,29 +1222,39 @@ public sealed class ProjectVersionRestoreService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
-        if (await db.IngestJobs.AnyAsync(item => item.ProjectId == projectId
-            && (item.Status == IngestJobStatus.Queued || item.Status == IngestJobStatus.Running || item.Status == IngestJobStatus.StopRequested), cancellationToken)
-            || await db.ProjectImportJobs.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == ProjectImportJobStatus.Queued || item.Status == ProjectImportJobStatus.Running), cancellationToken)
-            || await db.EditorRevisionJobs.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == EditorRevisionJobStatus.Queued || item.Status == EditorRevisionJobStatus.Running), cancellationToken)
-            || await db.ContestBatches.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == ContestBatchStatus.Running
-                    || item.Status == ContestBatchStatus.Completed
-                    || item.Status == ContestBatchStatus.Failed), cancellationToken)
-            || await db.ProjectImageGenerationJobs.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == ProjectImageGenerationJobStatus.Queued || item.Status == ProjectImageGenerationJobStatus.Running), cancellationToken)
-            || await db.PublicationPreparationJobs.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == PublicationPreparationStatus.Queued || item.Status == PublicationPreparationStatus.Preparing), cancellationToken)
-            || await db.PublicationRenderJobs.AnyAsync(item => item.ProjectId == projectId
-                && (item.Status == PublicationRenderStatus.Queued || item.Status == PublicationRenderStatus.Rendering), cancellationToken)
-            || await db.ProjectVersionRepositories.AnyAsync(item => item.ProjectId == projectId
-                && item.Operations.Any(operation => operation.Status == ProjectVersionOperationStatus.Running), cancellationToken))
+        var blockers = new List<VersionHistoryRestoreBlocker>();
+        AddBlocker(blockers, "Ingest job queued, running, or stop requested", await db.IngestJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == IngestJobStatus.Queued || item.Status == IngestJobStatus.Running || item.Status == IngestJobStatus.StopRequested), cancellationToken));
+        AddBlocker(blockers, "Project import job queued or running", await db.ProjectImportJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == ProjectImportJobStatus.Queued || item.Status == ProjectImportJobStatus.Running), cancellationToken));
+        AddBlocker(blockers, "Editor revision job queued or running", await db.EditorRevisionJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == EditorRevisionJobStatus.Queued || item.Status == EditorRevisionJobStatus.Running), cancellationToken));
+        AddBlocker(blockers, "Contest batch awaiting resolution", await db.ContestBatches.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == ContestBatchStatus.Running
+                || item.Status == ContestBatchStatus.Completed
+                || item.Status == ContestBatchStatus.Failed), cancellationToken));
+        AddBlocker(blockers, "Image generation job queued or running", await db.ProjectImageGenerationJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == ProjectImageGenerationJobStatus.Queued || item.Status == ProjectImageGenerationJobStatus.Running), cancellationToken));
+        AddBlocker(blockers, "Publication preparation queued or preparing", await db.PublicationPreparationJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == PublicationPreparationStatus.Queued || item.Status == PublicationPreparationStatus.Preparing), cancellationToken));
+        AddBlocker(blockers, "Publication render queued or rendering", await db.PublicationRenderJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == PublicationRenderStatus.Queued || item.Status == PublicationRenderStatus.Rendering), cancellationToken));
+        AddBlocker(blockers, "Version-history operation running", await db.ProjectVersionOperations.CountAsync(item => item.Repository.ProjectId == projectId
+            && item.Status == ProjectVersionOperationStatus.Running, cancellationToken));
+
+        if (blockers.Count > 0)
         {
             throw new VersionHistoryRestoreException(
                 "WorkInProgress",
-                "Restore is refused while queued or running project work exists.");
+                "Restore is refused while queued or running project work exists.",
+                blockers);
         }
+    }
+
+    private static void AddBlocker(List<VersionHistoryRestoreBlocker> blockers, string label, int count)
+    {
+        if (count > 0)
+            blockers.Add(new(label, count));
     }
 
     private static async Task ValidateDatabaseIdentityAsync(
@@ -1304,6 +1316,8 @@ public sealed class ProjectVersionRestoreService(
         await db.WebIngestCandidates.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.IngestStagingRecords.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.IngestVectorFragments.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.ProjectVersionOperations.Where(item => item.Repository.ProjectId == projectId
+            && item.Status == ProjectVersionOperationStatus.Running).ExecuteDeleteAsync(cancellationToken);
     }
 
     private static async Task ReplaceCanonicalStateAsync(
@@ -2098,8 +2112,10 @@ public sealed class ProjectVersionRestoreService(
         {
             return key switch
             {
-                "generic-perfectbound-template" => "generic-perfectbound-v1",
-                "generic-casebound-template" => "generic-casebound-v1",
+                "generic-perfectbound-template" => "generic-pb-bw-50-white",
+                "generic-perfectbound-v1" => "generic-pb-bw-50-white",
+                "generic-casebound-template" => "generic-case-bw-50-white",
+                "generic-casebound-v1" => "generic-case-bw-50-white",
                 "kdp-pb-bw-white" => "kdp-pb-bw-50-2252",
                 "kdp-pb-bw-cream" => "kdp-pb-bw-50-2500",
                 "kdp-pb-bw-groundwood" => "kdp-pb-bw-45-2350",
@@ -2127,14 +2143,16 @@ public sealed class ProjectVersionRestoreService(
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-50-2225",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-50-2009",
-            (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-v1",
+            (PublicationEditionFormat.Paperback, _, LegacyPublicationPaper.Cream, _) => "generic-pb-bw-60-cream",
+            (PublicationEditionFormat.Paperback, _, _, _) => "generic-pb-bw-50-white",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-50-2500",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-50-2224",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-50-2009",
-            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-v1",
+            (PublicationEditionFormat.Hardcover, _, LegacyPublicationPaper.Cream, _) => "generic-case-bw-60-cream",
+            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-case-bw-50-white",
             _ => string.Empty,
         };
     }

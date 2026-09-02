@@ -1,4 +1,6 @@
 @using System.ComponentModel.DataAnnotations
+@using Lorekeeper.ImportExport
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
 @using Lorekeeper.VersionHistory.Compare
@@ -10,13 +12,13 @@
 @using Lorekeeper.VersionHistory.Sync
 @implements IDisposable
 @inject IProjectVersionHistoryService VersionHistory
-@inject IVersionHistorySnapshotComparer SnapshotComparer
 @inject IProjectVersionRestoreService VersionRestore
 @inject IProjectService Projects
 @inject IGitHubConnectionService GitHub
 @inject IProjectVersionSyncService VersionSync
 @inject IProjectVersionRemoteUpdateService VersionRemoteUpdate
 @inject ProjectVersionHistoryUiEvents HistoryEvents
+@inject IServiceScopeFactory ScopeFactory
 
 <div class="history-page" aria-labelledby="history-page-title">
     @if (_loading)
@@ -225,33 +227,6 @@
                                                         {
                                                             <span class="history-change-flags">@ChangeFlags(entry)</span>
                                                         }
-                                                        @if (entry.BeforeText is not null || entry.AfterText is not null)
-                                                        {
-                                                            <div class="history-text-compare" aria-label="Before and after text for @entry.Label">
-                                                                <section class="history-text-pane is-before">
-                                                                    <header>
-                                                                        <strong>Before</strong>
-                                                                        <code>@ShortSha(_comparisonBeforeSha)</code>
-                                                                    </header>
-                                                                    <pre>@(entry.BeforeText ?? "No text in this snapshot.")</pre>
-                                                                    @if (entry.BeforeTextTruncated)
-                                                                    {
-                                                                        <span class="history-text-truncated">Preview truncated</span>
-                                                                    }
-                                                                </section>
-                                                                <section class="history-text-pane is-after">
-                                                                    <header>
-                                                                        <strong>After</strong>
-                                                                        <code>@ShortSha(_comparisonAfterSha)</code>
-                                                                    </header>
-                                                                    <pre>@(entry.AfterText ?? "No text in this snapshot.")</pre>
-                                                                    @if (entry.AfterTextTruncated)
-                                                                    {
-                                                                        <span class="history-text-truncated">Preview truncated</span>
-                                                                    }
-                                                                </section>
-                                                            </div>
-                                                        }
                                                     </li>
                                                 }
                                             </ul>
@@ -260,7 +235,101 @@
                                 </article>
                             }
                         </div>
-                        <p class="history-binary-note">Text-bearing changes show bounded before-and-after content. Metadata and binary-asset changes are reported without displaying binary data.</p>
+                        <p class="history-binary-note">Chapters and Other changes below render review-style diffs from the full snapshot text. Metadata and binary-asset changes are reported without displaying binary data.</p>
+
+                        @if (_chapterTargets.Count > 0 || _otherGroups.Count > 0)
+                        {
+                            <div class="history-compare-zoom">
+                                <p class="history-eyebrow">Zoomed comparison</p>
+                                <p class="history-muted">
+                                    Comparing <code>@ShortSha(_comparisonBeforeSha)</code> with <code>@ShortSha(_comparisonAfterSha)</code>. Choose a changed chapter or the Other changes target to read the full red/green diff.
+                                </p>
+                                <div class="history-compare-target-list">
+                                    @foreach (var target in _chapterTargets)
+                                    {
+                                        var isChapterSelected = !_otherSelected && _selectedChapterTarget?.ChapterId == target.ChapterId;
+                                        <button type="button"
+                                                class="history-compare-target @(isChapterSelected ? "is-selected" : null)"
+                                                aria-pressed="@isChapterSelected"
+                                                @onclick="() => SelectChapterTargetAsync(target)">
+                                            <span class="history-compare-target-title">@target.Title</span>
+                                            <span class="history-compare-target-kind">@ChapterTargetKind(target)</span>
+                                        </button>
+                                    }
+                                    @if (_otherGroups.Count > 0)
+                                    {
+                                        var otherCount = _otherGroups.Sum(group => group.Entries.Count);
+                                        <button type="button"
+                                                class="history-compare-target history-compare-target--other @(_otherSelected ? "is-selected" : null)"
+                                                aria-pressed="@_otherSelected"
+                                                @onclick="SelectOtherTarget">
+                                            <span class="history-compare-target-title">Other changes</span>
+                                            <span class="history-compare-target-kind">@otherCount item@(otherCount == 1 ? string.Empty : "s")</span>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            @if (!_otherSelected && _selectedChapterTarget is not null)
+                            {
+                                @if (_selectedChapterLoading)
+                                {
+                                    <p class="history-compare-diff-empty" role="status">Preparing chapter diff…</p>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(_selectedChapterError))
+                                {
+                                    <div class="alert alert-danger history-alert" role="alert">@_selectedChapterError</div>
+                                }
+                                else
+                                {
+                                    <HistoryCompareDiffView Model="_selectedChapterDiff" />
+                                }
+                            }
+                            else if (_otherSelected)
+                            {
+                                <div class="history-compare-other-list">
+                                    @foreach (var group in _otherSelectionGroups)
+                                    {
+                                        <section class="history-compare-other-group">
+                                            <header>
+                                                <strong>@group.Label</strong>
+                                                <span>@group.Entries.Count item@(group.Entries.Count == 1 ? string.Empty : "s")</span>
+                                            </header>
+                                            @foreach (var entry in group.Entries)
+                                            {
+                                                <article @key="entry.Key">
+                                                    <button type="button"
+                                                            class="history-compare-other-disclosure"
+                                                            aria-expanded="@entry.IsExpanded"
+                                                            @onclick="() => ToggleOtherEntryAsync(entry)">
+                                                        <span>
+                                                            <strong>@entry.Entry.Label</strong>
+                                                            <span>@entry.Entry.Category · @entry.Entry.Change</span>
+                                                        </span>
+                                                        <span aria-hidden="true">@(entry.IsExpanded ? "−" : "+")</span>
+                                                    </button>
+                                                    @if (entry.IsExpanded)
+                                                    {
+                                                        @if (entry.IsLoading)
+                                                        {
+                                                            <p class="history-compare-diff-empty" role="status">Preparing diff…</p>
+                                                        }
+                                                        else if (!string.IsNullOrWhiteSpace(entry.Error))
+                                                        {
+                                                            <div class="alert alert-danger history-alert" role="alert">@entry.Error</div>
+                                                        }
+                                                        else
+                                                        {
+                                                            <HistoryCompareDiffView Model="entry.Diff" />
+                                                        }
+                                                    }
+                                                </article>
+                                            }
+                                        </section>
+                                    }
+                                </div>
+                            }
+                        }
                     </section>
                 }
             </div>
@@ -523,7 +592,22 @@
 
                         @if (!string.IsNullOrWhiteSpace(_restoreError))
                         {
-                            <div class="alert alert-danger history-alert" role="alert">@_restoreError</div>
+                            <div class="alert alert-danger history-alert" role="alert">
+                                <p>@_restoreError</p>
+                                @if (_restoreBlockers is { Count: > 0 })
+                                {
+                                    <ul class="history-restore-blockers">
+                                        @foreach (var blocker in _restoreBlockers)
+                                        {
+                                            <li><strong>@blocker.Label</strong><span>@blocker.Count</span></li>
+                                        }
+                                    </ul>
+                                    <div class="history-restore-actions">
+                                        <button type="button" class="btn btn-outline-danger" disabled="@HasActiveHistoryOperation" @onclick="RequestForceRestore">Force restore</button>
+                                        <button type="button" class="btn btn-outline-secondary" disabled="@HasActiveHistoryOperation" @onclick="CloseRestoreWorkflow">Cancel</button>
+                                    </div>
+                                }
+                            </div>
                         }
 
                         @if (_restoreLoading)
@@ -669,6 +753,15 @@
                     </section>
                 }
 
+                <ConfirmationDialog IsOpen="@_forceRestoreRequested"
+                                    Title="Force restore and discard queued work"
+                                    Message="Force restoring discards all queued or running project work, including unfinished ingest, image generation, publication render, and unresolved contest results. The discarded work cannot be resumed. Continue?"
+                                    ConfirmLabel="Force restore"
+                                    CancelLabel="Keep queued work"
+                                    Destructive="true"
+                                    Busy="@_restoreBusy"
+                                    OnConfirm="ApplyForceRestoreAsync"
+                                    OnCancel="CancelForceRestore" />
                 <ConfirmationDialog IsOpen="@(_removeRemoteTarget is not null)"
                                     Title="Remove project remote"
                                     Message="@RemoveRemoteMessage"
@@ -728,6 +821,19 @@
     private string? _comparisonError;
     private string? _comparisonBeforeSha;
     private string? _comparisonAfterSha;
+    private CancellationTokenSource? _comparisonCancellation;
+    private CancellationTokenSource? _chapterDiffCancellation;
+    private long _comparisonGeneration;
+    private VersionHistorySnapshotPayload? _comparisonBaseline;
+    private VersionHistorySnapshotPayload? _comparisonCandidate;
+    private IReadOnlyList<HistoryChapterTarget> _chapterTargets = [];
+    private HistoryChapterTarget? _selectedChapterTarget;
+    private HistoryCompareDiffViewModel? _selectedChapterDiff;
+    private bool _selectedChapterLoading;
+    private string? _selectedChapterError;
+    private bool _otherSelected;
+    private IReadOnlyList<HistoryOtherGroup> _otherGroups = [];
+    private IReadOnlyList<HistoryOtherGroupView> _otherSelectionGroups = [];
     private bool _clearFailuresRequested;
     private bool _clearingFailures;
     private ProjectVersionTimelineView? Timeline { get; set; }
@@ -749,6 +855,8 @@
     private bool _checkpointRefreshPending;
     private ElementReference _restorePanel;
     private string? _restoreError;
+    private IReadOnlyList<VersionHistoryRestoreBlocker>? _restoreBlockers;
+    private bool _forceRestoreRequested;
     private string? _restoreSelectionError;
 
     private ProjectVersionRepositoryView? Repository => _status?.Repository ?? Timeline?.Repository;
@@ -812,10 +920,7 @@
 
         _loadedProjectId = Project.Id;
         _selectedCommitShas.Clear();
-        _comparison = null;
-        _comparisonError = null;
-        _comparisonBeforeSha = null;
-        _comparisonAfterSha = null;
+        ClearComparisonState();
         _connections = [];
         _remotes = [];
         _remoteDataAvailable = false;
@@ -1297,9 +1402,7 @@
                 ProjectVersionCheckpointKind.Manual,
                 _checkpointDraft.Message.Trim());
             _checkpointDraft.Message = string.Empty;
-            _comparison = null;
-            _comparisonBeforeSha = null;
-            _comparisonAfterSha = null;
+            ClearComparisonState();
             _selectedCommitShas.Clear();
             await RefreshHistoryAsync(project.Id);
             _actionMessage = "Checkpoint created.";
@@ -1362,18 +1465,12 @@
         if (existing >= 0)
         {
             _selectedCommitShas.RemoveAt(existing);
-            _comparison = null;
-            _comparisonError = null;
-            _comparisonBeforeSha = null;
-            _comparisonAfterSha = null;
+            ClearComparisonState();
         }
         else if (_selectedCommitShas.Count < 2)
         {
             _selectedCommitShas.Add(commitSha);
-            _comparison = null;
-            _comparisonError = null;
-            _comparisonBeforeSha = null;
-            _comparisonAfterSha = null;
+            ClearComparisonState();
         }
     }
 
@@ -1383,10 +1480,7 @@
             return;
 
         _selectedCommitShas.Clear();
-        _comparison = null;
-        _comparisonError = null;
-        _comparisonBeforeSha = null;
-        _comparisonAfterSha = null;
+        ClearComparisonState();
     }
 
     private async Task CompareSelectedAsync()
@@ -1395,6 +1489,10 @@
             return;
 
         using var operation = HistoryEvents.BeginProjectOperation(project.Id);
+        ClearComparisonState();
+        _comparisonCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        var generation = _comparisonGeneration;
+        var cancellationToken = _comparisonCancellation.Token;
         _isComparing = true;
         _comparisonError = null;
         try
@@ -1407,24 +1505,345 @@
             if (orderedCheckpoints.Count != 2)
                 throw new InvalidOperationException("Choose exactly two available checkpoints to compare.");
 
-            var baseline = await VersionHistory.LoadCheckpointAsync(project.Id, orderedCheckpoints[0].CommitSha!);
-            var candidate = await VersionHistory.LoadCheckpointAsync(project.Id, orderedCheckpoints[1].CommitSha!);
-            _comparison = SnapshotComparer.Compare(baseline.Payload, candidate.Payload);
-            _comparisonBeforeSha = baseline.Commit.Sha;
-            _comparisonAfterSha = candidate.Commit.Sha;
+            var beforeSha = orderedCheckpoints[0].CommitSha!;
+            var afterSha = orderedCheckpoints[1].CommitSha!;
+            var result = await Task.Run(async () =>
+            {
+                using var scope = ScopeFactory.CreateScope();
+                var versionHistory = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+                var comparer = scope.ServiceProvider.GetRequiredService<IVersionHistorySnapshotComparer>();
+                var baseline = await versionHistory.LoadCheckpointForComparisonAsync(project.Id, beforeSha, cancellationToken);
+                var candidate = await versionHistory.LoadCheckpointForComparisonAsync(project.Id, afterSha, cancellationToken);
+                var comparison = comparer.Compare(
+                    baseline.Payload,
+                    candidate.Payload,
+                    new VersionHistoryCompareOptions { IncludeBoundedReadableText = false });
+                var chapterTargets = BuildChapterTargets(baseline.Payload, candidate.Payload, comparison);
+                var selectedChapter = chapterTargets.FirstOrDefault();
+                var selectedDiff = selectedChapter is null
+                    ? null
+                    : HistoryCompareDiffProjector.Prepare(BuildChapterDiff(selectedChapter), cancellationToken);
+                return new HistoryComparisonLoadResult(
+                    baseline,
+                    candidate,
+                    comparison,
+                    chapterTargets,
+                    BuildOtherGroups(comparison),
+                    selectedChapter,
+                    selectedDiff);
+            }, cancellationToken);
+
+            if (!IsCurrentComparison(generation, project.Id))
+                return;
+
+            _comparisonBaseline = result.Baseline.Payload;
+            _comparisonCandidate = result.Candidate.Payload;
+            _comparison = result.Comparison;
+            _comparisonBeforeSha = result.Baseline.Commit.Sha;
+            _comparisonAfterSha = result.Candidate.Commit.Sha;
+            _chapterTargets = result.ChapterTargets;
+            _otherGroups = result.OtherGroups;
+            _selectedChapterTarget = result.SelectedChapter;
+            _selectedChapterDiff = result.SelectedChapterDiff;
+            _otherSelected = result.SelectedChapter is null && result.OtherGroups.Count > 0;
+            if (_otherSelected)
+                BuildOtherSelectionGroups();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         catch (Exception exception)
         {
-            _comparison = null;
-            _comparisonBeforeSha = null;
-            _comparisonAfterSha = null;
-            _comparisonError = exception.Message;
+            if (IsCurrentComparison(generation, project.Id))
+                _comparisonError = exception.Message;
         }
         finally
         {
-            _isComparing = false;
+            if (IsCurrentComparison(generation, project.Id))
+                _isComparing = false;
         }
     }
+
+    private void ClearComparisonState()
+    {
+        _comparisonGeneration++;
+        _chapterDiffCancellation?.Cancel();
+        _chapterDiffCancellation?.Dispose();
+        _chapterDiffCancellation = null;
+        _comparisonCancellation?.Cancel();
+        _comparisonCancellation?.Dispose();
+        _comparisonCancellation = null;
+        foreach (var entry in _otherSelectionGroups.SelectMany(group => group.Entries))
+            entry.Cancel();
+        _comparison = null;
+        _isComparing = false;
+        _comparisonError = null;
+        _comparisonBeforeSha = null;
+        _comparisonAfterSha = null;
+        _comparisonBaseline = null;
+        _comparisonCandidate = null;
+        _chapterTargets = [];
+        _selectedChapterTarget = null;
+        _selectedChapterDiff = null;
+        _selectedChapterLoading = false;
+        _selectedChapterError = null;
+        _otherSelected = false;
+        _otherGroups = [];
+        _otherSelectionGroups = [];
+    }
+
+    private bool IsCurrentComparison(long generation, Guid projectId) =>
+        !_disposed && generation == _comparisonGeneration && _loadedProjectId == projectId;
+
+    private async Task SelectChapterTargetAsync(HistoryChapterTarget target)
+    {
+        if (Project is not { } project || _comparisonCancellation is null)
+            return;
+
+        _chapterDiffCancellation?.Cancel();
+        _chapterDiffCancellation?.Dispose();
+        _chapterDiffCancellation = CancellationTokenSource.CreateLinkedTokenSource(_comparisonCancellation.Token);
+        var chapterCancellation = _chapterDiffCancellation;
+        var cancellationToken = chapterCancellation.Token;
+        var generation = _comparisonGeneration;
+        _selectedChapterTarget = target;
+        _selectedChapterDiff = null;
+        _selectedChapterLoading = true;
+        _selectedChapterError = null;
+        _otherSelected = false;
+        foreach (var entry in _otherSelectionGroups.SelectMany(group => group.Entries))
+            entry.Cancel();
+        _otherSelectionGroups = [];
+        try
+        {
+            var prepared = await Task.Run(() =>
+            {
+                using var scope = ScopeFactory.CreateScope();
+                cancellationToken.ThrowIfCancellationRequested();
+                return HistoryCompareDiffProjector.Prepare(BuildChapterDiff(target), cancellationToken);
+            }, cancellationToken);
+            if (IsCurrentComparison(generation, project.Id)
+                && ReferenceEquals(_chapterDiffCancellation, chapterCancellation)
+                && !_otherSelected
+                && _selectedChapterTarget?.ChapterId == target.ChapterId)
+            {
+                _selectedChapterDiff = prepared;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrentComparison(generation, project.Id)
+                && ReferenceEquals(_chapterDiffCancellation, chapterCancellation)
+                && !_otherSelected
+                && _selectedChapterTarget?.ChapterId == target.ChapterId)
+            {
+                _selectedChapterError = exception.Message;
+            }
+        }
+        finally
+        {
+            if (IsCurrentComparison(generation, project.Id)
+                && ReferenceEquals(_chapterDiffCancellation, chapterCancellation)
+                && !_otherSelected
+                && _selectedChapterTarget?.ChapterId == target.ChapterId)
+            {
+                _selectedChapterLoading = false;
+            }
+        }
+    }
+
+    private void SelectOtherTarget()
+    {
+        _chapterDiffCancellation?.Cancel();
+        _chapterDiffCancellation?.Dispose();
+        _chapterDiffCancellation = null;
+        _selectedChapterTarget = null;
+        _selectedChapterDiff = null;
+        _selectedChapterLoading = false;
+        _selectedChapterError = null;
+        _otherSelected = true;
+        BuildOtherSelectionGroups();
+    }
+
+    private void BuildOtherSelectionGroups()
+    {
+        _otherSelectionGroups = _otherGroups
+            .Select(group => new HistoryOtherGroupView(
+                group.Label,
+                group.Entries
+                    .Select(entry => new HistoryOtherEntryView(entry.Key, entry.Entry))
+                    .ToList()))
+            .ToList();
+    }
+
+    private async Task ToggleOtherEntryAsync(HistoryOtherEntryView entry)
+    {
+        if (Project is not { } project
+            || _comparisonCancellation is null
+            || _comparisonBaseline is null
+            || _comparisonCandidate is null)
+        {
+            return;
+        }
+
+        if (entry.IsExpanded)
+        {
+            entry.IsExpanded = false;
+            entry.Cancel();
+            return;
+        }
+
+        entry.IsExpanded = true;
+        if (entry.IsPrepared || entry.IsLoading)
+            return;
+
+        entry.Cancel();
+        entry.IsLoading = true;
+        entry.Error = null;
+        entry.Cancellation = CancellationTokenSource.CreateLinkedTokenSource(_comparisonCancellation.Token);
+        var cancellationToken = entry.Cancellation.Token;
+        var entryGeneration = entry.WorkGeneration;
+        var generation = _comparisonGeneration;
+        var baseline = _comparisonBaseline;
+        var candidate = _comparisonCandidate;
+        try
+        {
+            var prepared = await Task.Run(() =>
+            {
+                using var scope = ScopeFactory.CreateScope();
+                var comparer = scope.ServiceProvider.GetRequiredService<IVersionHistorySnapshotComparer>();
+                var exactComparison = comparer.Compare(
+                    baseline,
+                    candidate,
+                    new VersionHistoryCompareOptions
+                    {
+                        IncludeBoundedReadableText = false,
+                        UnboundedReadableTextEntry = entry.Key,
+                    });
+                var exactEntry = exactComparison.GetArea(entry.Key.Area).Entries.Single(item =>
+                    string.Equals(item.Category, entry.Key.Category, StringComparison.Ordinal)
+                    && string.Equals(item.Key, entry.Key.Key, StringComparison.Ordinal));
+                return HistoryCompareDiffProjector.Prepare(BuildOtherEntryDiff(exactEntry), cancellationToken);
+            }, cancellationToken);
+
+            if (IsCurrentComparison(generation, project.Id)
+                && entry.WorkGeneration == entryGeneration
+                && entry.IsExpanded)
+            {
+                entry.Diff = prepared;
+                entry.IsPrepared = true;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrentComparison(generation, project.Id)
+                && entry.WorkGeneration == entryGeneration
+                && entry.IsExpanded)
+                entry.Error = exception.Message;
+        }
+        finally
+        {
+            if (IsCurrentComparison(generation, project.Id))
+                entry.Complete(entryGeneration);
+        }
+    }
+
+    private static ReviewDiff? BuildChapterDiff(HistoryChapterTarget target) =>
+        ManuscriptReviewDiffBuilder.TryBuild(
+            ToManuscriptDocument(target.Before, target.ChapterId),
+            ToManuscriptDocument(target.After, target.ChapterId),
+            target.Title,
+            out var diff)
+            ? diff
+            : null;
+
+    private static ManuscriptDocument ToManuscriptDocument(ProjectExportChapter? chapter, Guid chapterId)
+    {
+        if (chapter is null || string.IsNullOrWhiteSpace(chapter.ManuscriptJson))
+            return ManuscriptCodec.CreateEmpty(chapter?.Id ?? chapterId, Math.Max(0, chapter?.ManuscriptRevision ?? 0));
+
+        return ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+    }
+
+    private static ReviewDiff? BuildOtherEntryDiff(VersionHistorySnapshotChangeEntry entry)
+    {
+        if (entry.BeforeText is null && entry.AfterText is null)
+            return null;
+
+        var section = ManuscriptReviewDiffBuilder.CreateSection(
+            $"{entry.Category}/{entry.Key}",
+            entry.Label,
+            entry.BeforeText ?? string.Empty,
+            entry.AfterText ?? string.Empty);
+        return section.Hunks.Count == 0 ? null : new ReviewDiff(entry.Label, null, [section]);
+    }
+
+    private static IReadOnlyList<HistoryChapterTarget> BuildChapterTargets(
+        VersionHistorySnapshotPayload baseline,
+        VersionHistorySnapshotPayload candidate,
+        VersionHistorySnapshotComparison comparison)
+    {
+        var baselineById = baseline.Narrative.Chapters.ToDictionary(chapter => chapter.Id);
+        var candidateById = candidate.Narrative.Chapters.ToDictionary(chapter => chapter.Id);
+        var targets = new List<(HistoryChapterTarget Target, int Order)>();
+        foreach (var entry in comparison.GetArea("narrative").Entries
+                     .Where(entry => entry.Category.Equals("chapters", StringComparison.OrdinalIgnoreCase)))
+        {
+            var chapterId = Guid.TryParseExact(entry.Key, "N", out var parsed) ? parsed : Guid.Empty;
+            baselineById.TryGetValue(chapterId, out var before);
+            candidateById.TryGetValue(chapterId, out var after);
+            targets.Add((
+                new HistoryChapterTarget(
+                    chapterId,
+                    after?.Title ?? before?.Title ?? entry.Label,
+                    before,
+                    after),
+                after?.Order ?? before?.Order ?? int.MaxValue));
+        }
+
+        return targets
+            .OrderBy(item => item.Order)
+            .ThenBy(item => item.Target.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Target)
+            .ToList();
+    }
+
+    private static IReadOnlyList<HistoryOtherGroup> BuildOtherGroups(VersionHistorySnapshotComparison comparison) =>
+        comparison.Areas
+            .SelectMany(area => area.Entries.Select(entry => new HistoryOtherEntrySummary(
+                new VersionHistorySnapshotEntryKey(area.Area, entry.Category, entry.Key),
+                entry)))
+            .GroupBy(item => item.Key.Area.Equals("narrative", StringComparison.Ordinal)
+                    && item.Entry.Category.Equals("chapters", StringComparison.OrdinalIgnoreCase)
+                ? $"narrative/chapters/{item.Key.Key}"
+                : $"{item.Key.Area}/{item.Entry.Category}",
+                StringComparer.Ordinal)
+            .Where(group => !group.Key.StartsWith("narrative/chapters/", StringComparison.Ordinal))
+            .Select(group =>
+            {
+                var entries = group
+                    .OrderBy(entry => entry.Entry.Key, StringComparer.Ordinal)
+                    .ToList();
+                var slash = group.Key.IndexOf('/');
+                var area = slash < 0 ? group.Key : group.Key[..slash];
+                return new HistoryOtherGroup(
+                    group.Key,
+                    entries.Count == 1 ? entries[0].Entry.Label : $"{AreaLabel(area)} changes",
+                    entries);
+            })
+            .OrderBy(group => group.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static string ChapterTargetKind(HistoryChapterTarget target) =>
+        target.Before is null
+            ? "Only in newer checkpoint"
+            : target.After is null ? "Only in older checkpoint" : "Changed";
 
     private async Task OpenRestoreAsync(ProjectVersionCheckpointView checkpoint)
     {
@@ -1437,6 +1856,8 @@
         _restoreCurrentLoaded = null;
         _restoreResult = null;
         _restoreError = null;
+        _restoreBlockers = null;
+        _forceRestoreRequested = false;
         _restoreSelectionError = null;
         _restoreStep = RestoreStep.Configure;
         _restoreScope = VersionHistoryRestoreScope.WholeProject;
@@ -1551,6 +1972,27 @@
 
     private async Task ApplyRestoreAsync()
     {
+        await ApplyRestoreCoreAsync(discardQueuedWork: false);
+    }
+
+    private void RequestForceRestore()
+    {
+        if (HasActiveHistoryOperation || _restoreBlockers is not { Count: > 0 })
+            return;
+
+        _forceRestoreRequested = true;
+    }
+
+    private void CancelForceRestore() => _forceRestoreRequested = false;
+
+    private async Task ApplyForceRestoreAsync()
+    {
+        _forceRestoreRequested = false;
+        await ApplyRestoreCoreAsync(discardQueuedWork: true);
+    }
+
+    private async Task ApplyRestoreCoreAsync(bool discardQueuedWork)
+    {
         if (Project is not { } project || _restoreTarget?.CommitSha is not { } targetCommitSha || HasActiveHistoryOperation)
             return;
 
@@ -1569,6 +2011,7 @@
         using var operation = HistoryEvents.BeginProjectOperation(project.Id);
         _restoreBusy = true;
         _restoreError = null;
+        _restoreBlockers = null;
         try
         {
             _restoreResult = await VersionRestore.RestoreAsync(
@@ -1576,12 +2019,18 @@
                 targetCommitSha,
                 selection,
                 safetyMessage: $"Safety checkpoint before restoring {ShortSha(targetCommitSha)}",
+                discardQueuedWork: discardQueuedWork,
                 cancellationToken: _lifetimeCancellation.Token);
             _restoreStep = RestoreStep.Result;
             await RefreshProjectHistoryAndRemoteAsync(project.Id);
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
+        }
+        catch (VersionHistoryRestoreException exception) when (exception.Code == "WorkInProgress")
+        {
+            _restoreBlockers = exception.Blockers;
+            _restoreError = exception.Message;
         }
         catch (Exception exception)
         {
@@ -1606,6 +2055,8 @@
         _restoreChapterIds.Clear();
         _restoreAreas.Clear();
         _restoreError = null;
+        _restoreBlockers = null;
+        _forceRestoreRequested = false;
         _restoreSelectionError = null;
         _restoreLoading = false;
     }
@@ -1787,6 +2238,7 @@
         HistoryEvents.CheckpointCreated -= HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged -= HandleOperationStateChanged;
         HistoryEvents.RemoteSyncChanged -= HandleRemoteSyncChanged;
+        ClearComparisonState();
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }
@@ -1811,6 +2263,68 @@
         string Title,
         bool InCurrent,
         bool InTarget);
+
+    private sealed record HistoryChapterTarget(
+        Guid ChapterId,
+        string Title,
+        ProjectExportChapter? Before,
+        ProjectExportChapter? After);
+
+    private sealed record HistoryOtherGroup(
+        string Key,
+        string Label,
+        IReadOnlyList<HistoryOtherEntrySummary> Entries);
+
+    private sealed record HistoryOtherEntrySummary(
+        VersionHistorySnapshotEntryKey Key,
+        VersionHistorySnapshotChangeEntry Entry);
+
+    private sealed class HistoryOtherEntryView(
+        VersionHistorySnapshotEntryKey key,
+        VersionHistorySnapshotChangeEntry entry)
+    {
+        public VersionHistorySnapshotEntryKey Key { get; } = key;
+        public VersionHistorySnapshotChangeEntry Entry { get; } = entry;
+        public bool IsExpanded { get; set; }
+        public bool IsLoading { get; set; }
+        public bool IsPrepared { get; set; }
+        public string? Error { get; set; }
+        public HistoryCompareDiffViewModel? Diff { get; set; }
+        public CancellationTokenSource? Cancellation { get; set; }
+        public int WorkGeneration { get; private set; }
+
+        public void Cancel()
+        {
+            WorkGeneration++;
+            Cancellation?.Cancel();
+            Cancellation?.Dispose();
+            Cancellation = null;
+            IsLoading = false;
+        }
+
+        public void Complete(int generation)
+        {
+            if (WorkGeneration != generation)
+                return;
+
+            Cancellation?.Dispose();
+            Cancellation = null;
+            IsLoading = false;
+        }
+    }
+
+    private sealed record HistoryComparisonLoadResult(
+        ProjectVersionLoadedCheckpoint Baseline,
+        ProjectVersionLoadedCheckpoint Candidate,
+        VersionHistorySnapshotComparison Comparison,
+        IReadOnlyList<HistoryChapterTarget> ChapterTargets,
+        IReadOnlyList<HistoryOtherGroup> OtherGroups,
+        HistoryChapterTarget? SelectedChapter,
+        HistoryCompareDiffViewModel? SelectedChapterDiff);
+
+    private sealed record HistoryOtherGroupView(
+        string Label,
+        IReadOnlyList<HistoryOtherEntryView> Entries);
 
     private sealed class ManualCheckpointDraft
     {

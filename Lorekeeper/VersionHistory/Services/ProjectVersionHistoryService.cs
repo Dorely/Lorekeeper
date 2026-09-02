@@ -1831,7 +1831,7 @@ public sealed class ProjectVersionHistoryService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
-        var loaded = LoadGitCheckpoint(
+        var loaded = LoadFullGitCheckpoint(
             repositoryId,
             commitSha,
             recordedCheckpoint: null,
@@ -1845,6 +1845,39 @@ public sealed class ProjectVersionHistoryService(
     }
 
     public async Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(
+        Guid projectId,
+        string commitSha,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        if (string.IsNullOrWhiteSpace(commitSha))
+            throw new ArgumentException("A checkpoint commit SHA is required.", nameof(commitSha));
+
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        ProjectVersionRepository repository;
+        ProjectVersionCheckpoint? recorded;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            repository = await read.Db.ProjectVersionRepositories
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+            recorded = await read.Db.ProjectVersionCheckpoints
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    item => item.ProjectVersionRepositoryId == repository.Id && item.CommitSha == commitSha,
+                    cancellationToken);
+        }
+
+        var loaded = LoadFullGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken);
+        return new ProjectVersionLoadedCheckpoint(
+            loaded.Commit,
+            loaded.Manifest,
+            loaded.Payload,
+            recorded is null ? null : ToCheckpointView(recorded));
+    }
+
+    public async Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(
         Guid projectId,
         string commitSha,
         CancellationToken cancellationToken = default)
@@ -2472,13 +2505,16 @@ public sealed class ProjectVersionHistoryService(
         if (!reviewCache.TryGetGitCheckpoint(repositoryId, commitSha, out var loaded))
         {
             var commit = git.GetCommitMetadata(repositoryId, commitSha);
-            var files = git.ReadTree(repositoryId, commitSha);
             var temporaryDirectory = CreateTemporaryDirectory();
             try
             {
-                WriteTreeToTemporaryDirectory(temporaryDirectory, files, cancellationToken);
+                git.MaterializeTree(repositoryId, temporaryDirectory, commitSha, cancellationToken);
                 EnsureNoReparsePointsRecursively(temporaryDirectory);
-                var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, expectedProjectId);
+                var artifact = snapshotReader.Read(
+                    temporaryDirectory,
+                    repositoryId,
+                    expectedProjectId,
+                    new VersionHistorySnapshotReadOptions { IncludeAssetData = false });
                 loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
             }
             finally
@@ -2487,6 +2523,41 @@ public sealed class ProjectVersionHistoryService(
             }
 
             reviewCache.SetGitCheckpoint(repositoryId, commitSha, loaded);
+        }
+
+        if (recordedCheckpoint is not null
+            && !string.Equals(
+                recordedCheckpoint.ContentHash,
+                loaded.Manifest.ContentHash,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("The recorded checkpoint content hash does not match its Git payload.");
+        }
+
+        return loaded;
+    }
+
+    private LoadedGitCheckpoint LoadFullGitCheckpoint(
+        Guid repositoryId,
+        string commitSha,
+        ProjectVersionCheckpoint? recordedCheckpoint,
+        Guid expectedProjectId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var commit = git.GetCommitMetadata(repositoryId, commitSha);
+        var temporaryDirectory = CreateTemporaryDirectory();
+        LoadedGitCheckpoint loaded;
+        try
+        {
+            git.MaterializeTree(repositoryId, temporaryDirectory, commitSha, cancellationToken);
+            EnsureNoReparsePointsRecursively(temporaryDirectory);
+            var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, expectedProjectId);
+            loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
+        }
+        finally
+        {
+            CleanupTemporaryDirectory(temporaryDirectory);
         }
 
         if (recordedCheckpoint is not null

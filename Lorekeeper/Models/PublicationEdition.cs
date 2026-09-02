@@ -28,6 +28,7 @@ public enum PublicationVendor
     AmazonKdp,
     IngramSpark,
     BarnesAndNoblePress,
+    Lulu,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PrintProjectUse>))]

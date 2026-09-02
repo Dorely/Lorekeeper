@@ -158,8 +158,6 @@ fn validate_registry_profile(
             vec!["dust-jacket"]
         }
         "JacketedCaseLaminate" => vec!["case-wrap", "dust-jacket"],
-        "Declared" if product.binding == "PerfectBound" => vec!["perfect-bound-outside"],
-        "Declared" if product.binding == "CaseBound" => vec!["case-wrap"],
         _ => Vec::new(),
     };
     let surfaces_match = expected_surfaces.len() == product.required_cover_surfaces.len()
@@ -300,7 +298,7 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
         return product
             .spine_model
             .inches_per_page
-            .map(|caliper| caliper * pages as f32)
+            .map(|caliper| caliper * pages as f32 + product.spine_model.base_inches)
             .ok_or_else(|| {
                 Diagnostic::error(
                     "PRESS_SPINE_MODEL_INVALID",
@@ -362,6 +360,9 @@ fn physical_cover_surfaces(
                 }
                 "case-wrap" if product.vendor == "AmazonKdp" => {
                     (2.0 * trim_width + spine + 1.02, trim_height + 1.02)
+                }
+                "case-wrap" if product.vendor == "Lulu" => {
+                    (2.0 * trim_width + spine + 0.25, trim_height + 0.25)
                 }
                 "case-wrap" => (2.0 * (trim_width - 0.185) + spine + 2.25, trim_height + 1.5),
                 "dust-jacket" => (
@@ -549,6 +550,24 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             Diagnostic::error(
                 "PRESS_BN_SPINE_TEXT_INELIGIBLE",
                 "B&N covers cannot contain spine text at 50 pages or fewer.",
+            ),
+        )));
+    }
+    if request
+        .print_artifact_profile
+        .as_ref()
+        .is_some_and(|product| product.vendor == "Lulu")
+        && layout.pages.len() < 100
+        && request
+            .cover
+            .as_ref()
+            .is_some_and(|cover| !cover.spine_text.trim().is_empty())
+    {
+        return Err(Box::new(RenderResponse::failed(
+            "rejected",
+            Diagnostic::error(
+                "PRESS_LULU_SPINE_TEXT_INELIGIBLE",
+                "Lulu covers cannot contain spine text below 100 pages.",
             ),
         )));
     }
@@ -1556,6 +1575,7 @@ fn validate_request(
             | "kdp-hardcover-v1"
             | "ingram-print-pdfx1a-v2"
             | "bn-print-pdfa1b-v1"
+            | "lulu-print-v1"
     ) {
         return reject(
             "PRESS_PROFILE_UNSUPPORTED",
@@ -1669,6 +1689,12 @@ fn validate_request(
         }
         let barcode_mode_is_valid = if request.profile == "generic-digital-pdf-v1" {
             cover.barcode_mode == "None"
+        } else if request
+            .print_artifact_profile
+            .as_ref()
+            .is_some_and(|product| product.vendor == "Lulu")
+        {
+            matches!(cover.barcode_mode.as_str(), "None" | "LorekeeperBarcode")
         } else {
             matches!(
                 cover.barcode_mode.as_str(),

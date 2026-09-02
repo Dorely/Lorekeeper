@@ -23,12 +23,10 @@
   configured remotes, and upstream status.
 - Never edit, commit, or push directly on `main`. If a session starts on `main`
   and work is required, first fetch `origin`, require a clean synchronized
-  checkout, and create a focused work branch from `origin/main`. Use the
-  `codex/` prefix for Codex-created branches unless the user requests another
-  name.
+  checkout, and create a separate work branch from `origin/main`. Use the
+  `work/` prefix and keep the name generic, this branch will be used for multiple changes.
 - If you are already on a feature branch that has commits that are not merged; 
   merge in the latest from `main` and then continue work on the current branch after merging.
-- Start feature work only from a clean working tree whose index matches `HEAD`.
 - If existing changes form coherent prior work, finish their verification and
   documentation, then commit them before beginning a new feature. Never mix
   unrelated unfinished work into a new change.
@@ -49,27 +47,9 @@
   workflow configuration, must enter `main` through a pull request from a
   non-`main` branch. Direct pushes to `main` are prohibited even for
   administrators and urgent fixes.
-- Accumulate coherent, verified commits on the focused work branch until the user
-  decides that branch is ready for review and merge. Do not open or update a pull
-  request merely because an individual change or commit is complete.
-- When the user decides to merge the accumulated work, fetch `origin`, incorporate
-  the latest `origin/main`, inspect the complete branch diff, rerun all required
-  verification on the exact proposed head, and push only the focused work branch.
-  Then open or update one pull request targeting `main`, keep its scope coherent,
-  and wait for the required status check and at least one approving review from
-  someone other than the last pusher. Resolve every review conversation before
-  merge.
-- Never approve or merge your own pull request. Agents may prepare, push, and
-  open a pull request, but merging requires an authorized human or a separately
-  authorized reviewer after repository protections pass.
-- Treat a local commit as implementation-complete and part of the accumulated
-  work branch. The branch becomes review-ready only when the user decides to open
-  or update its pull request, and the change is repository-integrated only after
-  GitHub reports that pull request merged into `main`. A closed or still-open pull
-  request is not merged work.
-- Use the repository's pull-request template and `CONTRIBUTING.md`. Keep GitHub
-  Actions permissions read-only by default; do not make a workflow token capable
-  of approving pull requests.
+- Accumulate coherent, verified commits on separate work branch until the user
+  decides that the changes are ready to be merged. Do not open or update a pull
+  request without explicit request from the user.
 
 ## Research and Impact Analysis
 
@@ -93,7 +73,10 @@
 ## Roslynk Semantic Workflow
 
 - The project-scoped `.codex/config.toml` pins Roslynk and intentionally exposes
-  only its read-only tools. When available, use Roslynk first for compiled C# and
+  only its read-only tools. The Command Code harness is pinned to the same
+  server through the project-scoped `.mcp.json`, with `.commandcode/settings.json`
+  permission rules exposing the same 14 read-only tools and denying the mutating
+  tools plus `reload_solution`. When available, use Roslynk first for compiled C# and
   Razor semantic questions: diagnostics, symbols, definitions, references,
   callers, implementations, type hierarchies, code-action discovery, and
   dead-code candidates. Continue to use `rg` and host file reads for text search

@@ -115,6 +115,129 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void SnapshotReaderLightweightModeValidatesAssetsWithoutRetainingBinaryData()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imageId = Guid.NewGuid();
+            var familyId = Guid.NewGuid();
+            var faceId = Guid.NewGuid();
+            byte[] imageData = [1, 3, 5, 7];
+            byte[] fontData = [2, 4, 6, 8, 10];
+            var image = new VersionHistoryImageAsset(
+                imageId,
+                "image.png",
+                "image/png",
+                $"assets/images/{imageId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex(imageData),
+                imageData.LongLength,
+                "Image",
+                PublishAssetSource.Uploaded,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var face = new VersionHistoryFontFace(
+                faceId,
+                "Regular",
+                "font.ttf",
+                "font/ttf",
+                400,
+                false,
+                $"assets/fonts/{familyId:N}/faces/{faceId:N}/content.ttf",
+                VersionHistoryCanonicalJson.Sha256Hex(fontData),
+                fontData.LongLength);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea(
+                    [image],
+                    [],
+                    [new VersionHistoryFontFamily(familyId, "Family", true, "Owned", [face])]),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = imageData },
+                FontFaceData = new Dictionary<Guid, byte[]> { [faceId] = fontData },
+            };
+            WriteSnapshotTree(root, payload);
+
+            var reader = new VersionHistorySnapshotReader();
+            var lightweight = reader.Read(
+                root,
+                payload.RepositoryId,
+                payload.ProjectId,
+                new VersionHistorySnapshotReadOptions { IncludeAssetData = false });
+            var full = reader.Read(root, payload.RepositoryId, payload.ProjectId);
+
+            Assert.Empty(lightweight.Payload.ImageData);
+            Assert.Empty(lightweight.Payload.FontFaceData);
+            Assert.Equal(imageData, full.Payload.ImageData[imageId]);
+            Assert.Equal(fontData, full.Payload.FontFaceData[faceId]);
+            Assert.Equal(image.Sha256, Assert.Single(lightweight.Payload.Assets.Images).Sha256);
+            Assert.Equal(face.Sha256, Assert.Single(Assert.Single(lightweight.Payload.Assets.FontFamilies).Faces).Sha256);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SnapshotReaderLightweightModeRejectsCorruptOrLengthMismatchedAsset(bool changeLength)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imageId = Guid.NewGuid();
+            byte[] imageData = [1, 2, 3, 4];
+            var image = new VersionHistoryImageAsset(
+                imageId,
+                "image.png",
+                "image/png",
+                $"assets/images/{imageId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex(imageData),
+                imageData.LongLength,
+                "Image",
+                PublishAssetSource.Uploaded,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([image], [], []),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = imageData },
+            };
+            WriteSnapshotTree(root, payload);
+            File.WriteAllBytes(
+                Path.Combine(root, image.BlobPath.Replace('/', Path.DirectorySeparatorChar)),
+                changeLength ? [9, 9, 9, 9, 9] : [9, 9, 9, 9]);
+
+            var exception = Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(
+                root,
+                payload.RepositoryId,
+                payload.ProjectId,
+                new VersionHistorySnapshotReadOptions { IncludeAssetData = false }));
+
+            Assert.Contains(changeLength ? "length" : "SHA-256", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SnapshotReaderPreservesChapterMetadataAndUsesDirectManuscriptJson()
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
@@ -433,6 +556,57 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void SelectiveRestoreChoosesCurrentOrTargetAssetBytesAndHashes()
+    {
+        var repositoryId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var imageId = Guid.NewGuid();
+        byte[] currentData = [1, 2, 3];
+        byte[] targetData = [7, 8, 9, 10];
+        var currentImage = new VersionHistoryImageAsset(
+            imageId,
+            "current.png",
+            "image/png",
+            $"assets/images/{imageId:N}/content.png",
+            VersionHistoryCanonicalJson.Sha256Hex(currentData),
+            currentData.LongLength,
+            "Current",
+            PublishAssetSource.Uploaded,
+            string.Empty,
+            string.Empty,
+            "{}",
+            null,
+            null,
+            null,
+            null,
+            null);
+        var targetImage = currentImage with
+        {
+            FileName = "target.png",
+            Sha256 = VersionHistoryCanonicalJson.Sha256Hex(targetData),
+            ByteLength = targetData.LongLength,
+        };
+        var current = CreatePayload(repositoryId, projectId) with
+        {
+            Assets = new VersionHistorySnapshotAssetsArea([currentImage], [], []),
+            ImageData = new Dictionary<Guid, byte[]> { [imageId] = currentData },
+        };
+        var target = CreatePayload(repositoryId, projectId) with
+        {
+            Assets = new VersionHistorySnapshotAssetsArea([targetImage], [], []),
+            ImageData = new Dictionary<Guid, byte[]> { [imageId] = targetData },
+        };
+
+        var assetsRestored = Merge(current, target, VersionHistoryRestoreSelection.ForMajorAreas(["assets"]));
+        var assetsUnchanged = Merge(current, target, VersionHistoryRestoreSelection.ForMajorAreas(["narrative"]));
+
+        Assert.Equal(targetData, assetsRestored.ImageData[imageId]);
+        Assert.Equal(targetImage.Sha256, Assert.Single(assetsRestored.Assets.Images).Sha256);
+        Assert.Equal(currentData, assetsUnchanged.ImageData[imageId]);
+        Assert.Equal(currentImage.Sha256, Assert.Single(assetsUnchanged.Assets.Images).Sha256);
+    }
+
+    [Fact]
     public void SelectedChapterMergeReplacesAddsRemovesAndRestoresOnlySelectedAnnotations()
     {
         var repositoryId = Guid.NewGuid();
@@ -574,6 +748,182 @@ public sealed class ProjectVersionRestoreTests
             Assert.Equal("Live project", project.Name);
             Assert.Equal("live-project", project.Slug);
             Assert.Equal(0, await verify.ProjectVersionCheckpoints.CountAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreRefusesQueuedWorkAndForceDiscardsBlockedOperationalRows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var databasePath = Path.Combine(root, "restore-queued-work.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            var projectId = Guid.NewGuid();
+            var repositoryId = Guid.NewGuid();
+            var headCommit = new string('a', 40);
+            await using (var setup = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await setup.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Id = projectId,
+                    Name = "Live project",
+                    Slug = "live-project",
+                };
+                setup.Projects.Add(project);
+                setup.ProjectVersionRepositories.Add(new ProjectVersionRepository
+                {
+                    Id = repositoryId,
+                    ProjectId = projectId,
+                    Project = project,
+                    CreativeRevision = 1,
+                    HeadCommitSha = headCommit,
+                });
+                var source = new IngestSource
+                {
+                    ProjectId = projectId,
+                    Title = "Blocked source",
+                    UserInstructions = "Ingest instructions",
+                    SourceText = "Source text",
+                };
+                setup.IngestSources.Add(source);
+                setup.IngestJobs.Add(new IngestJob
+                {
+                    ProjectId = projectId,
+                    SourceId = source.Id,
+                    Source = source,
+                    Instructions = "Ingest",
+                    Status = IngestJobStatus.StopRequested,
+                });
+                setup.ContestBatches.Add(new ContestBatch
+                {
+                    ProjectId = projectId,
+                    ChapterId = Guid.NewGuid(),
+                    OriginalManuscriptRevision = 1,
+                    OriginalManuscriptHash = "hash",
+                    Status = ContestBatchStatus.Completed,
+                });
+                setup.ProjectVersionOperations.Add(new ProjectVersionOperation
+                {
+                    ProjectVersionRepositoryId = repositoryId,
+                    Kind = ProjectVersionOperationKind.Checkpoint,
+                    Status = ProjectVersionOperationStatus.Running,
+                });
+                await setup.SaveChangesAsync();
+            }
+
+            var payload = CreatePayload(repositoryId, projectId);
+            var loaded = new ProjectVersionLoadedCheckpoint(
+                new GitCommitMetadata(
+                    headCommit,
+                    new string('b', 40),
+                    "target checkpoint",
+                    "test",
+                    "test@example.invalid",
+                    DateTimeOffset.UnixEpoch,
+                    "test",
+                    "test@example.invalid",
+                    DateTimeOffset.UnixEpoch,
+                    []),
+                new VersionHistorySnapshotManifest(
+                    VersionHistorySnapshotContract.FormatId,
+                    VersionHistorySnapshotContract.SchemaVersion,
+                    repositoryId,
+                    projectId,
+                    VersionHistorySnapshotContract.IncludedAreas,
+                    new string('c', 64),
+                    new string('d', 64),
+                    []),
+                payload,
+                null);
+            var history = new StubHistoryService(loaded)
+            {
+                Status = new ProjectVersionStatusView(
+                    new ProjectVersionRepositoryView(
+                        projectId,
+                        repositoryId,
+                        1,
+                        null,
+                        null,
+                        headCommit,
+                        null,
+                        null,
+                        ProjectVersionRepositoryHealth.Healthy,
+                        false,
+                        null),
+                    null),
+                CheckpointFactory = () => new ProjectVersionCheckpointView(
+                    Guid.NewGuid(),
+                    repositoryId,
+                    VersionHistorySnapshotContract.SchemaVersion,
+                    2,
+                    new string('e', 64),
+                    new string('f', 64),
+                    headCommit,
+                    null,
+                    ProjectVersionCheckpointKind.Manual,
+                    ProjectVersionCheckpointSource.Local,
+                    "test",
+                    DateTime.UtcNow),
+            };
+            var mutation = new ProjectMutationCoordinator($"Data Source={databasePath}");
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                mutation);
+            var service = new ProjectVersionRestoreService(
+                history,
+                database,
+                mutation,
+                new NoopOutlineGraphSync(),
+                new NoopContextIndexingService(),
+                new NoopIngestGraphSync(),
+                new NoopGraphStore(),
+                new NoopGraphAutoLinkService(),
+                new NoopProjectSearchIndex());
+
+            var exception = await Assert.ThrowsAsync<VersionHistoryRestoreException>(
+                () => service.RestoreAsync(
+                    projectId,
+                    headCommit,
+                    VersionHistoryRestoreSelection.ForWholeProject()));
+
+            Assert.Equal("WorkInProgress", exception.Code);
+            Assert.Equal("Restore is refused while queued or running project work exists.", exception.Message);
+            Assert.NotNull(exception.Blockers);
+            Assert.Equal(3, exception.Blockers!.Count);
+            await using (var verify = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                Assert.Equal(1, await verify.IngestJobs.CountAsync());
+                Assert.Equal(1, await verify.ContestBatches.CountAsync());
+                Assert.Equal(1, await verify.ProjectVersionOperations.CountAsync());
+                Assert.Equal("Live project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
+            }
+
+            var result = await service.RestoreAsync(
+                projectId,
+                headCommit,
+                VersionHistoryRestoreSelection.ForWholeProject(),
+                discardQueuedWork: true);
+
+            Assert.Equal(projectId, result.ProjectId);
+            await using (var verify = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                Assert.Equal(0, await verify.IngestJobs.CountAsync());
+                Assert.Equal(0, await verify.ContestBatches.CountAsync());
+                Assert.Equal(0, await verify.ProjectVersionOperations.CountAsync());
+                Assert.Equal("Project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
+            }
         }
         finally
         {
@@ -1003,6 +1353,8 @@ public sealed class ProjectVersionRestoreTests
     {
         public ProjectVersionStatusView? Status { get; set; }
 
+        public Func<ProjectVersionCheckpointView>? CheckpointFactory { get; set; }
+
         public int CreateCheckpointCalls { get; private set; }
 
         public Task<ProjectVersionRepositoryView?> GetRepositoryAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult<ProjectVersionRepositoryView?>(null);
@@ -1012,7 +1364,9 @@ public sealed class ProjectVersionRestoreTests
         public Task<ProjectVersionCheckpointView> CreateCheckpointAsync(Guid projectId, ProjectVersionCheckpointKind kind, string semanticMessage, string? requestKey = null, DateTimeOffset? authoredAt = null, CancellationToken cancellationToken = default)
         {
             CreateCheckpointCalls++;
-            return Unsupported<ProjectVersionCheckpointView>();
+            return CheckpointFactory is { } factory
+                ? Task.FromResult(factory())
+                : Unsupported<ProjectVersionCheckpointView>();
         }
 
         public Task<ProjectVersionTimelineView?> GetTimelineAsync(Guid projectId, int maxCheckpoints = 100, int maxOperations = 100, CancellationToken cancellationToken = default) => Task.FromResult<ProjectVersionTimelineView?>(null);
@@ -1048,6 +1402,8 @@ public sealed class ProjectVersionRestoreTests
         public Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockAsync(Guid projectId, ProjectVersionReviewTarget target, string blockId, string text, ProjectVersionReviewConcurrencyToken expectedToken, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
+
+        public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
 
         private static Task<T> Unsupported<T>() => Task.FromException<T>(new NotSupportedException());
     }

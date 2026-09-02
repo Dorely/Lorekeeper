@@ -222,7 +222,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
   print-artifact profile registry with built-in
-  profiles for Amazon KDP, IngramSpark, and Barnes & Noble Press.
+  profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu.
   Print-release creation chooses the destination and creates the release first;
   trim, interior color process, paper weight/thickness, cover construction, and
   cover-upload topology are configured afterward in that release's setup. Paper

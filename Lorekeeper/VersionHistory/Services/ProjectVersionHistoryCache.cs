@@ -25,6 +25,9 @@ public sealed class ProjectVersionHistoryCache
 
     internal void SetGitCheckpoint(Guid repositoryId, string commitSha, LoadedGitCheckpoint checkpoint)
     {
+        if (checkpoint.Payload.ImageData.Count != 0 || checkpoint.Payload.FontFaceData.Count != 0)
+            throw new InvalidOperationException("Version-history cache entries must not retain binary asset data.");
+
         _loadedGitCheckpoints[new GitCheckpointCacheKey(repositoryId, commitSha)] = checkpoint;
         Trim(_loadedGitCheckpoints, MaxLoadedGitCheckpointEntries);
     }

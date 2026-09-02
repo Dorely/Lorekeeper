@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Lorekeeper.Composition;
 using Lorekeeper.ImportExport;
@@ -10,7 +13,15 @@ public interface IVersionHistorySnapshotReader
     VersionHistorySnapshotArtifact Read(
         string rootDirectory,
         Guid? expectedRepositoryId = null,
-        Guid? expectedProjectId = null);
+        Guid? expectedProjectId = null,
+        VersionHistorySnapshotReadOptions? options = null);
+}
+
+public sealed record VersionHistorySnapshotReadOptions
+{
+    public static VersionHistorySnapshotReadOptions Default { get; } = new();
+
+    public bool IncludeAssetData { get; init; } = true;
 }
 
 /// <summary>
@@ -22,7 +33,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     public VersionHistorySnapshotArtifact Read(
         string rootDirectory,
         Guid? expectedRepositoryId = null,
-        Guid? expectedProjectId = null)
+        Guid? expectedProjectId = null,
+        VersionHistorySnapshotReadOptions? options = null)
     {
         if (string.IsNullOrWhiteSpace(rootDirectory))
             throw new ArgumentException("A snapshot directory is required.", nameof(rootDirectory));
@@ -38,24 +50,37 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException("Snapshot manifest.json is not in canonical form.");
         ValidateManifest(manifest, expectedRepositoryId, expectedProjectId);
 
+        var readOptions = options ?? VersionHistorySnapshotReadOptions.Default;
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var entry in manifest.Files)
+        var assetFiles = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var validatedFiles = new Dictionary<string, ValidatedSnapshotFile>(StringComparer.Ordinal);
+        using var payloadHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var entry in manifest.Files.OrderBy(item => item.Path, StringComparer.Ordinal))
         {
             var path = NormalizeRelativePath(entry.Path);
             var fullPath = ResolveSafePath(fullRoot, path);
             if (!File.Exists(fullPath))
                 throw new InvalidDataException($"Snapshot file '{path}' is missing.");
 
-            var bytes = File.ReadAllBytes(fullPath);
-            if (bytes.LongLength != entry.Length)
-                throw new InvalidDataException($"Snapshot file '{path}' has an unexpected length.");
-            if (!string.Equals(VersionHistoryCanonicalJson.Sha256Hex(bytes), entry.Sha256, StringComparison.Ordinal))
-                throw new InvalidDataException($"Snapshot file '{path}' failed its SHA-256 check.");
-            files.Add(path, bytes);
+            var isAssetBlob = IsAssetBlobPath(path);
+            var bytes = ValidateAndReadFile(
+                fullPath,
+                path,
+                entry,
+                payloadHash,
+                retainBytes: !isAssetBlob || readOptions.IncludeAssetData,
+                out var actualHash);
+            validatedFiles.Add(path, new(entry.Length, actualHash));
+            if (bytes is not null)
+            {
+                if (isAssetBlob)
+                    assetFiles.Add(path, bytes);
+                else
+                    files.Add(path, bytes);
+            }
         }
 
-        var actualPayloadHash = VersionHistoryCanonicalJson.Sha256Hex(
-            files.Select(item => (item.Key, item.Value)));
+        var actualPayloadHash = Convert.ToHexStringLower(payloadHash.GetHashAndReset());
         if (!string.Equals(actualPayloadHash, manifest.ContentHash, StringComparison.Ordinal))
             throw new InvalidDataException("Snapshot payload content hash does not match its manifest.");
 
@@ -64,10 +89,11 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         if (!string.Equals(expectedManifestHash, manifest.ManifestHash, StringComparison.Ordinal))
             throw new InvalidDataException("Snapshot manifest hash does not match its contents.");
 
-        ValidateFileSet(fullRoot, files.Keys);
+        var listedPaths = manifest.Files.Select(item => NormalizeRelativePath(item.Path)).ToList();
+        ValidateFileSet(fullRoot, listedPaths);
         var project = ReadRequired<VersionHistorySnapshotProjectArea>(files, "project/project.json");
         var narrativeFile = ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json");
-        var chapterPaths = ValidateChapterFileSet(files.Keys);
+        var chapterPaths = ValidateChapterFileSet(listedPaths);
         var chapters = ReadChapters(files, chapterPaths);
         var narrative = narrativeFile.ToArea(chapters);
         var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
@@ -81,7 +107,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             "publication/publication.json",
             requireCanonicalRoundTrip: manifest.SchemaVersion == VersionHistorySnapshotContract.SchemaVersion);
         publication = AdaptPublicationForSchema(publication, manifest.SchemaVersion);
-        ValidateSchemaFileSet(files.Keys, assets, chapterPaths);
+        ValidateSchemaFileSet(listedPaths, assets, chapterPaths);
+        ValidateAssetBlobs(assets, validatedFiles);
         var payload = new VersionHistorySnapshotPayload(
             manifest.RepositoryId,
             manifest.ProjectId,
@@ -94,13 +121,62 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             composition,
             publication)
         {
-            ImageData = ReadImageData(fullRoot, assets),
-            FontFaceData = ReadFontData(fullRoot, assets),
+            ImageData = readOptions.IncludeAssetData ? ReadImageData(assetFiles, assets) : new Dictionary<Guid, byte[]>(),
+            FontFaceData = readOptions.IncludeAssetData ? ReadFontData(assetFiles, assets) : new Dictionary<Guid, byte[]>(),
         };
 
         ValidateReferences(payload);
         return new VersionHistorySnapshotArtifact(fullRoot, manifest, payload);
     }
+
+    private static byte[]? ValidateAndReadFile(
+        string fullPath,
+        string relativePath,
+        VersionHistorySnapshotFile entry,
+        IncrementalHash payloadHash,
+        bool retainBytes,
+        out string actualHash)
+    {
+        using var source = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (source.Length != entry.Length)
+            throw new InvalidDataException($"Snapshot file '{relativePath}' has an unexpected length.");
+
+        var pathBytes = Encoding.UTF8.GetBytes(relativePath);
+        var lengthBytes = Encoding.UTF8.GetBytes(entry.Length.ToString(CultureInfo.InvariantCulture));
+        payloadHash.AppendData(pathBytes);
+        payloadHash.AppendData([0]);
+        payloadHash.AppendData(lengthBytes);
+        payloadHash.AppendData([0]);
+
+        using var fileHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[]? retained = retainBytes ? new byte[checked((int)entry.Length)] : null;
+        var buffer = new byte[81_920];
+        var totalRead = 0L;
+        while (true)
+        {
+            var read = source.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+                break;
+
+            var span = buffer.AsSpan(0, read);
+            fileHash.AppendData(span);
+            payloadHash.AppendData(span);
+            if (retained is not null)
+                span.CopyTo(retained.AsSpan(checked((int)totalRead)));
+            totalRead += read;
+        }
+
+        if (totalRead != entry.Length)
+            throw new InvalidDataException($"Snapshot file '{relativePath}' changed while it was being read.");
+        actualHash = Convert.ToHexStringLower(fileHash.GetHashAndReset());
+        if (!string.Equals(actualHash, entry.Sha256, StringComparison.Ordinal))
+            throw new InvalidDataException($"Snapshot file '{relativePath}' failed its SHA-256 check.");
+        return retained;
+    }
+
+    private static bool IsAssetBlobPath(string path) =>
+        path.StartsWith("assets/images/", StringComparison.Ordinal)
+        || path.StartsWith("assets/fonts/", StringComparison.Ordinal);
 
     private static void ValidateManifest(
         VersionHistorySnapshotManifest manifest,
@@ -159,13 +235,14 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     }
 
     private static Dictionary<Guid, byte[]> ReadImageData(
-        string root,
+        IReadOnlyDictionary<string, byte[]> files,
         VersionHistorySnapshotAssetsArea assets)
     {
         var result = new Dictionary<Guid, byte[]>();
         foreach (var image in assets.Images)
         {
-            var data = ReadBlob(root, image.BlobPath, image.Sha256, image.ByteLength);
+            var data = files.GetValueOrDefault(image.BlobPath)
+                ?? throw new InvalidDataException($"Snapshot image blob '{image.BlobPath}' was not retained.");
             result.Add(image.Id, data);
         }
 
@@ -173,18 +250,45 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     }
 
     private static Dictionary<Guid, byte[]> ReadFontData(
-        string root,
+        IReadOnlyDictionary<string, byte[]> files,
         VersionHistorySnapshotAssetsArea assets)
     {
         var result = new Dictionary<Guid, byte[]>();
         foreach (var family in assets.FontFamilies)
         foreach (var face in family.Faces)
         {
-            var data = ReadBlob(root, face.BlobPath, face.Sha256, face.ByteLength);
+            var data = files.GetValueOrDefault(face.BlobPath)
+                ?? throw new InvalidDataException($"Snapshot font blob '{face.BlobPath}' was not retained.");
             result.Add(face.Id, data);
         }
 
         return result;
+    }
+
+    private static void ValidateAssetBlobs(
+        VersionHistorySnapshotAssetsArea assets,
+        IReadOnlyDictionary<string, ValidatedSnapshotFile> files)
+    {
+        foreach (var image in assets.Images)
+            ValidateAssetBlob(files, image.BlobPath, image.Sha256, image.ByteLength, "image");
+        foreach (var family in assets.FontFamilies)
+        foreach (var face in family.Faces)
+            ValidateAssetBlob(files, face.BlobPath, face.Sha256, face.ByteLength, "font");
+    }
+
+    private static void ValidateAssetBlob(
+        IReadOnlyDictionary<string, ValidatedSnapshotFile> files,
+        string path,
+        string expectedHash,
+        long expectedLength,
+        string kind)
+    {
+        if (!files.TryGetValue(path, out var file))
+            throw new InvalidDataException($"Snapshot {kind} blob '{path}' is missing.");
+        if (file.Length != expectedLength)
+            throw new InvalidDataException($"Snapshot {kind} blob '{path}' has an unexpected length.");
+        if (!string.Equals(file.Sha256, expectedHash, StringComparison.Ordinal))
+            throw new InvalidDataException($"Snapshot {kind} blob '{path}' failed its SHA-256 check.");
     }
 
     private static VersionHistorySnapshotAssetsArea AdaptAssetsForSchema(
@@ -387,19 +491,6 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 "Snapshot payload files do not exactly match the canonical area, chapter, style, and asset paths.");
     }
 
-    private static byte[] ReadBlob(string root, string relativePath, string expectedHash, long expectedLength)
-    {
-        var path = ResolveSafePath(root, NormalizeRelativePath(relativePath));
-        if (!File.Exists(path))
-            throw new InvalidDataException($"Snapshot blob '{relativePath}' is missing.");
-        var bytes = File.ReadAllBytes(path);
-        if (bytes.LongLength != expectedLength)
-            throw new InvalidDataException($"Snapshot blob '{relativePath}' has an unexpected length.");
-        if (!string.Equals(VersionHistoryCanonicalJson.Sha256Hex(bytes), expectedHash, StringComparison.Ordinal))
-            throw new InvalidDataException($"Snapshot blob '{relativePath}' failed its SHA-256 check.");
-        return bytes;
-    }
-
     private static void ValidateReferences(VersionHistorySnapshotPayload payload)
     {
         if (payload.Project.Project.Id != payload.ProjectId)
@@ -510,6 +601,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
     private static string NormalizeRelativePath(string path) =>
         path.Replace('\\', '/');
+
+    private sealed record ValidatedSnapshotFile(long Length, string Sha256);
 
     private sealed record ChapterFilePaths(
         Guid ChapterId,

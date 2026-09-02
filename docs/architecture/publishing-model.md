@@ -253,7 +253,13 @@ to for-sale semantics. Switching use keeps entered ISBN text but changes the
 applicable vendor-SKU/vendor-assigned/user-supplied identifier behavior and
 therefore stales prepared artifacts and `print-setup.json`. A user-supplied mode
 requires ISBN-13; B&N-assigned ISBN mode remains preparable because assignment
-occurs during upload. These settings exist only to prepare and map artifacts;
+occurs during upload. Lulu supports the same two project uses with equivalent
+semantics: PersonalUse is print-only with no ISBN and no cover barcode, while
+ForSale requires a user-supplied ISBN-13 for which Lorekeeper generates the
+EAN-13 barcode in the reserved cover area. The separate distribution cover that
+Lulu's Global Distribution requires is out of scope for this first pass
+([Lulu print requirements research](../research/lulu-print-requirements.md)).
+These settings exist only to prepare and map artifacts;
 external account, rights, tax, pricing, listing, and order workflows are not
 modeled here. B&N documents the identifier distinction between its project
 choices ([B&N personal-use versus for-sale guidance](https://help-press.barnesandnoble.com/hc/en-us/articles/5358880235547-Print-Books-for-Sale-vs-Print-for-Personal-Use)).
