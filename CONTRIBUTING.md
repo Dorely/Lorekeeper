@@ -5,17 +5,25 @@ Lorekeeper accepts changes through reviewed pull requests. Direct work on
 
 ## Start from the current remote
 
-Begin with a clean checkout, then fetch the latest remote state and create a
-focused branch from `origin/main`:
+Normal development uses one reusable branch under `work/`; it does not create a
+branch per feature or topic. Begin with a clean checkout, fetch the latest remote
+state, and locate the existing work branch:
 
 ```powershell
 git fetch --prune origin
-git switch -c <type>/<short-topic> origin/main
+git branch --list "work/*"
 ```
 
-Use a short branch name that describes one coherent change. Do not commit or
-push directly to `main`. If the branch is shared or already published, integrate
-remote updates without rewriting other contributors' history.
+If exactly one work branch exists, switch to and reuse it. Create a generic work
+branch such as `work/current` from `origin/main` only when none exists. If more
+than one exists, resolve ownership before changing files rather than creating
+another branch. Do not commit or push directly to `main`.
+
+After every fetch, ensure `origin/main` is an ancestor of the work branch. A work
+branch with no unique commits can fast-forward to `origin/main`; a work branch
+with accumulated commits merges `origin/main` without rebasing or rewriting
+history. The synchronized work branch may be ahead of `main`, but it must not
+have commits on both sides of the comparison.
 
 Before pushing, fetch again and ensure the branch includes the latest
 `origin/main` and its own remote tracking branch.
@@ -47,9 +55,9 @@ request. Push the branch when it needs to be shared or backed up.
 
 When the maintainer decides the accumulated branch is ready to merge, fetch and
 incorporate the latest `origin/main`, rerun the full repository gate on the exact
-head, inspect the complete branch diff, and open one pull request targeting
-`main`. Complete the pull request checklist and explain any validation that was
-not performed.
+head, inspect the complete branch diff, and open one pull request from the
+reusable work branch to `main`. Complete the pull request checklist and explain
+any validation that was not performed.
 
 A pull request may merge only after:
 
@@ -58,9 +66,13 @@ A pull request may merge only after:
 - stale approvals are replaced after new commits; and
 - every review conversation is resolved.
 
-Do not approve or merge your own pull request. After merge, delete the remote
-work branch. A change is integrated only when GitHub reports its pull request as
-merged.
+Do not approve or merge your own pull request. Use a merge commit, not squash or
+rebase merge, so `main` retains the submitted work-branch ancestry. After GitHub
+reports the pull request merged, fetch `origin`, verify that `origin/main`
+descends from the submitted head, and fast-forward the reusable local work
+branch to `origin/main`. Fast-forward its remote branch as well when one exists,
+then reuse the same work branch for the next cycle. If ancestry does not match,
+stop rather than resetting or beginning new work on divergent history.
 
 ## Releases
 

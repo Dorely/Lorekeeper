@@ -21,12 +21,21 @@
 
 - Before beginning new work, inspect the current branch, working tree, index,
   configured remotes, and upstream status.
-- Never edit, commit, or push directly on `main`. If a session starts on `main`
-  and work is required, first fetch `origin`, require a clean synchronized
-  checkout, and create a separate work branch from `origin/main`. Use the
-  `work/` prefix and keep the name generic, this branch will be used for multiple changes.
-- If you are already on a feature branch that has commits that are not merged; 
-  merge in the latest from `main` and then continue work on the current branch after merging.
+- Never edit, commit, or push directly on `main`. Normal repository work uses
+  exactly one reusable local branch whose name starts with `work/`. Do not create
+  per-feature, per-task, or per-topic branches, and do not create a second
+  `work/` branch while one already exists.
+- At the start of a session, fetch `origin` with pruning and locate the existing
+  `work/` branch before changing files. If exactly one exists, continue on it.
+  If multiple `work/` branches exist, or uncommitted work belongs to another
+  branch, stop and ask for direction rather than choosing, moving, or hiding
+  work. Create a generic reusable `work/` branch from `origin/main` only when no
+  work branch exists and the checkout is clean and synchronized.
+- Before new work, require the reusable work branch to contain the current
+  `origin/main`. Fast-forward it when it has no unique commits; otherwise merge
+  `origin/main` into it without rebasing or rewriting history. After
+  synchronization, `origin/main` must be an ancestor of the work branch so its
+  history is equal to or strictly ahead of `main`, never locally diverged.
 - If existing changes form coherent prior work, finish their verification and
   documentation, then commit them before beginning a new feature. Never mix
   unrelated unfinished work into a new change.
@@ -47,9 +56,29 @@
   workflow configuration, must enter `main` through a pull request from a
   non-`main` branch. Direct pushes to `main` are prohibited even for
   administrators and urgent fixes.
-- Accumulate coherent, verified commits on separate work branch until the user
-  decides that the changes are ready to be merged. Do not open or update a pull
-  request without explicit request from the user.
+- Accumulate coherent, verified commits on the same reusable work branch until
+  the user decides that the accumulated changes are ready to merge. Do not open
+  or update a pull request without explicit request from the user.
+- When the user decides to merge the accumulated work, fetch `origin`, merge the
+  latest `origin/main` into the work branch if needed, inspect the complete
+  branch diff, rerun all required verification on the exact proposed head, push
+  only the reusable work branch, and open or update one pull request targeting
+  `main`.
+- Merge the pull request with a merge commit. Do not squash-merge or rebase-merge
+  it: those methods replace the submitted commit ancestry and make a reused work
+  branch diverge from `main`. Do not approve or merge your own pull request;
+  wait for the required status checks, an independent approval, and resolution
+  of every review conversation.
+- After GitHub reports the pull request merged, fetch `origin` and verify that
+  `origin/main` descends from the exact submitted work-branch head. Fast-forward
+  the local reusable work branch to `origin/main`, then fast-forward its remote
+  branch when one exists. Do not delete or replace the local work branch; reuse
+  it for the next accumulation cycle. If the merged `origin/main` does not
+  descend from the submitted head, stop for direction instead of resetting,
+  rebasing, or beginning new work on divergent history.
+- Dedicated release-preparation and release-orchestration branches are the only
+  exceptions to the single reusable work-branch rule, and exist only for the
+  release workflow described below.
 
 ## Research and Impact Analysis
 
