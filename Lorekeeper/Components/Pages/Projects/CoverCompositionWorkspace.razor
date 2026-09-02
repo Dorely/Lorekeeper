@@ -138,9 +138,10 @@
                         }
                         @if (primarySelection.Kind is CompositionObjectKind.Text or CompositionObjectKind.Image)
                         {
-                            <button type="button" title="Expand this frame to the full width of its constrained cover surface without stretching artwork" @onclick="() => FitSelectionWidth(primarySelection)">Fit width</button>
-                            <button type="button" title="Center this frame within its constrained cover surface" @onclick="() => CenterSelection(primarySelection, false)">Center</button>
-                            <button type="button" title="Center this frame within the safe margins of its constrained cover surface" @onclick="() => CenterSelection(primarySelection, true)">Center safe</button>
+                            <button type="button" title="Expand this frame to the full width of its constrained cover surface without stretching artwork" @onclick="() => FitSelectionWidth(primarySelection, false)">Fit width</button>
+                            <button type="button" title="Expand this frame to the safe width of its constrained cover surface without stretching artwork" @onclick="() => FitSelectionWidth(primarySelection, true)">Fit safe width</button>
+                            <button type="button" title="Center this frame horizontally within its constrained cover surface" @onclick="() => CenterSelection(primarySelection, false)">Center</button>
+                            <button type="button" title="Center this frame horizontally within the safe margins of its constrained cover surface" @onclick="() => CenterSelection(primarySelection, true)">Center safe</button>
                             <button type="button" title="Rotate this frame clockwise by 90 degrees" @onclick="() => Patch(CompositionObjectLayout.RotateQuarterTurn(primarySelection))">Rotate 90°</button>
                             <button type="button" disabled="@(Math.Abs(primarySelection.RotationDegrees) <= .001)" title="Reset this frame to zero degrees" @onclick="() => Patch(CompositionObjectLayout.ResetRotation(primarySelection))">Reset rotation</button>
                         }
@@ -567,10 +568,14 @@
         Patch(CompositionImageLayout.FillCanvas(item, RetainsAspectRatio(item)));
         return Task.CompletedTask;
     }
-    private void FitSelectionWidth(CompositionObject item) =>
-        Patch(CompositionObjectLayout.FitWidth(item, RegionBounds(item.RegionConstraint)));
+    private void FitSelectionWidth(CompositionObject item, bool useSafeArea) =>
+        Patch(CompositionObjectLayout.FitWidth(
+            item,
+            useSafeArea
+                ? CoverCompositionFactory.SafeRegionBoundsPercent(item.RegionConstraint, _scene!.Surface)
+                : RegionBounds(item.RegionConstraint)));
     private void CenterSelection(CompositionObject item, bool useSafeArea) =>
-        Patch(CompositionObjectLayout.Center(
+        Patch(CompositionObjectLayout.CenterHorizontally(
             item,
             useSafeArea
                 ? CoverCompositionFactory.SafeRegionBoundsPercent(item.RegionConstraint, _scene!.Surface)

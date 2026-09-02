@@ -366,10 +366,11 @@ in flight, applies the final pointer position, and then saves the completed
 gesture once. The full connected scene is preserved even when a provider package
 derives separate front/back pages.
 Every page and cover region exposes a center guide. Contextual text/image actions
-can fit a frame to the current page or constrained cover region width, center it
-within that surface or its safe bounds, rotate it clockwise by 90 degrees, or
-reset its rotation. Full-width image fitting switches the frame to proportional
-containment so logos are neither stretched nor converted to full-height crops.
+can fit a frame to the full or safe width of the current page or constrained
+cover region, center it horizontally within that surface or its safe bounds,
+rotate it clockwise by 90 degrees, or reset its rotation. Width fitting switches
+images to proportional containment so logos are neither stretched nor converted
+to full-height crops.
 Cover guides use the resolved print-artifact profile rather than CSS percentages;
 profile changes therefore reflow older saved scenes even when their outer width
 and height did not change.

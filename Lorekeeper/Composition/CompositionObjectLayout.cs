@@ -18,13 +18,12 @@ public static class CompositionObjectLayout
                 : item.ImageFit,
         };
 
-    public static CompositionObject Center(CompositionObject item, CompositionBounds target) =>
+    public static CompositionObject CenterHorizontally(CompositionObject item, CompositionBounds target) =>
         item with
         {
             Bounds = item.Bounds with
             {
                 XPercent = target.XPercent + (target.WidthPercent - item.Bounds.WidthPercent) / 2,
-                YPercent = target.YPercent + (target.HeightPercent - item.Bounds.HeightPercent) / 2,
             },
         };
 

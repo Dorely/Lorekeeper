@@ -272,7 +272,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools, canvas-aligned resize handles for rotated objects, justified text
   alignment, per-surface center and safe-area guides, one-action full-width fit,
-  surface/safe-area centering, quarter-turn rotation and rotation reset, and
+  full/safe-width fitting, horizontal surface/safe-area centering, quarter-turn
+  rotation and rotation reset, and
   reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
   `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact

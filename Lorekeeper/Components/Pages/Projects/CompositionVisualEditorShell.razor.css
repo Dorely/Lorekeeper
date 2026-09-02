@@ -75,6 +75,8 @@
     padding: .25rem .45rem;
     overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
 }
 
 .visual-editor-details {
