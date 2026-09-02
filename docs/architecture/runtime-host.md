@@ -38,9 +38,10 @@ Electron.NET, EF Core with SQLite, sqlite-vec and SQLite FTS5,
 protocol and publishing behavior belong to
 [Press production](press-production.md).
 The packaged descriptor and every managed invocation require Press protocol
-v12. Durable render workers use its scoped production requests; transient cover
-preview calls execute in the request scope, clean their bounded temporary job
-directory, and retain only expiring in-memory PDF bytes outside the database.
+v12. Durable render workers use its scoped production requests. Cover editor
+previews stay inside the Blazor request scope and use the shared in-process
+composition rasterizer, creating no child process, temporary Press job directory,
+PDF bytes, endpoint cache, or database record.
 
 ## Current architecture and invariants
 

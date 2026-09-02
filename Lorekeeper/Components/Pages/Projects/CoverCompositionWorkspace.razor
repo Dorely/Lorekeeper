@@ -279,7 +279,7 @@
     [Parameter] public bool InteractionLocked { get; set; }
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Back { get; set; }
-    [Parameter] public EventCallback<string> PreviewRequested { get; set; }
+    [Parameter] public EventCallback<PublicationCoverCanvasPreviewRequest> PreviewRequested { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
     private Lorekeeper.Authoring.AuthoringHistoryState _history = new(false, false, null, null);
@@ -406,8 +406,8 @@
     private string PreviewTitle => InteractionLocked
         ? "Cover editing is temporarily unavailable"
         : CanPreview
-            ? "Generate a temporary PDF preview of this cover"
-            : "Cloth setup produces a manifest rather than a cover PDF";
+            ? "Generate a quick visual preview of this cover"
+            : "Cloth setup produces a manifest rather than a visual cover";
     private async Task PreviewAsync()
     {
         if (!CanPreview || _previewing || !await FlushAsync()) return;
@@ -415,7 +415,28 @@
         _error = null;
         try
         {
-            await PreviewRequested.InvokeAsync(_surfaceRole);
+            if (_cover is null || _scene is null)
+                return;
+            var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with
+            {
+                Layers = _layers.ToList(),
+                Styles = _styles.ToList(),
+                Objects = _objects.ToList(),
+            });
+            await PreviewRequested.InvokeAsync(new PublicationCoverCanvasPreviewRequest(
+                _cover.Id,
+                _cover.Revision,
+                SurfaceLabel(_surfaceRole),
+                scene,
+                PublicationTextBindings.Bindings(
+                    _title,
+                    _subtitle,
+                    _author,
+                    _publisher,
+                    _copyright,
+                    _description,
+                    _isbn,
+                    _spineText)));
         }
         catch (Exception exception)
         {

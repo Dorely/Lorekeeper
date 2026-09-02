@@ -14,10 +14,10 @@
                 @(_showFacingSeam ? "Hide page seam" : "Show page seam")
             </button>
         }
-        <span>@EffectivePages.Count.ToString("N0") @(EffectivePages.Count == 1 ? "page" : "pages")</span>
+        <span>@PageCount.ToString("N0") @(PageCount == 1 ? "page" : "pages")</span>
     </header>
 
-    @if (EffectivePages.Count == 0)
+    @if (PageCount <= 0)
     {
         <div class="publication-pdf-preview-empty" role="status">
             Page information is unavailable. Regenerate this PDF before previewing it.
@@ -28,7 +28,7 @@
         <div class="publication-pdf-preview-scroll @(_facingPages ? "facing" : "single") @(_facingPages && _showFacingSeam ? "show-seam" : null)">
             @if (_facingPages)
             {
-                @foreach (var spread in BuildFacingSpreads(EffectivePages))
+                @foreach (var spread in BuildFacingSpreads(PageCount))
                 {
                     <div class="publication-pdf-preview-spread">
                         @foreach (var pageNumber in spread)
@@ -47,7 +47,7 @@
             }
             else
             {
-                @foreach (var page in EffectivePages)
+                @for (var page = 1; page <= PageCount; page++)
                 {
                     <div class="publication-pdf-preview-spread">
                         @RenderPage(page)
@@ -60,10 +60,8 @@
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
-    [Parameter] public Guid ArtifactId { get; set; }
-    [Parameter] public string? PageBaseUrl { get; set; }
+    [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
     [Parameter, EditorRequired] public int PageCount { get; set; }
-    [Parameter] public IReadOnlyList<int>? VisiblePages { get; set; }
 
     private bool _facingPages;
     private bool _showFacingSeam;
@@ -71,28 +69,17 @@
 
     protected override void OnParametersSet()
     {
-        if (VisiblePages is { Count: 1 })
-        {
-            _facingPages = false;
-            return;
-        }
         if (_initialized)
             return;
-        _facingPages = EffectivePages.Count > 1;
+        _facingPages = PageCount > 1;
         _initialized = true;
     }
 
-    private IReadOnlyList<int> EffectivePages => VisiblePages is { Count: > 0 }
-        ? VisiblePages.Where(page => page >= 1 && page <= PageCount).Distinct().ToList()
-        : Enumerable.Range(1, Math.Max(0, PageCount)).ToList();
-
-    private static IEnumerable<int?[]> BuildFacingSpreads(IReadOnlyList<int> pages)
+    private static IEnumerable<int?[]> BuildFacingSpreads(int pageCount)
     {
-        if (pages.Count == 0)
-            yield break;
-        yield return [null, pages[0]];
-        for (var index = 1; index < pages.Count; index += 2)
-            yield return [pages[index], index + 1 < pages.Count ? pages[index + 1] : null];
+        yield return [null, 1];
+        for (var page = 2; page <= pageCount; page += 2)
+            yield return [page, page + 1 <= pageCount ? page + 1 : null];
     }
 
     private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page" aria-label="PDF page @pageNumber">
@@ -103,9 +90,7 @@
     </figure>;
 
     private string PageUrl(int pageNumber) =>
-        string.IsNullOrWhiteSpace(PageBaseUrl)
-            ? $"/projects/{ProjectId:N}/publish/artifacts/{ArtifactId:N}/pages/{pageNumber}.png?width=1200"
-            : $"{PageBaseUrl.TrimEnd('/')}/{pageNumber}.png?width=1200";
+        $"/projects/{ProjectId:N}/publish/artifacts/{ArtifactId:N}/pages/{pageNumber}.png?width=1200";
 
     private static string ButtonClass(bool active) => active ? "btn-primary" : "btn-outline-secondary";
 }

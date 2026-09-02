@@ -284,9 +284,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout needed to obtain that current page count; the editor opens only after
   the calculated spine is available, without requiring a full prepared interior
   PDF first.
-  The cover editor's **Preview** button flushes current edits and opens a
-  transient Press-rendered PDF in the existing page viewer without creating a
-  durable render job, artifact, package, image replacement, or database row.
+  The cover editor's **Preview** button flushes current edits and opens a quick
+  in-process raster of the selected cover surface using the same composition
+  preview path as Designed Pages. It does not paginate the manuscript, invoke
+  Press, write a PDF, or create a durable render job, artifact, package, image
+  replacement, or database row.
   Images and shapes may extend through cover safe-area guides; only text outside
   the safe area blocks production, while physical bounds, barcode/no-ink, and
   accessibility checks remain enforced.

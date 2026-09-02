@@ -17,6 +17,13 @@ public sealed record PublicationCoverDiagnostic(
     string Message,
     Guid? ObjectId = null);
 
+public sealed record PublicationCoverCanvasPreviewRequest(
+    Guid CoverId,
+    long Revision,
+    string SurfaceLabel,
+    CompositionScene Scene,
+    IReadOnlyDictionary<string, string> TextBindings);
+
 public sealed record PublicationCoverDesignView(
     Guid Id,
     Guid EditionId,

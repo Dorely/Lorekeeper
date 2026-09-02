@@ -127,6 +127,9 @@ request carries the trusted validated interior page count and emits only its
 required cover artifact set. Book remains the inseparable Core/Digital PDF
 scope. Preview is cover-only, returns validated transient PDFs plus warning
 diagnostics without production evidence, and never establishes artifact claims.
+That protocol mode is a renderer conformance surface, not the interactive cover
+editor path; the editor uses the in-process composition raster described in
+[Composition and media](composition-media.md) so visual review never starts Press.
 Terminal responses echo protocol version and job identity. If malformed input
 prevents the body from being decoded and no identity can be recovered, the
 application preserves the Press diagnostic rather than inventing an identity

@@ -410,16 +410,17 @@ and inspect a clean preview for final verification. Text justification in the
 preview follows the shared composition alignment contract, including ragged
 final and hard-break lines.
 
-The manual cover editor also exposes a PDF **Preview** action. It flushes its
-serialized save queue, obtains fresh transient pagination for print geometry,
-and asks Press for only the selected production surface. Duplex outside/inside
-surfaces share their two-page PDF, B&N separate-panel output exposes Front and
-Back documents, and Core/Digital covers produce a one-page front PDF. The result
-is held only in a bounded expiring in-memory cache and displayed through the
-shared PDF page viewer; it creates no render job, artifact, package, image
-replacement, or database row. Manifest-only cloth setup remains visible but
-disabled. Production-only blockers that do not prevent layout appear as preview
-warnings, while **Prepare files** retains strict production validation.
+The manual cover editor also exposes a quick **Preview** action. It flushes its
+serialized save queue and hands the already-reflowed selected surface directly
+to `CompositionCanvasPreviewService`, matching the lightweight Designed Page
+visual-review path. The in-process clean PNG uses the saved scene, bound cover
+copy, project images, and resolved project fonts; it does not paginate the
+manuscript, start Press, write or inspect a PDF, or create a render job, artifact,
+package, image replacement, endpoint cache, or database row. Outside, inside,
+case, jacket, B&N wrap/panel, Core, and Digital surfaces preview individually as
+selected in the editor. Manifest-only cloth setup remains visible but disabled.
+Canvas clipping and typography diagnostics appear as preview notes, while
+**Prepare files** retains strict production validation.
 
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and
