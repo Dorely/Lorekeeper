@@ -1,0 +1,359 @@
+@using Lorekeeper.Manuscripts
+
+@if (Diff is not { } diff)
+{
+    <p class="history-compare-diff-empty" role="status">No textual difference</p>
+}
+else
+{
+    <div class="history-compare-diff">
+        @foreach (var section in BuildSections(diff))
+        {
+            <section class="history-compare-diff-section" aria-label="@(section.Label)">
+                <header>
+                    <strong>@(section.Label)</strong>
+                    <span class="history-compare-diff-counts">+@(section.Additions) −@(section.Deletions)</span>
+                </header>
+                @if (section.Hunks.Count == 0)
+                {
+                    <p class="history-compare-diff-empty" role="status">No textual difference</p>
+                }
+                else
+                {
+                    @foreach (var hunk in section.Hunks)
+                    {
+                        <div class="review-block-diff">
+                            @foreach (var row in hunk.Rows)
+                            {
+                                <div class="@RowClass(row)">
+                                    <span class="review-diff-line-number">@LineNumber(row)</span>
+                                    <span class="review-diff-marker">@row.Marker</span>
+                                    <span class="review-diff-line-text">@RenderSegments(row, hunk.SourceRows)</span>
+                                    <span class="review-diff-spacer"></span>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (section.Truncated)
+                    {
+                        <p class="history-compare-diff-truncated" role="status">Diff output truncated</p>
+                    }
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private const int FallbackMaxRows = 400;
+
+    [Parameter] public ReviewDiff? Diff { get; set; }
+
+    [Parameter] public int MaxRows { get; set; } = FallbackMaxRows;
+
+    private IReadOnlyList<SectionView> BuildSections(ReviewDiff diff)
+    {
+        var maxRows = MaxRows > 0 ? MaxRows : FallbackMaxRows;
+        var sections = new List<SectionView>();
+        foreach (var section in diff.Sections)
+        {
+            var hunks = new List<HunkView>();
+            var remaining = maxRows;
+            foreach (var hunk in section.Hunks)
+            {
+                var rows = remaining > 0 ? hunk.Rows.Take(remaining).ToList() : new List<DiffRow>();
+                remaining -= rows.Count;
+                hunks.Add(new HunkView(rows, hunk.Rows));
+            }
+
+            var totalRows = section.Hunks.Sum(hunk => hunk.Rows.Count);
+            sections.Add(new SectionView(
+                section.Label,
+                section.Additions,
+                section.Deletions,
+                hunks.Where(hunk => hunk.Rows.Count > 0).ToList(),
+                maxRows < totalRows));
+        }
+
+        return sections;
+    }
+
+    private static string RowClass(DiffRow row) => row.Kind switch
+    {
+        DiffRowKind.Added => "review-diff-row review-diff-row--added",
+        DiffRowKind.Removed => "review-diff-row review-diff-row--removed",
+        _ => "review-diff-row review-diff-row--context",
+    };
+
+    private static string LineNumber(DiffRow row) =>
+        (row.Kind == DiffRowKind.Removed
+            ? row.OldLineNumber
+            : row.NewLineNumber ?? row.OldLineNumber)?.ToString() ?? string.Empty;
+
+    private static RenderFragment RenderSegments(DiffRow row, IReadOnlyList<DiffRow> hunkRows) => builder =>
+    {
+        var segments = SegmentsForReviewRow(row, hunkRows, RowIndex(hunkRows, row));
+        var sequence = 0;
+        foreach (var segment in segments)
+        {
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", SegmentClass(segment.Kind));
+            builder.AddContent(sequence++, segment.Text);
+            builder.CloseElement();
+        }
+    };
+
+    private static IReadOnlyList<DiffSegment> SegmentsForReviewRow(DiffRow row, IReadOnlyList<DiffRow> hunkRows, int rowIndex)
+    {
+        if (row.Kind == DiffRowKind.Context)
+            return row.Segments;
+
+        if (row.Segments.Any(segment => segment.Kind != DiffSegmentKind.Unchanged))
+            return row.Segments;
+
+        var counterpart = FindCounterpart(row, hunkRows, rowIndex);
+        if (counterpart is not null && LineSimilarity(counterpart.Text, row.Text) >= 0.2)
+        {
+            return row.Kind == DiffRowKind.Added
+                ? BuildTokenDiffSegments(counterpart.Text, row.Text, renderNew: true)
+                : BuildTokenDiffSegments(row.Text, counterpart.Text, renderNew: false);
+        }
+
+        return row.Kind switch
+        {
+            DiffRowKind.Added => SegmentWholeText(row.Text, DiffSegmentKind.Added),
+            DiffRowKind.Removed => SegmentWholeText(row.Text, DiffSegmentKind.Removed),
+            _ => row.Segments,
+        };
+    }
+
+    private static DiffRow? FindCounterpart(DiffRow row, IReadOnlyList<DiffRow> hunkRows, int rowIndex)
+    {
+        var counterpartKind = row.Kind == DiffRowKind.Added ? DiffRowKind.Removed : DiffRowKind.Added;
+        if (row.PairId is int pairId)
+        {
+            var paired = hunkRows.FirstOrDefault(candidate => candidate.Kind == counterpartKind && candidate.PairId == pairId);
+            if (paired is not null)
+                return paired;
+        }
+
+        DiffRow? best = null;
+        var bestScore = 0.0;
+        for (var index = 0; index < hunkRows.Count; index++)
+        {
+            var candidate = hunkRows[index];
+            if (candidate.Kind != counterpartKind || candidate.PairId is not null)
+                continue;
+
+            var distancePenalty = Math.Abs(index - rowIndex) * 0.025;
+            var score = LineSimilarity(candidate.Text, row.Text) - distancePenalty;
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static IReadOnlyList<DiffSegment> SegmentWholeText(string text, DiffSegmentKind kind) =>
+        string.IsNullOrEmpty(text) ? [] : [new DiffSegment(text, kind)];
+
+    private static IReadOnlyList<DiffSegment> BuildTokenDiffSegments(string oldText, string newText, bool renderNew)
+    {
+        const long maxTokenDiffCells = 250_000;
+        var oldTokens = TokenizeDisplayText(oldText);
+        var newTokens = TokenizeDisplayText(newText);
+        if (oldTokens.Count == 0
+            || newTokens.Count == 0
+            || (long)oldTokens.Count * newTokens.Count > maxTokenDiffCells)
+        {
+            return SegmentWholeText(
+                renderNew ? newText : oldText,
+                renderNew ? DiffSegmentKind.Added : DiffSegmentKind.Removed);
+        }
+
+        var table = new int[oldTokens.Count + 1, newTokens.Count + 1];
+        for (var oldIndex = oldTokens.Count - 1; oldIndex >= 0; oldIndex--)
+        {
+            for (var newIndex = newTokens.Count - 1; newIndex >= 0; newIndex--)
+            {
+                table[oldIndex, newIndex] = TokensEquivalent(oldTokens[oldIndex], newTokens[newIndex])
+                    ? table[oldIndex + 1, newIndex + 1] + 1
+                    : Math.Max(table[oldIndex + 1, newIndex], table[oldIndex, newIndex + 1]);
+            }
+        }
+
+        var segments = new List<DiffSegment>();
+        var oldCursor = 0;
+        var newCursor = 0;
+        while (oldCursor < oldTokens.Count && newCursor < newTokens.Count)
+        {
+            if (TokensEquivalent(oldTokens[oldCursor], newTokens[newCursor]))
+            {
+                AddSegment(segments, renderNew ? newTokens[newCursor].Text : oldTokens[oldCursor].Text, DiffSegmentKind.Unchanged);
+                oldCursor++;
+                newCursor++;
+            }
+            else if (table[oldCursor + 1, newCursor] >= table[oldCursor, newCursor + 1])
+            {
+                if (!renderNew)
+                    AddSegment(segments, oldTokens[oldCursor].Text, DiffSegmentKind.Removed);
+                oldCursor++;
+            }
+            else
+            {
+                if (renderNew)
+                    AddSegment(segments, newTokens[newCursor].Text, DiffSegmentKind.Added);
+                newCursor++;
+            }
+        }
+
+        while (oldCursor < oldTokens.Count)
+        {
+            if (!renderNew)
+                AddSegment(segments, oldTokens[oldCursor].Text, DiffSegmentKind.Removed);
+            oldCursor++;
+        }
+
+        while (newCursor < newTokens.Count)
+        {
+            if (renderNew)
+                AddSegment(segments, newTokens[newCursor].Text, DiffSegmentKind.Added);
+            newCursor++;
+        }
+
+        return segments;
+    }
+
+    private static void AddSegment(List<DiffSegment> segments, string text, DiffSegmentKind kind)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        if (segments.Count > 0 && segments[^1].Kind == kind)
+        {
+            segments[^1] = segments[^1] with { Text = segments[^1].Text + text };
+            return;
+        }
+
+        segments.Add(new DiffSegment(text, kind));
+    }
+
+    private static IReadOnlyList<DisplayToken> TokenizeDisplayText(string text)
+    {
+        var tokens = new List<DisplayToken>();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var start = index;
+            var kind = TokenKind(text[index]);
+            index++;
+            while (index < text.Length && TokenKind(text[index]) == kind)
+                index++;
+
+            var tokenText = text[start..index];
+            var key = kind == DisplayTokenKind.Word
+                ? tokenText.ToUpperInvariant()
+                : tokenText;
+            tokens.Add(new DisplayToken(tokenText, key, kind));
+        }
+
+        return tokens;
+    }
+
+    private static DisplayTokenKind TokenKind(char character)
+    {
+        if (char.IsWhiteSpace(character)) return DisplayTokenKind.Whitespace;
+        return IsWordCharacter(character) ? DisplayTokenKind.Word : DisplayTokenKind.Punctuation;
+    }
+
+    private static bool TokensEquivalent(DisplayToken oldToken, DisplayToken newToken)
+    {
+        if (oldToken.Kind != newToken.Kind) return false;
+        return oldToken.Kind == DisplayTokenKind.Word
+            ? string.Equals(oldToken.Key, newToken.Key, StringComparison.Ordinal)
+            : string.Equals(oldToken.Text, newToken.Text, StringComparison.Ordinal);
+    }
+
+    private static bool IsWordCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character == '_' || character == '\'';
+
+    private static double LineSimilarity(string oldLine, string newLine)
+    {
+        if (string.Equals(oldLine, newLine, StringComparison.Ordinal)) return 1;
+
+        var oldWords = TokenizeWords(oldLine);
+        var newWords = TokenizeWords(newLine);
+        if (oldWords.Count == 0 || newWords.Count == 0) return 0;
+
+        var oldCounts = oldWords.GroupBy(word => word, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var newCounts = newWords.GroupBy(word => word, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var overlap = 0;
+        foreach (var (word, oldCount) in oldCounts)
+        {
+            if (newCounts.TryGetValue(word, out var newCount))
+                overlap += Math.Min(oldCount, newCount);
+        }
+
+        return (2.0 * overlap) / (oldWords.Count + newWords.Count);
+    }
+
+    private static IReadOnlyList<string> TokenizeWords(string line)
+    {
+        var words = new List<string>();
+        var index = 0;
+        while (index < line.Length)
+        {
+            if (!IsWordCharacter(line[index]))
+            {
+                index++;
+                continue;
+            }
+
+            var start = index;
+            while (index < line.Length && IsWordCharacter(line[index]))
+                index++;
+            words.Add(line[start..index]);
+        }
+
+        return words;
+    }
+
+    private static int RowIndex(IReadOnlyList<DiffRow> rows, DiffRow row)
+    {
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (ReferenceEquals(rows[index], row) || rows[index].Equals(row))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static string SegmentClass(DiffSegmentKind kind) => kind switch
+    {
+        DiffSegmentKind.Added => "review-diff-segment review-diff-segment--added",
+        DiffSegmentKind.Removed => "review-diff-segment review-diff-segment--removed",
+        _ => "review-diff-segment",
+    };
+
+    private sealed record HunkView(IReadOnlyList<DiffRow> Rows, IReadOnlyList<DiffRow> SourceRows);
+
+    private sealed record SectionView(
+        string Label,
+        int Additions,
+        int Deletions,
+        IReadOnlyList<HunkView> Hunks,
+        bool Truncated);
+
+    private sealed record DisplayToken(string Text, string Key, DisplayTokenKind Kind);
+
+    private enum DisplayTokenKind
+    {
+        Word,
+        Punctuation,
+        Whitespace,
+    }
+}

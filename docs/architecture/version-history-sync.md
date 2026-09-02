@@ -222,9 +222,15 @@ Other change as pending. A project-wide approval checkpoints the complete live
 snapshot.
 
 The History workspace provides the message-bearing checkpoint form. Its timeline
-can compare two checkpoints in chronological order with bounded, readable before/after panes derived
-from semantic manuscript content; raw semantic JSON and binary assets are never
-rendered. Failed operation notices remain durable journal rows for reconciliation,
+can compare two checkpoints in chronological order with a review-style
+comparison: changed chapters and non-manuscript dependency groups are listed as
+targets, and selecting one renders read-only red/green hunks with line numbers
+and inline word-level highlighting, zoomed to the changed sections with context
+instead of full before/after panes. The History compare path builds these hunks
+from the full, unbounded snapshot text; chapter targets cover core chapters
+because snapshots carry edition chapter overrides as publication data, so
+override-only changes stay under Other changes. The Review Other path keeps the
+bounded readable text. Raw semantic JSON and binary assets are never rendered. Failed operation notices remain durable journal rows for reconciliation,
 but the user can acknowledge and clear them from the sidebar without deleting
 their error or recovery data. Opening Restore focuses the controlled-restore card,
 where whole-project, major-area, and selected-chapter scopes are explicit. The shared

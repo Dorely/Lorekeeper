@@ -584,6 +584,182 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public async Task RestoreRefusesQueuedWorkAndForceDiscardsBlockedOperationalRows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var databasePath = Path.Combine(root, "restore-queued-work.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            var projectId = Guid.NewGuid();
+            var repositoryId = Guid.NewGuid();
+            var headCommit = new string('a', 40);
+            await using (var setup = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await setup.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Id = projectId,
+                    Name = "Live project",
+                    Slug = "live-project",
+                };
+                setup.Projects.Add(project);
+                setup.ProjectVersionRepositories.Add(new ProjectVersionRepository
+                {
+                    Id = repositoryId,
+                    ProjectId = projectId,
+                    Project = project,
+                    CreativeRevision = 1,
+                    HeadCommitSha = headCommit,
+                });
+                var source = new IngestSource
+                {
+                    ProjectId = projectId,
+                    Title = "Blocked source",
+                    UserInstructions = "Ingest instructions",
+                    SourceText = "Source text",
+                };
+                setup.IngestSources.Add(source);
+                setup.IngestJobs.Add(new IngestJob
+                {
+                    ProjectId = projectId,
+                    SourceId = source.Id,
+                    Source = source,
+                    Instructions = "Ingest",
+                    Status = IngestJobStatus.StopRequested,
+                });
+                setup.ContestBatches.Add(new ContestBatch
+                {
+                    ProjectId = projectId,
+                    ChapterId = Guid.NewGuid(),
+                    OriginalManuscriptRevision = 1,
+                    OriginalManuscriptHash = "hash",
+                    Status = ContestBatchStatus.Completed,
+                });
+                setup.ProjectVersionOperations.Add(new ProjectVersionOperation
+                {
+                    ProjectVersionRepositoryId = repositoryId,
+                    Kind = ProjectVersionOperationKind.Checkpoint,
+                    Status = ProjectVersionOperationStatus.Running,
+                });
+                await setup.SaveChangesAsync();
+            }
+
+            var payload = CreatePayload(repositoryId, projectId);
+            var loaded = new ProjectVersionLoadedCheckpoint(
+                new GitCommitMetadata(
+                    headCommit,
+                    new string('b', 40),
+                    "target checkpoint",
+                    "test",
+                    "test@example.invalid",
+                    DateTimeOffset.UnixEpoch,
+                    "test",
+                    "test@example.invalid",
+                    DateTimeOffset.UnixEpoch,
+                    []),
+                new VersionHistorySnapshotManifest(
+                    VersionHistorySnapshotContract.FormatId,
+                    VersionHistorySnapshotContract.SchemaVersion,
+                    repositoryId,
+                    projectId,
+                    VersionHistorySnapshotContract.IncludedAreas,
+                    new string('c', 64),
+                    new string('d', 64),
+                    []),
+                payload,
+                null);
+            var history = new StubHistoryService(loaded)
+            {
+                Status = new ProjectVersionStatusView(
+                    new ProjectVersionRepositoryView(
+                        projectId,
+                        repositoryId,
+                        1,
+                        null,
+                        null,
+                        headCommit,
+                        null,
+                        null,
+                        ProjectVersionRepositoryHealth.Healthy,
+                        false,
+                        null),
+                    null),
+                CheckpointFactory = () => new ProjectVersionCheckpointView(
+                    Guid.NewGuid(),
+                    repositoryId,
+                    VersionHistorySnapshotContract.SchemaVersion,
+                    2,
+                    new string('e', 64),
+                    new string('f', 64),
+                    headCommit,
+                    null,
+                    ProjectVersionCheckpointKind.Manual,
+                    ProjectVersionCheckpointSource.Local,
+                    "test",
+                    DateTime.UtcNow),
+            };
+            var mutation = new ProjectMutationCoordinator($"Data Source={databasePath}");
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                mutation);
+            var service = new ProjectVersionRestoreService(
+                history,
+                database,
+                mutation,
+                new NoopOutlineGraphSync(),
+                new NoopContextIndexingService(),
+                new NoopIngestGraphSync(),
+                new NoopGraphStore(),
+                new NoopGraphAutoLinkService(),
+                new NoopProjectSearchIndex());
+
+            var exception = await Assert.ThrowsAsync<VersionHistoryRestoreException>(
+                () => service.RestoreAsync(
+                    projectId,
+                    headCommit,
+                    VersionHistoryRestoreSelection.ForWholeProject()));
+
+            Assert.Equal("WorkInProgress", exception.Code);
+            Assert.Equal("Restore is refused while queued or running project work exists.", exception.Message);
+            Assert.NotNull(exception.Blockers);
+            Assert.Equal(3, exception.Blockers!.Count);
+            await using (var verify = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                Assert.Equal(1, await verify.IngestJobs.CountAsync());
+                Assert.Equal(1, await verify.ContestBatches.CountAsync());
+                Assert.Equal(1, await verify.ProjectVersionOperations.CountAsync());
+                Assert.Equal("Live project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
+            }
+
+            var result = await service.RestoreAsync(
+                projectId,
+                headCommit,
+                VersionHistoryRestoreSelection.ForWholeProject(),
+                discardQueuedWork: true);
+
+            Assert.Equal(projectId, result.ProjectId);
+            await using (var verify = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                Assert.Equal(0, await verify.IngestJobs.CountAsync());
+                Assert.Equal(0, await verify.ContestBatches.CountAsync());
+                Assert.Equal(0, await verify.ProjectVersionOperations.CountAsync());
+                Assert.Equal("Project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckoutRequiresExactHeadAndRecordsOnlyTheImportedCheckpoint()
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
@@ -1003,6 +1179,8 @@ public sealed class ProjectVersionRestoreTests
     {
         public ProjectVersionStatusView? Status { get; set; }
 
+        public Func<ProjectVersionCheckpointView>? CheckpointFactory { get; set; }
+
         public int CreateCheckpointCalls { get; private set; }
 
         public Task<ProjectVersionRepositoryView?> GetRepositoryAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult<ProjectVersionRepositoryView?>(null);
@@ -1012,7 +1190,9 @@ public sealed class ProjectVersionRestoreTests
         public Task<ProjectVersionCheckpointView> CreateCheckpointAsync(Guid projectId, ProjectVersionCheckpointKind kind, string semanticMessage, string? requestKey = null, DateTimeOffset? authoredAt = null, CancellationToken cancellationToken = default)
         {
             CreateCheckpointCalls++;
-            return Unsupported<ProjectVersionCheckpointView>();
+            return CheckpointFactory is { } factory
+                ? Task.FromResult(factory())
+                : Unsupported<ProjectVersionCheckpointView>();
         }
 
         public Task<ProjectVersionTimelineView?> GetTimelineAsync(Guid projectId, int maxCheckpoints = 100, int maxOperations = 100, CancellationToken cancellationToken = default) => Task.FromResult<ProjectVersionTimelineView?>(null);

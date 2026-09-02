@@ -1,0 +1,128 @@
+.history-compare-diff {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    min-width: 0;
+}
+
+.history-compare-diff-section {
+    background: var(--lk-surface-subtle);
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-md, 0.5rem);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.history-compare-diff-section > header {
+    align-items: baseline;
+    border-bottom: 1px solid var(--lk-line);
+    display: flex;
+    gap: 0.6rem;
+    justify-content: space-between;
+    padding: 0.45rem 0.6rem;
+}
+
+.history-compare-diff-section > header strong {
+    color: var(--lk-ink);
+    font-size: 0.8rem;
+}
+
+.history-compare-diff-counts {
+    color: var(--lk-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.history-compare-diff-empty {
+    color: var(--lk-muted);
+    font-size: 0.78rem;
+    margin: 0;
+    padding: 0.55rem 0.6rem;
+}
+
+.history-compare-diff-truncated {
+    border-top: 1px dashed var(--lk-line);
+    color: var(--lk-warning);
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+}
+
+.review-block-diff {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+}
+
+.review-diff-row {
+    display: grid;
+    grid-template-columns: 4.25rem 0.8rem minmax(0, 1fr) 0.75rem;
+    min-width: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.04);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 0.9rem;
+    line-height: 1.55;
+}
+
+.review-diff-row:first-child {
+    border-top: 0;
+}
+
+.review-diff-row--added {
+    background: rgba(25, 135, 84, 0.12);
+}
+
+.review-diff-row--removed {
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.review-diff-line-number,
+.review-diff-marker {
+    padding: 0.12rem 0.55rem 0.12rem 0.45rem;
+    border-right: 1px solid var(--lk-line);
+    background: var(--lk-soft);
+    color: var(--lk-muted);
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.78rem;
+    text-align: right;
+    user-select: none;
+}
+
+.review-diff-marker {
+    padding: 0.12rem 0;
+    text-align: center;
+}
+
+.review-diff-row--added .review-diff-marker {
+    color: var(--lk-success);
+}
+
+.review-diff-row--removed .review-diff-marker {
+    color: var(--lk-danger);
+}
+
+.review-diff-line-text {
+    min-width: 0;
+    padding: 0.12rem 0.55rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.review-diff-spacer {
+    background: transparent;
+}
+
+.review-diff-line-text ::deep .review-diff-segment--added,
+.review-diff-segment--added {
+    border-radius: 0.14rem;
+    padding: 0 0.04rem;
+    background: rgba(25, 135, 84, 0.32);
+}
+
+.review-diff-line-text ::deep .review-diff-segment--removed,
+.review-diff-segment--removed {
+    border-radius: 0.14rem;
+    padding: 0 0.04rem;
+    background: rgba(220, 53, 69, 0.25);
+}

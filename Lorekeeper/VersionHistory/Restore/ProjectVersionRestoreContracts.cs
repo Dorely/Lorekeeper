@@ -44,11 +44,18 @@ public interface IProjectVersionRestoreService
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// With <paramref name="discardQueuedWork"/> set, the queued-work guard is
+    /// skipped and every blocked operational row (queued or running ingest,
+    /// image generation, publication render, and unresolved contest batches)
+    /// is discarded during the restore transaction.
+    /// </summary>
     Task<VersionHistoryRestoreResult> RestoreAsync(
         Guid projectId,
         string targetCommitSha,
         VersionHistoryRestoreSelection selection,
         string? safetyMessage = null,
+        bool discardQueuedWork = false,
         CancellationToken cancellationToken = default);
 
     Task<VersionHistoryImportResult> ImportValidatedSnapshotAsync(
@@ -127,7 +134,12 @@ public sealed record VersionHistoryUnresolvedReference(
 
 public sealed class VersionHistoryRestoreException(
     string code,
-    string message) : InvalidOperationException(message)
+    string message,
+    IReadOnlyList<VersionHistoryRestoreBlocker>? blockers = null) : InvalidOperationException(message)
 {
     public string Code { get; } = code;
+
+    public IReadOnlyList<VersionHistoryRestoreBlocker>? Blockers { get; } = blockers;
 }
+
+public sealed record VersionHistoryRestoreBlocker(string Label, int Count);
