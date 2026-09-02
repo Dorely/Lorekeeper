@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__roslynk__open_solution",
+      "mcp__roslynk__get_solution_status",
+      "mcp__roslynk__get_diagnostics",
+      "mcp__roslynk__find_references",
+      "mcp__roslynk__get_callers",
+      "mcp__roslynk__find_definition",
+      "mcp__roslynk__find_implementations",
+      "mcp__roslynk__get_members",
+      "mcp__roslynk__get_symbol",
+      "mcp__roslynk__get_type_hierarchy",
+      "mcp__roslynk__search_symbols",
+      "mcp__roslynk__find_dead_code",
+      "mcp__roslynk__find_dead_conditionals",
+      "mcp__roslynk__get_code_actions"
+    ],
+    "deny": [
+      "mcp__roslynk__apply_patch",
+      "mcp__roslynk__apply_code_action",
+      "mcp__roslynk__apply_code_fix",
+      "mcp__roslynk__rename_symbol",
+      "mcp__roslynk__change_signature",
+      "mcp__roslynk__remove_unused_usings",
+      "mcp__roslynk__reload_solution"
+    ]
+  }
+}

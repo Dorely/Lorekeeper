@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "roslynk": {
+      "transport": "stdio",
+      "enabled": true,
+      "command": "dotnet",
+      "args": ["dnx", "Roslynk@1.1.0", "--yes", "--", "stdio"]
+    }
+  }
+}
