@@ -70,6 +70,7 @@ where
                 | "kdp-hardcover-v1"
                 | "ingram-print-pdfx1a-v2"
                 | "bn-print-pdfa1b-v1"
+                | "lulu-print-v1"
         );
         let (source_rgb, alpha) = if preserve_alpha {
             (decoded.rgb.clone(), decoded.alpha.clone())

@@ -289,7 +289,11 @@ public sealed class PublicationCoverService(
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
             ? PublicationBarcodeMode.VendorOverlay
-            : update.BarcodeMode;
+            : edition.Vendor == PublicationVendor.Lulu
+                ? edition.PrintProjectUse == PrintProjectUse.PersonalUse
+                    ? PublicationBarcodeMode.None
+                    : PublicationBarcodeMode.LorekeeperBarcode
+                : update.BarcodeMode;
         if (update.SpineReadingDirection is { } spineReadingDirection)
         {
             design.SpineReadingDirection = spineReadingDirection;
@@ -431,7 +435,11 @@ public sealed class PublicationCoverService(
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
             ? PublicationBarcodeMode.VendorOverlay
-            : update.BarcodeMode;
+            : edition.Vendor == PublicationVendor.Lulu
+                ? edition.PrintProjectUse == PrintProjectUse.PersonalUse
+                    ? PublicationBarcodeMode.None
+                    : PublicationBarcodeMode.LorekeeperBarcode
+                : update.BarcodeMode;
         if (update.SpineReadingDirection is { } spineReadingDirection)
             design.SpineReadingDirection = spineReadingDirection;
         design.ImageCropXPercent = update.ImageCropXPercent;
@@ -1276,7 +1284,11 @@ public sealed class PublicationCoverService(
                 ? PublicationBarcodeMode.None
                 : edition.Vendor == PublicationVendor.IngramSpark
                     ? PublicationBarcodeMode.LorekeeperBarcode
-                    : PublicationBarcodeMode.VendorOverlay,
+                    : edition.Vendor == PublicationVendor.Lulu
+                        ? edition.PrintProjectUse == PrintProjectUse.PersonalUse
+                            ? PublicationBarcodeMode.None
+                            : PublicationBarcodeMode.LorekeeperBarcode
+                        : PublicationBarcodeMode.VendorOverlay,
         };
         design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(
             CoverCompositionFactory.Create(edition, design),

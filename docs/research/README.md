@@ -19,6 +19,11 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 - [Publishing industry workflow and file standards](publishing-industry-and-file-standards.md)
   — print/ebook production stages, common service inputs, vendor constraints,
   metadata, preflight, and Lorekeeper's edition/package decisions.
+- [Lulu.com print requirements and evidence](lulu-print-requirements.md)
+  — evidence for adding Lulu.com as a Specific print preset: product matrix,
+  spine-width math, interior and cover PDF requirements, identifiers and
+  barcodes, color management, and the first-pass paperback and hardcover
+  casewrap profile scope.
 - [Book authoring and visual-design software](book-authoring-and-design-software.md)
   — capability comparison, missing editing/design tools, phased scope, and
   integration with Lorekeeper's existing workspaces and assistants.

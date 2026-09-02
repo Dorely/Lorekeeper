@@ -771,8 +771,10 @@ public sealed class PublicationRenderProcessor(
     public static string ProfileFor(PublicationEditionFormat format, PublicationVendor vendor) =>
         format == PublicationEditionFormat.DigitalPdf
             ? "generic-digital-pdf-v1"
-            : vendor == PublicationVendor.BarnesAndNoblePress
-                ? "bn-print-pdfa1b-v1"
+            : vendor == PublicationVendor.Lulu
+                ? "lulu-print-v1"
+                : vendor == PublicationVendor.BarnesAndNoblePress
+                    ? "bn-print-pdfa1b-v1"
             : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.AmazonKdp
                 ? "kdp-hardcover-v1"
             : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.IngramSpark

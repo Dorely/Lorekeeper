@@ -1,5 +1,5 @@
 {
-  "registryVersion": "2026.09.1",
+  "registryVersion": "2026.09.2",
   "reviewedAtUtc": "2026-09-02T00:00:00Z",
   "sources": [
     "https://kdp.amazon.com/en_US/help/topic/G201834180",
@@ -16,7 +16,12 @@
     "https://press.barnesandnoble.com/book-cover-template-generator",
     "https://press.barnesandnoble.com/bnpress-blog/?p=12423",
     "https://kdp.amazon.com/en_US/help/topic/G201953020",
-    "https://help.api.lulu.com/en/support/solutions/articles/64000254616-how-is-spine-width-calculated-"
+    "https://help.api.lulu.com/en/support/solutions/articles/64000254616-how-is-spine-width-calculated-",
+    "https://assets.lulu.com/media/guides/en/lulu-book-creation-guide.pdf",
+    "https://help.lulu.com/en/support/solutions/articles/64000255519-pdf-creation-settings",
+    "https://help.lulu.com/en/support/solutions/articles/64000282777-upload-your-cover-file",
+    "https://help.lulu.com/en/support/solutions/articles/64000255462-mandatory-print-book-distribution-requirements",
+    "https://help.lulu.com/en/support/solutions/articles/64000255473-cover-and-interior-paper-stocks"
   ],
   "profiles": [
     {
@@ -307,6 +312,5053 @@
         "roundToIncrementInches": 0.01
       },
       "minimumSubmittedPages": 18,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-pb-bw-60-cream",
+      "vendor": "Lulu",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 32,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0022522523,
+        "baseInches": 0.06
+      },
+      "minimumSubmittedPages": 32,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-pb-bw-60-white",
+      "vendor": "Lulu",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 32,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0022522523,
+        "baseInches": 0.06
+      },
+      "minimumSubmittedPages": 32,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-pb-stdcolor-60-white",
+      "vendor": "Lulu",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "StandardColor",
+      "basisWeightPounds": 60,
+      "gsm": 90,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 32,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0022522523,
+        "baseInches": 0.06
+      },
+      "minimumSubmittedPages": 32,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-pb-bw-80-white",
+      "vendor": "Lulu",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 32,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0022522523,
+        "baseInches": 0.06
+      },
+      "minimumSubmittedPages": 32,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-pb-premcolor-80-white",
+      "vendor": "Lulu",
+      "format": "Paperback",
+      "binding": "PerfectBound",
+      "interiorProcess": "PremiumColor",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "PrintedCover",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 32,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "Caliper",
+        "inchesPerPage": 0.0022522523,
+        "baseInches": 0.06
+      },
+      "minimumSubmittedPages": 32,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-hc-case-bw-80-white",
+      "vendor": "Lulu",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "BlackAndWhite",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 24,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "FrozenLookup",
+        "anchors": [
+          {
+            "pages": 24,
+            "inches": 0.25
+          },
+          {
+            "pages": 26,
+            "inches": 0.25
+          },
+          {
+            "pages": 28,
+            "inches": 0.25
+          },
+          {
+            "pages": 30,
+            "inches": 0.25
+          },
+          {
+            "pages": 32,
+            "inches": 0.25
+          },
+          {
+            "pages": 34,
+            "inches": 0.25
+          },
+          {
+            "pages": 36,
+            "inches": 0.25
+          },
+          {
+            "pages": 38,
+            "inches": 0.25
+          },
+          {
+            "pages": 40,
+            "inches": 0.25
+          },
+          {
+            "pages": 42,
+            "inches": 0.25
+          },
+          {
+            "pages": 44,
+            "inches": 0.25
+          },
+          {
+            "pages": 46,
+            "inches": 0.25
+          },
+          {
+            "pages": 48,
+            "inches": 0.25
+          },
+          {
+            "pages": 50,
+            "inches": 0.25
+          },
+          {
+            "pages": 52,
+            "inches": 0.25
+          },
+          {
+            "pages": 54,
+            "inches": 0.25
+          },
+          {
+            "pages": 56,
+            "inches": 0.25
+          },
+          {
+            "pages": 58,
+            "inches": 0.25
+          },
+          {
+            "pages": 60,
+            "inches": 0.25
+          },
+          {
+            "pages": 62,
+            "inches": 0.25
+          },
+          {
+            "pages": 64,
+            "inches": 0.25
+          },
+          {
+            "pages": 66,
+            "inches": 0.25
+          },
+          {
+            "pages": 68,
+            "inches": 0.25
+          },
+          {
+            "pages": 70,
+            "inches": 0.25
+          },
+          {
+            "pages": 72,
+            "inches": 0.25
+          },
+          {
+            "pages": 74,
+            "inches": 0.25
+          },
+          {
+            "pages": 76,
+            "inches": 0.25
+          },
+          {
+            "pages": 78,
+            "inches": 0.25
+          },
+          {
+            "pages": 80,
+            "inches": 0.25
+          },
+          {
+            "pages": 82,
+            "inches": 0.25
+          },
+          {
+            "pages": 84,
+            "inches": 0.25
+          },
+          {
+            "pages": 86,
+            "inches": 0.5
+          },
+          {
+            "pages": 88,
+            "inches": 0.5
+          },
+          {
+            "pages": 90,
+            "inches": 0.5
+          },
+          {
+            "pages": 92,
+            "inches": 0.5
+          },
+          {
+            "pages": 94,
+            "inches": 0.5
+          },
+          {
+            "pages": 96,
+            "inches": 0.5
+          },
+          {
+            "pages": 98,
+            "inches": 0.5
+          },
+          {
+            "pages": 100,
+            "inches": 0.5
+          },
+          {
+            "pages": 102,
+            "inches": 0.5
+          },
+          {
+            "pages": 104,
+            "inches": 0.5
+          },
+          {
+            "pages": 106,
+            "inches": 0.5
+          },
+          {
+            "pages": 108,
+            "inches": 0.5
+          },
+          {
+            "pages": 110,
+            "inches": 0.5
+          },
+          {
+            "pages": 112,
+            "inches": 0.5
+          },
+          {
+            "pages": 114,
+            "inches": 0.5
+          },
+          {
+            "pages": 116,
+            "inches": 0.5
+          },
+          {
+            "pages": 118,
+            "inches": 0.5
+          },
+          {
+            "pages": 120,
+            "inches": 0.5
+          },
+          {
+            "pages": 122,
+            "inches": 0.5
+          },
+          {
+            "pages": 124,
+            "inches": 0.5
+          },
+          {
+            "pages": 126,
+            "inches": 0.5
+          },
+          {
+            "pages": 128,
+            "inches": 0.5
+          },
+          {
+            "pages": 130,
+            "inches": 0.5
+          },
+          {
+            "pages": 132,
+            "inches": 0.5
+          },
+          {
+            "pages": 134,
+            "inches": 0.5
+          },
+          {
+            "pages": 136,
+            "inches": 0.5
+          },
+          {
+            "pages": 138,
+            "inches": 0.5
+          },
+          {
+            "pages": 140,
+            "inches": 0.5
+          },
+          {
+            "pages": 142,
+            "inches": 0.625
+          },
+          {
+            "pages": 144,
+            "inches": 0.625
+          },
+          {
+            "pages": 146,
+            "inches": 0.625
+          },
+          {
+            "pages": 148,
+            "inches": 0.625
+          },
+          {
+            "pages": 150,
+            "inches": 0.625
+          },
+          {
+            "pages": 152,
+            "inches": 0.625
+          },
+          {
+            "pages": 154,
+            "inches": 0.625
+          },
+          {
+            "pages": 156,
+            "inches": 0.625
+          },
+          {
+            "pages": 158,
+            "inches": 0.625
+          },
+          {
+            "pages": 160,
+            "inches": 0.625
+          },
+          {
+            "pages": 162,
+            "inches": 0.625
+          },
+          {
+            "pages": 164,
+            "inches": 0.625
+          },
+          {
+            "pages": 166,
+            "inches": 0.625
+          },
+          {
+            "pages": 168,
+            "inches": 0.625
+          },
+          {
+            "pages": 170,
+            "inches": 0.6875
+          },
+          {
+            "pages": 172,
+            "inches": 0.6875
+          },
+          {
+            "pages": 174,
+            "inches": 0.6875
+          },
+          {
+            "pages": 176,
+            "inches": 0.6875
+          },
+          {
+            "pages": 178,
+            "inches": 0.6875
+          },
+          {
+            "pages": 180,
+            "inches": 0.6875
+          },
+          {
+            "pages": 182,
+            "inches": 0.6875
+          },
+          {
+            "pages": 184,
+            "inches": 0.6875
+          },
+          {
+            "pages": 186,
+            "inches": 0.6875
+          },
+          {
+            "pages": 188,
+            "inches": 0.6875
+          },
+          {
+            "pages": 190,
+            "inches": 0.6875
+          },
+          {
+            "pages": 192,
+            "inches": 0.6875
+          },
+          {
+            "pages": 194,
+            "inches": 0.6875
+          },
+          {
+            "pages": 196,
+            "inches": 0.75
+          },
+          {
+            "pages": 198,
+            "inches": 0.75
+          },
+          {
+            "pages": 200,
+            "inches": 0.75
+          },
+          {
+            "pages": 202,
+            "inches": 0.75
+          },
+          {
+            "pages": 204,
+            "inches": 0.75
+          },
+          {
+            "pages": 206,
+            "inches": 0.75
+          },
+          {
+            "pages": 208,
+            "inches": 0.75
+          },
+          {
+            "pages": 210,
+            "inches": 0.75
+          },
+          {
+            "pages": 212,
+            "inches": 0.75
+          },
+          {
+            "pages": 214,
+            "inches": 0.75
+          },
+          {
+            "pages": 216,
+            "inches": 0.75
+          },
+          {
+            "pages": 218,
+            "inches": 0.75
+          },
+          {
+            "pages": 220,
+            "inches": 0.75
+          },
+          {
+            "pages": 222,
+            "inches": 0.75
+          },
+          {
+            "pages": 224,
+            "inches": 0.8125
+          },
+          {
+            "pages": 226,
+            "inches": 0.8125
+          },
+          {
+            "pages": 228,
+            "inches": 0.8125
+          },
+          {
+            "pages": 230,
+            "inches": 0.8125
+          },
+          {
+            "pages": 232,
+            "inches": 0.8125
+          },
+          {
+            "pages": 234,
+            "inches": 0.8125
+          },
+          {
+            "pages": 236,
+            "inches": 0.8125
+          },
+          {
+            "pages": 238,
+            "inches": 0.8125
+          },
+          {
+            "pages": 240,
+            "inches": 0.8125
+          },
+          {
+            "pages": 242,
+            "inches": 0.8125
+          },
+          {
+            "pages": 244,
+            "inches": 0.8125
+          },
+          {
+            "pages": 246,
+            "inches": 0.8125
+          },
+          {
+            "pages": 248,
+            "inches": 0.8125
+          },
+          {
+            "pages": 250,
+            "inches": 0.8125
+          },
+          {
+            "pages": 252,
+            "inches": 0.875
+          },
+          {
+            "pages": 254,
+            "inches": 0.875
+          },
+          {
+            "pages": 256,
+            "inches": 0.875
+          },
+          {
+            "pages": 258,
+            "inches": 0.875
+          },
+          {
+            "pages": 260,
+            "inches": 0.875
+          },
+          {
+            "pages": 262,
+            "inches": 0.875
+          },
+          {
+            "pages": 264,
+            "inches": 0.875
+          },
+          {
+            "pages": 266,
+            "inches": 0.875
+          },
+          {
+            "pages": 268,
+            "inches": 0.875
+          },
+          {
+            "pages": 270,
+            "inches": 0.875
+          },
+          {
+            "pages": 272,
+            "inches": 0.875
+          },
+          {
+            "pages": 274,
+            "inches": 0.875
+          },
+          {
+            "pages": 276,
+            "inches": 0.875
+          },
+          {
+            "pages": 278,
+            "inches": 0.875
+          },
+          {
+            "pages": 280,
+            "inches": 0.9375
+          },
+          {
+            "pages": 282,
+            "inches": 0.9375
+          },
+          {
+            "pages": 284,
+            "inches": 0.9375
+          },
+          {
+            "pages": 286,
+            "inches": 0.9375
+          },
+          {
+            "pages": 288,
+            "inches": 0.9375
+          },
+          {
+            "pages": 290,
+            "inches": 0.9375
+          },
+          {
+            "pages": 292,
+            "inches": 0.9375
+          },
+          {
+            "pages": 294,
+            "inches": 0.9375
+          },
+          {
+            "pages": 296,
+            "inches": 0.9375
+          },
+          {
+            "pages": 298,
+            "inches": 0.9375
+          },
+          {
+            "pages": 300,
+            "inches": 0.9375
+          },
+          {
+            "pages": 302,
+            "inches": 0.9375
+          },
+          {
+            "pages": 304,
+            "inches": 0.9375
+          },
+          {
+            "pages": 306,
+            "inches": 0.9375
+          },
+          {
+            "pages": 308,
+            "inches": 1.0
+          },
+          {
+            "pages": 310,
+            "inches": 1.0
+          },
+          {
+            "pages": 312,
+            "inches": 1.0
+          },
+          {
+            "pages": 314,
+            "inches": 1.0
+          },
+          {
+            "pages": 316,
+            "inches": 1.0
+          },
+          {
+            "pages": 318,
+            "inches": 1.0
+          },
+          {
+            "pages": 320,
+            "inches": 1.0
+          },
+          {
+            "pages": 322,
+            "inches": 1.0
+          },
+          {
+            "pages": 324,
+            "inches": 1.0
+          },
+          {
+            "pages": 326,
+            "inches": 1.0
+          },
+          {
+            "pages": 328,
+            "inches": 1.0
+          },
+          {
+            "pages": 330,
+            "inches": 1.0
+          },
+          {
+            "pages": 332,
+            "inches": 1.0
+          },
+          {
+            "pages": 334,
+            "inches": 1.0
+          },
+          {
+            "pages": 336,
+            "inches": 1.0625
+          },
+          {
+            "pages": 338,
+            "inches": 1.0625
+          },
+          {
+            "pages": 340,
+            "inches": 1.0625
+          },
+          {
+            "pages": 342,
+            "inches": 1.0625
+          },
+          {
+            "pages": 344,
+            "inches": 1.0625
+          },
+          {
+            "pages": 346,
+            "inches": 1.0625
+          },
+          {
+            "pages": 348,
+            "inches": 1.0625
+          },
+          {
+            "pages": 350,
+            "inches": 1.0625
+          },
+          {
+            "pages": 352,
+            "inches": 1.0625
+          },
+          {
+            "pages": 354,
+            "inches": 1.0625
+          },
+          {
+            "pages": 356,
+            "inches": 1.0625
+          },
+          {
+            "pages": 358,
+            "inches": 1.0625
+          },
+          {
+            "pages": 360,
+            "inches": 1.0625
+          },
+          {
+            "pages": 362,
+            "inches": 1.125
+          },
+          {
+            "pages": 364,
+            "inches": 1.125
+          },
+          {
+            "pages": 366,
+            "inches": 1.125
+          },
+          {
+            "pages": 368,
+            "inches": 1.125
+          },
+          {
+            "pages": 370,
+            "inches": 1.125
+          },
+          {
+            "pages": 372,
+            "inches": 1.125
+          },
+          {
+            "pages": 374,
+            "inches": 1.125
+          },
+          {
+            "pages": 376,
+            "inches": 1.125
+          },
+          {
+            "pages": 378,
+            "inches": 1.125
+          },
+          {
+            "pages": 380,
+            "inches": 1.125
+          },
+          {
+            "pages": 382,
+            "inches": 1.125
+          },
+          {
+            "pages": 384,
+            "inches": 1.125
+          },
+          {
+            "pages": 386,
+            "inches": 1.125
+          },
+          {
+            "pages": 388,
+            "inches": 1.125
+          },
+          {
+            "pages": 390,
+            "inches": 1.1875
+          },
+          {
+            "pages": 392,
+            "inches": 1.1875
+          },
+          {
+            "pages": 394,
+            "inches": 1.1875
+          },
+          {
+            "pages": 396,
+            "inches": 1.1875
+          },
+          {
+            "pages": 398,
+            "inches": 1.1875
+          },
+          {
+            "pages": 400,
+            "inches": 1.1875
+          },
+          {
+            "pages": 402,
+            "inches": 1.1875
+          },
+          {
+            "pages": 404,
+            "inches": 1.1875
+          },
+          {
+            "pages": 406,
+            "inches": 1.1875
+          },
+          {
+            "pages": 408,
+            "inches": 1.1875
+          },
+          {
+            "pages": 410,
+            "inches": 1.1875
+          },
+          {
+            "pages": 412,
+            "inches": 1.1875
+          },
+          {
+            "pages": 414,
+            "inches": 1.1875
+          },
+          {
+            "pages": 416,
+            "inches": 1.1875
+          },
+          {
+            "pages": 418,
+            "inches": 1.25
+          },
+          {
+            "pages": 420,
+            "inches": 1.25
+          },
+          {
+            "pages": 422,
+            "inches": 1.25
+          },
+          {
+            "pages": 424,
+            "inches": 1.25
+          },
+          {
+            "pages": 426,
+            "inches": 1.25
+          },
+          {
+            "pages": 428,
+            "inches": 1.25
+          },
+          {
+            "pages": 430,
+            "inches": 1.25
+          },
+          {
+            "pages": 432,
+            "inches": 1.25
+          },
+          {
+            "pages": 434,
+            "inches": 1.25
+          },
+          {
+            "pages": 436,
+            "inches": 1.25
+          },
+          {
+            "pages": 438,
+            "inches": 1.25
+          },
+          {
+            "pages": 440,
+            "inches": 1.25
+          },
+          {
+            "pages": 442,
+            "inches": 1.25
+          },
+          {
+            "pages": 444,
+            "inches": 1.25
+          },
+          {
+            "pages": 446,
+            "inches": 1.3125
+          },
+          {
+            "pages": 448,
+            "inches": 1.3125
+          },
+          {
+            "pages": 450,
+            "inches": 1.3125
+          },
+          {
+            "pages": 452,
+            "inches": 1.3125
+          },
+          {
+            "pages": 454,
+            "inches": 1.3125
+          },
+          {
+            "pages": 456,
+            "inches": 1.3125
+          },
+          {
+            "pages": 458,
+            "inches": 1.3125
+          },
+          {
+            "pages": 460,
+            "inches": 1.3125
+          },
+          {
+            "pages": 462,
+            "inches": 1.3125
+          },
+          {
+            "pages": 464,
+            "inches": 1.3125
+          },
+          {
+            "pages": 466,
+            "inches": 1.3125
+          },
+          {
+            "pages": 468,
+            "inches": 1.3125
+          },
+          {
+            "pages": 470,
+            "inches": 1.3125
+          },
+          {
+            "pages": 472,
+            "inches": 1.3125
+          },
+          {
+            "pages": 474,
+            "inches": 1.375
+          },
+          {
+            "pages": 476,
+            "inches": 1.375
+          },
+          {
+            "pages": 478,
+            "inches": 1.375
+          },
+          {
+            "pages": 480,
+            "inches": 1.375
+          },
+          {
+            "pages": 482,
+            "inches": 1.375
+          },
+          {
+            "pages": 484,
+            "inches": 1.375
+          },
+          {
+            "pages": 486,
+            "inches": 1.375
+          },
+          {
+            "pages": 488,
+            "inches": 1.375
+          },
+          {
+            "pages": 490,
+            "inches": 1.375
+          },
+          {
+            "pages": 492,
+            "inches": 1.375
+          },
+          {
+            "pages": 494,
+            "inches": 1.375
+          },
+          {
+            "pages": 496,
+            "inches": 1.375
+          },
+          {
+            "pages": 498,
+            "inches": 1.375
+          },
+          {
+            "pages": 500,
+            "inches": 1.375
+          },
+          {
+            "pages": 502,
+            "inches": 1.4375
+          },
+          {
+            "pages": 504,
+            "inches": 1.4375
+          },
+          {
+            "pages": 506,
+            "inches": 1.4375
+          },
+          {
+            "pages": 508,
+            "inches": 1.4375
+          },
+          {
+            "pages": 510,
+            "inches": 1.4375
+          },
+          {
+            "pages": 512,
+            "inches": 1.4375
+          },
+          {
+            "pages": 514,
+            "inches": 1.4375
+          },
+          {
+            "pages": 516,
+            "inches": 1.4375
+          },
+          {
+            "pages": 518,
+            "inches": 1.4375
+          },
+          {
+            "pages": 520,
+            "inches": 1.4375
+          },
+          {
+            "pages": 522,
+            "inches": 1.4375
+          },
+          {
+            "pages": 524,
+            "inches": 1.4375
+          },
+          {
+            "pages": 526,
+            "inches": 1.4375
+          },
+          {
+            "pages": 528,
+            "inches": 1.4375
+          },
+          {
+            "pages": 530,
+            "inches": 1.5
+          },
+          {
+            "pages": 532,
+            "inches": 1.5
+          },
+          {
+            "pages": 534,
+            "inches": 1.5
+          },
+          {
+            "pages": 536,
+            "inches": 1.5
+          },
+          {
+            "pages": 538,
+            "inches": 1.5
+          },
+          {
+            "pages": 540,
+            "inches": 1.5
+          },
+          {
+            "pages": 542,
+            "inches": 1.5
+          },
+          {
+            "pages": 544,
+            "inches": 1.5
+          },
+          {
+            "pages": 546,
+            "inches": 1.5
+          },
+          {
+            "pages": 548,
+            "inches": 1.5
+          },
+          {
+            "pages": 550,
+            "inches": 1.5
+          },
+          {
+            "pages": 552,
+            "inches": 1.5
+          },
+          {
+            "pages": 554,
+            "inches": 1.5
+          },
+          {
+            "pages": 556,
+            "inches": 1.5
+          },
+          {
+            "pages": 558,
+            "inches": 1.5625
+          },
+          {
+            "pages": 560,
+            "inches": 1.5625
+          },
+          {
+            "pages": 562,
+            "inches": 1.5625
+          },
+          {
+            "pages": 564,
+            "inches": 1.5625
+          },
+          {
+            "pages": 566,
+            "inches": 1.5625
+          },
+          {
+            "pages": 568,
+            "inches": 1.5625
+          },
+          {
+            "pages": 570,
+            "inches": 1.5625
+          },
+          {
+            "pages": 572,
+            "inches": 1.5625
+          },
+          {
+            "pages": 574,
+            "inches": 1.5625
+          },
+          {
+            "pages": 576,
+            "inches": 1.5625
+          },
+          {
+            "pages": 578,
+            "inches": 1.5625
+          },
+          {
+            "pages": 580,
+            "inches": 1.5625
+          },
+          {
+            "pages": 582,
+            "inches": 1.5625
+          },
+          {
+            "pages": 584,
+            "inches": 1.625
+          },
+          {
+            "pages": 586,
+            "inches": 1.625
+          },
+          {
+            "pages": 588,
+            "inches": 1.625
+          },
+          {
+            "pages": 590,
+            "inches": 1.625
+          },
+          {
+            "pages": 592,
+            "inches": 1.625
+          },
+          {
+            "pages": 594,
+            "inches": 1.625
+          },
+          {
+            "pages": 596,
+            "inches": 1.625
+          },
+          {
+            "pages": 598,
+            "inches": 1.625
+          },
+          {
+            "pages": 600,
+            "inches": 1.625
+          },
+          {
+            "pages": 602,
+            "inches": 1.625
+          },
+          {
+            "pages": 604,
+            "inches": 1.625
+          },
+          {
+            "pages": 606,
+            "inches": 1.625
+          },
+          {
+            "pages": 608,
+            "inches": 1.625
+          },
+          {
+            "pages": 610,
+            "inches": 1.625
+          },
+          {
+            "pages": 612,
+            "inches": 1.6875
+          },
+          {
+            "pages": 614,
+            "inches": 1.6875
+          },
+          {
+            "pages": 616,
+            "inches": 1.6875
+          },
+          {
+            "pages": 618,
+            "inches": 1.6875
+          },
+          {
+            "pages": 620,
+            "inches": 1.6875
+          },
+          {
+            "pages": 622,
+            "inches": 1.6875
+          },
+          {
+            "pages": 624,
+            "inches": 1.6875
+          },
+          {
+            "pages": 626,
+            "inches": 1.6875
+          },
+          {
+            "pages": 628,
+            "inches": 1.6875
+          },
+          {
+            "pages": 630,
+            "inches": 1.6875
+          },
+          {
+            "pages": 632,
+            "inches": 1.6875
+          },
+          {
+            "pages": 634,
+            "inches": 1.6875
+          },
+          {
+            "pages": 636,
+            "inches": 1.6875
+          },
+          {
+            "pages": 638,
+            "inches": 1.6875
+          },
+          {
+            "pages": 640,
+            "inches": 1.75
+          },
+          {
+            "pages": 642,
+            "inches": 1.75
+          },
+          {
+            "pages": 644,
+            "inches": 1.75
+          },
+          {
+            "pages": 646,
+            "inches": 1.75
+          },
+          {
+            "pages": 648,
+            "inches": 1.75
+          },
+          {
+            "pages": 650,
+            "inches": 1.75
+          },
+          {
+            "pages": 652,
+            "inches": 1.75
+          },
+          {
+            "pages": 654,
+            "inches": 1.75
+          },
+          {
+            "pages": 656,
+            "inches": 1.75
+          },
+          {
+            "pages": 658,
+            "inches": 1.75
+          },
+          {
+            "pages": 660,
+            "inches": 1.75
+          },
+          {
+            "pages": 662,
+            "inches": 1.75
+          },
+          {
+            "pages": 664,
+            "inches": 1.75
+          },
+          {
+            "pages": 666,
+            "inches": 1.75
+          },
+          {
+            "pages": 668,
+            "inches": 1.8125
+          },
+          {
+            "pages": 670,
+            "inches": 1.8125
+          },
+          {
+            "pages": 672,
+            "inches": 1.8125
+          },
+          {
+            "pages": 674,
+            "inches": 1.8125
+          },
+          {
+            "pages": 676,
+            "inches": 1.8125
+          },
+          {
+            "pages": 678,
+            "inches": 1.8125
+          },
+          {
+            "pages": 680,
+            "inches": 1.8125
+          },
+          {
+            "pages": 682,
+            "inches": 1.8125
+          },
+          {
+            "pages": 684,
+            "inches": 1.8125
+          },
+          {
+            "pages": 686,
+            "inches": 1.8125
+          },
+          {
+            "pages": 688,
+            "inches": 1.8125
+          },
+          {
+            "pages": 690,
+            "inches": 1.8125
+          },
+          {
+            "pages": 692,
+            "inches": 1.8125
+          },
+          {
+            "pages": 694,
+            "inches": 1.8125
+          },
+          {
+            "pages": 696,
+            "inches": 1.875
+          },
+          {
+            "pages": 698,
+            "inches": 1.875
+          },
+          {
+            "pages": 700,
+            "inches": 1.875
+          },
+          {
+            "pages": 702,
+            "inches": 1.875
+          },
+          {
+            "pages": 704,
+            "inches": 1.875
+          },
+          {
+            "pages": 706,
+            "inches": 1.875
+          },
+          {
+            "pages": 708,
+            "inches": 1.875
+          },
+          {
+            "pages": 710,
+            "inches": 1.875
+          },
+          {
+            "pages": 712,
+            "inches": 1.875
+          },
+          {
+            "pages": 714,
+            "inches": 1.875
+          },
+          {
+            "pages": 716,
+            "inches": 1.875
+          },
+          {
+            "pages": 718,
+            "inches": 1.875
+          },
+          {
+            "pages": 720,
+            "inches": 1.875
+          },
+          {
+            "pages": 722,
+            "inches": 1.875
+          },
+          {
+            "pages": 724,
+            "inches": 1.9375
+          },
+          {
+            "pages": 726,
+            "inches": 1.9375
+          },
+          {
+            "pages": 728,
+            "inches": 1.9375
+          },
+          {
+            "pages": 730,
+            "inches": 1.9375
+          },
+          {
+            "pages": 732,
+            "inches": 1.9375
+          },
+          {
+            "pages": 734,
+            "inches": 1.9375
+          },
+          {
+            "pages": 736,
+            "inches": 1.9375
+          },
+          {
+            "pages": 738,
+            "inches": 1.9375
+          },
+          {
+            "pages": 740,
+            "inches": 1.9375
+          },
+          {
+            "pages": 742,
+            "inches": 1.9375
+          },
+          {
+            "pages": 744,
+            "inches": 1.9375
+          },
+          {
+            "pages": 746,
+            "inches": 1.9375
+          },
+          {
+            "pages": 748,
+            "inches": 1.9375
+          },
+          {
+            "pages": 750,
+            "inches": 1.9375
+          },
+          {
+            "pages": 752,
+            "inches": 2.0
+          },
+          {
+            "pages": 754,
+            "inches": 2.0
+          },
+          {
+            "pages": 756,
+            "inches": 2.0
+          },
+          {
+            "pages": 758,
+            "inches": 2.0
+          },
+          {
+            "pages": 760,
+            "inches": 2.0
+          },
+          {
+            "pages": 762,
+            "inches": 2.0
+          },
+          {
+            "pages": 764,
+            "inches": 2.0
+          },
+          {
+            "pages": 766,
+            "inches": 2.0
+          },
+          {
+            "pages": 768,
+            "inches": 2.0
+          },
+          {
+            "pages": 770,
+            "inches": 2.0
+          },
+          {
+            "pages": 772,
+            "inches": 2.0
+          },
+          {
+            "pages": 774,
+            "inches": 2.0
+          },
+          {
+            "pages": 776,
+            "inches": 2.0
+          },
+          {
+            "pages": 778,
+            "inches": 2.0
+          },
+          {
+            "pages": 780,
+            "inches": 2.0625
+          },
+          {
+            "pages": 782,
+            "inches": 2.0625
+          },
+          {
+            "pages": 784,
+            "inches": 2.0625
+          },
+          {
+            "pages": 786,
+            "inches": 2.0625
+          },
+          {
+            "pages": 788,
+            "inches": 2.0625
+          },
+          {
+            "pages": 790,
+            "inches": 2.0625
+          },
+          {
+            "pages": 792,
+            "inches": 2.0625
+          },
+          {
+            "pages": 794,
+            "inches": 2.0625
+          },
+          {
+            "pages": 796,
+            "inches": 2.0625
+          },
+          {
+            "pages": 798,
+            "inches": 2.0625
+          },
+          {
+            "pages": 800,
+            "inches": 2.125
+          }
+        ],
+        "inchesPerPage": null
+      },
+      "minimumSubmittedPages": 24,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-hc-case-stdcolor-80-white",
+      "vendor": "Lulu",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "StandardColor",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 24,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "FrozenLookup",
+        "anchors": [
+          {
+            "pages": 24,
+            "inches": 0.25
+          },
+          {
+            "pages": 26,
+            "inches": 0.25
+          },
+          {
+            "pages": 28,
+            "inches": 0.25
+          },
+          {
+            "pages": 30,
+            "inches": 0.25
+          },
+          {
+            "pages": 32,
+            "inches": 0.25
+          },
+          {
+            "pages": 34,
+            "inches": 0.25
+          },
+          {
+            "pages": 36,
+            "inches": 0.25
+          },
+          {
+            "pages": 38,
+            "inches": 0.25
+          },
+          {
+            "pages": 40,
+            "inches": 0.25
+          },
+          {
+            "pages": 42,
+            "inches": 0.25
+          },
+          {
+            "pages": 44,
+            "inches": 0.25
+          },
+          {
+            "pages": 46,
+            "inches": 0.25
+          },
+          {
+            "pages": 48,
+            "inches": 0.25
+          },
+          {
+            "pages": 50,
+            "inches": 0.25
+          },
+          {
+            "pages": 52,
+            "inches": 0.25
+          },
+          {
+            "pages": 54,
+            "inches": 0.25
+          },
+          {
+            "pages": 56,
+            "inches": 0.25
+          },
+          {
+            "pages": 58,
+            "inches": 0.25
+          },
+          {
+            "pages": 60,
+            "inches": 0.25
+          },
+          {
+            "pages": 62,
+            "inches": 0.25
+          },
+          {
+            "pages": 64,
+            "inches": 0.25
+          },
+          {
+            "pages": 66,
+            "inches": 0.25
+          },
+          {
+            "pages": 68,
+            "inches": 0.25
+          },
+          {
+            "pages": 70,
+            "inches": 0.25
+          },
+          {
+            "pages": 72,
+            "inches": 0.25
+          },
+          {
+            "pages": 74,
+            "inches": 0.25
+          },
+          {
+            "pages": 76,
+            "inches": 0.25
+          },
+          {
+            "pages": 78,
+            "inches": 0.25
+          },
+          {
+            "pages": 80,
+            "inches": 0.25
+          },
+          {
+            "pages": 82,
+            "inches": 0.25
+          },
+          {
+            "pages": 84,
+            "inches": 0.25
+          },
+          {
+            "pages": 86,
+            "inches": 0.5
+          },
+          {
+            "pages": 88,
+            "inches": 0.5
+          },
+          {
+            "pages": 90,
+            "inches": 0.5
+          },
+          {
+            "pages": 92,
+            "inches": 0.5
+          },
+          {
+            "pages": 94,
+            "inches": 0.5
+          },
+          {
+            "pages": 96,
+            "inches": 0.5
+          },
+          {
+            "pages": 98,
+            "inches": 0.5
+          },
+          {
+            "pages": 100,
+            "inches": 0.5
+          },
+          {
+            "pages": 102,
+            "inches": 0.5
+          },
+          {
+            "pages": 104,
+            "inches": 0.5
+          },
+          {
+            "pages": 106,
+            "inches": 0.5
+          },
+          {
+            "pages": 108,
+            "inches": 0.5
+          },
+          {
+            "pages": 110,
+            "inches": 0.5
+          },
+          {
+            "pages": 112,
+            "inches": 0.5
+          },
+          {
+            "pages": 114,
+            "inches": 0.5
+          },
+          {
+            "pages": 116,
+            "inches": 0.5
+          },
+          {
+            "pages": 118,
+            "inches": 0.5
+          },
+          {
+            "pages": 120,
+            "inches": 0.5
+          },
+          {
+            "pages": 122,
+            "inches": 0.5
+          },
+          {
+            "pages": 124,
+            "inches": 0.5
+          },
+          {
+            "pages": 126,
+            "inches": 0.5
+          },
+          {
+            "pages": 128,
+            "inches": 0.5
+          },
+          {
+            "pages": 130,
+            "inches": 0.5
+          },
+          {
+            "pages": 132,
+            "inches": 0.5
+          },
+          {
+            "pages": 134,
+            "inches": 0.5
+          },
+          {
+            "pages": 136,
+            "inches": 0.5
+          },
+          {
+            "pages": 138,
+            "inches": 0.5
+          },
+          {
+            "pages": 140,
+            "inches": 0.5
+          },
+          {
+            "pages": 142,
+            "inches": 0.625
+          },
+          {
+            "pages": 144,
+            "inches": 0.625
+          },
+          {
+            "pages": 146,
+            "inches": 0.625
+          },
+          {
+            "pages": 148,
+            "inches": 0.625
+          },
+          {
+            "pages": 150,
+            "inches": 0.625
+          },
+          {
+            "pages": 152,
+            "inches": 0.625
+          },
+          {
+            "pages": 154,
+            "inches": 0.625
+          },
+          {
+            "pages": 156,
+            "inches": 0.625
+          },
+          {
+            "pages": 158,
+            "inches": 0.625
+          },
+          {
+            "pages": 160,
+            "inches": 0.625
+          },
+          {
+            "pages": 162,
+            "inches": 0.625
+          },
+          {
+            "pages": 164,
+            "inches": 0.625
+          },
+          {
+            "pages": 166,
+            "inches": 0.625
+          },
+          {
+            "pages": 168,
+            "inches": 0.625
+          },
+          {
+            "pages": 170,
+            "inches": 0.6875
+          },
+          {
+            "pages": 172,
+            "inches": 0.6875
+          },
+          {
+            "pages": 174,
+            "inches": 0.6875
+          },
+          {
+            "pages": 176,
+            "inches": 0.6875
+          },
+          {
+            "pages": 178,
+            "inches": 0.6875
+          },
+          {
+            "pages": 180,
+            "inches": 0.6875
+          },
+          {
+            "pages": 182,
+            "inches": 0.6875
+          },
+          {
+            "pages": 184,
+            "inches": 0.6875
+          },
+          {
+            "pages": 186,
+            "inches": 0.6875
+          },
+          {
+            "pages": 188,
+            "inches": 0.6875
+          },
+          {
+            "pages": 190,
+            "inches": 0.6875
+          },
+          {
+            "pages": 192,
+            "inches": 0.6875
+          },
+          {
+            "pages": 194,
+            "inches": 0.6875
+          },
+          {
+            "pages": 196,
+            "inches": 0.75
+          },
+          {
+            "pages": 198,
+            "inches": 0.75
+          },
+          {
+            "pages": 200,
+            "inches": 0.75
+          },
+          {
+            "pages": 202,
+            "inches": 0.75
+          },
+          {
+            "pages": 204,
+            "inches": 0.75
+          },
+          {
+            "pages": 206,
+            "inches": 0.75
+          },
+          {
+            "pages": 208,
+            "inches": 0.75
+          },
+          {
+            "pages": 210,
+            "inches": 0.75
+          },
+          {
+            "pages": 212,
+            "inches": 0.75
+          },
+          {
+            "pages": 214,
+            "inches": 0.75
+          },
+          {
+            "pages": 216,
+            "inches": 0.75
+          },
+          {
+            "pages": 218,
+            "inches": 0.75
+          },
+          {
+            "pages": 220,
+            "inches": 0.75
+          },
+          {
+            "pages": 222,
+            "inches": 0.75
+          },
+          {
+            "pages": 224,
+            "inches": 0.8125
+          },
+          {
+            "pages": 226,
+            "inches": 0.8125
+          },
+          {
+            "pages": 228,
+            "inches": 0.8125
+          },
+          {
+            "pages": 230,
+            "inches": 0.8125
+          },
+          {
+            "pages": 232,
+            "inches": 0.8125
+          },
+          {
+            "pages": 234,
+            "inches": 0.8125
+          },
+          {
+            "pages": 236,
+            "inches": 0.8125
+          },
+          {
+            "pages": 238,
+            "inches": 0.8125
+          },
+          {
+            "pages": 240,
+            "inches": 0.8125
+          },
+          {
+            "pages": 242,
+            "inches": 0.8125
+          },
+          {
+            "pages": 244,
+            "inches": 0.8125
+          },
+          {
+            "pages": 246,
+            "inches": 0.8125
+          },
+          {
+            "pages": 248,
+            "inches": 0.8125
+          },
+          {
+            "pages": 250,
+            "inches": 0.8125
+          },
+          {
+            "pages": 252,
+            "inches": 0.875
+          },
+          {
+            "pages": 254,
+            "inches": 0.875
+          },
+          {
+            "pages": 256,
+            "inches": 0.875
+          },
+          {
+            "pages": 258,
+            "inches": 0.875
+          },
+          {
+            "pages": 260,
+            "inches": 0.875
+          },
+          {
+            "pages": 262,
+            "inches": 0.875
+          },
+          {
+            "pages": 264,
+            "inches": 0.875
+          },
+          {
+            "pages": 266,
+            "inches": 0.875
+          },
+          {
+            "pages": 268,
+            "inches": 0.875
+          },
+          {
+            "pages": 270,
+            "inches": 0.875
+          },
+          {
+            "pages": 272,
+            "inches": 0.875
+          },
+          {
+            "pages": 274,
+            "inches": 0.875
+          },
+          {
+            "pages": 276,
+            "inches": 0.875
+          },
+          {
+            "pages": 278,
+            "inches": 0.875
+          },
+          {
+            "pages": 280,
+            "inches": 0.9375
+          },
+          {
+            "pages": 282,
+            "inches": 0.9375
+          },
+          {
+            "pages": 284,
+            "inches": 0.9375
+          },
+          {
+            "pages": 286,
+            "inches": 0.9375
+          },
+          {
+            "pages": 288,
+            "inches": 0.9375
+          },
+          {
+            "pages": 290,
+            "inches": 0.9375
+          },
+          {
+            "pages": 292,
+            "inches": 0.9375
+          },
+          {
+            "pages": 294,
+            "inches": 0.9375
+          },
+          {
+            "pages": 296,
+            "inches": 0.9375
+          },
+          {
+            "pages": 298,
+            "inches": 0.9375
+          },
+          {
+            "pages": 300,
+            "inches": 0.9375
+          },
+          {
+            "pages": 302,
+            "inches": 0.9375
+          },
+          {
+            "pages": 304,
+            "inches": 0.9375
+          },
+          {
+            "pages": 306,
+            "inches": 0.9375
+          },
+          {
+            "pages": 308,
+            "inches": 1.0
+          },
+          {
+            "pages": 310,
+            "inches": 1.0
+          },
+          {
+            "pages": 312,
+            "inches": 1.0
+          },
+          {
+            "pages": 314,
+            "inches": 1.0
+          },
+          {
+            "pages": 316,
+            "inches": 1.0
+          },
+          {
+            "pages": 318,
+            "inches": 1.0
+          },
+          {
+            "pages": 320,
+            "inches": 1.0
+          },
+          {
+            "pages": 322,
+            "inches": 1.0
+          },
+          {
+            "pages": 324,
+            "inches": 1.0
+          },
+          {
+            "pages": 326,
+            "inches": 1.0
+          },
+          {
+            "pages": 328,
+            "inches": 1.0
+          },
+          {
+            "pages": 330,
+            "inches": 1.0
+          },
+          {
+            "pages": 332,
+            "inches": 1.0
+          },
+          {
+            "pages": 334,
+            "inches": 1.0
+          },
+          {
+            "pages": 336,
+            "inches": 1.0625
+          },
+          {
+            "pages": 338,
+            "inches": 1.0625
+          },
+          {
+            "pages": 340,
+            "inches": 1.0625
+          },
+          {
+            "pages": 342,
+            "inches": 1.0625
+          },
+          {
+            "pages": 344,
+            "inches": 1.0625
+          },
+          {
+            "pages": 346,
+            "inches": 1.0625
+          },
+          {
+            "pages": 348,
+            "inches": 1.0625
+          },
+          {
+            "pages": 350,
+            "inches": 1.0625
+          },
+          {
+            "pages": 352,
+            "inches": 1.0625
+          },
+          {
+            "pages": 354,
+            "inches": 1.0625
+          },
+          {
+            "pages": 356,
+            "inches": 1.0625
+          },
+          {
+            "pages": 358,
+            "inches": 1.0625
+          },
+          {
+            "pages": 360,
+            "inches": 1.0625
+          },
+          {
+            "pages": 362,
+            "inches": 1.125
+          },
+          {
+            "pages": 364,
+            "inches": 1.125
+          },
+          {
+            "pages": 366,
+            "inches": 1.125
+          },
+          {
+            "pages": 368,
+            "inches": 1.125
+          },
+          {
+            "pages": 370,
+            "inches": 1.125
+          },
+          {
+            "pages": 372,
+            "inches": 1.125
+          },
+          {
+            "pages": 374,
+            "inches": 1.125
+          },
+          {
+            "pages": 376,
+            "inches": 1.125
+          },
+          {
+            "pages": 378,
+            "inches": 1.125
+          },
+          {
+            "pages": 380,
+            "inches": 1.125
+          },
+          {
+            "pages": 382,
+            "inches": 1.125
+          },
+          {
+            "pages": 384,
+            "inches": 1.125
+          },
+          {
+            "pages": 386,
+            "inches": 1.125
+          },
+          {
+            "pages": 388,
+            "inches": 1.125
+          },
+          {
+            "pages": 390,
+            "inches": 1.1875
+          },
+          {
+            "pages": 392,
+            "inches": 1.1875
+          },
+          {
+            "pages": 394,
+            "inches": 1.1875
+          },
+          {
+            "pages": 396,
+            "inches": 1.1875
+          },
+          {
+            "pages": 398,
+            "inches": 1.1875
+          },
+          {
+            "pages": 400,
+            "inches": 1.1875
+          },
+          {
+            "pages": 402,
+            "inches": 1.1875
+          },
+          {
+            "pages": 404,
+            "inches": 1.1875
+          },
+          {
+            "pages": 406,
+            "inches": 1.1875
+          },
+          {
+            "pages": 408,
+            "inches": 1.1875
+          },
+          {
+            "pages": 410,
+            "inches": 1.1875
+          },
+          {
+            "pages": 412,
+            "inches": 1.1875
+          },
+          {
+            "pages": 414,
+            "inches": 1.1875
+          },
+          {
+            "pages": 416,
+            "inches": 1.1875
+          },
+          {
+            "pages": 418,
+            "inches": 1.25
+          },
+          {
+            "pages": 420,
+            "inches": 1.25
+          },
+          {
+            "pages": 422,
+            "inches": 1.25
+          },
+          {
+            "pages": 424,
+            "inches": 1.25
+          },
+          {
+            "pages": 426,
+            "inches": 1.25
+          },
+          {
+            "pages": 428,
+            "inches": 1.25
+          },
+          {
+            "pages": 430,
+            "inches": 1.25
+          },
+          {
+            "pages": 432,
+            "inches": 1.25
+          },
+          {
+            "pages": 434,
+            "inches": 1.25
+          },
+          {
+            "pages": 436,
+            "inches": 1.25
+          },
+          {
+            "pages": 438,
+            "inches": 1.25
+          },
+          {
+            "pages": 440,
+            "inches": 1.25
+          },
+          {
+            "pages": 442,
+            "inches": 1.25
+          },
+          {
+            "pages": 444,
+            "inches": 1.25
+          },
+          {
+            "pages": 446,
+            "inches": 1.3125
+          },
+          {
+            "pages": 448,
+            "inches": 1.3125
+          },
+          {
+            "pages": 450,
+            "inches": 1.3125
+          },
+          {
+            "pages": 452,
+            "inches": 1.3125
+          },
+          {
+            "pages": 454,
+            "inches": 1.3125
+          },
+          {
+            "pages": 456,
+            "inches": 1.3125
+          },
+          {
+            "pages": 458,
+            "inches": 1.3125
+          },
+          {
+            "pages": 460,
+            "inches": 1.3125
+          },
+          {
+            "pages": 462,
+            "inches": 1.3125
+          },
+          {
+            "pages": 464,
+            "inches": 1.3125
+          },
+          {
+            "pages": 466,
+            "inches": 1.3125
+          },
+          {
+            "pages": 468,
+            "inches": 1.3125
+          },
+          {
+            "pages": 470,
+            "inches": 1.3125
+          },
+          {
+            "pages": 472,
+            "inches": 1.3125
+          },
+          {
+            "pages": 474,
+            "inches": 1.375
+          },
+          {
+            "pages": 476,
+            "inches": 1.375
+          },
+          {
+            "pages": 478,
+            "inches": 1.375
+          },
+          {
+            "pages": 480,
+            "inches": 1.375
+          },
+          {
+            "pages": 482,
+            "inches": 1.375
+          },
+          {
+            "pages": 484,
+            "inches": 1.375
+          },
+          {
+            "pages": 486,
+            "inches": 1.375
+          },
+          {
+            "pages": 488,
+            "inches": 1.375
+          },
+          {
+            "pages": 490,
+            "inches": 1.375
+          },
+          {
+            "pages": 492,
+            "inches": 1.375
+          },
+          {
+            "pages": 494,
+            "inches": 1.375
+          },
+          {
+            "pages": 496,
+            "inches": 1.375
+          },
+          {
+            "pages": 498,
+            "inches": 1.375
+          },
+          {
+            "pages": 500,
+            "inches": 1.375
+          },
+          {
+            "pages": 502,
+            "inches": 1.4375
+          },
+          {
+            "pages": 504,
+            "inches": 1.4375
+          },
+          {
+            "pages": 506,
+            "inches": 1.4375
+          },
+          {
+            "pages": 508,
+            "inches": 1.4375
+          },
+          {
+            "pages": 510,
+            "inches": 1.4375
+          },
+          {
+            "pages": 512,
+            "inches": 1.4375
+          },
+          {
+            "pages": 514,
+            "inches": 1.4375
+          },
+          {
+            "pages": 516,
+            "inches": 1.4375
+          },
+          {
+            "pages": 518,
+            "inches": 1.4375
+          },
+          {
+            "pages": 520,
+            "inches": 1.4375
+          },
+          {
+            "pages": 522,
+            "inches": 1.4375
+          },
+          {
+            "pages": 524,
+            "inches": 1.4375
+          },
+          {
+            "pages": 526,
+            "inches": 1.4375
+          },
+          {
+            "pages": 528,
+            "inches": 1.4375
+          },
+          {
+            "pages": 530,
+            "inches": 1.5
+          },
+          {
+            "pages": 532,
+            "inches": 1.5
+          },
+          {
+            "pages": 534,
+            "inches": 1.5
+          },
+          {
+            "pages": 536,
+            "inches": 1.5
+          },
+          {
+            "pages": 538,
+            "inches": 1.5
+          },
+          {
+            "pages": 540,
+            "inches": 1.5
+          },
+          {
+            "pages": 542,
+            "inches": 1.5
+          },
+          {
+            "pages": 544,
+            "inches": 1.5
+          },
+          {
+            "pages": 546,
+            "inches": 1.5
+          },
+          {
+            "pages": 548,
+            "inches": 1.5
+          },
+          {
+            "pages": 550,
+            "inches": 1.5
+          },
+          {
+            "pages": 552,
+            "inches": 1.5
+          },
+          {
+            "pages": 554,
+            "inches": 1.5
+          },
+          {
+            "pages": 556,
+            "inches": 1.5
+          },
+          {
+            "pages": 558,
+            "inches": 1.5625
+          },
+          {
+            "pages": 560,
+            "inches": 1.5625
+          },
+          {
+            "pages": 562,
+            "inches": 1.5625
+          },
+          {
+            "pages": 564,
+            "inches": 1.5625
+          },
+          {
+            "pages": 566,
+            "inches": 1.5625
+          },
+          {
+            "pages": 568,
+            "inches": 1.5625
+          },
+          {
+            "pages": 570,
+            "inches": 1.5625
+          },
+          {
+            "pages": 572,
+            "inches": 1.5625
+          },
+          {
+            "pages": 574,
+            "inches": 1.5625
+          },
+          {
+            "pages": 576,
+            "inches": 1.5625
+          },
+          {
+            "pages": 578,
+            "inches": 1.5625
+          },
+          {
+            "pages": 580,
+            "inches": 1.5625
+          },
+          {
+            "pages": 582,
+            "inches": 1.5625
+          },
+          {
+            "pages": 584,
+            "inches": 1.625
+          },
+          {
+            "pages": 586,
+            "inches": 1.625
+          },
+          {
+            "pages": 588,
+            "inches": 1.625
+          },
+          {
+            "pages": 590,
+            "inches": 1.625
+          },
+          {
+            "pages": 592,
+            "inches": 1.625
+          },
+          {
+            "pages": 594,
+            "inches": 1.625
+          },
+          {
+            "pages": 596,
+            "inches": 1.625
+          },
+          {
+            "pages": 598,
+            "inches": 1.625
+          },
+          {
+            "pages": 600,
+            "inches": 1.625
+          },
+          {
+            "pages": 602,
+            "inches": 1.625
+          },
+          {
+            "pages": 604,
+            "inches": 1.625
+          },
+          {
+            "pages": 606,
+            "inches": 1.625
+          },
+          {
+            "pages": 608,
+            "inches": 1.625
+          },
+          {
+            "pages": 610,
+            "inches": 1.625
+          },
+          {
+            "pages": 612,
+            "inches": 1.6875
+          },
+          {
+            "pages": 614,
+            "inches": 1.6875
+          },
+          {
+            "pages": 616,
+            "inches": 1.6875
+          },
+          {
+            "pages": 618,
+            "inches": 1.6875
+          },
+          {
+            "pages": 620,
+            "inches": 1.6875
+          },
+          {
+            "pages": 622,
+            "inches": 1.6875
+          },
+          {
+            "pages": 624,
+            "inches": 1.6875
+          },
+          {
+            "pages": 626,
+            "inches": 1.6875
+          },
+          {
+            "pages": 628,
+            "inches": 1.6875
+          },
+          {
+            "pages": 630,
+            "inches": 1.6875
+          },
+          {
+            "pages": 632,
+            "inches": 1.6875
+          },
+          {
+            "pages": 634,
+            "inches": 1.6875
+          },
+          {
+            "pages": 636,
+            "inches": 1.6875
+          },
+          {
+            "pages": 638,
+            "inches": 1.6875
+          },
+          {
+            "pages": 640,
+            "inches": 1.75
+          },
+          {
+            "pages": 642,
+            "inches": 1.75
+          },
+          {
+            "pages": 644,
+            "inches": 1.75
+          },
+          {
+            "pages": 646,
+            "inches": 1.75
+          },
+          {
+            "pages": 648,
+            "inches": 1.75
+          },
+          {
+            "pages": 650,
+            "inches": 1.75
+          },
+          {
+            "pages": 652,
+            "inches": 1.75
+          },
+          {
+            "pages": 654,
+            "inches": 1.75
+          },
+          {
+            "pages": 656,
+            "inches": 1.75
+          },
+          {
+            "pages": 658,
+            "inches": 1.75
+          },
+          {
+            "pages": 660,
+            "inches": 1.75
+          },
+          {
+            "pages": 662,
+            "inches": 1.75
+          },
+          {
+            "pages": 664,
+            "inches": 1.75
+          },
+          {
+            "pages": 666,
+            "inches": 1.75
+          },
+          {
+            "pages": 668,
+            "inches": 1.8125
+          },
+          {
+            "pages": 670,
+            "inches": 1.8125
+          },
+          {
+            "pages": 672,
+            "inches": 1.8125
+          },
+          {
+            "pages": 674,
+            "inches": 1.8125
+          },
+          {
+            "pages": 676,
+            "inches": 1.8125
+          },
+          {
+            "pages": 678,
+            "inches": 1.8125
+          },
+          {
+            "pages": 680,
+            "inches": 1.8125
+          },
+          {
+            "pages": 682,
+            "inches": 1.8125
+          },
+          {
+            "pages": 684,
+            "inches": 1.8125
+          },
+          {
+            "pages": 686,
+            "inches": 1.8125
+          },
+          {
+            "pages": 688,
+            "inches": 1.8125
+          },
+          {
+            "pages": 690,
+            "inches": 1.8125
+          },
+          {
+            "pages": 692,
+            "inches": 1.8125
+          },
+          {
+            "pages": 694,
+            "inches": 1.8125
+          },
+          {
+            "pages": 696,
+            "inches": 1.875
+          },
+          {
+            "pages": 698,
+            "inches": 1.875
+          },
+          {
+            "pages": 700,
+            "inches": 1.875
+          },
+          {
+            "pages": 702,
+            "inches": 1.875
+          },
+          {
+            "pages": 704,
+            "inches": 1.875
+          },
+          {
+            "pages": 706,
+            "inches": 1.875
+          },
+          {
+            "pages": 708,
+            "inches": 1.875
+          },
+          {
+            "pages": 710,
+            "inches": 1.875
+          },
+          {
+            "pages": 712,
+            "inches": 1.875
+          },
+          {
+            "pages": 714,
+            "inches": 1.875
+          },
+          {
+            "pages": 716,
+            "inches": 1.875
+          },
+          {
+            "pages": 718,
+            "inches": 1.875
+          },
+          {
+            "pages": 720,
+            "inches": 1.875
+          },
+          {
+            "pages": 722,
+            "inches": 1.875
+          },
+          {
+            "pages": 724,
+            "inches": 1.9375
+          },
+          {
+            "pages": 726,
+            "inches": 1.9375
+          },
+          {
+            "pages": 728,
+            "inches": 1.9375
+          },
+          {
+            "pages": 730,
+            "inches": 1.9375
+          },
+          {
+            "pages": 732,
+            "inches": 1.9375
+          },
+          {
+            "pages": 734,
+            "inches": 1.9375
+          },
+          {
+            "pages": 736,
+            "inches": 1.9375
+          },
+          {
+            "pages": 738,
+            "inches": 1.9375
+          },
+          {
+            "pages": 740,
+            "inches": 1.9375
+          },
+          {
+            "pages": 742,
+            "inches": 1.9375
+          },
+          {
+            "pages": 744,
+            "inches": 1.9375
+          },
+          {
+            "pages": 746,
+            "inches": 1.9375
+          },
+          {
+            "pages": 748,
+            "inches": 1.9375
+          },
+          {
+            "pages": 750,
+            "inches": 1.9375
+          },
+          {
+            "pages": 752,
+            "inches": 2.0
+          },
+          {
+            "pages": 754,
+            "inches": 2.0
+          },
+          {
+            "pages": 756,
+            "inches": 2.0
+          },
+          {
+            "pages": 758,
+            "inches": 2.0
+          },
+          {
+            "pages": 760,
+            "inches": 2.0
+          },
+          {
+            "pages": 762,
+            "inches": 2.0
+          },
+          {
+            "pages": 764,
+            "inches": 2.0
+          },
+          {
+            "pages": 766,
+            "inches": 2.0
+          },
+          {
+            "pages": 768,
+            "inches": 2.0
+          },
+          {
+            "pages": 770,
+            "inches": 2.0
+          },
+          {
+            "pages": 772,
+            "inches": 2.0
+          },
+          {
+            "pages": 774,
+            "inches": 2.0
+          },
+          {
+            "pages": 776,
+            "inches": 2.0
+          },
+          {
+            "pages": 778,
+            "inches": 2.0
+          },
+          {
+            "pages": 780,
+            "inches": 2.0625
+          },
+          {
+            "pages": 782,
+            "inches": 2.0625
+          },
+          {
+            "pages": 784,
+            "inches": 2.0625
+          },
+          {
+            "pages": 786,
+            "inches": 2.0625
+          },
+          {
+            "pages": 788,
+            "inches": 2.0625
+          },
+          {
+            "pages": 790,
+            "inches": 2.0625
+          },
+          {
+            "pages": 792,
+            "inches": 2.0625
+          },
+          {
+            "pages": 794,
+            "inches": 2.0625
+          },
+          {
+            "pages": 796,
+            "inches": 2.0625
+          },
+          {
+            "pages": 798,
+            "inches": 2.0625
+          },
+          {
+            "pages": 800,
+            "inches": 2.125
+          }
+        ],
+        "inchesPerPage": null
+      },
+      "minimumSubmittedPages": 24,
+      "maximumSubmittedPages": 800,
+      "supportedProjectUses": [
+        "PersonalUse",
+        "ForSale"
+      ],
+      "defaultProjectUse": "PersonalUse"
+    },
+    {
+      "key": "lulu-hc-case-premcolor-80-white",
+      "vendor": "Lulu",
+      "format": "Hardcover",
+      "binding": "CaseBound",
+      "interiorProcess": "PremiumColor",
+      "basisWeightPounds": 80,
+      "gsm": 118,
+      "coverMaterial": "CaseLaminate",
+      "coverModes": [
+        "Simplex"
+      ],
+      "trimSizes": [
+        "4.25x6.875",
+        "5x8",
+        "5.5x8.5",
+        "5.83x8.27",
+        "6.14x9.21",
+        "6x9",
+        "6.63x10.25",
+        "7x10",
+        "7.44x9.68",
+        "7.5x7.5",
+        "8.27x11.69",
+        "8.5x8.5",
+        "8.5x11",
+        "9x7",
+        "11x8.5",
+        "11.69x8.27"
+      ],
+      "allowsCustomTrim": false,
+      "minimumPages": 24,
+      "maximumPages": 800,
+      "pdfProfile": "lulu-print-v1",
+      "spineModel": {
+        "kind": "FrozenLookup",
+        "anchors": [
+          {
+            "pages": 24,
+            "inches": 0.25
+          },
+          {
+            "pages": 26,
+            "inches": 0.25
+          },
+          {
+            "pages": 28,
+            "inches": 0.25
+          },
+          {
+            "pages": 30,
+            "inches": 0.25
+          },
+          {
+            "pages": 32,
+            "inches": 0.25
+          },
+          {
+            "pages": 34,
+            "inches": 0.25
+          },
+          {
+            "pages": 36,
+            "inches": 0.25
+          },
+          {
+            "pages": 38,
+            "inches": 0.25
+          },
+          {
+            "pages": 40,
+            "inches": 0.25
+          },
+          {
+            "pages": 42,
+            "inches": 0.25
+          },
+          {
+            "pages": 44,
+            "inches": 0.25
+          },
+          {
+            "pages": 46,
+            "inches": 0.25
+          },
+          {
+            "pages": 48,
+            "inches": 0.25
+          },
+          {
+            "pages": 50,
+            "inches": 0.25
+          },
+          {
+            "pages": 52,
+            "inches": 0.25
+          },
+          {
+            "pages": 54,
+            "inches": 0.25
+          },
+          {
+            "pages": 56,
+            "inches": 0.25
+          },
+          {
+            "pages": 58,
+            "inches": 0.25
+          },
+          {
+            "pages": 60,
+            "inches": 0.25
+          },
+          {
+            "pages": 62,
+            "inches": 0.25
+          },
+          {
+            "pages": 64,
+            "inches": 0.25
+          },
+          {
+            "pages": 66,
+            "inches": 0.25
+          },
+          {
+            "pages": 68,
+            "inches": 0.25
+          },
+          {
+            "pages": 70,
+            "inches": 0.25
+          },
+          {
+            "pages": 72,
+            "inches": 0.25
+          },
+          {
+            "pages": 74,
+            "inches": 0.25
+          },
+          {
+            "pages": 76,
+            "inches": 0.25
+          },
+          {
+            "pages": 78,
+            "inches": 0.25
+          },
+          {
+            "pages": 80,
+            "inches": 0.25
+          },
+          {
+            "pages": 82,
+            "inches": 0.25
+          },
+          {
+            "pages": 84,
+            "inches": 0.25
+          },
+          {
+            "pages": 86,
+            "inches": 0.5
+          },
+          {
+            "pages": 88,
+            "inches": 0.5
+          },
+          {
+            "pages": 90,
+            "inches": 0.5
+          },
+          {
+            "pages": 92,
+            "inches": 0.5
+          },
+          {
+            "pages": 94,
+            "inches": 0.5
+          },
+          {
+            "pages": 96,
+            "inches": 0.5
+          },
+          {
+            "pages": 98,
+            "inches": 0.5
+          },
+          {
+            "pages": 100,
+            "inches": 0.5
+          },
+          {
+            "pages": 102,
+            "inches": 0.5
+          },
+          {
+            "pages": 104,
+            "inches": 0.5
+          },
+          {
+            "pages": 106,
+            "inches": 0.5
+          },
+          {
+            "pages": 108,
+            "inches": 0.5
+          },
+          {
+            "pages": 110,
+            "inches": 0.5
+          },
+          {
+            "pages": 112,
+            "inches": 0.5
+          },
+          {
+            "pages": 114,
+            "inches": 0.5
+          },
+          {
+            "pages": 116,
+            "inches": 0.5
+          },
+          {
+            "pages": 118,
+            "inches": 0.5
+          },
+          {
+            "pages": 120,
+            "inches": 0.5
+          },
+          {
+            "pages": 122,
+            "inches": 0.5
+          },
+          {
+            "pages": 124,
+            "inches": 0.5
+          },
+          {
+            "pages": 126,
+            "inches": 0.5
+          },
+          {
+            "pages": 128,
+            "inches": 0.5
+          },
+          {
+            "pages": 130,
+            "inches": 0.5
+          },
+          {
+            "pages": 132,
+            "inches": 0.5
+          },
+          {
+            "pages": 134,
+            "inches": 0.5
+          },
+          {
+            "pages": 136,
+            "inches": 0.5
+          },
+          {
+            "pages": 138,
+            "inches": 0.5
+          },
+          {
+            "pages": 140,
+            "inches": 0.5
+          },
+          {
+            "pages": 142,
+            "inches": 0.625
+          },
+          {
+            "pages": 144,
+            "inches": 0.625
+          },
+          {
+            "pages": 146,
+            "inches": 0.625
+          },
+          {
+            "pages": 148,
+            "inches": 0.625
+          },
+          {
+            "pages": 150,
+            "inches": 0.625
+          },
+          {
+            "pages": 152,
+            "inches": 0.625
+          },
+          {
+            "pages": 154,
+            "inches": 0.625
+          },
+          {
+            "pages": 156,
+            "inches": 0.625
+          },
+          {
+            "pages": 158,
+            "inches": 0.625
+          },
+          {
+            "pages": 160,
+            "inches": 0.625
+          },
+          {
+            "pages": 162,
+            "inches": 0.625
+          },
+          {
+            "pages": 164,
+            "inches": 0.625
+          },
+          {
+            "pages": 166,
+            "inches": 0.625
+          },
+          {
+            "pages": 168,
+            "inches": 0.625
+          },
+          {
+            "pages": 170,
+            "inches": 0.6875
+          },
+          {
+            "pages": 172,
+            "inches": 0.6875
+          },
+          {
+            "pages": 174,
+            "inches": 0.6875
+          },
+          {
+            "pages": 176,
+            "inches": 0.6875
+          },
+          {
+            "pages": 178,
+            "inches": 0.6875
+          },
+          {
+            "pages": 180,
+            "inches": 0.6875
+          },
+          {
+            "pages": 182,
+            "inches": 0.6875
+          },
+          {
+            "pages": 184,
+            "inches": 0.6875
+          },
+          {
+            "pages": 186,
+            "inches": 0.6875
+          },
+          {
+            "pages": 188,
+            "inches": 0.6875
+          },
+          {
+            "pages": 190,
+            "inches": 0.6875
+          },
+          {
+            "pages": 192,
+            "inches": 0.6875
+          },
+          {
+            "pages": 194,
+            "inches": 0.6875
+          },
+          {
+            "pages": 196,
+            "inches": 0.75
+          },
+          {
+            "pages": 198,
+            "inches": 0.75
+          },
+          {
+            "pages": 200,
+            "inches": 0.75
+          },
+          {
+            "pages": 202,
+            "inches": 0.75
+          },
+          {
+            "pages": 204,
+            "inches": 0.75
+          },
+          {
+            "pages": 206,
+            "inches": 0.75
+          },
+          {
+            "pages": 208,
+            "inches": 0.75
+          },
+          {
+            "pages": 210,
+            "inches": 0.75
+          },
+          {
+            "pages": 212,
+            "inches": 0.75
+          },
+          {
+            "pages": 214,
+            "inches": 0.75
+          },
+          {
+            "pages": 216,
+            "inches": 0.75
+          },
+          {
+            "pages": 218,
+            "inches": 0.75
+          },
+          {
+            "pages": 220,
+            "inches": 0.75
+          },
+          {
+            "pages": 222,
+            "inches": 0.75
+          },
+          {
+            "pages": 224,
+            "inches": 0.8125
+          },
+          {
+            "pages": 226,
+            "inches": 0.8125
+          },
+          {
+            "pages": 228,
+            "inches": 0.8125
+          },
+          {
+            "pages": 230,
+            "inches": 0.8125
+          },
+          {
+            "pages": 232,
+            "inches": 0.8125
+          },
+          {
+            "pages": 234,
+            "inches": 0.8125
+          },
+          {
+            "pages": 236,
+            "inches": 0.8125
+          },
+          {
+            "pages": 238,
+            "inches": 0.8125
+          },
+          {
+            "pages": 240,
+            "inches": 0.8125
+          },
+          {
+            "pages": 242,
+            "inches": 0.8125
+          },
+          {
+            "pages": 244,
+            "inches": 0.8125
+          },
+          {
+            "pages": 246,
+            "inches": 0.8125
+          },
+          {
+            "pages": 248,
+            "inches": 0.8125
+          },
+          {
+            "pages": 250,
+            "inches": 0.8125
+          },
+          {
+            "pages": 252,
+            "inches": 0.875
+          },
+          {
+            "pages": 254,
+            "inches": 0.875
+          },
+          {
+            "pages": 256,
+            "inches": 0.875
+          },
+          {
+            "pages": 258,
+            "inches": 0.875
+          },
+          {
+            "pages": 260,
+            "inches": 0.875
+          },
+          {
+            "pages": 262,
+            "inches": 0.875
+          },
+          {
+            "pages": 264,
+            "inches": 0.875
+          },
+          {
+            "pages": 266,
+            "inches": 0.875
+          },
+          {
+            "pages": 268,
+            "inches": 0.875
+          },
+          {
+            "pages": 270,
+            "inches": 0.875
+          },
+          {
+            "pages": 272,
+            "inches": 0.875
+          },
+          {
+            "pages": 274,
+            "inches": 0.875
+          },
+          {
+            "pages": 276,
+            "inches": 0.875
+          },
+          {
+            "pages": 278,
+            "inches": 0.875
+          },
+          {
+            "pages": 280,
+            "inches": 0.9375
+          },
+          {
+            "pages": 282,
+            "inches": 0.9375
+          },
+          {
+            "pages": 284,
+            "inches": 0.9375
+          },
+          {
+            "pages": 286,
+            "inches": 0.9375
+          },
+          {
+            "pages": 288,
+            "inches": 0.9375
+          },
+          {
+            "pages": 290,
+            "inches": 0.9375
+          },
+          {
+            "pages": 292,
+            "inches": 0.9375
+          },
+          {
+            "pages": 294,
+            "inches": 0.9375
+          },
+          {
+            "pages": 296,
+            "inches": 0.9375
+          },
+          {
+            "pages": 298,
+            "inches": 0.9375
+          },
+          {
+            "pages": 300,
+            "inches": 0.9375
+          },
+          {
+            "pages": 302,
+            "inches": 0.9375
+          },
+          {
+            "pages": 304,
+            "inches": 0.9375
+          },
+          {
+            "pages": 306,
+            "inches": 0.9375
+          },
+          {
+            "pages": 308,
+            "inches": 1.0
+          },
+          {
+            "pages": 310,
+            "inches": 1.0
+          },
+          {
+            "pages": 312,
+            "inches": 1.0
+          },
+          {
+            "pages": 314,
+            "inches": 1.0
+          },
+          {
+            "pages": 316,
+            "inches": 1.0
+          },
+          {
+            "pages": 318,
+            "inches": 1.0
+          },
+          {
+            "pages": 320,
+            "inches": 1.0
+          },
+          {
+            "pages": 322,
+            "inches": 1.0
+          },
+          {
+            "pages": 324,
+            "inches": 1.0
+          },
+          {
+            "pages": 326,
+            "inches": 1.0
+          },
+          {
+            "pages": 328,
+            "inches": 1.0
+          },
+          {
+            "pages": 330,
+            "inches": 1.0
+          },
+          {
+            "pages": 332,
+            "inches": 1.0
+          },
+          {
+            "pages": 334,
+            "inches": 1.0
+          },
+          {
+            "pages": 336,
+            "inches": 1.0625
+          },
+          {
+            "pages": 338,
+            "inches": 1.0625
+          },
+          {
+            "pages": 340,
+            "inches": 1.0625
+          },
+          {
+            "pages": 342,
+            "inches": 1.0625
+          },
+          {
+            "pages": 344,
+            "inches": 1.0625
+          },
+          {
+            "pages": 346,
+            "inches": 1.0625
+          },
+          {
+            "pages": 348,
+            "inches": 1.0625
+          },
+          {
+            "pages": 350,
+            "inches": 1.0625
+          },
+          {
+            "pages": 352,
+            "inches": 1.0625
+          },
+          {
+            "pages": 354,
+            "inches": 1.0625
+          },
+          {
+            "pages": 356,
+            "inches": 1.0625
+          },
+          {
+            "pages": 358,
+            "inches": 1.0625
+          },
+          {
+            "pages": 360,
+            "inches": 1.0625
+          },
+          {
+            "pages": 362,
+            "inches": 1.125
+          },
+          {
+            "pages": 364,
+            "inches": 1.125
+          },
+          {
+            "pages": 366,
+            "inches": 1.125
+          },
+          {
+            "pages": 368,
+            "inches": 1.125
+          },
+          {
+            "pages": 370,
+            "inches": 1.125
+          },
+          {
+            "pages": 372,
+            "inches": 1.125
+          },
+          {
+            "pages": 374,
+            "inches": 1.125
+          },
+          {
+            "pages": 376,
+            "inches": 1.125
+          },
+          {
+            "pages": 378,
+            "inches": 1.125
+          },
+          {
+            "pages": 380,
+            "inches": 1.125
+          },
+          {
+            "pages": 382,
+            "inches": 1.125
+          },
+          {
+            "pages": 384,
+            "inches": 1.125
+          },
+          {
+            "pages": 386,
+            "inches": 1.125
+          },
+          {
+            "pages": 388,
+            "inches": 1.125
+          },
+          {
+            "pages": 390,
+            "inches": 1.1875
+          },
+          {
+            "pages": 392,
+            "inches": 1.1875
+          },
+          {
+            "pages": 394,
+            "inches": 1.1875
+          },
+          {
+            "pages": 396,
+            "inches": 1.1875
+          },
+          {
+            "pages": 398,
+            "inches": 1.1875
+          },
+          {
+            "pages": 400,
+            "inches": 1.1875
+          },
+          {
+            "pages": 402,
+            "inches": 1.1875
+          },
+          {
+            "pages": 404,
+            "inches": 1.1875
+          },
+          {
+            "pages": 406,
+            "inches": 1.1875
+          },
+          {
+            "pages": 408,
+            "inches": 1.1875
+          },
+          {
+            "pages": 410,
+            "inches": 1.1875
+          },
+          {
+            "pages": 412,
+            "inches": 1.1875
+          },
+          {
+            "pages": 414,
+            "inches": 1.1875
+          },
+          {
+            "pages": 416,
+            "inches": 1.1875
+          },
+          {
+            "pages": 418,
+            "inches": 1.25
+          },
+          {
+            "pages": 420,
+            "inches": 1.25
+          },
+          {
+            "pages": 422,
+            "inches": 1.25
+          },
+          {
+            "pages": 424,
+            "inches": 1.25
+          },
+          {
+            "pages": 426,
+            "inches": 1.25
+          },
+          {
+            "pages": 428,
+            "inches": 1.25
+          },
+          {
+            "pages": 430,
+            "inches": 1.25
+          },
+          {
+            "pages": 432,
+            "inches": 1.25
+          },
+          {
+            "pages": 434,
+            "inches": 1.25
+          },
+          {
+            "pages": 436,
+            "inches": 1.25
+          },
+          {
+            "pages": 438,
+            "inches": 1.25
+          },
+          {
+            "pages": 440,
+            "inches": 1.25
+          },
+          {
+            "pages": 442,
+            "inches": 1.25
+          },
+          {
+            "pages": 444,
+            "inches": 1.25
+          },
+          {
+            "pages": 446,
+            "inches": 1.3125
+          },
+          {
+            "pages": 448,
+            "inches": 1.3125
+          },
+          {
+            "pages": 450,
+            "inches": 1.3125
+          },
+          {
+            "pages": 452,
+            "inches": 1.3125
+          },
+          {
+            "pages": 454,
+            "inches": 1.3125
+          },
+          {
+            "pages": 456,
+            "inches": 1.3125
+          },
+          {
+            "pages": 458,
+            "inches": 1.3125
+          },
+          {
+            "pages": 460,
+            "inches": 1.3125
+          },
+          {
+            "pages": 462,
+            "inches": 1.3125
+          },
+          {
+            "pages": 464,
+            "inches": 1.3125
+          },
+          {
+            "pages": 466,
+            "inches": 1.3125
+          },
+          {
+            "pages": 468,
+            "inches": 1.3125
+          },
+          {
+            "pages": 470,
+            "inches": 1.3125
+          },
+          {
+            "pages": 472,
+            "inches": 1.3125
+          },
+          {
+            "pages": 474,
+            "inches": 1.375
+          },
+          {
+            "pages": 476,
+            "inches": 1.375
+          },
+          {
+            "pages": 478,
+            "inches": 1.375
+          },
+          {
+            "pages": 480,
+            "inches": 1.375
+          },
+          {
+            "pages": 482,
+            "inches": 1.375
+          },
+          {
+            "pages": 484,
+            "inches": 1.375
+          },
+          {
+            "pages": 486,
+            "inches": 1.375
+          },
+          {
+            "pages": 488,
+            "inches": 1.375
+          },
+          {
+            "pages": 490,
+            "inches": 1.375
+          },
+          {
+            "pages": 492,
+            "inches": 1.375
+          },
+          {
+            "pages": 494,
+            "inches": 1.375
+          },
+          {
+            "pages": 496,
+            "inches": 1.375
+          },
+          {
+            "pages": 498,
+            "inches": 1.375
+          },
+          {
+            "pages": 500,
+            "inches": 1.375
+          },
+          {
+            "pages": 502,
+            "inches": 1.4375
+          },
+          {
+            "pages": 504,
+            "inches": 1.4375
+          },
+          {
+            "pages": 506,
+            "inches": 1.4375
+          },
+          {
+            "pages": 508,
+            "inches": 1.4375
+          },
+          {
+            "pages": 510,
+            "inches": 1.4375
+          },
+          {
+            "pages": 512,
+            "inches": 1.4375
+          },
+          {
+            "pages": 514,
+            "inches": 1.4375
+          },
+          {
+            "pages": 516,
+            "inches": 1.4375
+          },
+          {
+            "pages": 518,
+            "inches": 1.4375
+          },
+          {
+            "pages": 520,
+            "inches": 1.4375
+          },
+          {
+            "pages": 522,
+            "inches": 1.4375
+          },
+          {
+            "pages": 524,
+            "inches": 1.4375
+          },
+          {
+            "pages": 526,
+            "inches": 1.4375
+          },
+          {
+            "pages": 528,
+            "inches": 1.4375
+          },
+          {
+            "pages": 530,
+            "inches": 1.5
+          },
+          {
+            "pages": 532,
+            "inches": 1.5
+          },
+          {
+            "pages": 534,
+            "inches": 1.5
+          },
+          {
+            "pages": 536,
+            "inches": 1.5
+          },
+          {
+            "pages": 538,
+            "inches": 1.5
+          },
+          {
+            "pages": 540,
+            "inches": 1.5
+          },
+          {
+            "pages": 542,
+            "inches": 1.5
+          },
+          {
+            "pages": 544,
+            "inches": 1.5
+          },
+          {
+            "pages": 546,
+            "inches": 1.5
+          },
+          {
+            "pages": 548,
+            "inches": 1.5
+          },
+          {
+            "pages": 550,
+            "inches": 1.5
+          },
+          {
+            "pages": 552,
+            "inches": 1.5
+          },
+          {
+            "pages": 554,
+            "inches": 1.5
+          },
+          {
+            "pages": 556,
+            "inches": 1.5
+          },
+          {
+            "pages": 558,
+            "inches": 1.5625
+          },
+          {
+            "pages": 560,
+            "inches": 1.5625
+          },
+          {
+            "pages": 562,
+            "inches": 1.5625
+          },
+          {
+            "pages": 564,
+            "inches": 1.5625
+          },
+          {
+            "pages": 566,
+            "inches": 1.5625
+          },
+          {
+            "pages": 568,
+            "inches": 1.5625
+          },
+          {
+            "pages": 570,
+            "inches": 1.5625
+          },
+          {
+            "pages": 572,
+            "inches": 1.5625
+          },
+          {
+            "pages": 574,
+            "inches": 1.5625
+          },
+          {
+            "pages": 576,
+            "inches": 1.5625
+          },
+          {
+            "pages": 578,
+            "inches": 1.5625
+          },
+          {
+            "pages": 580,
+            "inches": 1.5625
+          },
+          {
+            "pages": 582,
+            "inches": 1.5625
+          },
+          {
+            "pages": 584,
+            "inches": 1.625
+          },
+          {
+            "pages": 586,
+            "inches": 1.625
+          },
+          {
+            "pages": 588,
+            "inches": 1.625
+          },
+          {
+            "pages": 590,
+            "inches": 1.625
+          },
+          {
+            "pages": 592,
+            "inches": 1.625
+          },
+          {
+            "pages": 594,
+            "inches": 1.625
+          },
+          {
+            "pages": 596,
+            "inches": 1.625
+          },
+          {
+            "pages": 598,
+            "inches": 1.625
+          },
+          {
+            "pages": 600,
+            "inches": 1.625
+          },
+          {
+            "pages": 602,
+            "inches": 1.625
+          },
+          {
+            "pages": 604,
+            "inches": 1.625
+          },
+          {
+            "pages": 606,
+            "inches": 1.625
+          },
+          {
+            "pages": 608,
+            "inches": 1.625
+          },
+          {
+            "pages": 610,
+            "inches": 1.625
+          },
+          {
+            "pages": 612,
+            "inches": 1.6875
+          },
+          {
+            "pages": 614,
+            "inches": 1.6875
+          },
+          {
+            "pages": 616,
+            "inches": 1.6875
+          },
+          {
+            "pages": 618,
+            "inches": 1.6875
+          },
+          {
+            "pages": 620,
+            "inches": 1.6875
+          },
+          {
+            "pages": 622,
+            "inches": 1.6875
+          },
+          {
+            "pages": 624,
+            "inches": 1.6875
+          },
+          {
+            "pages": 626,
+            "inches": 1.6875
+          },
+          {
+            "pages": 628,
+            "inches": 1.6875
+          },
+          {
+            "pages": 630,
+            "inches": 1.6875
+          },
+          {
+            "pages": 632,
+            "inches": 1.6875
+          },
+          {
+            "pages": 634,
+            "inches": 1.6875
+          },
+          {
+            "pages": 636,
+            "inches": 1.6875
+          },
+          {
+            "pages": 638,
+            "inches": 1.6875
+          },
+          {
+            "pages": 640,
+            "inches": 1.75
+          },
+          {
+            "pages": 642,
+            "inches": 1.75
+          },
+          {
+            "pages": 644,
+            "inches": 1.75
+          },
+          {
+            "pages": 646,
+            "inches": 1.75
+          },
+          {
+            "pages": 648,
+            "inches": 1.75
+          },
+          {
+            "pages": 650,
+            "inches": 1.75
+          },
+          {
+            "pages": 652,
+            "inches": 1.75
+          },
+          {
+            "pages": 654,
+            "inches": 1.75
+          },
+          {
+            "pages": 656,
+            "inches": 1.75
+          },
+          {
+            "pages": 658,
+            "inches": 1.75
+          },
+          {
+            "pages": 660,
+            "inches": 1.75
+          },
+          {
+            "pages": 662,
+            "inches": 1.75
+          },
+          {
+            "pages": 664,
+            "inches": 1.75
+          },
+          {
+            "pages": 666,
+            "inches": 1.75
+          },
+          {
+            "pages": 668,
+            "inches": 1.8125
+          },
+          {
+            "pages": 670,
+            "inches": 1.8125
+          },
+          {
+            "pages": 672,
+            "inches": 1.8125
+          },
+          {
+            "pages": 674,
+            "inches": 1.8125
+          },
+          {
+            "pages": 676,
+            "inches": 1.8125
+          },
+          {
+            "pages": 678,
+            "inches": 1.8125
+          },
+          {
+            "pages": 680,
+            "inches": 1.8125
+          },
+          {
+            "pages": 682,
+            "inches": 1.8125
+          },
+          {
+            "pages": 684,
+            "inches": 1.8125
+          },
+          {
+            "pages": 686,
+            "inches": 1.8125
+          },
+          {
+            "pages": 688,
+            "inches": 1.8125
+          },
+          {
+            "pages": 690,
+            "inches": 1.8125
+          },
+          {
+            "pages": 692,
+            "inches": 1.8125
+          },
+          {
+            "pages": 694,
+            "inches": 1.8125
+          },
+          {
+            "pages": 696,
+            "inches": 1.875
+          },
+          {
+            "pages": 698,
+            "inches": 1.875
+          },
+          {
+            "pages": 700,
+            "inches": 1.875
+          },
+          {
+            "pages": 702,
+            "inches": 1.875
+          },
+          {
+            "pages": 704,
+            "inches": 1.875
+          },
+          {
+            "pages": 706,
+            "inches": 1.875
+          },
+          {
+            "pages": 708,
+            "inches": 1.875
+          },
+          {
+            "pages": 710,
+            "inches": 1.875
+          },
+          {
+            "pages": 712,
+            "inches": 1.875
+          },
+          {
+            "pages": 714,
+            "inches": 1.875
+          },
+          {
+            "pages": 716,
+            "inches": 1.875
+          },
+          {
+            "pages": 718,
+            "inches": 1.875
+          },
+          {
+            "pages": 720,
+            "inches": 1.875
+          },
+          {
+            "pages": 722,
+            "inches": 1.875
+          },
+          {
+            "pages": 724,
+            "inches": 1.9375
+          },
+          {
+            "pages": 726,
+            "inches": 1.9375
+          },
+          {
+            "pages": 728,
+            "inches": 1.9375
+          },
+          {
+            "pages": 730,
+            "inches": 1.9375
+          },
+          {
+            "pages": 732,
+            "inches": 1.9375
+          },
+          {
+            "pages": 734,
+            "inches": 1.9375
+          },
+          {
+            "pages": 736,
+            "inches": 1.9375
+          },
+          {
+            "pages": 738,
+            "inches": 1.9375
+          },
+          {
+            "pages": 740,
+            "inches": 1.9375
+          },
+          {
+            "pages": 742,
+            "inches": 1.9375
+          },
+          {
+            "pages": 744,
+            "inches": 1.9375
+          },
+          {
+            "pages": 746,
+            "inches": 1.9375
+          },
+          {
+            "pages": 748,
+            "inches": 1.9375
+          },
+          {
+            "pages": 750,
+            "inches": 1.9375
+          },
+          {
+            "pages": 752,
+            "inches": 2.0
+          },
+          {
+            "pages": 754,
+            "inches": 2.0
+          },
+          {
+            "pages": 756,
+            "inches": 2.0
+          },
+          {
+            "pages": 758,
+            "inches": 2.0
+          },
+          {
+            "pages": 760,
+            "inches": 2.0
+          },
+          {
+            "pages": 762,
+            "inches": 2.0
+          },
+          {
+            "pages": 764,
+            "inches": 2.0
+          },
+          {
+            "pages": 766,
+            "inches": 2.0
+          },
+          {
+            "pages": 768,
+            "inches": 2.0
+          },
+          {
+            "pages": 770,
+            "inches": 2.0
+          },
+          {
+            "pages": 772,
+            "inches": 2.0
+          },
+          {
+            "pages": 774,
+            "inches": 2.0
+          },
+          {
+            "pages": 776,
+            "inches": 2.0
+          },
+          {
+            "pages": 778,
+            "inches": 2.0
+          },
+          {
+            "pages": 780,
+            "inches": 2.0625
+          },
+          {
+            "pages": 782,
+            "inches": 2.0625
+          },
+          {
+            "pages": 784,
+            "inches": 2.0625
+          },
+          {
+            "pages": 786,
+            "inches": 2.0625
+          },
+          {
+            "pages": 788,
+            "inches": 2.0625
+          },
+          {
+            "pages": 790,
+            "inches": 2.0625
+          },
+          {
+            "pages": 792,
+            "inches": 2.0625
+          },
+          {
+            "pages": 794,
+            "inches": 2.0625
+          },
+          {
+            "pages": 796,
+            "inches": 2.0625
+          },
+          {
+            "pages": 798,
+            "inches": 2.0625
+          },
+          {
+            "pages": 800,
+            "inches": 2.125
+          }
+        ],
+        "inchesPerPage": null
+      },
+      "minimumSubmittedPages": 24,
       "maximumSubmittedPages": 800,
       "supportedProjectUses": [
         "PersonalUse",

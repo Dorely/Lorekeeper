@@ -127,9 +127,9 @@ The current application provides:
 - a checked-in, versioned print-artifact profile registry shared by Lorekeeper and
   Press, with exact paper weight/thickness, process, trim, page-range,
   cover-mode, artifact, and geometry rules;
-- Generic, Amazon KDP paperback/case-laminate hardcover, and Ingram paperback,
+- Generic, Amazon KDP paperback/case-laminate hardcover, Ingram paperback,
   duplex-cover, case-laminate, Digital Cloth, dust-jacket, and jacketed-case
-  products;
+  products, and Lulu paperback and casewrap-hardcover products;
 - KDP PDF 1.7 and Ingram PDF/X-1a:2001 output with the owned CMYK profile;
 - reflowable and fixed-layout EPUB generation;
 - tagged Digital PDF with its front cover as page one;
@@ -220,7 +220,7 @@ without unpacking a package or opening another production application.
 
 ### 4. Versioned print-artifact profile registry and broader rules
 
-Status: `Implemented for current KDP, Ingram, and B&N artifact profiles`
+Status: `Implemented for current KDP, Ingram, B&N, and Lulu artifact profiles`
 
 - Generic versus Specific is the durable profile taxonomy.
 - The checked-in offline registry encodes reviewed vendor artifact profiles,

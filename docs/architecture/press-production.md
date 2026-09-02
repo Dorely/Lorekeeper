@@ -203,6 +203,18 @@ Uploaded covers reserve the bottom-right barcode area and use `VendorOverlay`,
 because B&N adds the applicable SKU or ISBN barcode
 ([B&N ISBN FAQs](https://help-press.barnesandnoble.com/hc/en-us/articles/5358254743963-ISBN-FAQs)).
 
+Lulu `lulu-print-v1` emits PDF 1.7 with embedded fonts and flattened
+transparency. Covers are always one integrated back-spine-front full wrap
+produced through `FullWrapMeasured`; Lulu has no separate-panel submission mode.
+Paperback spines use the published pages/444 + 0.06 inch formula and hardcover
+casewrap spines use a frozen lookup expanded from Lulu's banded table for every
+even page count in range. Spine text is only allowed at 100 pages or more so one
+rule covers both the print network and Global Distribution. Personal-use
+releases require no ISBN and ship without a barcode; for-sale releases use a
+user-supplied ISBN-13 with an EAN-13 barcode generated in the reserved
+bottom-right area. No `print-setup.json` is produced for Lulu. See
+[docs/research/lulu-print-requirements.md](../research/lulu-print-requirements.md).
+
 Composition opacity rules preserve Digital PDF appearance with bounded
 graphics states. KDP PDF 1.7 omits fully transparent backing paint and
 deterministically composites translucent backing shapes where safe while

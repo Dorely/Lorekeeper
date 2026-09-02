@@ -39,7 +39,8 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
             "ingram-print-pdfx1a-v2",
             "kdp-paperback-v2",
             "kdp-hardcover-v1",
-            "bn-print-pdfa1b-v1"
+            "bn-print-pdfa1b-v1",
+            "lulu-print-v1"
         ])
     );
     assert_eq!(value["machineRuntimeDependencies"], json!([]));
@@ -4231,6 +4232,303 @@ fn barnes_and_noble_precomposes_transparent_cover_images_into_lower_artwork() {
             .any(|samples| samples == [128, 0, 128, 255, 0, 0]),
         "the blue half-opacity icon pixel must blend into red artwork while its transparent pixel leaves the artwork unchanged"
     );
+}
+
+fn configure_lulu_job(
+    job: &mut PreparedJob,
+    project_use: &str,
+    identifier_mode: &str,
+    physical: (&str, &str, &str, &str, &[&str]),
+) {
+    job.configure_physical(physical);
+    job.request["printArtifactProfile"]["projectUse"] = json!(project_use);
+    job.request["printArtifactProfile"]["identifierMode"] = json!(identifier_mode);
+    job.request["printArtifactProfile"]["coverSubmissionMode"] = json!("FullWrapMeasured");
+    job.request["cover"]["spineReadingDirection"] = json!("TopToBottom");
+}
+
+fn lulu_chapters(count: usize) -> Value {
+    const LULU_BODY_PAGE: &str = "Lulu interior body text for pagination volume. ";
+    json!([{
+        "id": "act",
+        "title": "",
+        "includePage": false,
+        "includeHeading": false,
+        "chapters": [{
+            "id": "chapter-one",
+            "title": "Chapter one",
+            "includeHeading": true,
+            "blocks": (0..count)
+                .map(|index| {
+                    json!({
+                        "id": format!("block-{index}"),
+                        "type": "Paragraph",
+                        "content": [{"type": "Text", "text": LULU_BODY_PAGE.repeat(80), "marks": []}]
+                    })
+                })
+                .collect::<Vec<_>>()
+        }]
+    }])
+}
+
+fn lulu_interior_pages(response: &Value, job: &PreparedJob, kind: &str) -> usize {
+    inspect(&job.artifact(response, kind)).page_count
+}
+
+#[test]
+fn lulu_paperback_uses_the_registry_caliper_and_full_wrap_geometry() {
+    let mut job = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut job,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    job.request["document"]["sections"] = lulu_chapters(150);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    let pages = lulu_interior_pages(&response, &job, "interior-pdf");
+    assert!(pages >= 100, "the padded interior has {pages} pages");
+    let expected_spine = pages as f64 / 444.0 + 0.06;
+    let cover = inspect(&job.artifact(&response, "cover-pdf"));
+    assert_eq!(cover.page_count, 1);
+    assert!((cover.page_width / 72.0 - (12.25 + expected_spine)).abs() < 0.01);
+}
+
+#[test]
+fn lulu_hardcover_resolves_frozen_lookup_spine_anchors() {
+    let registry: Value =
+        serde_json::from_slice(include_bytes!("../assets/print-artifact-profiles-v1.json"))
+            .expect("print registry");
+    let catalog = registry["profiles"]
+        .as_array()
+        .expect("profiles")
+        .iter()
+        .find(|item| item["key"] == "lulu-hc-case-bw-80-white")
+        .expect("Lulu hardcover catalog");
+    let anchors = catalog["spineModel"]["anchors"]
+        .as_array()
+        .expect("frozen anchors");
+    let anchor = |pages: u64| {
+        anchors
+            .iter()
+            .find(|item| item["pages"].as_u64() == Some(pages))
+            .map(|item| item["inches"].as_f64().expect("anchor inches"))
+            .expect("anchor page")
+    };
+    assert_eq!(anchor(24), 0.25);
+    assert_eq!(anchor(168), 0.625);
+
+    let mut job = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut job,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-hc-case-bw-80-white",
+            "Lulu",
+            "Hardcover",
+            "CaseLaminate",
+            &["case-wrap"],
+        ),
+    );
+    job.request["document"]["sections"] = lulu_chapters(120);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    let pages = lulu_interior_pages(&response, &job, "interior-pdf");
+    let expected_spine = anchor(pages as u64);
+    let cover = inspect(&job.artifact(&response, "case-cover-pdf"));
+    assert_eq!(cover.page_count, 1);
+    assert!((cover.page_width / 72.0 - (12.25 + expected_spine)).abs() < 0.01);
+}
+
+#[test]
+fn lulu_rejects_spine_text_below_100_pages_and_accepts_it_at_100() {
+    let mut short = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut short,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    short.request["cover"]["spineText"] = json!("Too short");
+    short.write_request();
+    let output = short.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_LULU_SPINE_TEXT_INELIGIBLE"
+    ));
+
+    let mut eligible = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut eligible,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    eligible.request["cover"]["spineText"] = json!("One hundred pages");
+    eligible.request["document"]["sections"] = lulu_chapters(150);
+    eligible.write_request();
+
+    let output = eligible.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+}
+
+#[test]
+fn lulu_personal_use_omits_the_barcode_and_for_sale_renders_the_generated_ean_13() {
+    let mut personal = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut personal,
+        "PersonalUse",
+        "VendorSku",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    personal.request["cover"]["barcodeMode"] = json!("None");
+    personal.request["cover"]["isbn"] = Value::Null;
+    personal.write_request();
+    let output = personal.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let personal_pdf = Document::load(personal.artifact(&response(&output), "cover-pdf"))
+        .expect("personal-use cover PDF");
+    let personal_samples = personal_pdf.get_page_content(
+        *personal_pdf
+            .get_pages()
+            .values()
+            .next()
+            .expect("cover page"),
+    );
+    let personal_content = String::from_utf8_lossy(&personal_samples);
+    assert!(!personal_content.contains("1.15 46 re"));
+    assert!(!personal_content.contains("1.15 42 re"));
+
+    let mut for_sale = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut for_sale,
+        "ForSale",
+        "UserSuppliedIsbn",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    for_sale.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
+    for_sale.request["cover"]["isbn"] = json!("9780306406157");
+    for_sale.write_request();
+    let output = for_sale.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let for_sale_pdf = Document::load(for_sale.artifact(&response(&output), "cover-pdf"))
+        .expect("for-sale cover PDF");
+    let for_sale_samples = for_sale_pdf.get_page_content(
+        *for_sale_pdf
+            .get_pages()
+            .values()
+            .next()
+            .expect("cover page"),
+    );
+    let for_sale_content = String::from_utf8_lossy(&for_sale_samples);
+    assert!(for_sale_content.contains("1.15 46 re"));
+    assert!(for_sale_content.contains("1.15 42 re"));
+}
+
+#[test]
+fn lulu_print_output_is_pdf_17_with_embedded_fonts_and_srgb_flattened_art() {
+    let mut job = PreparedJob::new("lulu-print-v1");
+    configure_lulu_job(
+        &mut job,
+        "ForSale",
+        "UserSuppliedIsbn",
+        (
+            "lulu-pb-bw-60-white",
+            "Lulu",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ),
+    );
+    job.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
+    job.request["cover"]["isbn"] = json!("9780306406157");
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert_eq!(response["evidence"]["pdfVersion"], "1.7");
+    assert_eq!(response["evidence"]["fontsEmbedded"], true);
+    assert_eq!(response["evidence"]["hasTransparency"], false);
+    assert_eq!(response["evidence"]["hasEncryption"], false);
+    let interior = inspect(&job.artifact(&response, "interior-pdf"));
+    assert_eq!(interior.version, "1.7");
+    assert!(interior.all_fonts_embedded);
+    assert!(!interior.transparency);
+    assert!(!interior.device_cmyk);
+    let cover = inspect(&job.artifact(&response, "cover-pdf"));
+    assert!(cover.all_fonts_embedded);
+    assert!(cover.device_rgb);
+    assert!(!cover.device_cmyk);
+    assert!(!cover.transparency);
 }
 
 fn configure_bn_job(

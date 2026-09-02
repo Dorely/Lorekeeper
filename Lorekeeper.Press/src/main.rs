@@ -19,7 +19,7 @@ fn main() {
                 serde_json::to_string(&json!({
                     "protocolVersion": 11,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
-                    "printArtifactProfileRegistryVersion": "2026.09.1",
+                    "printArtifactProfileRegistryVersion": "2026.09.2",
                     "printArtifactProfileRegistrySha256": registry_hash,
                     "profiles": [
                         "generic-print-v2",
@@ -27,7 +27,8 @@ fn main() {
                         "ingram-print-pdfx1a-v2",
                         "kdp-paperback-v2",
                         "kdp-hardcover-v1",
-                        "bn-print-pdfa1b-v1"
+                        "bn-print-pdfa1b-v1",
+                        "lulu-print-v1"
                     ],
                     "machineRuntimeDependencies": [],
                     "limits": {
