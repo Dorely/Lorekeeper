@@ -408,7 +408,7 @@ try
         }
     }
     $pressDescription = (& $pressExecutable describe --json | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 8 -or
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 12 -or
         [string]::IsNullOrWhiteSpace($pressDescription.rendererVersion) -or
         [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistryVersion) -or
         [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistrySha256))
