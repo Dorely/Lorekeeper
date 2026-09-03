@@ -131,8 +131,10 @@ resolved, and GitHub reports the pull request merged with a merge commit. Squash
 and rebase merges are incompatible with reuse without divergence. After merge,
 verify that fetched `origin/main` descends from the submitted head and
 fast-forward the reusable local and existing remote work refs to it before new
-work. Applied EF migrations remain immutable history. Release-preparation and
-release-orchestration branches remain narrow workflow-specific exceptions.
+work. Applied EF migrations remain immutable history. A fresh
+release-orchestration branch created after the release-preparation pull request
+merges is the only narrow workflow-specific exception to reuse of the work
+branch.
 
 Before completion, search again for obsolete names and paths, inspect all callers
 of changed contracts, run `git diff --check`, and compare documentation claims to
@@ -264,10 +266,13 @@ checks, creates an ad-hoc-signed DMG, verifies architectures/signatures, mounts 
 smoke-tests the application, and writes a checksum. Do not substitute a
 cross-compiled artifact for that native evidence.
 
-Prepare every version change through a reviewed pull request. Publish Windows-only
-or coordinated Windows plus Apple Silicon releases from a fresh clean Windows
-orchestration branch whose `HEAD` exactly matches `origin/main`, supplying the
-merged release-preparation pull request that produced that commit:
+When the maintainer decides accumulated work is ready for release, make the
+version change as the final commit on the reusable work branch and include it in
+that branch's reviewed pull request. Do not create a separate release-preparation
+branch or pull request. Publish Windows-only or coordinated Windows plus Apple
+Silicon releases from a fresh clean Windows orchestration branch whose `HEAD`
+exactly matches `origin/main`, supplying the merged release-preparation pull
+request that produced that commit:
 
 ```powershell
 .\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number> -WindowsOnly
