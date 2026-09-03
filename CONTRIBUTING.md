@@ -76,9 +76,10 @@ stop rather than resetting or beginning new work on divergent history.
 
 ## Releases
 
-Release preparation is ordinary repository work: make the version changes on a
-dedicated branch, run the full gate, and merge them through a reviewed pull
-request.
+When the maintainer decides the accumulated work is ready for release, make the
+version changes as the final commit on the reusable work branch, run the full
+gate, and include that commit in the branch's reviewed pull request. Do not
+create a separate release-preparation branch or pull request.
 
 Publishing requires a fresh non-`main` orchestration branch at the exact fetched
 `origin/main` commit. Supply the merged release-preparation pull request number:

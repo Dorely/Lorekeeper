@@ -76,9 +76,9 @@
   it for the next accumulation cycle. If the merged `origin/main` does not
   descend from the submitted head, stop for direction instead of resetting,
   rebasing, or beginning new work on divergent history.
-- Dedicated release-preparation and release-orchestration branches are the only
-  exceptions to the single reusable work-branch rule, and exist only for the
-  release workflow described below.
+- A fresh release-orchestration branch is the only exception to the single
+  reusable work-branch rule. Create it only after the release-preparation pull
+  request has merged, as described below.
 
 ## Research and Impact Analysis
 
@@ -281,10 +281,13 @@
   invoking a release publisher, run the full repository commit gate. Release
   packaging checks are additional evidence; they never replace the repository
   gate. The exact commit being released must be the verified commit.
-- Prepare release/version changes on a dedicated branch and merge them through a
-  reviewed pull request. Before publishing, verify that release-preparation pull
-  request is `MERGED`, targets `main`, and produced the current `origin/main`
-  commit. If it is not fully merged, a release is impossible.
+- When the user decides the accumulated work is ready for release, add the
+  release/version changes as the final commit on the reusable work branch and
+  include them in that branch's reviewed pull request. Do not create a separate
+  release-preparation branch or pull request. Before publishing, verify that the
+  resulting release-preparation pull request is `MERGED`, targets `main`, and
+  produced the current `origin/main` commit. If it is not fully merged, a
+  release is impossible.
 - Invoke the publisher only from a fresh, clean, non-`main` release-orchestration
   branch created at the fetched `origin/main`. If any pull request targeting
   `main` remains open, stop and obtain explicit user confirmation before using
