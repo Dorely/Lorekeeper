@@ -267,8 +267,8 @@ try
     $pressDescription = (& $packagedPressExecutable describe --json | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 12 -or
         [string]::IsNullOrWhiteSpace($pressDescription.rendererVersion) -or
-        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistryVersion) -or
-        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistrySha256))
+        [string]::IsNullOrWhiteSpace($pressDescription.printArtifactProfileRegistryVersion) -or
+        [string]::IsNullOrWhiteSpace($pressDescription.printArtifactProfileRegistrySha256))
     {
         throw 'The packaged Lorekeeper Press executable failed its capability probe.'
     }
