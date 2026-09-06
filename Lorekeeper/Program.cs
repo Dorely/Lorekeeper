@@ -1,3 +1,4 @@
+using System.Reflection;
 using ElectronNET.API;
 using ElectronNET.API.Entities;
 using Lorekeeper.Auth;
@@ -370,6 +371,7 @@ builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 var app = builder.Build();
 if (isElectronMode)
     desktopReleaseUpdateChecker = app.Services.GetRequiredService<IDesktopReleaseUpdateChecker>();
+desktopUpdates.SetInstalledVersion(GetInstalledAppVersion());
 app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cancel);
 
 // Configure the HTTP request pipeline.
@@ -445,18 +447,24 @@ static async Task ElectronAppReady(
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 
     var isPortable = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR"));
+    var currentVersion = await Electron.App.GetVersionAsync(cancellationToken);
+    desktopUpdates.SetInstalledVersion(currentVersion);
     if (enableAutoUpdates && !isPortable)
     {
         ConfigureElectronAutoUpdater(desktopUpdates);
+        desktopUpdates.EnableManualCheck(
+            cancellation => CheckForElectronUpdatesAsync(desktopUpdates, cancellation));
         _ = MonitorElectronUpdatesAsync(desktopUpdates, updateCheckInterval, cancellationToken);
     }
     else if (!enableDevTools && (OperatingSystem.IsMacOS() || isPortable))
     {
-        var currentVersion = await Electron.App.GetVersionAsync(cancellationToken);
         desktopUpdates.EnableManualDownloads(OpenReleaseInDefaultBrowserAsync);
+        var releaseUpdateChecker = getReleaseUpdateChecker();
+        desktopUpdates.EnableManualCheck(
+            cancellation => CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellation));
         _ = MonitorManualUpdatesAsync(
             currentVersion,
-            getReleaseUpdateChecker(),
+            releaseUpdateChecker,
             desktopUpdates,
             updateCheckInterval,
             cancellationToken);
@@ -520,8 +528,12 @@ static async Task MonitorElectronUpdatesAsync(
     }
 }
 
-static async Task CheckForElectronUpdatesAsync(DesktopUpdateService desktopUpdates)
+static async Task CheckForElectronUpdatesAsync(
+    DesktopUpdateService desktopUpdates,
+    CancellationToken cancellationToken = default)
 {
+    if (cancellationToken.IsCancellationRequested) return;
+
     try
     {
         await Electron.AutoUpdater.CheckForUpdatesAsync();
@@ -564,6 +576,12 @@ static async Task CheckForManualUpdateAsync(
 {
     try
     {
+        var priorStatus = desktopUpdates.Snapshot.Status;
+        if (priorStatus is DesktopUpdateStatus.Idle or DesktopUpdateStatus.Unsupported)
+        {
+            desktopUpdates.MarkChecking();
+        }
+
         var update = await releaseUpdateChecker.CheckAsync(currentVersion, cancellationToken);
         if (update is null)
             desktopUpdates.MarkIdle(currentVersion);
@@ -577,6 +595,8 @@ static async Task CheckForManualUpdateAsync(
     catch (Exception exception)
     {
         // Keep any previously discovered release visible through transient failures.
+        if (desktopUpdates.Snapshot.Status == DesktopUpdateStatus.Checking)
+            desktopUpdates.MarkIdle(currentVersion);
         Console.Error.WriteLine($"Manual desktop update check failed: {exception.Message}");
     }
 }
@@ -591,6 +611,18 @@ static bool IsElectronArgument(string arg)
         || normalized.StartsWith("electronPort=", StringComparison.OrdinalIgnoreCase)
         || normalized.StartsWith("electronPID=", StringComparison.OrdinalIgnoreCase)
         || normalized.StartsWith("electronAuthToken=", StringComparison.OrdinalIgnoreCase);
+}
+
+static string? GetInstalledAppVersion()
+{
+    var informationalVersion = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    if (!string.IsNullOrWhiteSpace(informationalVersion))
+    {
+        var plusSeparator = informationalVersion.IndexOf('+');
+        return (plusSeparator >= 0 ? informationalVersion[..plusSeparator] : informationalVersion).Trim();
+    }
+
+    return Assembly.GetEntryAssembly()?.GetName().Version?.ToString();
 }
 
 static string GetDesktopUrl(IConfiguration configuration)

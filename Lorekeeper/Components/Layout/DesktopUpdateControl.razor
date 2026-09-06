@@ -5,11 +5,17 @@
 
 @{
     var snapshot = DesktopUpdates.Snapshot;
+    var installedVersion = DesktopUpdates.InstalledVersion ?? snapshot.Version;
+    var canCheck = DesktopUpdates.CanCheckForUpdates;
 }
 
 @if (snapshot.Status == DesktopUpdateStatus.ManualUpdateAvailable)
 {
-    <div class="desktop-update-control">
+    <div class="desktop-update-control desktop-update-available">
+        @if (!string.IsNullOrWhiteSpace(installedVersion))
+        {
+            <span class="desktop-update-version" title="@InstalledTitle(installedVersion)">v@(installedVersion)</span>
+        }
         <button type="button"
                 class="btn btn-sm btn-primary desktop-update-button"
                 disabled="@(!RendererInfo.IsInteractive || _openingDownload)"
@@ -61,7 +67,11 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
 {
     var restarting = snapshot.Status == DesktopUpdateStatus.Restarting;
 
-    <div class="desktop-update-control">
+    <div class="desktop-update-control desktop-update-available">
+        @if (!string.IsNullOrWhiteSpace(installedVersion))
+        {
+            <span class="desktop-update-version" title="@InstalledTitle(installedVersion)">v@(installedVersion)</span>
+        }
         <button type="button"
                 class="btn btn-sm btn-primary desktop-update-button"
                 disabled="@(!RendererInfo.IsInteractive || restarting)"
@@ -71,10 +81,43 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
         </button>
     </div>
 }
+else if (!string.IsNullOrWhiteSpace(installedVersion) || canCheck || snapshot.Status is DesktopUpdateStatus.Checking or DesktopUpdateStatus.Error)
+{
+    var checking = snapshot.Status == DesktopUpdateStatus.Checking || _checkingForUpdates;
+    var showCheckButton = canCheck && snapshot.Status is DesktopUpdateStatus.Idle or DesktopUpdateStatus.Error or DesktopUpdateStatus.Unsupported;
+
+    <div class="desktop-update-control desktop-update-idle" aria-live="polite">
+        @if (!string.IsNullOrWhiteSpace(installedVersion))
+        {
+            <span class="desktop-update-version" title="@InstalledTitle(installedVersion)">v@(installedVersion)</span>
+        }
+        @if (checking)
+        {
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary desktop-update-button"
+                    disabled="disabled"
+                    title="Checking for Lorekeeper updates">
+                Checking…
+            </button>
+        }
+        else if (showCheckButton)
+        {
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary desktop-update-button"
+                    disabled="@(!RendererInfo.IsInteractive)"
+                    title="@CheckTitle(snapshot.Error)"
+                    aria-label="Check for Lorekeeper updates"
+                    @onclick="CheckForUpdatesAsync">
+                Check for updates
+            </button>
+        }
+    </div>
+}
 
 @code {
     private bool _disposed;
     private bool _openingDownload;
+    private bool _checkingForUpdates;
 
     protected override void OnInitialized()
     {
@@ -85,6 +128,28 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
     {
         if (_disposed) return;
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (!RendererInfo.IsInteractive || _checkingForUpdates) return;
+
+        _checkingForUpdates = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await DesktopUpdates.CheckForUpdatesAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogWarning(exception, "Manual Lorekeeper update check failed.");
+        }
+        finally
+        {
+            _checkingForUpdates = false;
+            if (!_disposed)
+                await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task RestartToUpdateAsync()
@@ -120,6 +185,16 @@ else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Res
         if (percent is not { } value || !double.IsFinite(value)) return null;
         return (int)Math.Round(Math.Clamp(value, 0d, 100d), MidpointRounding.AwayFromZero);
     }
+
+    private static string InstalledTitle(string? version) =>
+        version is { Length: > 0 }
+            ? $"Installed Lorekeeper version {version}"
+            : "Installed Lorekeeper version";
+
+    private static string CheckTitle(string? error) =>
+        error is { Length: > 0 }
+            ? $"Check for Lorekeeper updates (last check failed: {error})"
+            : "Check for Lorekeeper updates now";
 
     private static string DownloadLabel(string? version) =>
         version is { Length: > 0 }
