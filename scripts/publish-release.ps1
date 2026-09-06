@@ -350,7 +350,9 @@ try
     {
         throw 'Could not inspect open pull requests targeting main.'
     }
-    $openPullRequests = @(($openPullRequestsJson -join [Environment]::NewLine) | ConvertFrom-Json)
+    $openPullRequests = @((
+        ($openPullRequestsJson -join [Environment]::NewLine) | ConvertFrom-Json
+    ) | ForEach-Object { $_ })
     if ($openPullRequests.Count -gt 0)
     {
         $openPullRequestSummary = @(
