@@ -78,7 +78,25 @@ function Remove-GeneratedDirectory
     if (Test-Path -LiteralPath $fullPath)
     {
         Write-Host "Cleaning $fullPath"
-        Remove-Item -LiteralPath $fullPath -Recurse -Force
+        $attempts = 0
+        while ($true)
+        {
+            try
+            {
+                Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+                break
+            }
+            catch
+            {
+                $attempts++
+                if ($attempts -ge 12)
+                {
+                    throw
+                }
+                Write-Warning "Cleaning $fullPath is blocked by another process; retrying ($attempts/12)."
+                Start-Sleep -Seconds 10
+            }
+        }
     }
 }
 
