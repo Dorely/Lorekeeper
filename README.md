@@ -466,7 +466,7 @@ Build the current Windows packages without publishing them:
 .\scripts\build-windows-release.ps1
 ```
 
-The project version is currently `0.3.11`. Pass `-Version <version>` only when
+The project version is currently `0.3.12`. Pass `-Version <version>` only when
 validating a different future SemVer. This build-only script verifies the
 solution, audits NuGet and the shipped npm/Electron runtime, probes the packaged
 Press protocol/registry contract, and produces the installer and portable
@@ -493,8 +493,8 @@ install and authenticate [GitHub CLI](https://cli.github.com/), then run:
 ```powershell
 gh auth login
 git fetch --prune origin
-git switch -c release/publish-0.3.11 origin/main
-.\scripts\publish-release.ps1 -Version 0.3.11 -MergedPullRequest 123 -WindowsOnly
+git switch -c release/publish-0.3.12 origin/main
+.\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123 -WindowsOnly
 ```
 
 The Windows-only path builds locally, does not dispatch the macOS workflow, and
@@ -510,8 +510,8 @@ run the same command without `-WindowsOnly`:
 ```powershell
 gh auth login
 git fetch --prune origin
-git switch -c release/publish-0.3.11 origin/main
-.\scripts\publish-release.ps1 -Version 0.3.11 -MergedPullRequest 123
+git switch -c release/publish-0.3.12 origin/main
+.\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123
 ```
 
 The publisher requires a clean, named, non-`main` orchestration branch whose
@@ -537,7 +537,7 @@ Each completed release contains the Windows installer, portable executable,
 updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`, and one checksum
 file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
-prereleases such as `0.3.11-beta.1` are published as GitHub prereleases.
+prereleases such as `0.3.12-beta.1` are published as GitHub prereleases.
 Published versions are immutable; fixes require a higher version.
 
 Installed Windows builds use automatic updates and require the Setup executable,
@@ -546,7 +546,7 @@ builds instead query the public stable release API at startup and every 15
 minutes. They show **Download Update** only when the latest stable release is
 newer, and open that release in the operating system's default browser. Change
 the interval with `Desktop:UpdateCheckIntervalMinutes`. The top bar always shows
-the installed version (for example `v0.3.11`) next to the update control, and
+the installed version (for example `v0.3.12`) next to the update control, and
 while no update is pending it offers **Check for updates**, which re-runs the
 same check immediately instead of waiting for the next automatic poll.
 
