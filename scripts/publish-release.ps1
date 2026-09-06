@@ -15,7 +15,9 @@ param(
 
     [switch]$WindowsOnly,
 
-    [switch]$ConfirmOpenPullRequests
+    [switch]$ConfirmOpenPullRequests,
+
+    [switch]$AllowDirectMainPush
 )
 
 Set-StrictMode -Version Latest
@@ -338,10 +340,17 @@ try
         throw "Release-preparation pull request #$MergedPullRequest must be merged into main before a release is possible."
     }
     $pullRequestMergeCommit = [string]$pullRequest.mergeCommit.oid
-    if ([string]::IsNullOrWhiteSpace($pullRequestMergeCommit) -or
-        $pullRequestMergeCommit -ne $sourceCommit)
+    if ([string]::IsNullOrWhiteSpace($pullRequestMergeCommit))
     {
-        throw "Release-preparation pull request #$MergedPullRequest produced $pullRequestMergeCommit, but the release source is $sourceCommit. The merged release-preparation pull request must be the current origin/main commit."
+        throw "Could not determine the merge commit for release-preparation pull request #$MergedPullRequest."
+    }
+    if ($pullRequestMergeCommit -ne $sourceCommit -and -not $AllowDirectMainPush)
+    {
+        throw "Release-preparation pull request #$MergedPullRequest produced $pullRequestMergeCommit, but the release source is $sourceCommit. The merged release-preparation pull request must be the current origin/main commit, or rerun with -AllowDirectMainPush after explicitly confirming the direct main push should be released."
+    }
+    if ($pullRequestMergeCommit -ne $sourceCommit)
+    {
+        Write-Warning "Release source $sourceCommit includes direct main changes after release-preparation pull request #$MergedPullRequest merged at $pullRequestMergeCommit. Proceeding after explicit -AllowDirectMainPush confirmation."
     }
 
     $openPullRequestsJson = & gh pr list --repo $sourceRepository --state open `
