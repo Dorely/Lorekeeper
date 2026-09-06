@@ -545,7 +545,10 @@ its `.blockmap`, and `latest.yml` to remain together. macOS and Windows portable
 builds instead query the public stable release API at startup and every 15
 minutes. They show **Download Update** only when the latest stable release is
 newer, and open that release in the operating system's default browser. Change
-the interval with `Desktop:UpdateCheckIntervalMinutes`.
+the interval with `Desktop:UpdateCheckIntervalMinutes`. The top bar always shows
+the installed version (for example `v0.3.11`) next to the update control, and
+while no update is pending it offers **Check for updates**, which re-runs the
+same check immediately instead of waiting for the next automatic poll.
 
 Release builds store the SQLite database in per-user application data, outside
 the installed application, mounted DMG, and portable executable's extraction

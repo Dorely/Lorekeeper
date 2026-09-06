@@ -140,7 +140,11 @@ handoffs. Installed Windows builds use Electron's updater. Windows portable and
 macOS builds use the constrained public latest-release endpoint, require a newer
 stable version with an applicable platform/architecture asset, and open the
 release in the operating system browser. Update state is exposed to the shared
-top-bar control rather than owned by individual pages.
+top-bar control rather than owned by individual pages. That control also shows
+the installed application version and, while no update is pending or in
+progress, offers a manual "Check for updates" action that re-runs the same
+discovery immediately: the Electron updater check for installed Windows builds,
+or the constrained public latest-release check for portable and macOS builds.
 
 The automatic updater downloads in the background and offers an application-owned
 restart action only after Electron reports readiness. Manual discovery reuses an

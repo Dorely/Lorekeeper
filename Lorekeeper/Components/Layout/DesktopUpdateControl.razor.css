@@ -4,6 +4,21 @@
     min-width: 0;
 }
 
+.desktop-update-idle,
+.desktop-update-available {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.5rem;
+}
+
+.desktop-update-version {
+    color: var(--lk-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
 .desktop-update-download {
     display: grid;
     flex: 0 1 16rem;
