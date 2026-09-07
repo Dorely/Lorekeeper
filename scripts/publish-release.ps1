@@ -308,11 +308,7 @@ try
     $branch = (& git branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch))
     {
-        throw 'Releases must be published from a named release-orchestration branch.'
-    }
-    if ($branch -eq 'main')
-    {
-        throw 'Never publish while main is checked out. Create a fresh release-orchestration branch from origin/main.'
+        throw 'Releases must be published from a named branch, including main.'
     }
 
     & git fetch origin main --quiet

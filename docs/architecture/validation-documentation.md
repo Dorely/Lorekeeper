@@ -104,7 +104,7 @@ checks, command help/dry inspection where safe, and diff review.
 ### Repository readiness and completion
 
 Before new work, inspect the branch, working tree, index, remotes, and upstream.
-Never edit, commit, or push directly on `main`. Normal work reuses exactly one
+Maintainer-directed commits and pushes to `main` are permitted. Normal work reuses exactly one
 generic `work/` branch across accumulation cycles; it does not create feature or
 topic branches. Create that branch from freshly fetched `origin/main` only when
 no work branch exists and the tree and index are clean. When an upstream exists,
@@ -131,10 +131,9 @@ resolved, and GitHub reports the pull request merged with a merge commit. Squash
 and rebase merges are incompatible with reuse without divergence. After merge,
 verify that fetched `origin/main` descends from the submitted head and
 fast-forward the reusable local and existing remote work refs to it before new
-work. Applied EF migrations remain immutable history. A fresh
-release-orchestration branch created after the release-preparation pull request
-merges is the only narrow workflow-specific exception to reuse of the work
-branch.
+work. Applied EF migrations remain immutable history. Publishing uses the current
+clean named branch, including `main`, at fetched `origin/main`; no temporary
+release branch is needed.
 
 Before completion, search again for obsolete names and paths, inspect all callers
 of changed contracts, run `git diff --check`, and compare documentation claims to
@@ -270,17 +269,19 @@ When the maintainer decides accumulated work is ready for release, make the
 version change as the final commit on the reusable work branch and include it in
 that branch's reviewed pull request. Do not create a separate release-preparation
 branch or pull request. Publish Windows-only or coordinated Windows plus Apple
-Silicon releases from a fresh clean Windows orchestration branch whose `HEAD`
-exactly matches `origin/main`, supplying the merged release-preparation pull
-request that produced that commit:
+Silicon releases on Windows from a clean named branch, including `main`, whose
+`HEAD` exactly matches `origin/main`, supplying the merged release-preparation
+pull request:
 
 ```powershell
 .\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number> -WindowsOnly
 .\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
-The publisher rejects `main`, an unmerged or non-current release-preparation pull
-request, and any source commit other than fetched `origin/main`. It lists and
+The publisher rejects a detached checkout, an unmerged release-preparation pull
+request, and any source commit other than fetched `origin/main`. The pull request's
+merge commit must match that source unless the maintainer explicitly authorizes
+subsequent direct pushes with `-AllowDirectMainPush`. It lists and
 stops for open pull requests targeting `main`; `-ConfirmOpenPullRequests` is an
 explicit human-approved override for unrelated open work, never for unmerged
 release preparation. The cross-platform path dispatches one correlated macOS

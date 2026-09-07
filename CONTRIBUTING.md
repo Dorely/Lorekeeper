@@ -1,7 +1,7 @@
 # Contributing to Lorekeeper
 
-Lorekeeper accepts changes through reviewed pull requests. Direct work on
-`main` is not part of the repository workflow.
+Lorekeeper normally accepts changes through reviewed pull requests. Maintainer-
+directed commits and pushes to `main` are also permitted.
 
 ## Start from the current remote
 
@@ -17,7 +17,7 @@ git branch --list "work/*"
 If exactly one work branch exists, switch to and reuse it. Create a generic work
 branch such as `work/current` from `origin/main` only when none exists. If more
 than one exists, resolve ownership before changing files rather than creating
-another branch. Do not commit or push directly to `main`.
+another branch. Use `main` directly when the maintainer requests it.
 
 After every fetch, ensure `origin/main` is an ancestor of the work branch. A work
 branch with no unique commits can fast-forward to `origin/main`; a work branch
@@ -81,16 +81,20 @@ version changes as the final commit on the reusable work branch, run the full
 gate, and include that commit in the branch's reviewed pull request. Do not
 create a separate release-preparation branch or pull request.
 
-Publishing requires a fresh non-`main` orchestration branch at the exact fetched
-`origin/main` commit. Supply the merged release-preparation pull request number:
+Publishing requires a clean named branch, including `main`, at the exact fetched
+`origin/main` commit. No temporary branch is needed. Supply the merged
+release-preparation pull request number:
 
 ```powershell
 git fetch --prune origin
-git switch -c release/publish-<version> origin/main
+git switch main
+git merge --ff-only origin/main
 .\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
-The publisher refuses an unmerged or non-current release-preparation pull
-request. It also stops when any pull request targeting `main` remains open. A
+The publisher refuses an unmerged release-preparation pull request. For an
+explicitly authorized release of direct pushes after that merge, add
+`-AllowDirectMainPush`; otherwise its merge commit must be current `origin/main`.
+It also stops when any pull request targeting `main` remains open. A
 maintainer may rerun with `-ConfirmOpenPullRequests` only after explicitly
 reviewing those open pull requests and confirming the release should proceed.

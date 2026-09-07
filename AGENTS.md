@@ -78,9 +78,8 @@
   it for the next accumulation cycle. If the merged `origin/main` does not
   descend from the submitted head, stop for direction instead of resetting,
   rebasing, or beginning new work on divergent history.
-- A fresh release-orchestration branch is the only exception to the single
-  reusable work-branch rule. Create it only after the release-preparation pull
-  request has merged, as described below.
+- Publishing uses the current clean named branch, including `main`, at the
+  fetched `origin/main` commit. Do not create a temporary release branch.
 
 ## Research and Impact Analysis
 
@@ -293,8 +292,8 @@
   produced the current `origin/main` commit, unless the user explicitly
   directed a direct push to `main` for the release changes. If it is not fully
   merged, a release is impossible.
-- Invoke the publisher only from a fresh, clean, non-`main` release-orchestration
-  branch created at the fetched `origin/main`. If any pull request targeting
+- Invoke the publisher only from a clean named branch, including `main`, whose
+  `HEAD` equals fetched `origin/main`. If any pull request targeting
   `main` remains open, stop and obtain explicit user confirmation before using
   the publisher's `-ConfirmOpenPullRequests` override. That override never makes
   an unmerged release-preparation pull request releasable.

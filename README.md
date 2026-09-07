@@ -452,7 +452,8 @@ OAuth unless that redirect URI is also accepted by the OAuth provider.
 
 ## Contributing
 
-All changes use non-`main` branches and reviewed pull requests. See
+Changes normally use reviewed pull requests; maintainer-directed direct pushes
+to `main` are also supported. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch synchronization, the mandatory
 repository gate, review requirements, and the maintainer release workflow.
 Repository owners can apply and verify the matching GitHub controls with
@@ -493,7 +494,8 @@ install and authenticate [GitHub CLI](https://cli.github.com/), then run:
 ```powershell
 gh auth login
 git fetch --prune origin
-git switch -c release/publish-0.3.12 origin/main
+git switch main
+git merge --ff-only origin/main
 .\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123 -WindowsOnly
 ```
 
@@ -510,14 +512,17 @@ run the same command without `-WindowsOnly`:
 ```powershell
 gh auth login
 git fetch --prune origin
-git switch -c release/publish-0.3.12 origin/main
+git switch main
+git merge --ff-only origin/main
 .\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123
 ```
 
-The publisher requires a clean, named, non-`main` orchestration branch whose
-`HEAD` exactly matches freshly fetched `origin/main`. `-MergedPullRequest` must
-identify the merged release-preparation pull request that produced that exact
-commit. If any other pull request targeting `main` remains open, the publisher
+The publisher accepts a clean named branch, including `main`, whose `HEAD`
+exactly matches freshly fetched `origin/main`; no temporary branch is needed.
+`-MergedPullRequest` must identify the merged release-preparation pull request.
+For explicitly authorized direct pushes after that merge, add
+`-AllowDirectMainPush` to release the current commit instead of the merge commit.
+If any other pull request targeting `main` remains open, the publisher
 stops and lists it. A maintainer may rerun with `-ConfirmOpenPullRequests` only
 after explicitly reviewing the open work and confirming publication should
 continue. Unless `-WindowsOnly` is used, the publisher dispatches
