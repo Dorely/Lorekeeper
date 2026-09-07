@@ -115,18 +115,7 @@ public sealed class PublicationArtifactPreviewService(
             throw new InvalidDataException("The PDF page geometry is invalid.");
 
         var heightPixels = Math.Max(1, (int)Math.Round(widthPixels * sourceHeight / sourceWidth));
-        var smallerDimension = Math.Min(widthPixels, heightPixels);
-        var largerDimension = Math.Max(widthPixels, heightPixels);
-        using var documentReader = DocLib.Instance.GetDocReader(
-            artifact.Data,
-            new PageDimensions(smallerDimension, largerDimension));
-        using var pageReader = documentReader.GetPageReader(pageNumber - 1);
-        var rawBytes = pageReader.GetImage();
-        var renderedWidth = pageReader.GetPageWidth();
-        var renderedHeight = pageReader.GetPageHeight();
-
-        using var bitmap = new SKBitmap(renderedWidth, renderedHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-        Marshal.Copy(rawBytes, 0, bitmap.GetPixels(), rawBytes.Length);
+        using var bitmap = RenderBitmap(artifact.Data, pageNumber - 1, widthPixels, heightPixels, checked(widthPixels * heightPixels));
         using var image = SKImage.FromBitmap(bitmap);
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 95);
         return new(
@@ -134,7 +123,51 @@ public sealed class PublicationArtifactPreviewService(
             artifact.Sha256,
             artifact.CreatedAt,
             pageNumber,
-            renderedWidth,
-            renderedHeight);
+            bitmap.Width,
+            bitmap.Height);
+    }
+
+    internal static SKBitmap RenderBitmap(
+        byte[] data,
+        int zeroBasedPage,
+        int targetWidth,
+        int targetHeight,
+        int maxPixels)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        if (zeroBasedPage < 0)
+            throw new ArgumentOutOfRangeException(nameof(zeroBasedPage));
+        if (targetWidth <= 0 || targetHeight <= 0)
+            throw new ArgumentOutOfRangeException(nameof(targetWidth));
+        if (maxPixels <= 0 || (long)targetWidth * targetHeight > maxPixels)
+            throw new InvalidDataException("The requested PDF raster exceeds the pixel limit.");
+
+        var smallerDimension = Math.Min(targetWidth, targetHeight);
+        var largerDimension = Math.Max(targetWidth, targetHeight);
+        using var documentReader = DocLib.Instance.GetDocReader(
+            data,
+            new PageDimensions(smallerDimension, largerDimension));
+        using var pageReader = documentReader.GetPageReader(zeroBasedPage);
+        var renderedWidth = pageReader.GetPageWidth();
+        var renderedHeight = pageReader.GetPageHeight();
+        if (renderedWidth <= 0 || renderedHeight <= 0
+            || (long)renderedWidth * renderedHeight > maxPixels)
+            throw new InvalidDataException("The PDF raster dimensions exceed the pixel limit.");
+
+        var rawBytes = pageReader.GetImage();
+        var expectedBytes = checked((long)renderedWidth * renderedHeight * 4);
+        if (rawBytes is null || rawBytes.Length < expectedBytes)
+            throw new InvalidDataException("The PDF raster data is incomplete.");
+        var bitmap = new SKBitmap(renderedWidth, renderedHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+        try
+        {
+            Marshal.Copy(rawBytes, 0, bitmap.GetPixels(), checked((int)expectedBytes));
+            return bitmap;
+        }
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
     }
 }

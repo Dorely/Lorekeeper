@@ -436,6 +436,23 @@ selected in the editor. Manifest-only cloth setup remains visible but disabled.
 Canvas clipping and typography diagnostics appear as preview notes, while
 **Prepare files** retains strict production validation.
 
+Designed Pages and the selected cover surface expose Print through the shared
+application-owned print preview. They flush pending saves, stop on save failure,
+and capture clean composition artwork with resolved copy and fonts. The print
+snapshot uses an explicit higher raster resolution separate from ordinary
+screen-preview limits and cache identities. Guides, handles, and editor zoom
+never enter the print source. A facing spread or connected wrap remains one
+surface on one sheet. The shared image viewer prints original-resolution project
+content, including partial and transcript images, without creating a derivative
+asset. Images have an aspect ratio but no inferred physical-size promise.
+
+Print sheets target 300 DPI at the selected paper size; limited source detail is
+reported rather than described as newly created detail. Fit preserves the whole
+source, Fill crops proportionally, and Actual size is offered only for sources
+with physical dimensions. White paper resolves transparency. Paper, orientation,
+margins, and fit are transient choices rather than authored geometry changes.
+The runtime-host chapter owns print-dialog and device-handoff mechanics.
+
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and
 deletion guards. Imported-font deletion is blocked while a paragraph, saved

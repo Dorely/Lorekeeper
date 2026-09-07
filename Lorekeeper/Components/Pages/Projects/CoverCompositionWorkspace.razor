@@ -16,6 +16,7 @@
 @inject IAuthoringHistoryRuntime AuthoringHistory
 @inject IPrintArtifactProfileRegistry PrintArtifactProfiles
 @inject IJSRuntime JS
+@inject IPrintPreparationService Printing
 
 <div class="cover-composer @(InteractionLocked ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
@@ -51,6 +52,7 @@
                             disabled="@(!CanPreview || _previewing)"
                             title="@PreviewTitle"
                             @onclick="PreviewAsync">@(_previewing ? "Generating…" : "Preview")</button>
+                    <button type="button" class="cover-preview" disabled="@(!CanPreview || _previewing)" @onclick="() => _printOpen = true">Print</button>
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
                         <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
@@ -285,7 +287,28 @@
     </div>
 }
 
+@if (_printOpen)
+{
+    <PrintPreviewDialog SourceFactory="CreatePrintSourceAsync" Closed="() => _printOpen = false" />
+}
+
 @code {
+    private bool _printOpen;
+
+    private async Task<PrintSource> CreatePrintSourceAsync(CancellationToken cancellationToken)
+    {
+        if (!CanPreview || !await FlushAsync() || _cover is null || _scene is null)
+            throw new InvalidOperationException(_error ?? "Save this cover before printing.");
+        var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with
+        {
+            Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList(),
+        });
+        return await Printing.CreateCompositionAsync(ProjectId, _cover.Id, _cover.Revision,
+            SurfaceLabel(_surfaceRole), scene, null,
+            PublicationTextBindings.Bindings(_title, _subtitle, _author, _publisher, _copyright, _description, _isbn, _spineText),
+            cancellationToken, backgroundColor: _background);
+    }
+
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid EditionId { get; set; }
     [Parameter] public bool CoreBook { get; set; }

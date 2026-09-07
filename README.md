@@ -12,6 +12,13 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 ## Current Capabilities
 
+- Print Designed Pages, selected cover surfaces, images, and individual or ranged
+  pages from PDF previews. Lorekeeper previews the complete artwork on Letter/A4
+  paper by default, oriented to match the source and fitted without cropping.
+  Paper size, margins, orientation, fitting, and PDF page selection can be changed
+  before opening the system printer dialog for printer, copies, and duplex
+  settings. Spreads and full wraps fit on one sheet. Printing is raster-based;
+  download the original publication PDF to retain its text and vectors.
 - Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
   and chapter workspaces.
 - Projects can directly reference other projects for read-only continuity evidence,

@@ -201,6 +201,34 @@ is allowed only for intentional handoffs such as OAuth, vendor documentation, or
 application updates. This keeps product context visible and makes browser and
 Electron behavior consistent.
 
+Printing is the other narrow device handoff: the shared `PrintPreviewDialog`
+owns source loading, layout choices, page selection, progress, and errors; only
+its explicit Print action opens the browser/system printer dialog. `IPrintHost`
+separates browser iframe printing from the desktop adapter. Electron uses an
+application-owned host hook to wait for the native print callback, because the
+pinned Electron.NET bridge returns before that callback. A sandboxed temporary
+window loads only the local print-session document and is destroyed after the
+operation or cancellation. Printer selection, copies, duplex, and device
+settings remain in the final system dialog. No silent printing is used.
+
+`Printing/` owns bounded, transient print sources and prepared sheet sessions.
+Project-scoped, unguessable session routes serve immutable sheet PNGs and a
+standalone print document with no app chrome. Responses are not cached, and
+sessions are released on replacement, close, failure, or expiry. Printing creates
+no database rows, assets, publication jobs, or PDFs. The browser and desktop
+handoffs consume the same prepared sheets shown in preview.
+
+The `Printing` configuration section bounds source bytes, selected pages, raster
+pixels, session count, lifetime, and aggregate encoded session bytes. Its session
+byte limit also caps the decoded sheets in a single handoff; oversized selections
+must be split into smaller ranges. Preparation is serialized to bound native
+raster memory. Image snapshots preserve EXIF orientation. The project build
+replaces only Electron.NET's empty host hook with `ElectronHostHook/index.js`
+and retains the pinned connector in build and publish output.
+The Electron 43.6.0 pin includes the upstream fix for rejected print options
+introduced in 43.0/43.1; printer settings must not be dropped to work around that
+runtime regression.
+
 Shared layout components own the viewport shell, navigation, page headings,
 configuration navigation, circuit-reconnect UI, print-specific overflow, and
 desktop-update presentation. Feature pages should reuse those components instead

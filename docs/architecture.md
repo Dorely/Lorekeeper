@@ -61,7 +61,8 @@ the current runtime. Source inspection remains the proof of what is implemented.
   payloads, or logs.
 - Product dialogs are application-owned Razor/HTML/CSS. Browser, Electron, and
   operating-system dialogs are not product UI except for browser-mediated local
-  file selection at explicit import/upload boundaries.
+  file selection at explicit import/upload boundaries and the explicit final
+  printer handoff from the application-owned print preview.
 - Superseded runtime paths and current-state documentation are removed in the
   same change. Applied EF migrations and historical decision records remain
   immutable evidence rather than active compatibility paths.

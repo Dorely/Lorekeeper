@@ -1,4 +1,8 @@
-<section class="publication-pdf-preview" aria-label="PDF pages">
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IPrintPreparationService Printing
+
+<section class="publication-pdf-preview" aria-label="PDF pages" @ref="_root">
     <header class="publication-pdf-preview-toolbar">
         <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
             <button type="button" class="btn @ButtonClass(!_facingPages)" @onclick="() => _facingPages = false">Single page</button>
@@ -14,7 +18,8 @@
                 @(_showFacingSeam ? "Hide page seam" : "Show page seam")
             </button>
         }
-        <span>@PageCount.ToString("N0") @(PageCount == 1 ? "page" : "pages")</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(PageCount <= 0)" @onclick="() => _printOpen = true">Print</button>
+        <span aria-live="polite">Page @_currentPage of @PageCount.ToString("N0")</span>
     </header>
 
     @if (PageCount <= 0)
@@ -58,6 +63,11 @@
     }
 </section>
 
+@if (_printOpen)
+{
+    <PrintPreviewDialog SourceFactory="CreatePrintSourceAsync" Closed="() => _printOpen = false" />
+}
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
@@ -66,11 +76,59 @@
     private bool _facingPages;
     private bool _showFacingSeam;
     private bool _initialized;
+    private bool _printOpen;
+    private int _currentPage = 1;
+    private ElementReference _root;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<PublicationPdfPreview>? _reference;
+    private Guid _loadedArtifact;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "/js/pdf-print-selection.js");
+            _reference = DotNetObjectReference.Create(this);
+        }
+        if (_module is not null)
+            await _module.InvokeVoidAsync("observe", _root, _reference);
+    }
+
+    [JSInvokable]
+    public Task SetCurrentPage(int page)
+    {
+        if (page >= 1 && page <= PageCount && page != _currentPage)
+        {
+            _currentPage = page;
+            return InvokeAsync(StateHasChanged);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task<PrintSource> CreatePrintSourceAsync(CancellationToken cancellationToken) =>
+        Printing.CreatePdfAsync(ProjectId, ArtifactId, _currentPage, cancellationToken);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("dispose", _root);
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+        }
+        _reference?.Dispose();
+    }
 
     protected override void OnParametersSet()
     {
-        if (_initialized)
+        if (_initialized && _loadedArtifact == ArtifactId)
             return;
+        _loadedArtifact = ArtifactId;
+        _currentPage = 1;
+        _printOpen = false;
         _facingPages = PageCount > 1;
         _initialized = true;
     }
@@ -82,7 +140,7 @@
             yield return [page, page + 1 <= pageCount ? page + 1 : null];
     }
 
-    private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page" aria-label="PDF page @pageNumber">
+    private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page @(pageNumber == _currentPage ? "print-current" : null)" data-page-number="@pageNumber" aria-label="PDF page @pageNumber" tabindex="0" role="button" aria-pressed="@(pageNumber == _currentPage)">
         <img src="@PageUrl(pageNumber)"
              alt="PDF page @pageNumber"
              loading="@(pageNumber <= 3 ? "eager" : "lazy")"

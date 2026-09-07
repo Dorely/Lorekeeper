@@ -14,7 +14,7 @@
     <Description>AI-assisted narrative coherence engine.</Description>
     <Version>0.3.12</Version>
     <PackageId>Lorekeeper</PackageId>
-    <ElectronVersion>43.1.0</ElectronVersion>
+    <ElectronVersion>43.6.0</ElectronVersion>
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
     <ElectronPackageId>com.lorekeeper.app</ElectronPackageId>
     <ElectronSingleInstance>true</ElectronSingleInstance>
@@ -48,9 +48,21 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
+    <Content Include="ElectronHostHook\index.js" Link=".electron\ElectronHostHook\index.js" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\print-artifact-profiles-v1.json" Link="PrintArtifactProfiles\print-artifact-profiles-v1.json" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v2.json" Link="Typography\manuscript-typography-v2.json" />
   </ItemGroup>
+
+  <!-- Keep the pinned connector/template metadata; replace only its empty hook. -->
+  <Target Name="UseLorekeeperPrintHook" AfterTargets="ElectronResolvePaths">
+    <ItemGroup>
+      <Content Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
+      <ContentWithTargetPath Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
+      <FilesForPackagingFromProject Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
+      <ElectronSourceFiles Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
+      <ElectronSourceFilesWithTargetPath Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
+    </ItemGroup>
+  </Target>
 
   <Target Name="BuildLorekeeperPressRuntime" AfterTargets="Build">
     <PropertyGroup>

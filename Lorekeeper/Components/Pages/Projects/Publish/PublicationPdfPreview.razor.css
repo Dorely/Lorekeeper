@@ -73,6 +73,10 @@
     background: #fff;
 }
 
+.publication-pdf-preview-page { cursor: pointer; }
+.publication-pdf-preview-page.print-current img { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
+.publication-pdf-preview-page:focus-visible { outline: 2px solid var(--bs-primary); }
+
 .publication-pdf-preview-scroll.facing .publication-pdf-preview-page:first-child {
     justify-content: flex-end;
 }

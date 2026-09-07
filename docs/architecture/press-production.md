@@ -372,6 +372,13 @@ Press's existing 256 MiB containment boundary.
 
 ## Key files and file families
 
+Local printer output is separate from publication production. Print preparation
+reads the hash-verified original PDF and rasterizes selected pages at print
+resolution, bypassing the 1600-pixel screen-preview cap. It preserves each page's
+physical aspect before applying the user's sheet layout. It does not rerun Press
+or produce a new PDF, and the printed raster is not a new publication-conformance
+claim. The original downloadable PDF retains its text, vectors, and evidence.
+
 | Path or family | Primary responsibility |
 |---|---|
 | `Lorekeeper.Press/src/model.rs` | Protocol-v12 request/response, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
