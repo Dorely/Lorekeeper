@@ -1,7 +1,7 @@
 # Contributing to Lorekeeper
 
-Lorekeeper accepts changes through reviewed pull requests. Direct work on
-`main` is not part of the repository workflow.
+Lorekeeper normally accepts changes through reviewed pull requests. Maintainer-
+directed commits and pushes to `main` are also permitted.
 
 ## Start from the current remote
 
@@ -17,7 +17,7 @@ git branch --list "work/*"
 If exactly one work branch exists, switch to and reuse it. Create a generic work
 branch such as `work/current` from `origin/main` only when none exists. If more
 than one exists, resolve ownership before changing files rather than creating
-another branch. Do not commit or push directly to `main`.
+another branch. Use `main` directly when the maintainer requests it.
 
 After every fetch, ensure `origin/main` is an ancestor of the work branch. A work
 branch with no unique commits can fast-forward to `origin/main`; a work branch
@@ -76,21 +76,29 @@ stop rather than resetting or beginning new work on divergent history.
 
 ## Releases
 
-When the maintainer decides the accumulated work is ready for release, make the
-version changes as the final commit on the reusable work branch, run the full
-gate, and include that commit in the branch's reviewed pull request. Do not
-create a separate release-preparation branch or pull request.
-
-Publishing requires a fresh non-`main` orchestration branch at the exact fetched
-`origin/main` commit. Supply the merged release-preparation pull request number:
+For a direct release, commit completed feature work on `main`, then run on Windows:
 
 ```powershell
-git fetch --prune origin
-git switch -c release/publish-<version> origin/main
-.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
+.\scripts\release.ps1
 ```
 
-The publisher refuses an unmerged or non-current release-preparation pull
-request. It also stops when any pull request targeting `main` remains open. A
-maintainer may rerun with `-ConfirmOpenPullRequests` only after explicitly
-reviewing those open pull requests and confirming the release should proceed.
+This authorizes automatic stable version preparation, the full gate before the
+version commit and again before publication, a normal push to `main`, and both
+platform builds/publications. The driver defaults to a patch bump or retries an
+unpublished prepared version. It never commits unrelated changes. Use
+`-CheckOnly` to preview, `-Bump Minor` or `-Bump Major` for larger increments,
+`-Version <major.minor.patch>` for an explicit stable version, or `-WindowsOnly`.
+VS Code provides **Release Lorekeeper** and **Preview Lorekeeper release** tasks.
+The README documents preconditions and interruption/retry behavior.
+
+For a reviewed release, put the version changes in the reusable work branch's
+final verified commit and include them in its PR. Once merged, run the full gate
+and `scripts/publish-release.ps1 -Version <version> -MergedPullRequest <number>`
+from clean source at the exact fetched `origin/main` commit. Direct publication
+instead uses `-AllowDirectMainPush`, without a PR number. Neither path needs a
+temporary branch. The publisher requires the requested version to match the
+project and rechecks source identity after packaging.
+
+Both entry points stop for open PRs targeting `main`. Supply
+`-ConfirmOpenPullRequests` only after explicitly reviewing those PRs and
+confirming they may be excluded from the release.

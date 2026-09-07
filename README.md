@@ -452,7 +452,8 @@ OAuth unless that redirect URI is also accepted by the OAuth provider.
 
 ## Contributing
 
-All changes use non-`main` branches and reviewed pull requests. See
+Changes normally use reviewed pull requests; maintainer-directed direct pushes
+to `main` are also supported. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch synchronization, the mandatory
 repository gate, review requirements, and the maintainer release workflow.
 Repository owners can apply and verify the matching GitHub controls with
@@ -466,7 +467,7 @@ Build the current Windows packages without publishing them:
 .\scripts\build-windows-release.ps1
 ```
 
-The project version is currently `0.3.12`. Pass `-Version <version>` only when
+The project version comes from `Lorekeeper/Lorekeeper.csproj`. Pass `-Version <version>` only when
 validating a different future SemVer. This build-only script verifies the
 solution, audits NuGet and the shipped npm/Electron runtime, probes the packaged
 Press protocol/registry contract, and produces the installer and portable
@@ -487,40 +488,70 @@ The build produces a per-user NSIS installer and a portable executable in
 without administrator rights, and recipients do not need .NET or Node.js. Share
 `publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
 
-To publish only the Windows packages without consuming GitHub Actions minutes,
-install and authenticate [GitHub CLI](https://cli.github.com/), then run:
+For a complete stable release, install and authenticate
+[GitHub CLI](https://cli.github.com/), commit your feature work on `main`, and run
+this from Windows:
 
 ```powershell
-gh auth login
-git fetch --prune origin
-git switch -c release/publish-0.3.12 origin/main
-.\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123 -WindowsOnly
+.\scripts\release.ps1
 ```
 
-The Windows-only path builds locally, does not dispatch the macOS workflow, and
-publishes the installer, portable executable, updater metadata, blockmap, and a
-checksum file. The release is still marked latest so installed Windows builds
-and Windows portable builds can discover it. Manual-update packages containing
-this change ignore a newer release that lacks an artifact for their platform and
-architecture.
+Or choose **Tasks: Run Task → Release Lorekeeper** in VS Code. Invoking the driver
+authorizes the version commit, direct push to main, Windows and native Apple
+Silicon macOS builds, and publication to both repositories. The project's
+`<Version>` is the single version source; documentation needs no per-release edits.
 
-To build and publish Windows plus Apple Silicon macOS packages as one release,
-run the same command without `-WindowsOnly`:
+The driver checks tools, GitHub write access, origin identity, clean source/index,
+remote ancestry, open PRs, matching latest stable releases/assets, and unused tags.
+It fast-forwards a behind-only main and reloads the driver; divergence and
+unrelated uncommitted work block execution. By default it reuses a higher
+unpublished project version, otherwise increments the patch version. If the
+exact current commit is already published, it exits without another release.
+
+It updates only `Lorekeeper/Lorekeeper.csproj`, runs the full repository gate,
+commits the version, reruns the gate on the committed source, and pushes main
+normally before building and publishing. Existing local commits on main are
+included. Failed verification restores only the driver's exact unstaged version
+edit. Committed preparation remains available so a retry reuses that version.
+A staged edit after a failed commit, concurrent changes, or a tag/partial release
+left by interrupted publication requires inspection rather than automatic
+discarding or overwriting. The driver does not install tools or upgrade dependencies.
+
+Preview and optional overrides:
 
 ```powershell
-gh auth login
-git fetch --prune origin
-git switch -c release/publish-0.3.12 origin/main
-.\scripts\publish-release.ps1 -Version 0.3.12 -MergedPullRequest 123
+.\scripts\release.ps1 -CheckOnly
+.\scripts\release.ps1 -Bump Minor
+.\scripts\release.ps1 -Bump Major
+.\scripts\release.ps1 -Version <major.minor.patch>
+.\scripts\release.ps1 -WindowsOnly
 ```
 
-The publisher requires a clean, named, non-`main` orchestration branch whose
-`HEAD` exactly matches freshly fetched `origin/main`. `-MergedPullRequest` must
-identify the merged release-preparation pull request that produced that exact
-commit. If any other pull request targeting `main` remains open, the publisher
-stops and lists it. A maintainer may rerun with `-ConfirmOpenPullRequests` only
-after explicitly reviewing the open work and confirming publication should
-continue. Unless `-WindowsOnly` is used, the publisher dispatches
+**Preview Lorekeeper release** is also available as a VS Code task.
+`-CheckOnly` fetches remote metadata and performs preflight, but never edits
+source, commits, pushes, builds, or publishes. It requires a clean checkout and
+reports a behind checkout rather than fast-forwarding it. Use `-Version` or `-Bump`,
+not both. The driver handles stable releases; prereleases remain an explicit
+lower-level publishing operation.
+
+For already prepared and verified source at fetched origin/main, the lower-level
+publisher accepts either direct publication or a merged release-preparation PR
+that produced that exact commit:
+
+```powershell
+.\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
+.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
+```
+
+The authorization modes are mutually exclusive; direct publication does not
+query a PR. The requested version must match the project. Open PRs targeting main
+block the driver and publisher unless the maintainer explicitly supplies
+`-ConfirmOpenPullRequests` after reviewing the excluded work.
+
+The Windows-only path omits macOS and publishes the installer, portable
+executable, updater metadata, blockmap, and checksum file as the latest release.
+Portable/macOS discovery ignores releases without an applicable platform asset.
+Unless `-WindowsOnly` is used, the publisher dispatches
 `.github/workflows/build-macos-release.yml` for the Apple Silicon package,
 builds Windows locally at the same time, waits for the correlated Actions run,
 downloads the verified DMG, and publishes every artifact together only if all
@@ -537,7 +568,7 @@ Each completed release contains the Windows installer, portable executable,
 updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`, and one checksum
 file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
-prereleases such as `0.3.12-beta.1` are published as GitHub prereleases.
+prereleases are published as GitHub prereleases by the lower-level publisher.
 Published versions are immutable; fixes require a higher version.
 
 Installed Windows builds use automatic updates and require the Setup executable,
@@ -546,7 +577,7 @@ builds instead query the public stable release API at startup and every 15
 minutes. They show **Download Update** only when the latest stable release is
 newer, and open that release in the operating system's default browser. Change
 the interval with `Desktop:UpdateCheckIntervalMinutes`. The top bar always shows
-the installed version (for example `v0.3.12`) next to the update control, and
+the installed version next to the update control, and
 while no update is pending it offers **Check for updates**, which re-runs the
 same check immediately instead of waiting for the next automatic poll.
 

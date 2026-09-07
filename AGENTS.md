@@ -21,10 +21,11 @@
 
 - Before beginning new work, inspect the current branch, working tree, index,
   configured remotes, and upstream status.
-- Never edit, commit, or push directly on `main`. Normal repository work uses
-  exactly one reusable local branch whose name starts with `work/`. Do not create
-  per-feature, per-task, or per-topic branches, and do not create a second
-  `work/` branch while one already exists.
+- Normal repository work uses exactly one reusable local branch whose name
+  starts with `work/`. Do not create per-feature, per-task, or per-topic
+  branches, and do not create a second `work/` branch while one already exists.
+  Direct commits and pushes to `main` are permitted as a working practice to
+  keep merges clean when pull requests cause friction.
 - At the start of a session, fetch `origin` with pruning and locate the existing
   `work/` branch before changing files. If exactly one exists, continue on it.
   If multiple `work/` branches exist, or uncommitted work belongs to another
@@ -50,15 +51,23 @@
 - When no remote or upstream exists, require a clean local `HEAD` and report that
   remote synchronization could not be checked.
 
+## Codex harness only — cost-conscious delegation
+
+- Use `gpt-5.6-luna` subagents extensively for development and other tasks they can reasonably complete successfully with well-scoped, clearly explained instructions. This is a cost-saving preference for Codex, not a requirement for other harnesses.
+- Give each assignment its relevant context, boundaries, expected output, and verification criteria. Assign separate file ownership for concurrent work. The main agent owns integration, review, and milestone commits.
+- Vision/image interpretation, graphics work, complex logic and troubleshooting, and Godot engine MCP operations should generally remain with the main agent, unless its judgment supports delegating a particular bounded task to Luna.
+- Prefer cost-effective delegation without unnecessary coordination overhead.
+
 ## Branch and Pull Request Workflow
 
-- Every repository change, including release preparation, documentation, and
-  workflow configuration, must enter `main` through a pull request from a
-  non-`main` branch. Direct pushes to `main` are prohibited even for
-  administrators and urgent fixes.
+- Repository changes normally enter `main` through a pull request from a
+  non-`main` branch. Direct pushes to `main` are permitted when pull requests
+  cause friction, so merges stay clean.
 - Accumulate coherent, verified commits on the same reusable work branch until
   the user decides that the accumulated changes are ready to merge. Do not open
-  or update a pull request without explicit request from the user.
+  or update a pull request without explicit request from the user. When the user
+  asks to push directly to `main` instead, commit on the current branch as
+  requested and push `main` after verification.
 - When the user decides to merge the accumulated work, fetch `origin`, merge the
   latest `origin/main` into the work branch if needed, inspect the complete
   branch diff, rerun all required verification on the exact proposed head, push
@@ -76,9 +85,8 @@
   it for the next accumulation cycle. If the merged `origin/main` does not
   descend from the submitted head, stop for direction instead of resetting,
   rebasing, or beginning new work on divergent history.
-- A fresh release-orchestration branch is the only exception to the single
-  reusable work-branch rule. Create it only after the release-preparation pull
-  request has merged, as described below.
+- Publishing uses the current clean named branch, including `main`, at the
+  fetched `origin/main` commit. Do not create a temporary release branch.
 
 ## Research and Impact Analysis
 
@@ -281,15 +289,24 @@
   invoking a release publisher, run the full repository commit gate. Release
   packaging checks are additional evidence; they never replace the repository
   gate. The exact commit being released must be the verified commit.
+- For a user-authorized direct stable release, prefer `scripts/release.ps1` on
+  clean `main`. It owns version selection, the version-only commit, both gates,
+  pushing, and publication. Use `-CheckOnly` when asked to preview or validate
+  the driver without releasing. Do not run its publishing path merely to test
+  changes to release tooling. It must never commit unrelated unfinished work.
 - When the user decides the accumulated work is ready for release, add the
   release/version changes as the final commit on the reusable work branch and
   include them in that branch's reviewed pull request. Do not create a separate
-  release-preparation branch or pull request. Before publishing, verify that the
+  release-preparation branch or pull request. When the user asks to push
+  directly to `main` instead, commit on the current branch as requested and
+  push `main` after verification. Before publishing, verify that the
   resulting release-preparation pull request is `MERGED`, targets `main`, and
-  produced the current `origin/main` commit. If it is not fully merged, a
-  release is impossible.
-- Invoke the publisher only from a fresh, clean, non-`main` release-orchestration
-  branch created at the fetched `origin/main`. If any pull request targeting
+  produced the current `origin/main` commit. When the user explicitly directs a
+  direct release instead, use the driver or the publisher's
+  `-AllowDirectMainPush` mode without a PR number. The reviewed path cannot
+  publish an unmerged release-preparation PR.
+- Invoke the publisher only from a clean named branch, including `main`, whose
+  `HEAD` equals fetched `origin/main`. If any pull request targeting
   `main` remains open, stop and obtain explicit user confirmation before using
   the publisher's `-ConfirmOpenPullRequests` override. That override never makes
   an unmerged release-preparation pull request releasable.
@@ -309,9 +326,11 @@
   merge; do not create a pull request after every commit or feature.
 - After committing, verify that the working tree is clean. Push the branch when
   requested or needed for collaboration or backup, but open or update its pull
-  request only when the user decides to merge the accumulated work. Do not amend,
-  squash, force-push, or otherwise rewrite history unless explicitly requested.
-  Repository integration is complete only after the pull request is reviewed,
-  all required checks pass, and GitHub reports it merged.
+  request only when the user decides to merge the accumulated work. When the
+  user explicitly asks for a direct push to `main`, push `main` instead. Do not
+  amend, squash, force-push, or otherwise rewrite history unless explicitly
+  requested. Repository integration through a pull request is complete only
+  after the pull request is reviewed, all required checks pass, and GitHub
+  reports it merged.
 - If a required commit cannot be created, report the blocker and do not describe
   the feature as completed.

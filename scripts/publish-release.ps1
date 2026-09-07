@@ -1,9 +1,9 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Reviewed')]
 param(
     [Parameter(Mandatory)]
     [string]$Version,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Reviewed')]
     [ValidateRange(1, [int]::MaxValue)]
     [int]$MergedPullRequest,
 
@@ -15,7 +15,10 @@ param(
 
     [switch]$WindowsOnly,
 
-    [switch]$ConfirmOpenPullRequests
+    [switch]$ConfirmOpenPullRequests,
+
+    [Parameter(Mandatory, ParameterSetName = 'Direct')]
+    [switch]$AllowDirectMainPush
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +47,11 @@ foreach ($commandName in @('git', 'gh', 'dotnet', 'node', 'npm.cmd'))
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
+if ((Get-LorekeeperVersion (Join-Path $repoRoot 'Lorekeeper/Lorekeeper.csproj')) -ne $Version)
+{
+    throw 'The requested release version must match Lorekeeper.csproj. Use scripts/release.ps1 to prepare it.'
+}
 $sourceRepository = 'Dorely/Lorekeeper'
 $publicReleaseRepository = 'Dorely/Lorekeeper-Releases'
 $releaseRepositories = @($sourceRepository, $publicReleaseRepository)
@@ -61,7 +69,7 @@ $createdReleaseRepositories = [System.Collections.Generic.List[string]]::new()
 
 if ($NotesFile)
 {
-    $NotesFile = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $NotesFile))
+    $NotesFile = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine((Get-Location).Path, $NotesFile))
     if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf))
     {
         throw "Release notes file was not found: $NotesFile"
@@ -100,61 +108,6 @@ function Invoke-Gh
     }
 }
 
-function Assert-GitHubApiResourceMissing
-{
-    param(
-        [Parameter(Mandatory)][string]$ApiPath,
-        [Parameter(Mandatory)][string]$ExistingMessage,
-        [Parameter(Mandatory)][string]$LookupFailureMessage
-    )
-
-    $lookupOutputPath = [System.IO.Path]::GetTempFileName()
-    $lookupErrorPath = [System.IO.Path]::GetTempFileName()
-    try
-    {
-        $lookupProcess = Start-Process -FilePath (Get-Command gh).Source -ArgumentList @(
-            'api', '--include', $ApiPath
-        ) -NoNewWindow -Wait -PassThru `
-            -RedirectStandardOutput $lookupOutputPath `
-            -RedirectStandardError $lookupErrorPath
-        $lookupExitCode = $lookupProcess.ExitCode
-        $lookupOutput = @([System.IO.File]::ReadAllLines($lookupOutputPath))
-        $lookupError = [System.IO.File]::ReadAllText($lookupErrorPath).Trim()
-    }
-    finally
-    {
-        Remove-Item -LiteralPath $lookupOutputPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $lookupErrorPath -Force -ErrorAction SilentlyContinue
-    }
-
-    if ($lookupExitCode -eq 0)
-    {
-        throw $ExistingMessage
-    }
-
-    $statusLine = if ($lookupOutput.Count -gt 0) { [string]$lookupOutput[0] } else { '' }
-    if (($statusLine -notmatch '^HTTP/\S+ 404 ') -and ($lookupError -notmatch '\(HTTP 404\)'))
-    {
-        throw "$LookupFailureMessage GitHub returned: $statusLine $lookupError"
-    }
-}
-
-function Assert-ReleaseTagUnused
-{
-    param(
-        [Parameter(Mandatory)][string]$Repository,
-        [Parameter(Mandatory)][string]$Tag
-    )
-
-    Assert-GitHubApiResourceMissing `
-        -ApiPath "repos/$Repository/releases/tags/$Tag" `
-        -ExistingMessage "Release $Tag already exists in $Repository. Release versions are immutable; choose a newer version." `
-        -LookupFailureMessage "Could not confirm that release $Tag is unused in $Repository."
-    Assert-GitHubApiResourceMissing `
-        -ApiPath "repos/$Repository/git/ref/tags/$Tag" `
-        -ExistingMessage "Tag $Tag already exists in $Repository without a matching release. Refusing to reuse it; choose a newer version." `
-        -LookupFailureMessage "Could not confirm that tag $Tag is unused in $Repository."
-}
 
 function Remove-CreatedReleases
 {
@@ -306,11 +259,7 @@ try
     $branch = (& git branch --show-current).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch))
     {
-        throw 'Releases must be published from a named release-orchestration branch.'
-    }
-    if ($branch -eq 'main')
-    {
-        throw 'Never publish while main is checked out. Create a fresh release-orchestration branch from origin/main.'
+        throw 'Releases must be published from a named branch, including main.'
     }
 
     & git fetch origin main --quiet
@@ -326,22 +275,25 @@ try
         throw "Local HEAD ($sourceCommit) must exactly match origin/main ($remoteCommit)."
     }
 
-    $pullRequestJson = & gh pr view $MergedPullRequest --repo $sourceRepository `
-        --json number,state,baseRefName,mergeCommit,title,url
-    if ($LASTEXITCODE -ne 0)
+    if ($PSCmdlet.ParameterSetName -eq 'Direct')
     {
-        throw "Could not inspect release-preparation pull request #$MergedPullRequest."
+        if (-not $AllowDirectMainPush) { throw 'Direct publication requires -AllowDirectMainPush.' }
+        Write-Host "Publishing explicitly authorized source $sourceCommit from origin/main."
     }
-    $pullRequest = ($pullRequestJson -join [Environment]::NewLine) | ConvertFrom-Json
-    if ($pullRequest.state -ne 'MERGED' -or $pullRequest.baseRefName -ne 'main')
+    else
     {
-        throw "Release-preparation pull request #$MergedPullRequest must be merged into main before a release is possible."
-    }
-    $pullRequestMergeCommit = [string]$pullRequest.mergeCommit.oid
-    if ([string]::IsNullOrWhiteSpace($pullRequestMergeCommit) -or
-        $pullRequestMergeCommit -ne $sourceCommit)
-    {
-        throw "Release-preparation pull request #$MergedPullRequest produced $pullRequestMergeCommit, but the release source is $sourceCommit. The merged release-preparation pull request must be the current origin/main commit."
+        $pullRequestJson = & gh pr view $MergedPullRequest --repo $sourceRepository `
+            --json state,baseRefName,mergeCommit
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Could not inspect release-preparation pull request #$MergedPullRequest."
+        }
+        $pullRequest = ($pullRequestJson -join [Environment]::NewLine) | ConvertFrom-Json
+        if ($pullRequest.state -ne 'MERGED' -or $pullRequest.baseRefName -ne 'main' -or
+            [string]$pullRequest.mergeCommit.oid -ne $sourceCommit)
+        {
+            throw "Release-preparation pull request #$MergedPullRequest must be merged into main and produce current origin/main. Use -AllowDirectMainPush instead for an explicitly authorized direct release."
+        }
     }
 
     $openPullRequestsJson = & gh pr list --repo $sourceRepository --state open `
@@ -515,8 +467,21 @@ try
 
     try
     {
+        & git fetch origin --prune --quiet
+        if ($LASTEXITCODE -ne 0) { throw 'Could not refresh origin before publication.' }
+        $finalHead = (& git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not resolve HEAD before publication.' }
+        $finalRemoteHead = (& git rev-parse origin/main).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not resolve origin/main before publication.' }
+        $finalChanges = @(& git status --porcelain)
+        if ($LASTEXITCODE -ne 0 -or $finalChanges.Count -gt 0 -or
+            $finalHead -ne $sourceCommit -or $finalRemoteHead -ne $sourceCommit)
+        {
+            throw 'Release source changed during packaging. Verify the new source before publishing.'
+        }
         foreach ($repository in $releaseRepositories)
         {
+            Assert-ReleaseTagUnused -Repository $repository -Tag $tag
             $target = if ($repository -eq $sourceRepository) { $sourceCommit } else { 'main' }
             $releaseArguments = @(
                 'release', 'create', $tag,
@@ -525,8 +490,8 @@ try
                 '--title', "Lorekeeper $Version",
                 '--draft'
             ) + $releaseNotesArguments + $releaseTypeArguments + $artifactPaths
-            $createdReleaseRepositories.Add($repository)
             Invoke-Gh $releaseArguments
+            $createdReleaseRepositories.Add($repository)
         }
 
         foreach ($repository in $releaseRepositories)
@@ -547,7 +512,7 @@ try
     catch
     {
         Remove-CreatedReleases -Tag $tag
-        throw "Dual-repository publication failed and Lorekeeper attempted to remove every release and tag created for $tag. $($_.Exception.Message)"
+        throw "Dual-repository publication failed. Lorekeeper attempted to remove releases whose creation succeeded in this run. Inspect $tag in both repositories after any uncertain upload failure before retrying. $($_.Exception.Message)"
     }
 
     if (-not $WindowsOnly)
