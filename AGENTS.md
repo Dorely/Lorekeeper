@@ -282,6 +282,11 @@
   invoking a release publisher, run the full repository commit gate. Release
   packaging checks are additional evidence; they never replace the repository
   gate. The exact commit being released must be the verified commit.
+- For a user-authorized direct stable release, prefer `scripts/release.ps1` on
+  clean `main`. It owns version selection, the version-only commit, both gates,
+  pushing, and publication. Use `-CheckOnly` when asked to preview or validate
+  the driver without releasing. Do not run its publishing path merely to test
+  changes to release tooling. It must never commit unrelated unfinished work.
 - When the user decides the accumulated work is ready for release, add the
   release/version changes as the final commit on the reusable work branch and
   include them in that branch's reviewed pull request. Do not create a separate
@@ -289,9 +294,10 @@
   directly to `main` instead, commit on the current branch as requested and
   push `main` after verification. Before publishing, verify that the
   resulting release-preparation pull request is `MERGED`, targets `main`, and
-  produced the current `origin/main` commit, unless the user explicitly
-  directed a direct push to `main` for the release changes. If it is not fully
-  merged, a release is impossible.
+  produced the current `origin/main` commit. When the user explicitly directs a
+  direct release instead, use the driver or the publisher's
+  `-AllowDirectMainPush` mode without a PR number. The reviewed path cannot
+  publish an unmerged release-preparation PR.
 - Invoke the publisher only from a clean named branch, including `main`, whose
   `HEAD` equals fetched `origin/main`. If any pull request targeting
   `main` remains open, stop and obtain explicit user confirmation before using

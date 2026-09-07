@@ -265,23 +265,56 @@ checks, creates an ad-hoc-signed DMG, verifies architectures/signatures, mounts 
 smoke-tests the application, and writes a checksum. Do not substitute a
 cross-compiled artifact for that native evidence.
 
-When the maintainer decides accumulated work is ready for release, make the
-version change as the final commit on the reusable work branch and include it in
-that branch's reviewed pull request. Do not create a separate release-preparation
-branch or pull request. Publish Windows-only or coordinated Windows plus Apple
-Silicon releases on Windows from a clean named branch, including `main`, whose
-`HEAD` exactly matches `origin/main`, supplying the merged release-preparation
-pull request:
+The Windows stable-release entry point is `scripts/release.ps1`, also exposed by
+the **Release Lorekeeper** VS Code task. Invoking it authorizes preparation and
+direct publication from `main`. It requires a clean worktree/index, the intended
+GitHub origin and write access to both repositories, the SDK/Node/Rust tools, and
+the macOS workflow when applicable. It fetches with pruning, fast-forwards a
+behind-only `main` and reloads itself, accepts verified local commits ahead of
+the remote, and stops for divergence. An exclusive local file handle prevents
+two drivers from running concurrently in this checkout.
+
+The driver reads the sole application version from `Lorekeeper.csproj`, compares
+both repositories' highest stable releases and matching uploaded asset digests,
+requires published source ancestry, and rejects candidate release/tag collisions.
+It reuses a higher unpublished project version or increments the patch version;
+an already published exact source is a no-op. `-Bump Minor`, `-Bump Major`, and
+`-Version <major.minor.patch>` select deliberate alternatives. Prereleases use the
+lower-level publisher. Documentation uses version-independent examples.
+
+Only the project version is edited and committed. The driver runs the complete
+repository gate through `eng/ReleaseWorkflow.ps1` before that commit and again
+on the committed source before pushing and publishing. .NET gate outputs use
+the isolated commit-gate directory and the previous environment is restored.
+Verification rejects unexpected source/index changes. On failure it restores
+only its exact unstaged version edit; committed preparation remains available
+for a retry. Staged/concurrent edits and partial publication need inspection.
+There is no reset, force push, tag overwrite, dependency upgrade, or automatic
+commit of feature work.
+
+`-CheckOnly` (the **Preview Lorekeeper release** task) performs preflight and
+reports the selected version/platforms without source edits, builds, commits,
+pushes, or publication. It still fetches metadata, requires a clean checkout,
+and reports a behind checkout instead of fast-forwarding it. `-WindowsOnly`
+omits the macOS build. Preview is the release-driver validation surface; do not
+publish a new version merely to exercise tooling changes.
+
+For a reviewed release, prepare the version as the reusable work branch's final
+verified commit and include it in its PR. The lower-level publisher runs from a
+clean named branch at fetched `origin/main`, with one explicit authorization mode:
 
 ```powershell
-.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number> -WindowsOnly
+.\scripts\release.ps1
+.\scripts\release.ps1 -CheckOnly
+.\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
 .\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
-The publisher rejects a detached checkout, an unmerged release-preparation pull
-request, and any source commit other than fetched `origin/main`. The pull request's
-merge commit must match that source unless the maintainer explicitly authorizes
-subsequent direct pushes with `-AllowDirectMainPush`. It lists and
+The publisher rejects detached or dirty source, a version different from the
+project, and any commit other than fetched `origin/main`. The reviewed parameter
+set requires a merged PR targeting `main` whose merge commit matches that source;
+the direct parameter set requires `-AllowDirectMainPush` and does not query a PR.
+It rechecks worktree and local/remote source identity after packaging. It lists and
 stops for open pull requests targeting `main`; `-ConfirmOpenPullRequests` is an
 explicit human-approved override for unrelated open work, never for unmerged
 release preparation. The cross-platform path dispatches one correlated macOS
@@ -321,6 +354,7 @@ service or UI tests remain outside the automated-test boundary.
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
 | [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized test-project boundary for startup-migration and versioned import/export preservation/fail-closed fixtures only. |
 | [`eng/ReleaseDependencyAudit.ps1`](../../eng/ReleaseDependencyAudit.ps1) | Shared fail-closed shipped Electron dependency policy and its narrowly bounded dormant-splash advisory exception. |
+| [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared repository gate/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |
