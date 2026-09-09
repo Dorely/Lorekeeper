@@ -311,6 +311,11 @@ metadata proves they were print resamples. Existing preparation jobs and
 unrelated imported/resized assets are preserved; older portable JSON's numeric
 source value is handled separately by its versioned import adapter.
 
+Image-generation jobs now persist normalized model, quality, output format,
+compression, and `Background` settings before provider dispatch. The forward
+background migration assigns existing jobs `auto` and preserves their audit
+history; provider-reported model and quality remain separate result provenance.
+
 The cover-description forward migration rewrites persisted primary and
 exact-surface scene bindings to `description`, then drops the obsolete
 `PublicationCoverDesigns.BackCopy` column. The downgrade recreates the column

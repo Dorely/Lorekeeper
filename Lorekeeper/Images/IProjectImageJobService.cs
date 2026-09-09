@@ -42,7 +42,8 @@ public sealed record ProjectImageGenerationWorkItem(
     IReadOnlyList<Guid> ReferenceImageIds,
     string TargetGeometryJson,
     string MainlineModel,
-    string ImageModel);
+    string ImageModel,
+    string Background = "auto");
 
 public sealed record ProjectImageMaskShapeRequest(
     string Label,

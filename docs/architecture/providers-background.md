@@ -289,6 +289,29 @@ active job per project, cancellation propagated through providers and retries,
 durable partial preview URLs, terminal waiters, and notifications. The startup worker marks
 interrupted running jobs failed and resumes queued work after database readiness.
 
+Image jobs normalize the requested model, quality, output format/compression,
+and background before dispatch and capture those settings on the durable job.
+The default model is Flare; Sunburst is an explicit option for demanding work.
+Provider-reported model and quality remain separate result provenance. Background
+`transparent` is validated as a requested alpha output and prompt guidance
+requests an empty backdrop unless the brief explicitly requires background elements;
+`opaque` receives an appropriate plain instruction. Existing jobs are carried
+forward with `Background = auto` by a forward schema migration. These defaults
+and model aliases require live provider validation before an integration claim.
+
+Image-provider failures are classified from structured error `code`/`type`,
+status, and redacted message into stable kinds. `rate_limit`,
+`codex_image_input_rate_limit`, `server_error`, and `transport_error` are
+retryable; invalid requests, invalid models, authentication/permission,
+moderation, quota/billing, and other API errors fail without retry. A
+`Retry-After` delta/date is honored when present, otherwise the runtime uses
+bounded backoff (with the image-input rate-limit floor). The request timeout
+covers the entire provider stream, including partial-image receipt, and is
+recorded as `request_timeout`; caller cancellation remains cancellation and is
+not converted into timeout or retried. A stream that ends without a final image
+is a structured failure. Persisted partials remain available across retries,
+timeouts, cancellation, and failure according to the image-job audit contract.
+
 ### Queue, worker, and notification contract
 
 Embedding rebuilds, project imports, ingest jobs, image jobs, publication
@@ -355,6 +378,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
 | [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`CodexProjectImageProvider.cs`](../../Lorekeeper/Images/CodexProjectImageProvider.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Image provider abstraction/adapter and singleton FIFO execution with regional-guide input normalization, previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | Code-owned image model IDs, supported quality levels, and request normalization for model, background, output format, and compression. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 
 ## Related chapters

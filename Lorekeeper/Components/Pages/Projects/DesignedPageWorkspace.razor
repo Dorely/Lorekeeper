@@ -15,6 +15,7 @@
 @inject IProjectFontService ProjectFonts
 @inject IAuthoringHistoryRuntime AuthoringHistory
 @inject IJSRuntime JS
+@inject IPrintPreparationService Printing
 
 <section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
@@ -31,6 +32,7 @@
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.FacingSpread)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.FacingSpread)"><span class="page-thumb spread"></span>Facing spread</button>
                     </div>
                     <label class="composition-guide-toggle" title="Show or hide trim, safe-area, gutter, and measurement guides"><input type="checkbox" @bind="_showGuides" /><span class="composition-guides-icon" aria-hidden="true">&#9638;</span><span>Guides</span></label>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@InteractionLocked" @onclick="() => _printOpen = true">Print</button>
                 </nav>
             </Toolbar>
             <Canvas>
@@ -298,7 +300,24 @@
                                 OnPrimaryAction="UsePickedImageAsync"
                                 OnClose="CloseImagePicker" />
 
+@if (_printOpen)
+{
+    <PrintPreviewDialog SourceFactory="CreatePrintSourceAsync" Closed="() => _printOpen = false" />
+}
+
 @code {
+    private bool _printOpen;
+
+    private async Task<PrintSource> CreatePrintSourceAsync(CancellationToken cancellationToken)
+    {
+        if (!await FlushAsync() || _scene is null || _composition is null || _variant is null)
+            throw new InvalidOperationException(_error ?? "Save this page before printing.");
+        var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList(), Guides = [] };
+        var semantic = ManuscriptCodec.Deserialize(_composition.SemanticManuscriptJson, _composition.Id, _composition.Revision);
+        return await Printing.CreateCompositionAsync(ProjectId, _composition.Id, _variant.Revision,
+            _composition.Name, scene, semantic, null, cancellationToken);
+    }
+
     [Parameter] public int RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter] public Guid? RequestedVariantId { get; set; }

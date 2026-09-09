@@ -68,6 +68,13 @@ public interface ICompositionCanvasPreviewService
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default,
         IReadOnlyDictionary<string, string>? textBindings = null);
+
+    Task<CompositionCanvasPreviewResult> RenderSceneAtResolutionAsync(
+        Guid projectId, Guid targetId, long revision, CompositionScene scene,
+        ManuscriptDocument semantic, CompositionCanvasPreviewMode mode,
+        int maximumEdge, CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null,
+        string? backgroundColor = null);
 }
 
 public sealed partial class CompositionCanvasPreviewService(
@@ -158,6 +165,24 @@ public sealed partial class CompositionCanvasPreviewService(
         CancellationToken cancellationToken = default,
         IReadOnlyDictionary<string, string>? textBindings = null)
     {
+        return await RenderSceneAtResolutionCoreAsync(projectId, targetId, revision, scene, semantic, mode, null, cancellationToken, textBindings, null);
+    }
+
+    public Task<CompositionCanvasPreviewResult> RenderSceneAtResolutionAsync(
+        Guid projectId, Guid targetId, long revision, CompositionScene scene,
+        ManuscriptDocument semantic, CompositionCanvasPreviewMode mode,
+        int maximumEdge, CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null,
+        string? backgroundColor = null) =>
+        RenderSceneAtResolutionCoreAsync(projectId, targetId, revision, scene, semantic, mode, maximumEdge, cancellationToken, textBindings, backgroundColor);
+
+    private async Task<CompositionCanvasPreviewResult> RenderSceneAtResolutionCoreAsync(
+        Guid projectId, Guid targetId, long revision, CompositionScene scene,
+        ManuscriptDocument semantic, CompositionCanvasPreviewMode mode,
+        int? requestedMaximumEdge, CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? textBindings,
+        string? backgroundColor)
+    {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
         ArgumentNullException.ThrowIfNull(scene);
@@ -196,11 +221,14 @@ public sealed partial class CompositionCanvasPreviewService(
             mode,
             assets,
             fontFaces.Select(item => (item.Id, item.FamilyId, item.Weight, item.Italic, item.Data)),
-            textBindings);
-        if (Cache.TryGetValue(cacheKey, out var cached))
+            textBindings,
+            requestedMaximumEdge);
+        var useCache = requestedMaximumEdge is null && backgroundColor is null;
+        if (useCache && Cache.TryGetValue(cacheKey, out var cached))
             return cached;
 
-        var result = await RasterizeAsync(projectId, syntheticVariant, scene, semantic, assets, mode, textBindings, cancellationToken);
+        var result = await RasterizeAsync(projectId, syntheticVariant, scene, semantic, assets, mode, textBindings, cancellationToken, requestedMaximumEdge, backgroundColor);
+        if (!useCache) return result;
         Cache[cacheKey] = result;
         CacheOrder.Enqueue(cacheKey);
         while (Cache.Count > MaximumCachedPreviews && CacheOrder.TryDequeue(out var expired))
@@ -216,11 +244,13 @@ public sealed partial class CompositionCanvasPreviewService(
         IReadOnlyList<PublishAsset> assets,
         CompositionCanvasPreviewMode mode,
         IReadOnlyDictionary<string, string>? textBindings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? requestedMaximumEdge = null,
+        string? backgroundColor = null)
     {
         var surfaceWidth = Math.Max(1, scene.Surface.WidthPoints);
         var surfaceHeight = Math.Max(1, scene.Surface.HeightPoints);
-        var maxEdge = Math.Clamp(options.Value.PreviewImageMaxEdge, 640, 3200);
+        var maxEdge = Math.Clamp(requestedMaximumEdge ?? options.Value.PreviewImageMaxEdge, 640, requestedMaximumEdge is null ? 3200 : 6000);
         var scale = Math.Min(maxEdge / surfaceWidth, maxEdge / surfaceHeight);
         var pixelWidth = Math.Max(1, (int)Math.Round(surfaceWidth * scale));
         var pixelHeight = Math.Max(1, (int)Math.Round(surfaceHeight * scale));
@@ -264,7 +294,7 @@ public sealed partial class CompositionCanvasPreviewService(
             using var raster = SKSurface.Create(new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Rgba8888, SKAlphaType.Premul))
                 ?? throw new InvalidOperationException("The composition preview canvas could not be created.");
             var canvas = raster.Canvas;
-            canvas.Clear(SKColors.White);
+            canvas.Clear(ParseBackground(backgroundColor));
             canvas.Scale((float)(pixelWidth / surfaceWidth), (float)(pixelHeight / surfaceHeight));
             canvas.ClipRect(new SKRect(0, 0, (float)surfaceWidth, (float)surfaceHeight));
             foreach (var item in resolvedObjects)
@@ -786,6 +816,11 @@ public sealed partial class CompositionCanvasPreviewService(
         return color.WithAlpha(Alpha(opacity));
     }
 
+    private static SKColor ParseBackground(string? value) =>
+        string.IsNullOrWhiteSpace(value) || !SKColor.TryParse(value, out var color)
+            ? SKColors.White
+            : color;
+
     private static byte Alpha(double opacity) =>
         (byte)Math.Clamp(Math.Round(Math.Clamp(opacity, 0, 1) * 255), 0, 255);
 
@@ -794,7 +829,8 @@ public sealed partial class CompositionCanvasPreviewService(
         CompositionCanvasPreviewMode mode,
         IReadOnlyList<PublishAsset> assets,
         IEnumerable<(Guid Id, Guid FamilyId, int Weight, bool Italic, byte[] Data)> fontFaces,
-        IReadOnlyDictionary<string, string>? textBindings)
+        IReadOnlyDictionary<string, string>? textBindings,
+        int? maximumEdge = null)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Append(hash, "composition-canvas-preview-v3");
@@ -802,6 +838,7 @@ public sealed partial class CompositionCanvasPreviewService(
         Append(hash, variant.Composition.Revision.ToString());
         Append(hash, variant.Revision.ToString());
         Append(hash, mode.ToString());
+        Append(hash, $"edge:{maximumEdge?.ToString() ?? "default"}");
         Append(hash, variant.SceneJson);
         Append(hash, variant.Composition.SemanticManuscriptJson);
         if (textBindings is null)

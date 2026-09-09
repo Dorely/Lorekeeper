@@ -387,6 +387,13 @@ and its fingerprint describe the permanent replacement references.
 
 ## Key files and file families
 
+Publication PDF previews track the visible page nearest the scroll viewport's
+center and allow explicit page selection in facing view. Print starts with that
+page and offers all pages or validated ranges in the shared print preview.
+Printing uses the exact immutable artifact being inspected; it does not prepare
+a newer release or change artifact freshness. Source PDF downloads remain
+unchanged. Artifact image previews also expose the shared image-print action.
+
 | Path or family | Primary responsibility |
 |---|---|
 | `Lorekeeper/Publish/PublicationBookService.cs` | Core Book creation, metadata/presentation patches, chapter inclusion, reusable cover coordination, revisions, source fingerprints, and Core-plus-release effective configuration resolution. |

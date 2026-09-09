@@ -90,6 +90,10 @@ else
                                 }
                                 <span>@FormatBytes(image.SizeBytes)</span>
                             </div>
+                            @if (HasTransparencyWarning(image))
+                            {
+                                <div class="alert alert-warning py-1 px-2 small mb-2">Requested transparency was not met. The provider returned an opaque image; automatic attachment and print preparation were skipped.</div>
+                            }
                             <ImageEntityAssociations ProjectId="@Project.Id" ImageId="@image.Id" />
                             <div class="image-actions">
                                 @if (PartialsForImage(image.Id) is { Count: > 0 } imagePartials)
@@ -164,7 +168,7 @@ else
                     <div class="image-form-grid">
                         @if (_layoutTarget is null)
                         {
-                            <label>
+                            <label class="image-form-wide">
                                 <span>Size</span>
                                 <select class="form-select form-select-sm" @bind="_imageSize">
                                     <option value="auto">Core Book page (@_defaultImageRaster)</option>
@@ -174,7 +178,7 @@ else
                                 </select>
                             </label>
                         }
-                        <label>
+                        <label class="image-form-wide">
                             <span>Minimum DPI</span>
                             <input class="form-control form-control-sm"
                                    type="number"
@@ -185,13 +189,34 @@ else
                                    disabled="@HasConcreteImageSize" />
                             <small>@(HasConcreteImageSize ? "Clear the concrete size to resolve a raster from DPI." : "Uses effective pixels at the intended physical size; no file-header DPI is stamped.")</small>
                         </label>
+                        <label class="image-form-wide">
+                            <span>Image model</span>
+                            <select class="form-select form-select-sm" @bind="_imageModel">
+                                @foreach (var model in ProjectImageModelCatalog.Models)
+                                {
+                                    <option value="@model.Id">@model.Label</option>
+                                }
+                            </select>
+                        </label>
                         <label>
                             <span>Quality</span>
                             <select class="form-select form-select-sm" @bind="_imageQuality">
+                                @if (!CurrentImageModel.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <option value="@_imageQuality">@_imageQuality (currently configured)</option>
+                                }
+                                @foreach (var quality in CurrentImageModel.Qualities)
+                                {
+                                    <option value="@quality">@quality</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            <span>Background</span>
+                            <select class="form-select form-select-sm" @bind="_imageBackground">
                                 <option value="auto">Auto</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
+                                <option value="opaque">Opaque</option>
+                                <option value="transparent">Transparent</option>
                             </select>
                         </label>
                         <label>
@@ -207,8 +232,8 @@ else
                             }
                         </label>
                         <label>
-                            <span>JPEG compression</span>
-                            <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat != "jpeg")" />
+                            <span>Output compression</span>
+                            <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat is not ("jpeg" or "webp"))" />
                         </label>
                     </div>
                     <label>
@@ -435,6 +460,48 @@ else
                         <span>Edit prompt</span>
                         <textarea class="form-control form-control-sm" rows="7" @bind="_maskPrompt"></textarea>
                     </label>
+                    <label>
+                        <span>Image model</span>
+                        <select class="form-select form-select-sm" @bind="_imageModel">
+                            @foreach (var model in ProjectImageModelCatalog.Models)
+                            {
+                                <option value="@model.Id">@model.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        <span>Quality</span>
+                        <select class="form-select form-select-sm" @bind="_imageQuality">
+                            @if (!CurrentImageModel.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <option value="@_imageQuality">@_imageQuality (currently configured)</option>
+                            }
+                            @foreach (var quality in CurrentImageModel.Qualities)
+                            {
+                                <option value="@quality">@quality</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        <span>Background</span>
+                        <select class="form-select form-select-sm" @bind="_imageBackground">
+                            <option value="auto">Auto</option>
+                            <option value="opaque">Opaque</option>
+                            <option value="transparent">Transparent</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Output format</span>
+                        <select class="form-select form-select-sm" @bind="_imageFormat">
+                            <option value="png">PNG</option>
+                            <option value="jpeg">JPEG</option>
+                            <option value="webp">WebP</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Output compression</span>
+                        <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat is not ("jpeg" or "webp"))" />
+                    </label>
                     <label><span>Additional represented entities</span></label>
                     <EntityVisualTargetPicker ProjectId="@Project!.Id" @bind-Targets="_editEntityTargets" />
                     <label class="form-check">
@@ -499,6 +566,8 @@ else
     private int? _minimumDpi;
     private string _defaultImageRaster = string.Empty;
     private string _imageQuality = "auto";
+    private string _imageModel = string.Empty;
+    private string _imageBackground = "auto";
     private string _imageFormat = "png";
     private int? _imageCompression;
     private string _generatedAltText = string.Empty;
@@ -529,6 +598,10 @@ else
         _layoutTarget is null
         && !string.IsNullOrWhiteSpace(_imageSize)
         && !_imageSize.Equals("auto", StringComparison.OrdinalIgnoreCase);
+
+    private ProjectImageModelDefinition CurrentImageModel =>
+        ProjectImageModelCatalog.Models.FirstOrDefault(model => model.Id.Equals(_imageModel, StringComparison.OrdinalIgnoreCase))
+        ?? ProjectImageModelCatalog.Models[0];
 
     private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
         _generationReferences.Select(reference => reference.Image.Id).ToList();
@@ -597,6 +670,9 @@ else
         _generationReferencePickerOpen = false;
         _imageSize = "auto";
         _minimumDpi = null;
+        _imageModel = ImageOptions.Value.DefaultImageModel;
+        _imageBackground = "auto";
+        _imageQuality = ImageOptions.Value.DefaultQuality;
         _loadedProjectId = Project.Id;
         await ReloadAsync();
     }
@@ -761,13 +837,15 @@ else
                 references,
                 target: _layoutTarget is null
                     ? new ImageGenerationTarget { Size = _imageSize, MinimumDpi = HasConcreteImageSize ? null : _minimumDpi }
-                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId, MinimumDpi = _minimumDpi });
+                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId, MinimumDpi = _minimumDpi },
+                cancellationToken: default,
+                background: _imageBackground);
             await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
                 compiled.Prompt,
                 compiled.Size,
                 _imageQuality,
                 _imageFormat,
-                _imageFormat == "jpeg" ? _imageCompression : null,
+                _imageFormat is "jpeg" or "webp" ? _imageCompression : null,
                 _generatedAltText,
                 1,
                 compiled.ReferenceImageIds,
@@ -775,7 +853,9 @@ else
                 EntityTargets: _generationEntityTargets,
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
-                TargetGeometryJson: compiled.TargetGeometryJson));
+                TargetGeometryJson: compiled.TargetGeometryJson,
+                ImageModel: _imageModel,
+                Background: _imageBackground));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             var printPlan = ReadPrintUpscalePlan(compiled.TargetGeometryJson);
             _status = printPlan is { } queuedPlan
@@ -1278,14 +1358,15 @@ else
                 },
                 references: null,
                 target: null,
-                guidanceMode: ImageEditGuidanceMode.RegionalGuide);
+                guidanceMode: ImageEditGuidanceMode.RegionalGuide,
+                background: _imageBackground);
             await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
                 _editingImage.Id,
                 compiled.Prompt,
                 compiled.Size,
                 _imageQuality,
                 _imageFormat,
-                _imageFormat == "jpeg" ? _imageCompression : null,
+                _imageFormat is "jpeg" or "webp" ? _imageCompression : null,
                 _generatedAltText,
                 1,
                 maskDataUrl,
@@ -1295,7 +1376,9 @@ else
                 InheritSourceEntityTargets: _inheritEditEntityTargets,
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
-                TargetGeometryJson: compiled.TargetGeometryJson));
+                TargetGeometryJson: compiled.TargetGeometryJson,
+                ImageModel: _imageModel,
+                Background: _imageBackground));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _maskModalOpen = false;
             _status = "Edit job queued.";
@@ -1349,7 +1432,12 @@ else
                 <div class="image-meta">
                     <span>@job.Kind</span>
                     <span>@JobStatusText(job, displayedRuntimeJob)</span>
+                    <span>@job.ImageModel · @job.Quality · @job.Background</span>
                 </div>
+                @if (job.OutputImageIds.Any(imageId => _images.FirstOrDefault(image => image.Id == imageId) is { } image && HasTransparencyWarning(image)))
+                {
+                    <div class="alert alert-warning py-1 px-2 small mb-2">Transparent background requirement was not met. Output was retained unattached and not print-prepared.</div>
+                }
                 <p class="small mb-0">@Truncate(job.Prompt, 160)</p>
                 <details class="small mt-2">
                     <summary>Generation brief and provider details</summary>
@@ -1416,6 +1504,45 @@ else
 
     private static bool IsActiveJob(ProjectImageGenerationJobStatus status) =>
         status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running;
+
+    private static bool HasTransparencyWarning(ProjectImageView image)
+    {
+        if (string.IsNullOrWhiteSpace(image.SourceMetadataJson))
+            return false;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(image.SourceMetadataJson);
+            return ContainsWarning(document.RootElement);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ContainsWarning(System.Text.Json.JsonElement element)
+    {
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "warningCodes", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == System.Text.Json.JsonValueKind.Array
+                    && property.Value.EnumerateArray().Any(value => value.ValueKind == System.Text.Json.JsonValueKind.String
+                        && string.Equals(value.GetString(), "TRANSPARENCY_NOT_MET", StringComparison.Ordinal)))
+                    return true;
+                if (ContainsWarning(property.Value))
+                    return true;
+            }
+        }
+        else if (element.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                if (ContainsWarning(item))
+                    return true;
+        }
+        return false;
+    }
 
     private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
     {

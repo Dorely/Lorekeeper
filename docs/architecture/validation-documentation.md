@@ -400,3 +400,12 @@ Electron, packaging, or target-native release checks only when their boundaries
 are affected. In the completion report, state exact commands and results, manual
 or integration checks performed, checks intentionally not run, final commit, and
 working-tree status.
+
+For printing changes, syntax-check the print browser modules and desktop hook,
+then use explicitly authorized preview checks for source orientation, fit/crop,
+margins, custom fonts, backgrounds/transparency, pending saves, PDF page/range
+selection, errors, and cancellation. Check that the isolated document has one
+sheet per selected surface and excludes editor chrome. Verify the custom host
+hook is copied into `.electron/ElectronHostHook/index.js`. Open and cancel the
+final printer dialog only when authorized; never infer physical output or
+another operating system's driver behavior from a preview or successful build.

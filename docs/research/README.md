@@ -1,11 +1,13 @@
 # Lorekeeper editorial and composition research
 
-Last reviewed: 2026-08-30
+Last reviewed: 2026-09-08
 
 Research access date: recorded by brief.
 
-Runtime model scope for image research: OpenAI `gpt-image-2` and the OpenAI
-Image/Responses APIs reviewed on 2026-08-30.
+Runtime model scope for image research: Lorekeeper's Flare default and explicit
+Sunburst option, plus the OpenAI Image/Responses APIs reviewed on 2026-09-08.
+Model aliases, quality behavior, deployments, and raw Codex routes remain
+subject to user live validation; research does not claim an unverified route.
 
 These briefs are engineering references for Lorekeeper's prompts, automation, contracts, and diagnostics. They are not prompt payloads and must not be injected wholesale into a model request. Runtime instructions should contain only the compact rules needed for the active task; the application should calculate geometry, assemble context, validate contracts, and measure diagnostics itself.
 

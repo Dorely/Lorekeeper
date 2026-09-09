@@ -1,0 +1,40 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IPrintPreparationService Printing
+
+<button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _open = true">Print</button>
+@if (_open)
+{
+    <PrintPreviewDialog SourceFactory="CreateSourceAsync" Closed="() => _open = false" />
+}
+
+@code {
+    [Parameter, EditorRequired] public string ImageUrl { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    private bool _open;
+    private IJSObjectReference? _module;
+
+    private async Task<PrintSource> CreateSourceAsync(CancellationToken cancellationToken)
+    {
+        // Every shared image viewer consumes a project-owned media URL. Retain that
+        // scope while copying the already-authorized browser resource into a snapshot.
+        var path = Uri.TryCreate(ImageUrl, UriKind.Absolute, out var absolute) ? absolute.AbsolutePath : ImageUrl.Split('?')[0];
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || parts[0] != "projects" || !Guid.TryParse(parts[1], out var projectId))
+            throw new InvalidOperationException("This image does not have a project-owned print source.");
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", cancellationToken, "/js/print-preview.js");
+        await using var reference = await _module.InvokeAsync<IJSStreamReference>("readImage", cancellationToken, ImageUrl, 64L * 1024 * 1024);
+        await using var stream = await reference.OpenReadStreamAsync(64L * 1024 * 1024, cancellationToken);
+        return await Printing.CreateImageAsync(projectId, Title, stream, cancellationToken);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+    }
+}

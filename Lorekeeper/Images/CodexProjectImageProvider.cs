@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Diagnostics;
 using Lorekeeper.Llm;
 using Microsoft.Extensions.Options;
 
@@ -102,6 +103,39 @@ public sealed class CodexProjectImageProvider(
         CancellationToken cancellationToken,
         IProgress<ProjectImageProviderProgress>? progress)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(options.Value.RequestTimeoutSeconds, 1, 3600)));
+        try
+        {
+            return await SendImageRequestCoreAsync(connection, mainlineModel, imageModel, payload,
+                requestedOutputFormat, timeout.Token, progress);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new ProjectImageProviderException("The image request timed out before a final image was received.",
+                "request_timeout", innerException: ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ProjectImageProviderException("The connection to the image provider failed.",
+                "transport_error", statusCode: (int?)ex.StatusCode, innerException: ex);
+        }
+        catch (IOException ex)
+        {
+            throw new ProjectImageProviderException("The image provider stream was interrupted.",
+                "transport_error", innerException: ex);
+        }
+    }
+
+    private async Task<CodexImageReadResult> SendImageRequestCoreAsync(
+        CodexImageConnection connection,
+        string mainlineModel,
+        string imageModel,
+        Dictionary<string, object?> payload,
+        string requestedOutputFormat,
+        CancellationToken cancellationToken,
+        IProgress<ProjectImageProviderProgress>? progress)
+    {
         var json = JsonSerializer.Serialize(payload);
         var stopwatch = Stopwatch.StartNew();
         string? requestId = null;
@@ -120,7 +154,7 @@ public sealed class CodexProjectImageProvider(
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
         var httpClient = httpClientFactory.CreateClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.Value.RequestTimeoutSeconds, 1, 3600));
+        httpClient.Timeout = Timeout.InfiniteTimeSpan;
 
         ReportProgress(progress, new ProjectImageProviderProgress(ProjectImageProviderProgressKind.Started, "Image request started."));
 
@@ -129,13 +163,16 @@ public sealed class CodexProjectImageProvider(
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            var errorKind = ClassifyImageError(errorBody);
-            var errorMessage = ReadErrorMessage(errorBody) ?? errorBody;
+            var error = ParseError(errorBody);
+            var errorKind = ClassifyImageError(error, (int)response.StatusCode);
             var exception = new ProjectImageProviderException(
-                $"Codex image request returned {(int)response.StatusCode} ({errorKind}): {errorMessage}",
+                $"Codex image request returned {(int)response.StatusCode} ({errorKind}): {error.Message}",
                 errorKind,
                 requestId,
-                statusCode: (int)response.StatusCode);
+                statusCode: (int)response.StatusCode,
+                errorCode: error.Code,
+                errorType: error.Type,
+                retryAfter: ReadRetryAfter(response));
             ReportProgress(progress, FailedProgress(exception, ProjectImageProviderProgressKind.Failed));
             throw exception;
         }
@@ -181,15 +218,18 @@ public sealed class CodexProjectImageProvider(
 
             if (type == "response.failed" || type == "error")
             {
-                var error = ReadResponseError(evt) ?? "Codex image generation failed.";
+                var error = ReadError(evt);
                 var errorKind = ClassifyImageError(error);
                 var exception = new ProjectImageProviderException(
-                    $"Codex image generation failed ({errorKind}): {error}",
+                    $"Codex image generation failed ({errorKind}): {error.Message}",
                     errorKind,
                     requestId,
                     responseId,
                     lastEventType: lastEventType,
-                    eventCount: eventCount);
+                    eventCount: eventCount,
+                    errorCode: error.Code,
+                    errorType: error.Type,
+                    retryAfter: ReadRetryAfter(response));
                 ReportProgress(progress, FailedProgress(exception, ProjectImageProviderProgressKind.Failed));
                 throw exception;
             }
@@ -366,13 +406,25 @@ public sealed class CodexProjectImageProvider(
                 outputFormat,
                 ReadString(item, "revised_prompt"),
                 responseId,
-                callId),
+                callId,
+                ReadString(item, "model"),
+                ReadString(item, "quality"),
+                ReadString(item, "background"),
+                ReadString(item, "size"),
+                ReadString(item, "output_format"),
+                ReadInt(item, "output_compression")),
             new
             {
                 ResponseId = responseId,
                 CallId = callId,
                 RevisedPrompt = ReadString(item, "revised_prompt"),
                 OutputFormat = outputFormat,
+                ReportedModel = ReadString(item, "model"),
+                ReportedQuality = ReadString(item, "quality"),
+                ReportedBackground = ReadString(item, "background"),
+                ReportedSize = ReadString(item, "size"),
+                ReportedOutputFormat = ReadString(item, "output_format"),
+                ReportedOutputCompression = ReadInt(item, "output_compression"),
             });
     }
 
@@ -396,7 +448,7 @@ public sealed class CodexProjectImageProvider(
         return BasePayload(
             mainlineModel,
             content,
-            BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "generate"),
+            BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "generate", request.Background),
             "Use the image_generation tool to create one story illustration or project image from the standalone target brief. Supplied input images are visual continuity references, not edit canvases: preserve the character identity, design, clothes, hair, age, proportions, palette, medium, recurring props, setting traits, and style assigned to each reference by the brief unless it requests a redesign or style break. Take expression, pose, gesture, gaze, body language, action, camera, framing, layout, background, lighting, and composition from the target brief rather than copying those shot-specific traits from a reference unless explicitly requested.");
     }
 
@@ -418,7 +470,7 @@ public sealed class CodexProjectImageProvider(
         foreach (var reference in request.ReferenceImages.Take(options.Value.MaxReferenceImages))
             content.Add(InputImage(reference));
 
-        var tool = BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "edit");
+        var tool = BaseImageTool(request.Size, request.Quality, request.OutputFormat, request.OutputCompression, imageModel, "edit", request.Background);
         if (request.Mask is not null)
         {
             tool["input_image_mask"] = new Dictionary<string, object?>
@@ -428,7 +480,7 @@ public sealed class CodexProjectImageProvider(
         }
 
         var instructions = request.Mask is null
-            ? "Use the image_generation tool to render one coherent complete edit from the first supplied image as the visual starting point. Make the requested changes while preserving the source's explicitly requested identity, story, style, and composition continuity. Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details."
+            ? "Use the image_generation tool to edit the first supplied image. Make only the requested changes, preserve the named identity, story, style, and composition constraints and unrelated content, and adapt other details only where the requested transformation requires it. Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details."
             : $"Use the image_generation tool to render one coherent complete edit from the first supplied image as the visual starting point. {ProjectImageRegionalGuide.PromptInstruction} Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details.";
 
         return BasePayload(
@@ -467,7 +519,8 @@ public sealed class CodexProjectImageProvider(
         string outputFormat,
         int? outputCompression,
         string imageModel,
-        string action)
+        string action,
+        string background)
     {
         var normalizedOutputFormat = NormalizeOutputFormat(outputFormat);
         var tool = new Dictionary<string, object?>
@@ -477,7 +530,7 @@ public sealed class CodexProjectImageProvider(
             ["action"] = action,
             ["size"] = string.IsNullOrWhiteSpace(size) ? "auto" : size.Trim(),
             ["output_format"] = normalizedOutputFormat,
-            ["background"] = "auto",
+            ["background"] = ProjectImageModelCatalog.NormalizeBackground(background),
         };
 
         var partialImages = Math.Clamp(options.Value.PartialImages, 0, 3);
@@ -487,7 +540,7 @@ public sealed class CodexProjectImageProvider(
         if (!string.IsNullOrWhiteSpace(quality) && !string.Equals(quality, "auto", StringComparison.OrdinalIgnoreCase))
             tool["quality"] = quality.Trim();
 
-        if (normalizedOutputFormat == "jpeg" && outputCompression is int compression)
+        if (normalizedOutputFormat is "jpeg" or "webp" && outputCompression is int compression)
             tool["output_compression"] = Math.Clamp(compression, 0, 100);
 
         return tool;
@@ -626,11 +679,34 @@ public sealed class CodexProjectImageProvider(
         return null;
     }
 
-    private static string ClassifyImageError(string message)
+    private static string ClassifyImageError(ImageProviderError error, int? statusCode = null)
     {
-        if (string.IsNullOrWhiteSpace(message))
-            return "unknown";
-
+        var message = error.Message;
+        var code = error.Code?.ToLowerInvariant();
+        var type = error.Type?.ToLowerInvariant();
+        if (code == "moderation_blocked" || type == "moderation_blocked") return "moderation_blocked";
+        if (code == "image_generation_user_error" || type == "image_generation_user_error") return "image_generation_user_error";
+        if (code is "insufficient_quota" or "billing_hard_limit_reached" or "billing_not_active"
+            || type == "insufficient_quota"
+            || message.Contains("quota", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("billing", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("usage limit", StringComparison.OrdinalIgnoreCase))
+            return "quota_exhausted";
+        if (statusCode == 401 || type == "authentication_error" || code is "invalid_api_key" or "invalid_token" or "token_expired")
+            return "authentication_error";
+        if (statusCode == 403 || code is "permission_denied" or "model_access_denied"
+            || message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Cloudflare", StringComparison.OrdinalIgnoreCase))
+            return "codex_transport_forbidden";
+        if (code is "model_not_found" or "unsupported_model"
+            || (code == "invalid_value" && message.Contains("model", StringComparison.OrdinalIgnoreCase)))
+            return "image_model_invalid";
+        if (code is "content_policy_violation" or "safety_violation"
+            || message.Contains("moderation", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("content policy", StringComparison.OrdinalIgnoreCase))
+            return "moderation_blocked";
+        if (type == "invalid_request_error" || statusCode is 400 or 404 or 422)
+            return "invalid_request";
         if (message.Contains("input-images", StringComparison.OrdinalIgnoreCase)
             && message.Contains("per min", StringComparison.OrdinalIgnoreCase)
             && message.Contains("gpt-image", StringComparison.OrdinalIgnoreCase))
@@ -638,73 +714,54 @@ public sealed class CodexProjectImageProvider(
             return "codex_image_input_rate_limit";
         }
 
-        if (message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("429", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Too Many Requests", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Please try again", StringComparison.OrdinalIgnoreCase))
+        if (statusCode == 429 || code is "rate_limit_exceeded" or "slow_down"
+            || type == "rate_limit_error"
+            || message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Too Many Requests", StringComparison.OrdinalIgnoreCase))
         {
             return "rate_limit";
         }
 
-        if (message.Contains("403", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Cloudflare", StringComparison.OrdinalIgnoreCase))
-        {
-            return "codex_transport_forbidden";
-        }
-
-        if (message.Contains("invalid_value", StringComparison.OrdinalIgnoreCase)
-            && message.Contains("gpt-image", StringComparison.OrdinalIgnoreCase))
-        {
-            return "image_model_invalid";
-        }
-
+        if (statusCode >= 500 || code is "server_error" or "server_is_overloaded" || type == "server_error")
+            return "server_error";
         return "api_error";
     }
 
-    private static string? ReadResponseError(JsonElement evt)
+    private static ImageProviderError ReadError(JsonElement element)
     {
-        if (evt.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
-            return message.GetString();
-        if (evt.TryGetProperty("error", out var error)
-            && error.TryGetProperty("message", out var errorMessage)
-            && errorMessage.ValueKind == JsonValueKind.String)
-        {
-            return errorMessage.GetString();
-        }
-        if (evt.TryGetProperty("response", out var response)
-            && response.TryGetProperty("error", out error)
-            && error.TryGetProperty("message", out errorMessage)
-            && errorMessage.ValueKind == JsonValueKind.String)
-        {
-            return errorMessage.GetString();
-        }
-        return null;
+        if (element.ValueKind != JsonValueKind.Object)
+            return new ImageProviderError("The image provider rejected the request.", null, null);
+        if (element.TryGetProperty("response", out var response) && response.ValueKind == JsonValueKind.Object)
+            element = response;
+        if (element.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+            element = error;
+        return new ImageProviderError(
+            LogRedaction.RedactJson(ReadString(element, "message") ?? "The image provider rejected the request."),
+            ReadString(element, "code"), ReadString(element, "type"));
     }
 
-    private static string? ReadErrorMessage(string body)
+    private static ImageProviderError ParseError(string body)
     {
-        if (string.IsNullOrWhiteSpace(body))
-            return null;
         try
         {
             using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            if (root.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
-                return message.GetString();
-            if (root.TryGetProperty("error", out var error)
-                && error.TryGetProperty("message", out var errorMessage)
-                && errorMessage.ValueKind == JsonValueKind.String)
-            {
-                return errorMessage.GetString();
-            }
+            return ReadError(document.RootElement);
         }
         catch (JsonException)
         {
         }
 
-        return null;
+        return new ImageProviderError("The image provider returned an unsuccessful response without a structured error.", null, null);
     }
+
+    private static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
+    {
+        var header = response.Headers.RetryAfter;
+        var delay = header?.Delta ?? (header?.Date is { } date ? date - DateTimeOffset.UtcNow : (TimeSpan?)null);
+        return delay > TimeSpan.Zero ? delay : null;
+    }
+
+    private sealed record ImageProviderError(string Message, string? Code, string? Type);
 
     private sealed record CodexImageConnection(string Token, string AccountId);
 

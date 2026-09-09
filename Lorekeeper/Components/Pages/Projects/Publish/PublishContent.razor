@@ -141,6 +141,10 @@ else
             <header>
                 <div><span class="eyebrow">Prepared artifact</span><h2 id="artifact-preview-title">@PreviewLabel(previewArtifact.Kind)</h2><small>@previewArtifact.FileName · @FormatBytes(previewArtifact.ByteLength)@if (previewArtifact.PageCount is int pages){<text> · @pages pages</text>}</small></div>
                 <div class="button-row">
+                    @if (previewArtifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <ImagePrintButton ImageUrl="@ViewUrl(previewArtifact.Id)" Title="@previewArtifact.FileName" />
+                    }
                     <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(previewArtifact.Id)" download="@previewArtifact.FileName">@DownloadLabel(previewArtifact.Kind)</a>
                     <button class="btn-close" aria-label="Close artifact preview" @onclick="ClosePdfPreview"></button>
                 </div>

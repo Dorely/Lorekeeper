@@ -7,6 +7,21 @@ public static class ProjectImageBinary
     public const int DefaultMaxBytes = 20 * 1024 * 1024;
     public const int ProviderInputMaxBytes = 50 * 1024 * 1024;
 
+    public static bool ContainsTransparentPixel(byte[] data)
+    {
+        using var bitmap = SKBitmap.Decode(data)
+            ?? throw new InvalidDataException("Image transparency could not be inspected.");
+        if (bitmap.AlphaType == SKAlphaType.Opaque)
+            return false;
+
+        for (var y = 0; y < bitmap.Height; y++)
+        for (var x = 0; x < bitmap.Width; x++)
+            if (bitmap.GetPixel(x, y).Alpha < byte.MaxValue)
+                return true;
+
+        return false;
+    }
+
     public static NormalizedProjectImage Normalize(byte[] data, string? contentType, string? fileName, int maxBytes = DefaultMaxBytes)
     {
         if (data.Length == 0)

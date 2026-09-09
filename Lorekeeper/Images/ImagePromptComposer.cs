@@ -36,9 +36,9 @@ public sealed class ImageGenerationBrief
 public sealed class ImageEditBrief
 {
     public string IntendedUse { get; init; } = string.Empty;
-    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. For same-aspect up-resolution, require the complete original framing and visible content with credible reconstructed detail and no crop, zoom-out, or surrounding-canvas invention. For intentional outpainting, describe the new framing and surrounding scene direction. Prefer a complete source-driven edit for spatial or compositional changes.")]
+    [Description("Describe the coherent desired result and the specific requested change. Preserve the named invariants and unrelated scene; do not authorize broad pose, framing, lighting, or background changes unless the request calls for them. For same-aspect up-resolution, require the complete original framing and visible content with credible reconstructed detail and no crop, zoom-out, or surrounding-canvas invention. For intentional outpainting, describe the new framing and surrounding scene direction.")]
     public string Change { get; init; } = string.Empty;
-    [Description("Only the identity, story, style, or composition anchors that materially require continuity. Do not require every unmentioned detail to remain exact; let the image model adapt nearby details so the result remains coherent.")]
+    [Description("Name the identity, story, style, composition, framing, lighting, background, and open-space invariants that must remain. Preserve unrelated scene content; allow only the requested change and directly required adaptations for coherence.")]
     public string Preserve { get; init; } = string.Empty;
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
@@ -183,7 +183,8 @@ public interface IImagePromptComposer
         ImageGenerationBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string background = "auto");
 
     Task<CompiledImagePrompt> CompileEditAsync(
         Guid projectId,
@@ -192,7 +193,8 @@ public interface IImagePromptComposer
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
         ImageEditGuidanceMode guidanceMode,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string background = "auto");
 }
 
 public sealed class ImagePromptComposer(
@@ -215,14 +217,16 @@ public sealed class ImagePromptComposer(
         ImageGenerationBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string background = "auto")
     {
         ArgumentNullException.ThrowIfNull(brief);
         Require(brief.IntendedUse, "intendedUse");
         Require(brief.Scene, "scene");
         ValidateRenderedText(brief.AllowRenderedText, brief.RenderedText);
 
-        var targetResolution = await ResolveTargetAsync(projectId, target, cancellationToken);
+        background = ProjectImageModelCatalog.NormalizeBackground(background);
+        var targetResolution = await ResolveTargetAsync(projectId, target, background, cancellationToken);
         var manifest = await BuildReferenceManifestAsync(projectId, references, firstProviderInputOrder: 1, cancellationToken);
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
@@ -235,7 +239,8 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Style, medium, and palette", brief.StyleMediumPalette);
         AppendSection(builder, "Camera and framing", brief.CameraFraming);
         AppendSection(builder, "Composition", brief.Composition);
-        AppendSection(builder, "Purposeful use of space", PurposefulSpaceInstruction);
+        AppendSection(builder, "Background output", BuildBackgroundInstruction(background));
+        AppendSection(builder, "Purposeful use of space", BuildGenerationSpaceInstruction(background));
         AppendSection(builder, "Lighting and mood", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Constraints and exclusions", brief.Constraints);
@@ -244,7 +249,7 @@ public sealed class ImagePromptComposer(
             "Creative latitude",
             "Meet every stated story, continuity, composition, and output requirement. Freely compose visual details that are not prescribed by the brief or references so the result feels intentional and coherent. Do not infer that unspecified details are forbidden, and do not add literal exclusions such as 'nothing else'.");
         AppendRenderedTextPolicy(builder, brief.AllowRenderedText, brief.RenderedText);
-        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText);
+        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText, background);
 
         return BuildResult(
             builder,
@@ -260,7 +265,8 @@ public sealed class ImagePromptComposer(
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
         ImageEditGuidanceMode guidanceMode,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string background = "auto")
     {
         if (sourceImageId == Guid.Empty)
             throw new ArgumentException("sourceImageId is required.", nameof(sourceImageId));
@@ -270,13 +276,14 @@ public sealed class ImagePromptComposer(
         Require(brief.Preserve, "preserve");
         ValidateRenderedText(brief.AllowRenderedText, brief.RenderedText);
 
+        background = ProjectImageModelCatalog.NormalizeBackground(background);
         var source = await images.GetAsync(projectId, sourceImageId, cancellationToken)
             ?? throw new InvalidOperationException($"Source image {sourceImageId:N} was not found in this project.");
         if ((references ?? []).Any(reference => reference.ImageId == sourceImageId))
             throw new ArgumentException("The edit source is already provider input image 1 and must not also appear in references.", nameof(references));
         var targetResolution = guidanceMode == ImageEditGuidanceMode.RegionalGuide
             ? await ResolveRegionalGuideTargetAsync(projectId, sourceImageId, target, cancellationToken)
-            : await ResolveTargetAsync(projectId, target, cancellationToken);
+            : await ResolveTargetAsync(projectId, target, background, cancellationToken);
         var manifest = await BuildReferenceManifestAsync(projectId, references, firstProviderInputOrder: 2, cancellationToken);
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
@@ -284,25 +291,26 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Desired edited result", brief.Change);
         AppendSection(builder, "Continuity priorities", brief.Preserve);
         AppendSection(builder, "Composition after edit", brief.Composition);
+        AppendSection(builder, "Background output", BuildBackgroundInstruction(background));
         AppendSection(
             builder,
             "Purposeful use of space after edit",
             guidanceMode == ImageEditGuidanceMode.RegionalGuide
                 ? "Preserve the source image's existing balance of occupied and open space outside the guided region. Do not fill, clear, expand, crop, or otherwise redesign surrounding areas unless the requested local change requires a minimal boundary adjustment for coherence."
-                : PurposefulSpaceInstruction);
+                : "Preserve the source image's existing balance of occupied and open space. Keep existing open space, background treatment, and surrounding scene intact unless the requested change explicitly asks to alter them; make only the local or directly dependent adaptations needed for a coherent result.");
         AppendSection(builder, "Lighting and mood after edit", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Additional constraints and exclusions", brief.Constraints);
         AppendRenderedTextPolicy(builder, brief.AllowRenderedText, brief.RenderedText);
         if (guidanceMode == ImageEditGuidanceMode.RegionalGuide)
             AppendSection(builder, "Regional edit guide", ProjectImageRegionalGuide.PromptInstruction);
-        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText);
+        AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText, background);
         AppendSection(
             builder,
             "Edit discipline",
             guidanceMode == ImageEditGuidanceMode.RegionalGuide
                 ? "Render the requested revision as one coherent complete image using the supplied image as its visual starting point. Preserve the source framing and the explicitly listed identity, story, style, and composition priorities. Concentrate the requested change in the guided region, allow only the minimal nearby lighting, texture, edge, or geometry adaptation needed for coherence, and avoid unrelated changes elsewhere. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them."
-                : "Render the requested revision as one coherent complete image using the supplied image as its visual starting point. Preserve the explicitly listed identity, story, style, and composition priorities, while allowing nearby pose, framing, lighting, background, texture, and geometry to adapt naturally when needed. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them.");
+                : "Render one coherent complete image using the supplied image as its visual starting point. Make the requested change and only the directly dependent adaptations needed for coherence. Preserve every named identity, story, style, composition, framing, lighting, background, and open-space invariant, and keep unrelated subjects and scene details recognizable without duplicating, deforming, or partially reconstructing them. Do not broaden a local request into a new pose, framing, lighting, or background design.");
 
         return BuildResult(
             builder,
@@ -419,6 +427,7 @@ public sealed class ImagePromptComposer(
     private async Task<TargetResolution> ResolveTargetAsync(
         Guid projectId,
         ImageGenerationTarget? target,
+        string background,
         CancellationToken cancellationToken)
     {
         ValidateTargetRequest(target);
@@ -465,7 +474,7 @@ public sealed class ImagePromptComposer(
                 : ApplyMinimumDpi(ApplyLayoutRasterOverride(descriptor, target.Size), target, target.Size);
             if (descriptor.RequestedWidthPixels <= 0 || descriptor.RequestedHeightPixels <= 0)
                 throw new ArgumentException("The physical target aspect cannot be represented by one provider-compatible raster. Use a minimum-DPI preflight and its multi-image surface plan, reduce the placement, or choose a compatible frame aspect.", nameof(target));
-            var appendix = BuildLayoutTargetAppendix(descriptor, target.FillTarget);
+            var appendix = BuildLayoutTargetAppendix(descriptor, target.FillTarget, background);
             return new(
                 descriptor.RequestedRaster,
                 descriptor.AspectRatio,
@@ -828,12 +837,15 @@ public sealed class ImagePromptComposer(
 
     private static string BuildLayoutTargetAppendix(
         LayoutGenerationTargetDescriptor descriptor,
-        bool fillTarget)
+        bool fillTarget,
+        string background)
     {
         var prompt = new StringBuilder();
         prompt.Append("Layout target: ").Append(descriptor.TargetKind)
             .Append("; intended frame aspect ratio ").Append(descriptor.AspectRatio).AppendLine(".");
-        prompt.Append(fillTarget
+        prompt.Append(background == "transparent"
+            ? "Compose the requested subject within the complete target and keep important details inside its crop-safe region. Preserve intentional empty alpha through crop margins instead of extending scenery. "
+            : fillTarget
             ? "Compose edge-to-edge so the image can crop-to-fill the complete target. Extend background naturally through any crop margin and keep focal subjects, faces, hands, lettering-safe space, and other essential content within the centered target-aspect window. "
             : "Compose for the complete target while preserving its intended framing. ");
         prompt.Append("Keep important content within usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup.").AppendLine();
@@ -950,15 +962,32 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Rendered-text policy", allowed
             ? string.IsNullOrWhiteSpace(renderedText)
                 ? "Rendered text is permitted only where the composition explicitly calls for it. Keep it legible and do not invent additional words."
-                : $"Render only this exact text: {renderedText.Trim()}"
+                : $"Render only this exact text, delimited by the serialized quote {JsonSerializer.Serialize(renderedText.Trim())}. Spell it exactly and keep it legible. Do not add, omit, paraphrase, correct, translate, repeat, or decorate any other words. Inspect the complete raster for extra or missing text before accepting it."
             : "Do not render words, letters, numbers, captions, labels, signatures, watermarks, logos, or story copy. Keep all story text as editable Lorekeeper text outside the raster image.");
     }
+
+    private static string BuildBackgroundInstruction(
+        string? background)
+    {
+        var normalized = background?.Trim();
+        if (string.Equals(normalized, "transparent", StringComparison.OrdinalIgnoreCase))
+            return "Transparent output is requested. Follow only the brief's explicit background details; otherwise preserve an empty alpha backdrop with no invented scenery, floor, ground, horizon, cast shadow, or background wash. Keep only the requested subject and directly required details. Inspect the complete raster for unintended opaque backdrop pixels.";
+        if (string.Equals(normalized, "opaque", StringComparison.OrdinalIgnoreCase))
+            return "Opaque output is requested. Use an appropriate plain or scene-integrated background treatment that supports the requested subject and composition; follow any explicit background direction and do not force transparency.";
+        return "Background mode is automatic. Follow the brief and source composition without imposing a new opaque or transparent background treatment.";
+    }
+
+    private static string BuildGenerationSpaceInstruction(string? background) =>
+        string.Equals(background?.Trim(), "transparent", StringComparison.OrdinalIgnoreCase)
+            ? "Transparent output requires an intentionally empty alpha backdrop outside the requested subject and directly required details. Do not fill open space with invented scenery, floor, ground, horizon, cast shadow, or background wash unless the brief explicitly requests it."
+            : PurposefulSpaceInstruction;
 
     private static void AppendTarget(
         StringBuilder builder,
         TargetResolution target,
         IReadOnlyList<ImageReservedRegion>? reservedRegions,
-        bool renderedTextAllowed)
+        bool renderedTextAllowed,
+        string background)
     {
         var targetText = new StringBuilder();
         targetText.Append("Raster size: ").Append(target.Size)
@@ -984,6 +1013,8 @@ public sealed class ImagePromptComposer(
         }
         if (!string.IsNullOrWhiteSpace(target.PromptAppendix))
             targetText.Append('\n').Append(target.PromptAppendix);
+        if (background == "transparent")
+            targetText.Append(" For reserved text regions, preserve intentional empty alpha; the page beneath supplies the readable value. Do not add an opaque panel or backdrop to satisfy quiet-space guidance.");
         foreach (var region in reservedRegions ?? [])
         {
             ValidateRegion(region);

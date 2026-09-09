@@ -29,6 +29,8 @@ public class ProjectImageGenerationJob
 
     public string OutputFormat { get; set; } = "png";
 
+    public string Background { get; set; } = "auto";
+
     public int? OutputCompression { get; set; }
 
     public int Count { get; set; } = 1;

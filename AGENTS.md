@@ -190,6 +190,9 @@
   import/upload boundaries where the web security model requires it. Opening an
   external browser is permitted only for an intentional, documented handoff such
   as OAuth, vendor documentation, or application updates.
+- Printing uses the shared application-owned print preview. Its explicit Print
+  action may open the browser/system printer dialog as a narrow device handoff;
+  this exception does not permit native dialogs for other product workflows.
 
 ## Code Style
 

@@ -217,6 +217,10 @@ public sealed class ProjectImageJobService(
         var minimumDpiMet = physicalGeometry?.MinimumDpi is not { } minimumDpi
             ? (bool?)null
             : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+        var transparencyDetected = ProjectImageBinary.ContainsTransparentPixel(storedImage.Data);
+        var transparencyMet = !string.Equals(job.Background, "transparent", StringComparison.OrdinalIgnoreCase)
+            ? (bool?)null
+            : transparencyDetected;
         var warningCodes = new List<string>();
         if (!rasterMatched)
             warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
@@ -224,6 +228,8 @@ public sealed class ProjectImageJobService(
             warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
         if (minimumDpiMet == false)
             warningCodes.Add("MINIMUM_DPI_NOT_MET");
+        if (transparencyMet == false)
+            warningCodes.Add("TRANSPARENCY_NOT_MET");
         var asset = new PublishAsset
         {
             ProjectId = projectId,
@@ -245,6 +251,17 @@ public sealed class ProjectImageJobService(
                 partial.Provider,
                 partial.MainlineModel,
                 partial.ImageModel,
+                RequestedImageModel = job.ImageModel,
+                RequestedQuality = job.Quality,
+                RequestedOutputFormat = job.OutputFormat,
+                RequestedOutputCompression = job.OutputCompression,
+                RequestedBackground = job.Background,
+                ReportedImageModel = (string?)null,
+                ReportedQuality = (string?)null,
+                ReportedBackground = (string?)null,
+                ReportedSize = (string?)null,
+                ReportedOutputFormat = (string?)null,
+                ReportedOutputCompression = (int?)null,
                 TargetGeometry = JsonNodeOrString(job.TargetGeometryJson),
                 partial.RequestId,
                 partial.ResponseId,
@@ -279,6 +296,12 @@ public sealed class ProjectImageJobService(
                     RequestedMinimumDpi = physicalGeometry?.MinimumDpi,
                     EffectiveDpi = effectiveDpi,
                     MinimumDpiMet = minimumDpiMet,
+                    OutputValidation = new
+                    {
+                        RequestedBackground = job.Background,
+                        TransparencyDetected = transparencyDetected,
+                        TransparencyMet = transparencyMet,
+                    },
                     WarningCodes = warningCodes,
                     WarningCode = warningCodes.FirstOrDefault(),
                 },
@@ -337,6 +360,14 @@ public sealed class ProjectImageJobService(
         var entityTargets = await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken);
         var count = ClampCount(request.Count);
         var layoutBound = HasLayoutTargetGeometry(request.TargetGeometryJson);
+        var model = ProjectImageModelCatalog.Resolve(
+            request.ImageModel,
+            request.Quality,
+            request.OutputFormat,
+            request.OutputCompression,
+            request.Background,
+            options.Value,
+            layoutBound);
         var now = DateTime.UtcNow;
         var job = new ProjectImageGenerationJob
         {
@@ -349,9 +380,10 @@ public sealed class ProjectImageJobService(
             ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = size,
-            Quality = NormalizeQuality(request.Quality),
-            OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
-            OutputCompression = layoutBound ? null : request.OutputCompression,
+            Quality = model.Quality,
+            OutputFormat = model.OutputFormat,
+            OutputCompression = model.OutputCompression,
+            Background = model.Background,
             Count = count,
             AltText = Clean(request.AltText),
             ReferenceImageIdsJson = SerializeIds(referenceIds),
@@ -360,7 +392,7 @@ public sealed class ProjectImageJobService(
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
             Provider = CodexProvider.Name,
             MainlineModel = options.Value.DefaultMainlineModel,
-            ImageModel = options.Value.DefaultImageModel,
+            ImageModel = model.ImageModel,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -388,6 +420,14 @@ public sealed class ProjectImageJobService(
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, source.Id, cancellationToken);
         var count = ClampCount(request.Count);
         var layoutBound = HasLayoutTargetGeometry(request.TargetGeometryJson);
+        var model = ProjectImageModelCatalog.Resolve(
+            request.ImageModel,
+            request.Quality,
+            request.OutputFormat,
+            request.OutputCompression,
+            request.Background,
+            options.Value,
+            layoutBound);
         var hasPngGuide = !string.IsNullOrWhiteSpace(request.MaskPngDataUrl);
         var hasShapeGuide = request.RegionalGuide is not null;
         if (hasPngGuide && hasShapeGuide)
@@ -452,9 +492,10 @@ public sealed class ProjectImageJobService(
             ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
             Size = size,
-            Quality = NormalizeQuality(request.Quality),
-            OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
-            OutputCompression = layoutBound ? null : request.OutputCompression,
+            Quality = model.Quality,
+            OutputFormat = model.OutputFormat,
+            OutputCompression = model.OutputCompression,
+            Background = model.Background,
             Count = count,
             AltText = Clean(request.AltText),
             SourceImageId = source.Id,
@@ -465,7 +506,7 @@ public sealed class ProjectImageJobService(
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
             Provider = CodexProvider.Name,
             MainlineModel = options.Value.DefaultMainlineModel,
-            ImageModel = options.Value.DefaultImageModel,
+            ImageModel = model.ImageModel,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -672,6 +713,10 @@ public sealed class ProjectImageJobService(
         var minimumDpiMet = physicalGeometry?.MinimumDpi is not { } minimumDpi
             ? (bool?)null
             : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+        var transparencyDetected = ProjectImageBinary.ContainsTransparentPixel(storedImage.Data);
+        var transparencyMet = !string.Equals(job.Background, "transparent", StringComparison.OrdinalIgnoreCase)
+            ? (bool?)null
+            : transparencyDetected;
         var warningCodes = new List<string>();
         if (!rasterMatched)
             warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
@@ -679,6 +724,8 @@ public sealed class ProjectImageJobService(
             warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
         if (minimumDpiMet == false)
             warningCodes.Add("MINIMUM_DPI_NOT_MET");
+        if (transparencyMet == false)
+            warningCodes.Add("TRANSPARENCY_NOT_MET");
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
@@ -697,7 +744,17 @@ public sealed class ProjectImageJobService(
                 OutputIndex = outputIndex,
                 result.Provider,
                 result.MainlineModel,
-                result.ImageModel,
+                RequestedImageModel = job.ImageModel,
+                RequestedQuality = job.Quality,
+                RequestedOutputFormat = job.OutputFormat,
+                RequestedOutputCompression = job.OutputCompression,
+                RequestedBackground = job.Background,
+                ReportedImageModel = image.ReportedModel,
+                ReportedQuality = image.ReportedQuality,
+                ReportedBackground = image.ReportedBackground,
+                ReportedSize = image.ReportedSize,
+                ReportedOutputFormat = image.ReportedOutputFormat,
+                ReportedOutputCompression = image.ReportedOutputCompression,
                 image.OutputFormat,
                 image.RevisedPrompt,
                 StructuredBrief = JsonNodeOrString(job.BriefJson),
@@ -725,6 +782,12 @@ public sealed class ProjectImageJobService(
                     RequestedMinimumDpi = physicalGeometry?.MinimumDpi,
                     EffectiveDpi = effectiveDpi,
                     MinimumDpiMet = minimumDpiMet,
+                    OutputValidation = new
+                    {
+                        RequestedBackground = job.Background,
+                        TransparencyDetected = transparencyDetected,
+                        TransparencyMet = transparencyMet,
+                    },
                     WarningCodes = warningCodes,
                     WarningCode = warningCodes.FirstOrDefault(),
                 },
@@ -750,7 +813,6 @@ public sealed class ProjectImageJobService(
         }
         job.Provider = result.Provider;
         job.MainlineModel = result.MainlineModel;
-        job.ImageModel = result.ImageModel;
         job.RawProviderResponseJson = result.RawMetadataJson;
         if (!string.IsNullOrWhiteSpace(image.RevisedPrompt))
         {
@@ -764,13 +826,15 @@ public sealed class ProjectImageJobService(
             new ProjectImageOutputStateView(
                 outputIndex,
                 ProjectImageOutputStatus.Succeeded,
-                Message: "Image saved.",
+                Message: transparencyMet == false
+                    ? "Image saved unattached: requested transparency was not met."
+                    : "Image saved.",
                 UpdatedAt: now,
                 CompletedAt: now)));
         job.UpdatedAt = now;
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
-        if (minimumDpiMet != false)
+        if (minimumDpiMet != false && transparencyMet != false)
         {
             foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
                 await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
@@ -953,7 +1017,8 @@ public sealed class ProjectImageJobService(
             DeserializeIds(job.ReferenceImageIdsJson),
             job.TargetGeometryJson,
             string.IsNullOrWhiteSpace(job.MainlineModel) ? options.Value.DefaultMainlineModel : job.MainlineModel,
-            string.IsNullOrWhiteSpace(job.ImageModel) ? options.Value.DefaultImageModel : job.ImageModel);
+            string.IsNullOrWhiteSpace(job.ImageModel) ? options.Value.DefaultImageModel : job.ImageModel,
+            job.Background);
 
     private static ProjectImageJobView ToView(ProjectImageGenerationJob job) =>
         new(
@@ -987,7 +1052,8 @@ public sealed class ProjectImageJobService(
             job.BriefJson,
             job.ReferenceManifestJson,
             job.TargetGeometryJson,
-            DeserializeStrings(job.ProviderRevisedPromptsJson));
+            DeserializeStrings(job.ProviderRevisedPromptsJson),
+            job.Background);
 
     private static ProjectImagePartialView WithPartialPreviewUrl(Guid projectId, ProjectImagePartialView partial) =>
         partial with
@@ -1109,24 +1175,6 @@ public sealed class ProjectImageJobService(
         try { return JsonSerializer.Deserialize<List<string>>(value, JsonOptions) ?? []; }
         catch (JsonException) { return []; }
     }
-
-    private static string NormalizeQuality(string? value) =>
-        value?.Trim().ToLowerInvariant() switch
-        {
-            "low" => "low",
-            "medium" => "medium",
-            "high" => "high",
-            _ => "auto",
-        };
-
-    private static string NormalizeOutputFormat(string? value) =>
-        value?.Trim().ToLowerInvariant() switch
-        {
-            "jpg" => "jpeg",
-            "jpeg" => "jpeg",
-            "webp" => "webp",
-            _ => "png",
-        };
 
     private static bool HasLayoutTargetGeometry(string? value)
     {

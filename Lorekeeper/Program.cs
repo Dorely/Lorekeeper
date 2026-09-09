@@ -1,6 +1,7 @@
 using System.Reflection;
 using ElectronNET.API;
 using ElectronNET.API.Entities;
+using Lorekeeper.Printing;
 using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
 using Lorekeeper.ChatTurns;
@@ -325,6 +326,20 @@ builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>()
 builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
 builder.Services.AddSingleton<PublicationArtifactPreviewCache>();
 builder.Services.AddScoped<IPublicationArtifactPreviewService, PublicationArtifactPreviewService>();
+builder.Services.AddOptions<PrintingOptions>().BindConfiguration(PrintingOptions.SectionName)
+    .Validate(value => value.MaxSourceBytes is > 0 and <= 268435456
+        && value.MaxPagesPerJob is > 0 and <= 200
+        && value.MaxSessions is > 0 and <= 32
+        && value.SessionMinutes is >= 1 and <= 120
+        && value.MaxSessionBytes is > 0 and <= 536870912
+        && value.MaxRasterPixels is >= 20000000 and <= 120000000, "Printing limits are outside the supported bounds.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<PrintSessionStore>();
+builder.Services.AddScoped<IPrintPreparationService, PrintPreparationService>();
+if (isElectronMode)
+    builder.Services.AddScoped<IPrintHost, Lorekeeper.Desktop.ElectronPrintHost>();
+else
+    builder.Services.AddScoped<IPrintHost, BrowserPrintHost>();
 builder.Services.AddSingleton<PublicationEpubPreviewCache>();
 builder.Services.AddScoped<IPublicationEpubPreviewService, PublicationEpubPreviewService>();
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
@@ -398,6 +413,7 @@ app.MapCodexOAuth();
 app.MapProjectImages();
 app.MapProjectFonts();
 app.MapPublishEndpoints();
+app.MapPrintingEndpoints();
 
 app.Run();
 

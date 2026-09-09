@@ -18,7 +18,9 @@ public interface IAgentProjectImageWorkflow
         string label,
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
-        int? defaultMinimumDpi = null);
+        int? defaultMinimumDpi = null,
+        string? imageModel = null,
+        string? background = null);
 
     Task<AgentProjectImageResult> EditAsync(
         Guid projectId,
@@ -34,7 +36,9 @@ public interface IAgentProjectImageWorkflow
         string label,
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
-        int? defaultMinimumDpi = null);
+        int? defaultMinimumDpi = null,
+        string? imageModel = null,
+        string? background = null);
 
     Task<AgentProjectImageResult?> ReadAsync(
         Guid projectId,
@@ -63,7 +67,12 @@ public sealed record AgentProjectImageResult(
     string Summary,
     double? RequestedMinimumDpi = null,
     bool? MinimumDpiMet = null,
-    IReadOnlyList<string>? WarningCodes = null)
+    IReadOnlyList<string>? WarningCodes = null,
+    string? ImageModel = null,
+    string? Quality = null,
+    string? OutputFormat = null,
+    int? OutputCompression = null,
+    string? Background = null)
 {
     public IReadOnlyList<ProjectImageView> Images => Outputs.Select(output => output.Image).ToList();
 }
@@ -102,23 +111,27 @@ public sealed class AgentProjectImageWorkflow(
         string label,
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
-        int? defaultMinimumDpi = null)
+        int? defaultMinimumDpi = null,
+        string? imageModel = null,
+        string? background = null)
     {
         var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
+        var resolved = ProjectImageModelCatalog.Resolve(imageModel, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileGenerationAsync(
             projectId,
             brief,
             references?.ToArray(),
             effectiveTarget,
-            cancellationToken);
+            cancellationToken,
+            background: resolved.Background);
         var job = await jobs.CreateGenerateJobAsync(
             projectId,
             new ProjectImageGenerateJobRequest(
                 compiled.Prompt,
                 compiled.Size,
-                CleanOr(quality, options.Value.DefaultQuality),
-                CleanOr(outputFormat, options.Value.DefaultOutputFormat),
-                outputCompression,
+                resolved.Quality,
+                resolved.OutputFormat,
+                resolved.OutputCompression,
                 altText?.Trim() ?? string.Empty,
                 1,
                 compiled.ReferenceImageIds,
@@ -126,7 +139,9 @@ public sealed class AgentProjectImageWorkflow(
                 EntityTargets: null,
                 compiled.BriefJson,
                 compiled.ReferenceManifestJson,
-                compiled.TargetGeometryJson),
+                compiled.TargetGeometryJson,
+                ImageModel: resolved.ImageModel,
+                Background: resolved.Background),
             cancellationToken);
         return await RunAsync(projectId, job.Id, onJobCreated, cancellationToken);
     }
@@ -145,11 +160,14 @@ public sealed class AgentProjectImageWorkflow(
         string label,
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
-        int? defaultMinimumDpi = null)
+        int? defaultMinimumDpi = null,
+        string? imageModel = null,
+        string? background = null)
     {
         var effectiveTarget = WithDefaultMinimumDpi(
             geometryGuidance,
             regionalGuide is null ? defaultMinimumDpi : null);
+        var resolved = ProjectImageModelCatalog.Resolve(imageModel, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileEditAsync(
             projectId,
             sourceImageId,
@@ -157,16 +175,17 @@ public sealed class AgentProjectImageWorkflow(
             references?.ToArray(),
             effectiveTarget,
             regionalGuide is null ? ImageEditGuidanceMode.SourceDriven : ImageEditGuidanceMode.RegionalGuide,
-            cancellationToken);
+            cancellationToken,
+            background: resolved.Background);
         var job = await jobs.CreateEditJobAsync(
             projectId,
             new ProjectImageEditJobRequest(
                 sourceImageId,
                 compiled.Prompt,
                 compiled.Size,
-                CleanOr(quality, options.Value.DefaultQuality),
-                CleanOr(outputFormat, options.Value.DefaultOutputFormat),
-                outputCompression,
+                resolved.Quality,
+                resolved.OutputFormat,
+                resolved.OutputCompression,
                 altText?.Trim() ?? string.Empty,
                 1,
                 MaskPngDataUrl: null,
@@ -177,7 +196,9 @@ public sealed class AgentProjectImageWorkflow(
                 InheritSourceEntityTargets: false,
                 compiled.BriefJson,
                 compiled.ReferenceManifestJson,
-                compiled.TargetGeometryJson),
+                compiled.TargetGeometryJson,
+                ImageModel: resolved.ImageModel,
+                Background: resolved.Background),
             cancellationToken);
         return await RunAsync(projectId, job.Id, onJobCreated, cancellationToken);
     }
@@ -277,6 +298,9 @@ public sealed class AgentProjectImageWorkflow(
                     outputWarnings.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
                 if (!aspectMatched)
                     outputWarnings.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
+                if (string.Equals(job.Background, "transparent", StringComparison.OrdinalIgnoreCase)
+                    && !ProjectImageBinary.ContainsTransparentPixel(data.Data))
+                    outputWarnings.Add("TRANSPARENCY_NOT_MET");
                 var outputMinimumDpiMet = geometry?.MinimumDpi is not { } minimumDpi
                     ? (bool?)null
                     : printUpscale is not null || applicationFillUpscale
@@ -307,6 +331,7 @@ public sealed class AgentProjectImageWorkflow(
 
         if ((printUpscale is not null || applicationFillUpscale) && providerSucceeded
             && outputImages.Count > 0
+            && outputImages.All(output => !(output.WarningCodes ?? []).Contains("TRANSPARENCY_NOT_MET", StringComparer.Ordinal))
             && geometry is { WidthInches: > 0, HeightInches: > 0 })
         {
             for (var index = 0; index < outputImages.Count; index++)
@@ -345,8 +370,13 @@ public sealed class AgentProjectImageWorkflow(
             ? (bool?)null
             : outputImages.All(output => output.MinimumDpiMet == true);
         var succeeded = providerSucceeded && minimumDpiMet != false;
+        var transparencyFailed = outputImages.Any(output => (output.WarningCodes ?? []).Contains("TRANSPARENCY_NOT_MET", StringComparer.Ordinal));
+        if (transparencyFailed)
+            succeeded = false;
         var status = timedOut
             ? "timed_out"
+            : transparencyFailed
+                ? "transparency_not_met"
             : providerSucceeded && minimumDpiMet == false
                 ? "minimum_dpi_not_met"
                 : StatusName(job.Status);
@@ -354,6 +384,8 @@ public sealed class AgentProjectImageWorkflow(
             ? "Image generation exceeded the configured lifetime and was cancelled; no image was placed."
             : providerSucceeded && minimumDpiMet == false
                 ? "The provider output was retained as an unattached image, but it did not meet the requested minimum DPI and is not publication-compliant."
+            : transparencyFailed
+                ? "The provider output was retained as an unattached image, but it did not meet the requested transparent-background requirement. It was not print-prepared or suggested for placement."
             : succeeded && printUpscale is { } appliedPlan
                 ? $"{outputImages.Count} unattached project image(s) completed and were upscaled to {appliedPlan.PrintWidth}x{appliedPlan.PrintHeight} for the {appliedPlan.TargetDpi:0} DPI physical print target from the provider's largest compatible raster. Place the print-upscaled image ID, not the native one."
             : succeeded
@@ -381,7 +413,12 @@ public sealed class AgentProjectImageWorkflow(
             summary,
             geometry?.MinimumDpi,
             minimumDpiMet,
-            warningCodes.ToList());
+            warningCodes.ToList(),
+            job.ImageModel,
+            job.Quality,
+            job.OutputFormat,
+            job.OutputCompression,
+            job.Background);
     }
 
     private static bool IsTerminal(ProjectImageGenerationJobStatus status) => status is
@@ -395,9 +432,6 @@ public sealed class AgentProjectImageWorkflow(
         ProjectImageGenerationJobStatus.CompletedWithErrors => "completed_with_errors",
         _ => status.ToString().ToLowerInvariant(),
     };
-
-    private static string CleanOr(string? value, string fallback) =>
-        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     private static ImageGenerationTarget? WithDefaultMinimumDpi(
         ImageGenerationTarget? target,
