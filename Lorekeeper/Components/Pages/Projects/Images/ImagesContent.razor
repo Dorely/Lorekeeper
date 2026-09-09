@@ -168,7 +168,7 @@ else
                     <div class="image-form-grid">
                         @if (_layoutTarget is null)
                         {
-                            <label>
+                            <label class="image-form-wide">
                                 <span>Size</span>
                                 <select class="form-select form-select-sm" @bind="_imageSize">
                                     <option value="auto">Core Book page (@_defaultImageRaster)</option>
@@ -178,7 +178,7 @@ else
                                 </select>
                             </label>
                         }
-                        <label>
+                        <label class="image-form-wide">
                             <span>Minimum DPI</span>
                             <input class="form-control form-control-sm"
                                    type="number"
@@ -189,7 +189,7 @@ else
                                    disabled="@HasConcreteImageSize" />
                             <small>@(HasConcreteImageSize ? "Clear the concrete size to resolve a raster from DPI." : "Uses effective pixels at the intended physical size; no file-header DPI is stamped.")</small>
                         </label>
-                        <label>
+                        <label class="image-form-wide">
                             <span>Image model</span>
                             <select class="form-select form-select-sm" @bind="_imageModel">
                                 @foreach (var model in ProjectImageModelCatalog.Models)
