@@ -414,18 +414,18 @@ IActService acts,
     ]);
 
         tools.Add(AIFunctionFactory.Create(
-            method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
+                GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "generate_project_image",
             description:
-                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes before placement. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes before placement. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression),
+                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
+                EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes; keep undersized output unattached and do not place it as publication-compliant. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes; keep undersized output unattached and do not place it as publication-compliant. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
@@ -2464,7 +2464,9 @@ IActService acts,
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression)
+        int? outputCompression,
+        string? imageModel,
+        string? background)
     {
         try
         {
@@ -2480,7 +2482,9 @@ IActService acts,
                 "Editor chat image",
                 ctx.TrackImageGenerationJob,
                 ctx.TurnCancellationToken,
-                defaultMinimumDpi: 300);
+                defaultMinimumDpi: 300,
+                imageModel: imageModel,
+                background: background);
             return await BuildImageResultAsync(ctx, result, "Generated output saved to the image library.");
         }
         catch (MinimumDpiUnachievableException ex)
@@ -2503,7 +2507,9 @@ IActService acts,
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression)
+        int? outputCompression,
+        string? imageModel,
+        string? background)
     {
         if (regionalGuideShapes is { Length: 0 })
             return "Error: regionalGuideShapes must contain at least one shape when supplied.";
@@ -2528,7 +2534,9 @@ IActService acts,
                 "Editor chat image edit",
                 ctx.TrackImageGenerationJob,
                 ctx.TurnCancellationToken,
-                defaultMinimumDpi: 300);
+                defaultMinimumDpi: 300,
+                imageModel: imageModel,
+                background: background);
             return await BuildImageResultAsync(ctx, result, "Edited output saved to the image library.");
         }
         catch (MinimumDpiUnachievableException ex)
@@ -2620,6 +2628,11 @@ IActService acts,
                 image.Id,
                 image.PreviewUrl,
                 targetAspect = result.TargetAspect,
+                imageModel = result.ImageModel,
+                quality = result.Quality,
+                outputFormat = result.OutputFormat,
+                outputCompression = result.OutputCompression,
+                background = result.Background,
                 requestedRaster = result.RequestedRaster,
                 actualRaster = output.ActualRaster,
                 rasterMatched = output.RasterMatched,

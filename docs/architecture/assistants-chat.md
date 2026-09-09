@@ -279,9 +279,12 @@ The Images workspace refreshes its library and job projections only for an
 explicit image-mutation update; ordinary tool completion, assistant completion,
 and turn errors remain local chat updates and must not reload the workspace.
 Same-aspect up-resolution uses the ordinary source-driven edit operation: the
-original image is supplied directly, the complete framing and content are
-preserved, and the prompt asks for credible reconstructed detail without
-outward extension or cropping. Intentional expansion is a distinct outpainting
+latest accepted image is supplied directly, the complete framing and content
+are preserved, and the prompt restates the requested change and constraints
+while asking for credible reconstructed detail without outward extension or
+cropping. Unmasked edits make only the requested change plus directly dependent
+adaptations, preserving named invariants, unrelated scene details, and existing
+open space unless the request explicitly changes them. Intentional expansion is a distinct outpainting
 request whose prompt describes the larger framing, including left-and-right or
 above-and-below surroundings as appropriate. Regional guides are reserved for
 genuinely localized or otherwise hard-to-describe edits. They are soft visual
@@ -295,6 +298,15 @@ in full before the assistant presents, promotes, associates, or places it,
 including the area outside any guide. Deterministic resize creates a new
 unattached source-linked asset and adds no visual detail; it is never evidence
 of publication-quality enhancement.
+
+Images assistants use Flare by default and choose Sunburst explicitly for
+demanding detail, exact raster text, or difficult composition. xhigh/max
+quality is reserved for a concrete unmet need. Requested model, background,
+quality, output format, and compression are captured per job; provider-reported
+values remain separate audit evidence. Transparent output keeps an empty alpha
+backdrop unless the brief explicitly requests background elements, while opaque
+output receives an appropriate plain or scene-integrated background. User-grounded
+exclusions are allowed; assistants do not invent blanket exclusions.
 
 Publish target-bound generation always uses crop-to-fill. For unusually narrow
 or wide targets, the application chooses the closest supported native aspect,

@@ -37,15 +37,20 @@ public sealed class ProjectImagePartialMigrationTests
                     projectId,
                     "Image partial migration fixture",
                     $"image-partial-migration-{projectId:N}");
-                db.ProjectImageGenerationJobs.Add(new ProjectImageGenerationJob
-                {
-                    Id = jobId,
-                    ProjectId = projectId,
-                    Label = "Preserved generation job",
-                    Prompt = "Preserve this prompt",
-                    Count = 1,
-                    OutputStatesJson = "[]",
-                });
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO ProjectImageGenerationJobs
+                    (Id, ProjectId, Kind, Status, Label, Prompt, BriefJson, ReferenceManifestJson,
+                     TargetGeometryJson, ProviderRevisedPromptsJson, Size, Quality, OutputFormat,
+                     OutputCompression, Count, AltText, SourceImageId, MaskId, ReferenceImageIdsJson,
+                     EntityVisualTargetsJson, InheritSourceEntityTargets, OutputImageIdsJson,
+                     OutputStatesJson, OutputErrorsJson, Provider, MainlineModel, ImageModel,
+                     RawProviderResponseJson, Error, CreatedAt, UpdatedAt, StartedAt, CompletedAt)
+                    VALUES ({0}, {1}, 'Generate', 'Queued', 'Preserved generation job',
+                            'Preserve this prompt', '{{}}', '[]', '{{}}', '[]', 'auto', 'auto', 'png',
+                            NULL, 1, '', NULL, NULL, '[]', '[]', 0, '[]', '[]', '[]',
+                            'Codex', 'gpt-5.6-sol', 'gpt-image-2', '', '', datetime('now'),
+                            datetime('now'), NULL, NULL)
+                    """, jobId, projectId);
                 db.PublishAssets.Add(new PublishAsset
                 {
                     Id = finalImageId,

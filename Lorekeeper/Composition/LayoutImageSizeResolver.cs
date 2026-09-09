@@ -199,7 +199,7 @@ public static class LayoutImageSizeResolver
         }
 
         if (candidates.Count == 0)
-            throw new ArgumentException("Could not derive a valid gpt-image-2 raster size for the requested aspect ratio.", nameof(aspect));
+            throw new ArgumentException("Could not derive a provider-valid raster size for the requested aspect ratio.", nameof(aspect));
 
         var exact = candidates.Where(candidate => candidate.AspectError <= ExactAspectError).ToList();
         var preferred = candidates.Where(candidate => candidate.AspectError <= PreferredAspectError).ToList();

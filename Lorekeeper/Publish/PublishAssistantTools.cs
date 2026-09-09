@@ -370,15 +370,15 @@ public sealed class PublishAssistantTools(
                 name: "validate_publication_page_composition",
                 description: "Validate one publication-section Designed Page against the protected active Core/release target for geometry, semantic coverage, reading order, accessibility, overflow, image readiness, and font readiness."),
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                    GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
+                    GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
                 name: "generate_project_image",
-                description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn."),
+                description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn." + ProjectImageModelCatalog.ToolParameterGuidance),
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                    EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
+                    EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
                 name: "edit_project_image",
-                description: "Edit one project image and wait for a terminal result. Use the original source for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source."),
+                description: "Edit one project image and wait for a terminal result. Use the latest accepted source image for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source." + ProjectImageModelCatalog.ToolParameterGuidance),
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
                 name: "read_project_image_job",
@@ -1328,7 +1328,9 @@ public sealed class PublishAssistantTools(
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression)
+        int? outputCompression,
+        string? imageModel,
+        string? background)
     {
         if (imageWorkflow is null)
             return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image generation is unavailable." });
@@ -1345,7 +1347,9 @@ public sealed class PublishAssistantTools(
                 outputCompression,
                 "Publish image",
                 context.TrackImageJob,
-                context.TurnCancellationToken);
+                context.TurnCancellationToken,
+                imageModel: imageModel,
+                background: background);
             return ImageResult(context, result);
         }
         catch (MinimumDpiUnachievableException)
@@ -1369,7 +1373,9 @@ public sealed class PublishAssistantTools(
         string? altText,
         string? quality,
         string? outputFormat,
-        int? outputCompression)
+        int? outputCompression,
+        string? imageModel,
+        string? background)
     {
         if (imageWorkflow is null)
             return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image editing is unavailable." });
@@ -1388,7 +1394,9 @@ public sealed class PublishAssistantTools(
                 outputCompression,
                 "Publish image edit",
                 context.TrackImageJob,
-                context.TurnCancellationToken);
+                context.TurnCancellationToken,
+                imageModel: imageModel,
+                background: background);
             return ImageResult(context, result);
         }
         catch (MinimumDpiUnachievableException)
@@ -1440,19 +1448,24 @@ public sealed class PublishAssistantTools(
                 IsExplicitImage: true,
                 ImageSource: image.Source));
         }
-        var placementImageIds = result.Outputs
-            .Select(output => output.PrintImageId ?? output.Image.Id)
-            .ToList();
+        var placementImageIds = result.Succeeded
+            ? result.Outputs.Select(output => output.PrintImageId ?? output.Image.Id).ToList()
+            : [];
         return Serialize(new
         {
             ok = result.Succeeded,
             jobId = result.JobId,
             status = result.Succeeded ? "completed" : result.IsTerminal ? "failed" : result.Status,
             targetAspect = result.TargetAspect,
+            imageModel = result.ImageModel,
+            quality = result.Quality,
+            outputFormat = result.OutputFormat,
+            outputCompression = result.OutputCompression,
+            background = result.Background,
             outputImageIds = placementImageIds,
             images = result.Outputs.Select(output => new
             {
-                imageId = output.PrintImageId ?? output.Image.Id,
+                imageId = result.Succeeded ? output.PrintImageId ?? output.Image.Id : (Guid?)null,
                 output.Image.FileName,
                 output.Image.ContentType,
                 output.Image.PreviewUrl,
@@ -1461,7 +1474,9 @@ public sealed class PublishAssistantTools(
             diagnostics = result.Diagnostics.Take(3),
             summary = result.Succeeded
                 ? $"Created {placementImageIds.Count} unattached project image(s) prepared for the target."
-                : "Image generation did not produce a target-ready image.",
+                : result.WarningCodes?.Contains("TRANSPARENCY_NOT_MET", StringComparer.Ordinal) == true
+                    ? "The output was retained unattached because the requested transparent background was not met; do not place or print-prepare it."
+                    : "Image generation did not produce a target-ready image.",
             nextAction = result.Succeeded
                 ? "Inspect the image, then place its imageId with Cover (crop-to-fill) using the appropriate cover or publication-page tool before completing the request."
                 : null,

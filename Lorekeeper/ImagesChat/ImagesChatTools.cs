@@ -143,16 +143,16 @@ public sealed class ImagesChatTools(
                 description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This local pixel transform creates a new unattached source-linked image and adds no visual detail; it is not publication-quality enhancement. Use edit_project_image with the original source for same-aspect detail reconstruction or intentional outpainting."),
 
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null) =>
-                    GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
+                    GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
                 name: "generate_project_image",
-                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label),
+                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
+                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content; use the latest accepted source image and reconstruct credible detail without cropping, zooming out, or inventing surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect effectiveDpi and minimumDpiMet before promoting it. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -543,7 +543,9 @@ public sealed class ImagesChatTools(
         int? outputCompression,
         int? minimumDpi,
         string? aspectRatio,
-        string? label)
+        string? label,
+        string? imageModel,
+        string? background)
     {
         try
         {
@@ -558,7 +560,9 @@ public sealed class ImagesChatTools(
                 outputCompression,
                 string.IsNullOrWhiteSpace(label) ? "Images assistant image" : label.Trim(),
                 ctx.TrackImageGenerationJob,
-                ctx.TurnCancellationToken);
+                ctx.TurnCancellationToken,
+                imageModel: imageModel,
+                background: background);
             return await BuildImageResultAsync(ctx, result, "Generated output saved to the image library.");
         }
         catch (MinimumDpiUnachievableException ex)
@@ -583,7 +587,9 @@ public sealed class ImagesChatTools(
         int? outputCompression,
         int? minimumDpi,
         string? aspectRatio,
-        string? label)
+        string? label,
+        string? imageModel,
+        string? background)
     {
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
@@ -609,7 +615,9 @@ public sealed class ImagesChatTools(
                 outputCompression,
                 string.IsNullOrWhiteSpace(label) ? "Images assistant edit" : label.Trim(),
                 ctx.TrackImageGenerationJob,
-                ctx.TurnCancellationToken);
+                ctx.TurnCancellationToken,
+                imageModel: imageModel,
+                background: background);
             return await BuildImageResultAsync(ctx, result, "Edited output saved to the image library.");
         }
         catch (MinimumDpiUnachievableException ex)
@@ -759,6 +767,11 @@ public sealed class ImagesChatTools(
             jobId = result.JobId,
             status = result.Status,
             targetAspect = result.TargetAspect,
+            imageModel = result.ImageModel,
+            quality = result.Quality,
+            outputFormat = result.OutputFormat,
+            outputCompression = result.OutputCompression,
+            background = result.Background,
             requestedRaster = result.RequestedRaster,
             requestedMinimumDpi = result.RequestedMinimumDpi,
             minimumDpiMet = result.MinimumDpiMet,

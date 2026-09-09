@@ -373,7 +373,8 @@ public sealed class ProjectImageGenerationRuntime(
             references,
             workItem.OutputFormat,
             workItem.Quality,
-            workItem.OutputCompression);
+            workItem.OutputCompression,
+            workItem.Background);
     }
 
     private async Task<ProjectImageProviderEditRequest> BuildEditRequestAsync(
@@ -437,7 +438,8 @@ public sealed class ProjectImageGenerationRuntime(
             references,
             workItem.OutputFormat,
             workItem.Quality,
-            workItem.OutputCompression);
+            workItem.OutputCompression,
+            workItem.Background);
     }
 
     private void HandleProviderProgress(Guid projectId, Guid jobId, int outputIndex, int attempt, ProjectImageProviderProgress update)
@@ -685,14 +687,8 @@ public sealed class ProjectImageGenerationRuntime(
     {
         for (Exception? current = exception; current is not null; current = current.InnerException)
         {
-            var message = current.Message;
-            if (message.Contains("Rate limit", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("429", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("Too Many Requests", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("Please try again", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            if (current is ProjectImageProviderException provider)
+                return provider.ErrorKind is "rate_limit" or "codex_image_input_rate_limit" or "server_error" or "transport_error";
         }
 
         return false;
@@ -702,6 +698,8 @@ public sealed class ProjectImageGenerationRuntime(
     {
         for (Exception? current = exception; current is not null; current = current.InnerException)
         {
+            if (current is ProjectImageProviderException { RetryAfter: { } retryAfter } && retryAfter > TimeSpan.Zero)
+                return retryAfter;
             var providerDelay = TryReadProviderRetryDelay(current.Message);
             if (providerDelay is { } delay && delay > TimeSpan.Zero)
             {

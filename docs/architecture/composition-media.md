@@ -239,6 +239,24 @@ without contradicting that request with general edit guidance that permits
 reframing or nearby scene changes. A reserved or quiet region must be explicit
 when copy needs space; the rest of the frame must contribute purposeful subject,
 setting, depth, scale, atmosphere, visual flow, or other meaningful information.
+Unmasked edits make only the requested change plus directly dependent adaptations,
+preserving named invariants, unrelated scene details, and existing open space
+unless the brief explicitly changes them. Transparent output requests preserve
+an empty alpha backdrop and suppress generic scenery, floors, horizons, cast
+shadows, and background washes unless the brief explicitly asks for one;
+opaque output requests use an appropriate plain or scene-integrated background.
+The shared contract records model, background, quality, output format, and
+compression settings per job, while provider-reported values remain separate
+audit evidence. Flare is the default image model; Sunburst is explicit for
+demanding tasks, and xhigh/max quality is reserved for unmet concrete needs.
+Model/quality/background combinations are rejected before job creation when
+unsupported. Transparent JPEG is rejected; compression is sent only for JPEG or
+WebP, while layout-bound output remains PNG. Normalization preserves alpha,
+including WebP-to-PNG conversion. Fully opaque output requested as transparent
+is retained with `TRANSPARENCY_NOT_MET` in permanent asset provenance and visible
+library/job warnings, with automatic attachment and print preparation suppressed.
+Requested settings remain distinct from optional provider-reported settings;
+re-encoding does not establish preservation of C2PA or other embedded metadata.
 The Images surface owns concept-art iteration and approved Visual Direction.
 Outline is restricted to explicit canonical entity appearance work. Editor
 consumes a completed image for a Figure or Designed Page. Publish consumes it
@@ -492,7 +510,7 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact upscaling, dimensions and lineage views, provenance metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
-| `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
+| `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, requested-scope/background guidance, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
 | `Lorekeeper/Images/ProjectImageRegionalGuide.cs` / `ProjectImageBinary.cs` | Soft-guide prompt discipline, source-aspect output resolution, transient same-size PNG normalization, and binary-alpha mask validation. |
 | `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
 | `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |

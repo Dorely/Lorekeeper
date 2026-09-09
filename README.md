@@ -172,7 +172,15 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   copy regions: Lorekeeper chooses the native generation request and prepares the
   output asset for that target internally. Very narrow or wide targets use a
   crop-safe generated aspect and still fill their canvas rather than turning into
-  an assistant-managed panel plan. Same-aspect
+   an assistant-managed panel plan. Image jobs use Flare by default, with
+   explicit Sunburst selection for demanding detail, typography, or composition.
+   Requested model, background (`auto`, `opaque`, or `transparent`), quality,
+   output format, and compression are saved with each job; provider-reported
+   values remain separate audit data. Transparent output requests an empty
+   alpha backdrop unless the brief asks for background elements; the returned
+   alpha still requires inspection. Opaque output requests an appropriate plain
+   or scene-integrated treatment. These model aliases and quality defaults
+   require live provider validation before making a deployment claim. Same-aspect
   generative up-resolution preserves the complete framing and reconstructs
   detail, while deterministic resizing changes dimensions without adding detail.
   Target-bound generation, accessibility state, and layout diagnostics remain

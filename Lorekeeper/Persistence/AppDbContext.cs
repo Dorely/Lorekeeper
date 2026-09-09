@@ -1286,6 +1286,7 @@ public class AppDbContext(
             entity.HasIndex(e => e.MaskId);
             entity.Property(e => e.Kind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.Background).HasDefaultValue("auto");
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.ProjectImageGenerationJobs)

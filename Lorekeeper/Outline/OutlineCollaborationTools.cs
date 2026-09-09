@@ -131,16 +131,16 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var tools = BuildSharedTools(context);
         tools.AddRange([
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null) =>
-                    GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, cancellationToken),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
+                    GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "generate_project_image",
-                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect effectiveDpi and minimumDpiMet before attaching the image."),
+                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect effectiveDpi and minimumDpiMet before attaching the image." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null) =>
-                    EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, cancellationToken),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
+                    EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "edit_project_image",
-                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect effectiveDpi and minimumDpiMet before attaching it."),
+                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Use the latest accepted source image; same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail, without zooming out, cropping, or inventing surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect effectiveDpi and minimumDpiMet before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false, cancellationToken),
@@ -1037,6 +1037,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         int? outputCompression,
         int? minimumDpi,
         string? aspectRatio,
+        string? imageModel,
+        string? background,
         CancellationToken cancellationToken)
     {
         if (imageWorkflow is null)
@@ -1054,7 +1056,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 outputCompression,
                 "Outline image",
                 context.TrackImageGenerationJob,
-                cancellationToken);
+                cancellationToken,
+                imageModel: imageModel,
+                background: background);
             return ImageResult(context, result);
         }
         catch (MinimumDpiUnachievableException ex)
@@ -1078,6 +1082,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         int? outputCompression,
         int? minimumDpi,
         string? aspectRatio,
+        string? imageModel,
+        string? background,
         CancellationToken cancellationToken)
     {
         if (imageWorkflow is null)
@@ -1097,7 +1103,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 outputCompression,
                 "Outline image edit",
                 context.TrackImageGenerationJob,
-                cancellationToken);
+                cancellationToken,
+                imageModel: imageModel,
+                background: background);
             return ImageResult(context, result);
         }
         catch (MinimumDpiUnachievableException ex)
@@ -1224,6 +1232,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             jobId = result.JobId,
             status = result.Status,
             targetAspect = result.TargetAspect,
+            imageModel = result.ImageModel,
+            quality = result.Quality,
+            outputFormat = result.OutputFormat,
+            outputCompression = result.OutputCompression,
+            background = result.Background,
             requestedRaster = result.RequestedRaster,
             requestedMinimumDpi = result.RequestedMinimumDpi,
             minimumDpiMet = result.MinimumDpiMet,

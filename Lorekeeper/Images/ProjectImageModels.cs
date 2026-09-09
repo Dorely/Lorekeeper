@@ -154,7 +154,9 @@ public sealed record ProjectImageGenerateJobRequest(
     IReadOnlyList<EntityVisualTarget>? EntityTargets = null,
     string? BriefJson = null,
     string? ReferenceManifestJson = null,
-    string? TargetGeometryJson = null);
+    string? TargetGeometryJson = null,
+    string? ImageModel = null,
+    string Background = "auto");
 
 public sealed record ProjectImageEditJobRequest(
     Guid SourceImageId,
@@ -173,7 +175,9 @@ public sealed record ProjectImageEditJobRequest(
     bool InheritSourceEntityTargets = true,
     string? BriefJson = null,
     string? ReferenceManifestJson = null,
-    string? TargetGeometryJson = null);
+    string? TargetGeometryJson = null,
+    string? ImageModel = null,
+    string Background = "auto");
 
 public sealed record ProjectImageJobView(
     Guid Id,
@@ -206,7 +210,8 @@ public sealed record ProjectImageJobView(
     string BriefJson,
     string ReferenceManifestJson,
     string TargetGeometryJson,
-    IReadOnlyList<string> ProviderRevisedPrompts);
+    IReadOnlyList<string> ProviderRevisedPrompts,
+    string Background = "auto");
 
 public sealed record ProjectImageOutputStateView(
     int OutputIndex,
@@ -254,7 +259,8 @@ public sealed record ProjectImageProviderGenerateRequest(
     IReadOnlyList<ProjectImageProviderReference> ReferenceImages,
     string OutputFormat,
     string Quality,
-    int? OutputCompression);
+    int? OutputCompression,
+    string Background = "auto");
 
 public sealed record ProjectImageProviderEditRequest(
     string Prompt,
@@ -267,7 +273,8 @@ public sealed record ProjectImageProviderEditRequest(
     IReadOnlyList<ProjectImageProviderReference> ReferenceImages,
     string OutputFormat,
     string Quality,
-    int? OutputCompression);
+    int? OutputCompression,
+    string Background = "auto");
 
 public sealed record ProjectImageProviderReference(
     string FileName,
@@ -287,7 +294,13 @@ public sealed record ProjectImageProviderImage(
     string OutputFormat,
     string? RevisedPrompt,
     string? ResponseId,
-    string? CallId);
+    string? CallId,
+    string? ReportedModel = null,
+    string? ReportedQuality = null,
+    string? ReportedBackground = null,
+    string? ReportedSize = null,
+    string? ReportedOutputFormat = null,
+    int? ReportedOutputCompression = null);
 
 public sealed record ProjectImageProviderProgress(
     ProjectImageProviderProgressKind Kind,
@@ -326,7 +339,10 @@ public sealed class ProjectImageProviderException : InvalidOperationException
         int? statusCode = null,
         string? lastEventType = null,
         int eventCount = 0,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        string? errorCode = null,
+        string? errorType = null,
+        TimeSpan? retryAfter = null)
         : base(message, innerException)
     {
         ErrorKind = string.IsNullOrWhiteSpace(errorKind) ? "unknown" : errorKind.Trim();
@@ -336,6 +352,9 @@ public sealed class ProjectImageProviderException : InvalidOperationException
         StatusCode = statusCode;
         LastEventType = lastEventType;
         EventCount = eventCount;
+        ErrorCode = errorCode;
+        ErrorType = errorType;
+        RetryAfter = retryAfter;
     }
 
     public string ErrorKind { get; }
@@ -345,6 +364,9 @@ public sealed class ProjectImageProviderException : InvalidOperationException
     public int? StatusCode { get; }
     public string? LastEventType { get; }
     public int EventCount { get; }
+    public string? ErrorCode { get; }
+    public string? ErrorType { get; }
+    public TimeSpan? RetryAfter { get; }
 }
 
 public sealed record ProjectImageGenerationRuntimeSnapshot(
