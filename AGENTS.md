@@ -51,13 +51,6 @@
 - When no remote or upstream exists, require a clean local `HEAD` and report that
   remote synchronization could not be checked.
 
-## Codex harness only — cost-conscious delegation
-
-- Use `gpt-5.6-luna` subagents extensively for development and other tasks they can reasonably complete successfully with well-scoped, clearly explained instructions. This is a cost-saving preference for Codex, not a requirement for other harnesses.
-- Give each assignment its relevant context, boundaries, expected output, and verification criteria. Assign separate file ownership for concurrent work. The main agent owns integration, review, and milestone commits.
-- Vision/image interpretation, graphics work, complex logic and troubleshooting, and Godot engine MCP operations should generally remain with the main agent, unless its judgment supports delegating a particular bounded task to Luna.
-- Prefer cost-effective delegation without unnecessary coordination overhead.
-
 ## Branch and Pull Request Workflow
 
 - Repository changes normally enter `main` through a pull request from a
