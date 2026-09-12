@@ -1965,8 +1965,16 @@ else
                 }
                 try
                 {
-                    if (!await EnsureReleaseCoverPaginationAsync())
+                    if (diagnostic.EditionId is null)
+                    {
+                        await OpenCoreCoverAsync();
+                        if (!_coverEditorOpen)
+                            return;
+                    }
+                    else if (!await EnsureReleaseCoverPaginationAsync())
+                    {
                         return;
+                    }
                     _coverSelectionId = diagnostic.ObjectId;
                     _coverEditorOpen = true;
                     _coverRefreshSignal++;

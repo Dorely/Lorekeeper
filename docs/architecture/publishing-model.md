@@ -180,6 +180,12 @@ PDF ebook release. Format-specific identifiers and metadata never cross formats:
 EPUB editions cannot request Press output, and non-EPUB editions cannot export
 EPUB.
 
+Publication diagnostic links open the owning authoring surface and pass the
+affected object ID to its selection state. Core-cover links use the normal Core
+cover entry, including its pending-save checks; only release-cover links use
+the release pagination prerequisite. A Core diagnostic must not require a
+selected release before opening its reusable front cover.
+
 Effective values are resolved at read/render/preflight time. Absence means
 inheritance; optional text may be explicitly empty; reset removes the
 override. Core metadata updates linked system-page copy transactionally while
