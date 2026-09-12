@@ -103,7 +103,7 @@ public sealed class PublicationCoreMigrationService(
             .Include(item => item.CoverDesign)
             .OrderBy(item => item.CreatedAt).ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
-        await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
+        await ApplyMigrationTypographyAsync(db, releases, cancellationToken);
         var source = releases.FirstOrDefault(item => item.Id == legacyDefaultId) ?? releases.FirstOrDefault();
         var briefLanguage = await db.BookBriefs.AsNoTracking().Where(item => item.ProjectId == project.Id)
             .Select(item => item.LanguageLocale).SingleOrDefaultAsync(cancellationToken);
@@ -380,9 +380,12 @@ public sealed class PublicationCoreMigrationService(
 
     private static async Task<Guid?> ReadLegacyDefaultReleaseIdAsync(AppDbContext db, Guid projectId, CancellationToken cancellationToken)
     {
+        if ((await db.Database.GetAppliedMigrationsAsync(cancellationToken)).Contains(CleanupMigrationId, StringComparer.Ordinal))
+            return null;
         var connection = db.Database.GetDbConnection();
         if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
         command.CommandText = "SELECT Id, ProjectId FROM PublicationEditions WHERE IsDefault = 1";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -431,7 +434,7 @@ public sealed class PublicationCoreMigrationService(
         CancellationToken cancellationToken)
     {
         var releases = await db.PublicationEditions.AsNoTracking().OrderBy(item => item.Id).ToListAsync(cancellationToken);
-        await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
+        await ApplyMigrationTypographyAsync(db, releases, cancellationToken);
         var resolver = new PublicationEffectiveConfigurationResolver(
             database,
             readPdfPresentation: false,
@@ -627,13 +630,28 @@ public sealed class PublicationCoreMigrationService(
             .OrderBy(item => item.SortOrder).ToList();
     }
 
-    private static async Task ApplyLegacyTypographyAsync(
+    private static async Task ApplyMigrationTypographyAsync(
         AppDbContext db,
         IReadOnlyCollection<PublicationEdition> releases,
         CancellationToken cancellationToken)
     {
         if (releases.Count == 0)
             return;
+        // A deferred Core transform can run after release typography was
+        // removed. At that boundary the project page setup owns these values.
+        if ((await db.Database.GetAppliedMigrationsAsync(cancellationToken)).Contains(
+            EditionContentMigrationService.CleanupMigrationId, StringComparer.Ordinal))
+        {
+            var setups = await db.ProjectPageSetups.AsNoTracking().ToDictionaryAsync(item => item.ProjectId, cancellationToken);
+            foreach (var release in releases)
+            {
+                if (!setups.TryGetValue(release.ProjectId, out var setup))
+                    throw new InvalidDataException("A release is missing its project page setup during Core migration.");
+                release.BodyFontSizePoints = setup.BodyFontSizePoints;
+                release.BodyLineHeight = setup.BodyLineHeight;
+            }
+            return;
+        }
         var connection = db.Database.GetDbConnection();
         if (connection.State != System.Data.ConnectionState.Open)
             await connection.OpenAsync(cancellationToken);

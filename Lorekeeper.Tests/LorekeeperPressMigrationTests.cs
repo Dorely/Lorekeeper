@@ -119,6 +119,85 @@ public sealed class LorekeeperPressMigrationTests
     }
 
     [Fact]
+    public async Task DeferredCoreMigrationAfterSchemaCleanupPreservesProjectTypographyAndReleaseContent()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "deferred-core.db");
+            var configuration = TestConfiguration(path);
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+            var recovery = new DatabaseMigrationRecoveryService(configuration, NullLogger<DatabaseMigrationRecoveryService>.Instance);
+            var database = new AppDatabaseOperationFactory(new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(), new ProjectMutationCoordinator());
+            await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+            var startup = new DatabaseStartupMigrationService(database,
+                new ManuscriptMigrationService(configuration, recovery, NullLogger<ManuscriptMigrationService>.Instance),
+                new PublicationEditionMigrationService(configuration, recovery, NullLogger<PublicationEditionMigrationService>.Instance),
+                new PublicationPressMigrationService(configuration, recovery, NullLogger<PublicationPressMigrationService>.Instance),
+                new VisualCompositionMigrationService(recovery, NullLogger<VisualCompositionMigrationService>.Instance),
+                new AuthoringPageMigrationService(recovery, NullLogger<AuthoringPageMigrationService>.Instance),
+                new PublicationCoreMigrationService(database, recovery, NullLogger<PublicationCoreMigrationService>.Instance),
+                new EditionContentMigrationService(recovery, new MigrationManuscriptService(db), NullLogger<EditionContentMigrationService>.Instance),
+                new PublicationSectionMigrationService(recovery, NullLogger<PublicationSectionMigrationService>.Instance),
+                new PrintArtifactProfileMigrationService(recovery, new PrintArtifactProfileRegistry(), NullLogger<PrintArtifactProfileMigrationService>.Instance),
+                recovery);
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            // Simulate schema cleanup completing before the independent Core
+            // transform has created any Core rows or its completion journal.
+            await db.ManuscriptMigrationJournals.Where(item => item.MigrationName == PublicationCoreMigrationService.MigrationName)
+                .ExecuteDeleteAsync();
+            var project = new Project { Name = "Preserved project", Slug = "preserved-project", ReviewEditsEnabled = true };
+            var setup = new ProjectPageSetup { ProjectId = project.Id, BodyFontSizePoints = 15, BodyLineHeight = 1.8, Revision = 9 };
+            var edition = new PublicationEdition
+            {
+                ProjectId = project.Id,
+                Name = "Preserved release",
+                TitleOverride = "Preserved title",
+                Description = "Preserved description",
+                Format = PublicationEditionFormat.DigitalPdf,
+                PageWidthInches = 7,
+                PageHeightInches = 10,
+                PageMarginInches = 0.6,
+                Revision = 7,
+            };
+            db.AddRange(project, setup, edition);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            Assert.False(await recovery.IsRecoveryRequiredAsync());
+            var book = await db.PublicationBooks.SingleAsync();
+            Assert.Equal(project.Id, book.ProjectId);
+            Assert.Equal(edition.TitleOverride, book.Title);
+            Assert.Equal(edition.Description, book.Description);
+            var resolver = new PublicationEffectiveConfigurationResolver(database);
+            var effective = await resolver.ResolveReleaseAsync(project.Id, edition.Id);
+            Assert.Equal(edition.TitleOverride, effective.Edition.TitleOverride);
+            Assert.Equal(edition.Description, effective.Edition.Description);
+            Assert.Equal(edition.PageWidthInches, effective.Edition.PageWidthInches);
+            Assert.Equal(edition.PageHeightInches, effective.Edition.PageHeightInches);
+            Assert.Equal(edition.PageMarginInches, effective.Edition.PageMarginInches);
+            Assert.Equal(edition.Revision, effective.Edition.Revision);
+            Assert.Equal(setup.BodyFontSizePoints, effective.Edition.BodyFontSizePoints);
+            Assert.Equal(setup.BodyLineHeight, effective.Edition.BodyLineHeight);
+            Assert.Equal(setup.Revision, (await db.ProjectPageSetups.SingleAsync()).Revision);
+            Assert.True((await db.Projects.SingleAsync()).ReviewEditsEnabled);
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            Assert.Single(await db.PublicationBooks.ToListAsync());
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task InstalledPopulatedDatabaseRunsActualStartupMigrationWithoutDataLossOrRecovery()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));

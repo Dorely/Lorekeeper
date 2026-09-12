@@ -642,6 +642,8 @@ the original migration error and protected project backup instead of failing
 with a duplicate-column error while opening Data Recovery.
 Deferred composition upgrades also handle databases whose schema is already
 current, preserving release overrides and covers while repairing page geometry.
+Deferred Core Book upgrades likewise use the surviving project typography and
+release records when older release-only columns have already been removed.
 
 The Projects hub provides a References action for each project. It manages direct
 read-only continuity links with in-surface validation and keeps current-project-only

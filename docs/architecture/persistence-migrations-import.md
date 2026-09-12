@@ -168,6 +168,12 @@ Its edition read supplies defaults only for absent Core columns, retaining every
 stored edition field, and its cover read omits retired cover copy.
 These reads support both historical and current schemas without duplicating
 column names or changing stored release overrides and cover content.
+The Core Book data transform also supports schema cleanup that completed before
+its journal: once release typography is removed, it reads the project page setup
+that now owns typography. After default-release cleanup it uses the existing
+deterministic release ordering instead of querying the retired default flag.
+Missing page setup fails closed; projection checks still verify that release
+content and effective settings survive the deferred transform.
 
 The guarded startup order matters. The migration owner targets a historical EF
 schema only when that schema migration is pending; a later unrelated EF
