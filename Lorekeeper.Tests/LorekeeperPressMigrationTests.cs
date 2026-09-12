@@ -25,7 +25,7 @@ public sealed class LorekeeperPressMigrationTests
     }
 
     [Fact]
-    public async Task FreshDatabaseRunsActualStartupThroughAllHistoricalBoundaries()
+    public async Task FreshDatabaseAndDeferredGeometryRepairRunActualStartup()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -54,6 +54,60 @@ public sealed class LorekeeperPressMigrationTests
             Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
             Assert.Empty(await db.Database.GetPendingMigrationsAsync());
             Assert.False(await recovery.IsRecoveryRequiredAsync());
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+
+            var project = new Project { Name = "Deferred geometry", Slug = "deferred-geometry", ReviewEditsEnabled = true };
+            var edition = new PublicationEdition
+            {
+                ProjectId = project.Id,
+                Name = "Preserved release",
+                Format = PublicationEditionFormat.DigitalPdf,
+                PageWidthInches = 6,
+                PageHeightInches = 9,
+                PageMarginInches = 0.5,
+                AllowDesignedPageOverrides = true,
+                OverrideFieldsJson = "[\"description\"]",
+                InheritsCoreCover = false,
+                Description = "Keep this description",
+                Revision = 7,
+            };
+            var scene = CompositionService.CreatePageScene(edition);
+            var sceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
+            var composition = new PageComposition { ProjectId = project.Id, Name = "Preserved page", Revision = 4 };
+            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(composition.Id, composition.Revision));
+            var variant = new PageCompositionVariant
+            {
+                CompositionId = composition.Id,
+                GeometryKey = CompositionService.LegacyEditionOnlyGeometryKey(edition),
+                SceneJson = sceneJson,
+                Revision = 5,
+            };
+            var cover = new PublicationCoverDesign { EditionId = edition.Id, CompositionSceneJson = sceneJson, Revision = 6 };
+            db.AddRange(project, edition, composition, variant, cover);
+            await db.SaveChangesAsync();
+            // Schema upgrades can finish before this independent data migration.
+            await db.ManuscriptMigrationJournals.Where(item => item.MigrationName == VisualCompositionMigrationService.GeometryPolicyMigrationName)
+                .ExecuteDeleteAsync();
+            db.ChangeTracker.Clear();
+
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            Assert.False(await recovery.IsRecoveryRequiredAsync());
+            var preservedEdition = await db.PublicationEditions.SingleAsync(item => item.Id == edition.Id);
+            Assert.Equal(edition.OverrideFieldsJson, preservedEdition.OverrideFieldsJson);
+            Assert.False(preservedEdition.InheritsCoreCover);
+            Assert.Equal(edition.Description, preservedEdition.Description);
+            Assert.Equal(edition.Revision, preservedEdition.Revision);
+            var preservedVariant = await db.PageCompositionVariants.SingleAsync(item => item.Id == variant.Id);
+            var normalizedScene = scene with { Surface = scene.Surface with { AllowIndependentPdfPage = false } };
+            Assert.Equal(CompositionService.SceneGeometryKey(normalizedScene), preservedVariant.GeometryKey);
+            Assert.Equal(JsonSerializer.Serialize(normalizedScene, ManuscriptCodec.JsonOptions), preservedVariant.SceneJson);
+            Assert.Equal(variant.Revision, preservedVariant.Revision);
+            var preservedCover = await db.PublicationCoverDesigns.SingleAsync(item => item.Id == cover.Id);
+            Assert.Equal(sceneJson, preservedCover.CompositionSceneJson);
+            Assert.Equal(cover.Revision, preservedCover.Revision);
+            Assert.Equal(composition.SemanticManuscriptJson,
+                (await db.PageCompositions.SingleAsync(item => item.Id == composition.Id)).SemanticManuscriptJson);
+            Assert.True((await db.Projects.SingleAsync(item => item.Id == project.Id)).ReviewEditsEnabled);
             Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
         }
         finally

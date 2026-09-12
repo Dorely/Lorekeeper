@@ -640,6 +640,8 @@ database or running any normal migration service.
 Recovery also handles backups containing temporary upgrade columns, preserving
 the original migration error and protected project backup instead of failing
 with a duplicate-column error while opening Data Recovery.
+Deferred composition upgrades also handle databases whose schema is already
+current, preserving release overrides and covers while repairing page geometry.
 
 The Projects hub provides a References action for each project. It manages direct
 read-only continuity links with in-surface validation and keeps current-project-only

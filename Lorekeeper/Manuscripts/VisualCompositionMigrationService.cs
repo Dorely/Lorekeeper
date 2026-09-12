@@ -92,7 +92,7 @@ public sealed class VisualCompositionMigrationService(
             var chapters = await db.Chapters.OrderBy(item => item.ProjectId).ThenBy(item => item.Order)
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
             var assets = await db.PublishAssets.AsNoTracking().ToDictionaryAsync(item => item.Id, cancellationToken);
-            var legacyEditions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
+            var legacyEditions = await ReadMigrationEditionsAsync(db, cancellationToken);
             var editionsByProject = legacyEditions
                 .GroupBy(item => item.ProjectId)
                 .ToDictionary(group => group.Key, group => group.ToList());
@@ -169,7 +169,7 @@ public sealed class VisualCompositionMigrationService(
                 chapter.UpdatedAt = DateTime.UtcNow;
             }
 
-            foreach (var cover in await ReadCoversBeforeCoreAsync(db, cancellationToken))
+            foreach (var cover in await ReadMigrationCoversAsync(db, cancellationToken))
             {
                 cover.Edition = editionsById[cover.EditionId];
                 if (cover.Edition.Format != PublicationEditionFormat.Paperback)
@@ -634,7 +634,7 @@ public sealed class VisualCompositionMigrationService(
             return;
         }
 
-        var editions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
+        var editions = await ReadMigrationEditionsAsync(db, cancellationToken);
         var compositionProjects = await db.PageCompositions.AsNoTracking()
             .Select(item => new { item.Id, item.ProjectId })
             .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
@@ -1126,7 +1126,7 @@ public sealed class VisualCompositionMigrationService(
             .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
         foreach (var composition in compositions)
             composition.Variants = variants.Where(item => item.CompositionId == composition.Id).ToList();
-        var editions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
+        var editions = await ReadMigrationEditionsAsync(db, cancellationToken);
         foreach (var composition in compositions)
         {
             var semantic = ManuscriptCodec.Deserialize(
@@ -1169,7 +1169,7 @@ public sealed class VisualCompositionMigrationService(
         }
         if (picturePageSeeds.Any(seed => compositions.All(composition => composition.Id != seed.TargetId)))
             throw new InvalidDataException("A migrated Picture Page seed references a missing Designed Page.");
-        foreach (var cover in await ReadCoversBeforeCoreAsync(db, cancellationToken))
+        foreach (var cover in await ReadMigrationCoversAsync(db, cancellationToken))
         {
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException($"Cover {cover.Id:N} has no composition scene.");
@@ -1188,20 +1188,23 @@ public sealed class VisualCompositionMigrationService(
             throw new InvalidDataException($"Foreign-key validation failed for table {reader.GetString(0)}.");
     }
 
-    // These projections intentionally omit Core Book columns. The guarded visual
-    // migration runs before the later additive Core schema on older databases,
-    // while the current EF model already knows about those columns.
-    private static Task<List<PublicationEdition>> ReadEditionsBeforeCoreAsync(
+    // Geometry repair can remain pending after the Core schema is applied.
+    // Supply historical defaults only for absent Core columns; selecting an
+    // existing column twice prevents EF from materializing any edition rows.
+    private static async Task<List<PublicationEdition>> ReadMigrationEditionsAsync(
         AppDbContext db,
-        CancellationToken cancellationToken) =>
-        db.PublicationEditions.FromSqlRaw("""
-            SELECT PublicationEditions.*,
-                   '[]' AS OverrideFieldsJson,
-                   0 AS InheritsCoreCover
-            FROM PublicationEditions
-            """).AsNoTracking().ToListAsync(cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var sql = "SELECT PublicationEditions.*";
+        if (!await HasColumnAsync(db, "PublicationEditions", "OverrideFieldsJson", cancellationToken))
+            sql += ", '[]' AS OverrideFieldsJson";
+        if (!await HasColumnAsync(db, "PublicationEditions", "InheritsCoreCover", cancellationToken))
+            sql += ", 0 AS InheritsCoreCover";
+        sql += " FROM PublicationEditions";
+        return await db.PublicationEditions.FromSqlRaw(sql).AsNoTracking().ToListAsync(cancellationToken);
+    }
 
-    private static async Task<List<PublicationCoverDesign>> ReadCoversBeforeCoreAsync(
+    private static async Task<List<PublicationCoverDesign>> ReadMigrationCoversAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
@@ -1217,7 +1220,7 @@ public sealed class VisualCompositionMigrationService(
         await using var command = connection.CreateCommand();
         command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
         command.CommandText = $"""
-            SELECT Id, EditionId, Title, Subtitle, Author, SpineText, BackCopy,
+            SELECT Id, EditionId, Title, Subtitle, Author, SpineText,
                    BackgroundColor, BarcodeMode, {QuoteIdentifier(cropX)}, {QuoteIdentifier(cropY)},
                    AcknowledgedTemplateFingerprint, CompositionSceneJson, Revision
             FROM PublicationCoverDesigns
@@ -1235,13 +1238,13 @@ public sealed class VisualCompositionMigrationService(
                 Subtitle = reader.GetString(3),
                 Author = reader.GetString(4),
                 SpineText = reader.GetString(5),
-                BackgroundColor = reader.GetString(7),
-                BarcodeMode = Enum.Parse<PublicationBarcodeMode>(reader.GetString(8)),
-                ImageCropXPercent = reader.GetDouble(9),
-                ImageCropYPercent = reader.GetDouble(10),
-                AcknowledgedTemplateFingerprint = reader.GetString(11),
-                CompositionSceneJson = reader.GetString(12),
-                Revision = reader.GetInt64(13),
+                BackgroundColor = reader.GetString(6),
+                BarcodeMode = Enum.Parse<PublicationBarcodeMode>(reader.GetString(7)),
+                ImageCropXPercent = reader.GetDouble(8),
+                ImageCropYPercent = reader.GetDouble(9),
+                AcknowledgedTemplateFingerprint = reader.GetString(10),
+                CompositionSceneJson = reader.GetString(11),
+                Revision = reader.GetInt64(12),
             });
         }
         return covers;

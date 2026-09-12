@@ -163,6 +163,11 @@ replace the original migration failure or prevent access to Data Recovery.
 Startup also provisions print-setting compatibility columns after the Press
 schema boundary creates publication tables on fresh or sufficiently old
 databases, before the composition migration reads them with the current model.
+The composition geometry repair can remain pending after later schema upgrades.
+Its edition read supplies defaults only for absent Core columns, retaining every
+stored edition field, and its cover read omits retired cover copy.
+These reads support both historical and current schemas without duplicating
+column names or changing stored release overrides and cover content.
 
 The guarded startup order matters. The migration owner targets a historical EF
 schema only when that schema migration is pending; a later unrelated EF
