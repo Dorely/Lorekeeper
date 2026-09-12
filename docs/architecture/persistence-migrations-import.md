@@ -154,6 +154,16 @@ state and requires a short-lived explicit confirmation. Backup pruning never
 removes a backup referenced by a running/failed journal, scheduled restore,
 active recovery state, or protected transform.
 
+Recovery-shell schema replay removes temporary startup compatibility columns
+from the restored working copy before their owning EF migrations run, including
+Review Edits, section start/order, recto chapter starts, and print artifact
+profiles. This uses the same guarded removal helpers as normal startup and
+leaves the protected source backup unchanged, so duplicate-column errors do not
+replace the original migration failure or prevent access to Data Recovery.
+Startup also provisions print-setting compatibility columns after the Press
+schema boundary creates publication tables on fresh or sufficiently old
+databases, before the composition migration reads them with the current model.
+
 The guarded startup order matters. The migration owner targets a historical EF
 schema only when that schema migration is pending; a later unrelated EF
 migration must not downgrade current application tables. Publication/Press

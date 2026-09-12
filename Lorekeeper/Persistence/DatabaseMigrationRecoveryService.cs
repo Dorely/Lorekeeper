@@ -126,6 +126,15 @@ public sealed class DatabaseMigrationRecoveryService(
         await DatabaseStartupMigrationService.RemovePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.RemoveAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
+        // Startup backups can include temporary columns for current-model reads.
+        // Remove them before replaying their owning migrations into the recovery
+        // shell, or a duplicate column can hide the original validation failure.
+        // The protected source backup remains unchanged.
+        await DatabaseStartupMigrationService.RemovePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.RemovePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.RemoveReviewPreferenceCompatibilityColumnAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.RemoveRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.RemovePrintArtifactProfileCompatibilityColumnsAsync(db, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Projects;", cancellationToken);
         db.ChangeTracker.Clear();

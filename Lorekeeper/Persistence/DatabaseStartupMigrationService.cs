@@ -87,6 +87,9 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+        // Older installs and fresh databases may only now have publication
+        // tables. The visual migration reads them through the current EF model.
+        await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking designed pages", "Migrating visual compositions and semantic text bindings.", 5, totalSteps);
         var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -1755,7 +1758,7 @@ public sealed class DatabaseStartupMigrationService(
         db.ChangeTracker.Clear();
     }
 
-    private static async Task RemovePublicationSectionStartSideCompatibilityColumnAsync(
+    internal static async Task RemovePublicationSectionStartSideCompatibilityColumnAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
@@ -1856,7 +1859,7 @@ public sealed class DatabaseStartupMigrationService(
         db.ChangeTracker.Clear();
     }
 
-    private static async Task RemovePublicationSectionOrderCompatibilityColumnAsync(
+    internal static async Task RemovePublicationSectionOrderCompatibilityColumnAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
@@ -1908,7 +1911,7 @@ public sealed class DatabaseStartupMigrationService(
         db.ChangeTracker.Clear();
     }
 
-    private static async Task RemoveReviewPreferenceCompatibilityColumnAsync(
+    internal static async Task RemoveReviewPreferenceCompatibilityColumnAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {

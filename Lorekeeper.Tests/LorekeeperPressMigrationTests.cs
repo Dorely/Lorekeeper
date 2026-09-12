@@ -25,6 +25,46 @@ public sealed class LorekeeperPressMigrationTests
     }
 
     [Fact]
+    public async Task FreshDatabaseRunsActualStartupThroughAllHistoricalBoundaries()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "fresh-startup.db");
+            var configuration = TestConfiguration(path);
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+            var recovery = new DatabaseMigrationRecoveryService(configuration, NullLogger<DatabaseMigrationRecoveryService>.Instance);
+            var database = new AppDatabaseOperationFactory(new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(), new ProjectMutationCoordinator());
+            await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+            var startup = new DatabaseStartupMigrationService(database,
+                new ManuscriptMigrationService(configuration, recovery, NullLogger<ManuscriptMigrationService>.Instance),
+                new PublicationEditionMigrationService(configuration, recovery, NullLogger<PublicationEditionMigrationService>.Instance),
+                new PublicationPressMigrationService(configuration, recovery, NullLogger<PublicationPressMigrationService>.Instance),
+                new VisualCompositionMigrationService(recovery, NullLogger<VisualCompositionMigrationService>.Instance),
+                new AuthoringPageMigrationService(recovery, NullLogger<AuthoringPageMigrationService>.Instance),
+                new PublicationCoreMigrationService(database, recovery, NullLogger<PublicationCoreMigrationService>.Instance),
+                new EditionContentMigrationService(recovery, new MigrationManuscriptService(db), NullLogger<EditionContentMigrationService>.Instance),
+                new PublicationSectionMigrationService(recovery, NullLogger<PublicationSectionMigrationService>.Instance),
+                new PrintArtifactProfileMigrationService(recovery, new PrintArtifactProfileRegistry(), NullLogger<PrintArtifactProfileMigrationService>.Instance),
+                recovery);
+
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+            Assert.False(await recovery.IsRecoveryRequiredAsync());
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task InstalledPopulatedDatabaseRunsActualStartupMigrationWithoutDataLossOrRecovery()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));

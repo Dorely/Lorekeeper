@@ -637,6 +637,9 @@ application can be restarted after the cause is addressed.
 On a recovery start, Lorekeeper applies an explicitly scheduled restore first;
 otherwise it honors the existing recovery marker before opening the projectless
 database or running any normal migration service.
+Recovery also handles backups containing temporary upgrade columns, preserving
+the original migration error and protected project backup instead of failing
+with a duplicate-column error while opening Data Recovery.
 
 The Projects hub provides a References action for each project. It manages direct
 read-only continuity links with in-surface validation and keeps current-project-only
