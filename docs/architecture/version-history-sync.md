@@ -52,6 +52,14 @@ app-managed local repository after the database delete succeeds; a failure can
 be rolled back from its local deletion tombstone. Deleting local history never
 deletes or changes a GitHub repository.
 
+Checkpoint capture and reconciliation share `VersionHistoryTemporaryPaths` to
+resolve symbolic links in the OS temporary-directory prefix before appending
+`Lorekeeper/version-history`. This accommodates macOS system paths such as
+`/var` pointing to `/private/var`. Creation and cleanup use the same resolved
+parent; the existing ancestor and content checks still reject reparse points
+in the application-owned staging tree. Repository and sync-staging containment
+checks remain unchanged.
+
 ### Snapshot contract
 
 Schema v1 uses format ID `lorekeeper.version-history-snapshot`. Every checkpoint

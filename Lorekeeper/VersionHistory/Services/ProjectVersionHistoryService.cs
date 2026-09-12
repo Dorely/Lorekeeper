@@ -2648,7 +2648,7 @@ public sealed class ProjectVersionHistoryService(
 
     private static string CreateTemporaryDirectory()
     {
-        var parent = Path.Combine(Path.GetTempPath(), "Lorekeeper", "version-history");
+        var parent = VersionHistoryTemporaryPaths.GetParentDirectory();
         EnsureNoReparsePoints(parent);
         Directory.CreateDirectory(parent);
         EnsureNoReparsePoints(parent);
@@ -2662,7 +2662,7 @@ public sealed class ProjectVersionHistoryService(
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
             return;
 
-        var parent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "Lorekeeper", "version-history"));
+        var parent = VersionHistoryTemporaryPaths.GetParentDirectory();
         var fullPath = Path.GetFullPath(path);
         var prefix = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
