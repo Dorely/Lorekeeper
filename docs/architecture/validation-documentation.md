@@ -27,12 +27,19 @@ OAuth test; an HTTP startup is not an Electron/package test; and renderer unit
 tests are not vendor acceptance. Report unperformed integrations instead of
 promoting assumptions to verified behavior.
 
-The repository has intentionally narrow automated-test boundaries. Do not add an
-automated UI, assistant, ordinary service, provider, authentication, editor,
-packaging, or general runtime test merely because a feature would normally invite
-one. Existing policy permits application tests only for startup database migration
-and versioned project import/export transformation safety, plus Press conformance
-tests that map to the native renderer evidence matrix.
+The repository has intentionally narrow automated-test boundaries. Apart from
+Press conformance tests that map to the native renderer evidence matrix,
+application tests are limited to startup database migration and versioned project
+import/export transformation safety plus deterministic, headless v1 contract
+regressions for DOCX/citation conversion and formatting; shared Designed Page and
+release-override behavior; authoring operations, Undo/save recovery, idempotency,
+and assistant concurrency; provider catalog/account configuration and credential
+migration; portable archive/history closure and restoration; and free/Store
+channel and updater-policy selection. These tests exercise production contracts;
+they do not simulate browser UI, Word desktop, OAuth or provider calls, Store
+services, packaging, or operating-system updates. Do not add broad UI, general
+editor, assistant, provider, ordinary service, authentication, packaging, or
+runtime-behavior suites merely because a feature would normally invite one.
 
 Image-generation resolution controls therefore use compilation, static contract
 inspection, startup smoke checks, and user-authorized provider/UI exercise rather
@@ -178,13 +185,14 @@ Confirm startup and terminate the application. An HTTP startup does not validate
 the Electron bridge, update integration, packaged data paths, or native window
 behavior.
 
-### Authorized .NET migration/import tests
+### Authorized .NET data-safety and focused contract tests
 
-[`Lorekeeper.Tests`](../../Lorekeeper.Tests/) exists only to prove data
-preservation and fail-closed behavior across application-startup database
-migrations and versioned project import/export transformations. Its fixtures must
-exercise the same production migration/import boundaries as the app; do not create
-a parallel migration sequence for test convenience.
+[`Lorekeeper.Tests`](../../Lorekeeper.Tests/) proves data preservation and
+fail-closed behavior across application-startup database migrations and versioned
+project import/export transformations, plus the focused deterministic contract
+regressions listed above. Fixtures must exercise the same production boundaries
+as the app; do not create a parallel migration sequence or a generic unit-test
+suite for test convenience.
 
 Run the full authorized suite with:
 
@@ -193,7 +201,8 @@ dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 ```
 
 Focused filters are appropriate during an edit loop, but final verification must
-cover the affected preservation boundary. For example, project-reference
+cover the affected preservation or focused-contract boundary. For example,
+project-reference
 compatibility uses populated pre-reference migration fixtures and the real v26
 export/queued-import path:
 
@@ -204,8 +213,10 @@ dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj --no-restore -c Release --f
 Tests in this project cover manuscript/page/composition/Core/release migrations,
 annotation and chat preservation, source-evidence and project-reference cutovers,
 protected backup/recovery, current/legacy import adaptation, identifier remapping,
-warning behavior, foreign keys, and whole-import rollback. They are not a home for
-assistant, UI, ordinary service, or provider behavior tests.
+warning behavior, foreign keys, and whole-import rollback. It is also the current
+home for the approved v1 focused contracts. It is not a home for broad assistant,
+UI, ordinary service, or provider behavior suites, and no permitted test may
+substitute a simulated external integration for target-specific evidence.
 
 ### Semantic editor verification
 
@@ -343,7 +354,10 @@ Approved migration/import fixtures cover historical
 print-resample reclassification, preparation-job preservation, v30 full and
 non-structural round trips, parent remapping/missing-parent rejection, legacy
 cover-description adaptation, and snapshot-schema-v6 restore preservation. Ordinary publication
-service or UI tests remain outside the automated-test boundary.
+service or UI tests remain outside the automated-test boundary. The sole related
+exception is the approved deterministic free/Store channel and updater-policy
+selection contract; actual package and update behavior still requires
+target-specific evidence.
 
 ## Key files and file families
 
@@ -355,7 +369,7 @@ service or UI tests remain outside the automated-test boundary.
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
-| [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized test-project boundary for startup-migration and versioned import/export preservation/fail-closed fixtures only. |
+| [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary for migration/import preservation and fail-closed fixtures plus the approved deterministic, headless v1 contract regressions. |
 | [`eng/ReleaseDependencyAudit.ps1`](../../eng/ReleaseDependencyAudit.ps1) | Shared fail-closed shipped Electron dependency policy and its narrowly bounded dormant-splash advisory exception. |
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared repository gate/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
@@ -370,9 +384,9 @@ service or UI tests remain outside the automated-test boundary.
   gating, Electron behavior, and shared UI validation boundary.
 - [Providers and background work](providers-background.md) — integration checks
   that cannot be inferred from builds.
-- [Persistence, migrations, and import](persistence-migrations-import.md) — the
-  only application behaviors eligible for `Lorekeeper.Tests` alongside versioned
-  imports.
+- [Persistence, migrations, and import](persistence-migrations-import.md) —
+  data-safety boundaries and portable transformations; this chapter owns the
+  complete permitted-test policy.
 - [Manuscript authoring](manuscript-authoring.md) — semantic-editor source and
   current manuscript contract.
 - [Press production](press-production.md) — native conformance evidence and

@@ -643,10 +643,12 @@ other direct assistant-visible changes.
   modes, semantic grouping, stale-token rejection, exact target ownership,
   durable candidate drafts, project-wide Editor locking, terminal state,
   resolution/discard behavior, and cancellation cleanup.
-- Do not add ordinary assistant, UI, editor, or service automated tests. Use
-  compilation, static inspection, and explicitly authorized manual integration
-  checks; migration-only persistence changes may use the approved migration
-  safety fixtures.
+- Do not add broad assistant, UI, editor, or service automated-test suites. The
+  validation chapter permits deterministic, headless authoring-save and
+  assistant-concurrency contract regressions; they must use production contracts
+  and cannot simulate a provider or browser. Use compilation, static inspection,
+  and explicitly authorized manual integration checks for all other assistant
+  behavior.
 - Run `dotnet build Lorekeeper.sln` and the HTTP startup smoke check for normal
   source changes. Provider calls, model-specific tool behavior, browser UI,
   image generation, and publishing flows require explicit integration exercise

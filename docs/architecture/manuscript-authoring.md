@@ -489,9 +489,11 @@ mutation boundary as other persisted manuscript changes.
   release behavior, outdated-state fallback, action coalescing, stale-stream
   reconciliation, Git pending/historical review, dependency retention, and
   export exclusion.
-- Automated .NET tests may cover only startup migration or versioned
-  import/export preservation and fail-closed behavior; do not add ordinary
-  editor, assistant, annotation, style, or service tests.
+- In addition to startup migration and versioned import/export safety, the
+  validation chapter permits deterministic, headless DOCX/citation and
+  authoring-operation/Undo/save-recovery contract regressions. Do not add broad
+  editor, assistant, annotation, style, or service test suites, or tests that
+  simulate browser UI or external integrations.
 - Run `dotnet build Lorekeeper.sln`, relevant approved migration/import tests,
   and the HTTP startup smoke check for source changes. Documentation-only edits
   require link/path validation and the broader verification selected by the

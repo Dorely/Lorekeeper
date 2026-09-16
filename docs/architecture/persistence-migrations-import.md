@@ -6,7 +6,7 @@ Read this chapter when a change touches SQLite, `AppDbContext`, EF migrations,
 repositories, write leases, revision tokens, project mutation coordination,
 backup/recovery, startup migration order, import/export, durable jobs,
 artifact bytes or hashes, local data placement, credentials/tokens, or the
-approved migration/import test boundaries. Read it with
+authorized application-test boundaries. Read it with
 `publishing-model.md` or `press-production.md` for publication rows, render and
 package freshness, and native artifact semantics. Read it with
 `manuscript-authoring.md` for manuscript/schema/history data, and with
@@ -425,9 +425,10 @@ EF migrations are unchanged and that every new schema change has a forward
 migration. Do not run destructive restore/delete operations as part of routine
 documentation or source verification.
 
-The repository’s approved .NET tests are limited to startup database migration
-and versioned project import/export safety. Do not add ordinary UI, assistant,
-provider, packaging, or runtime-behavior tests under this boundary. Provider
-calls, OAuth, embeddings, search, image generation, publication output,
+The repository’s approved .NET tests include startup database migration and
+versioned project import/export safety plus the deterministic, headless v1
+contract regressions enumerated by the validation chapter. Do not add broad UI,
+assistant, provider, packaging, or runtime-behavior suites under this boundary.
+Provider calls, OAuth, embeddings, search, image generation, publication output,
 packaging, and OS-specific behavior require explicit integration exercise before
 claiming they work.

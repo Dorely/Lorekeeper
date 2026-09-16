@@ -284,10 +284,12 @@ not introduce a second canon-selection, relationship, or job-state authority.
 - For reference changes, verify one-hop scope, foreign-ID rejection, active-only
   mutation targets, incoming deletion handling, canonical-visual restrictions,
   and export omission warnings.
-- For ingest/import or startup transformation changes, add or update tests only
-  where they prove allowed migration/import data preservation or fail-closed
-  behavior; ordinary search, graph, context, Research, and assistant behavior is
-  verified through builds and static inspection.
+- For ingest/import, source-evidence, archive, or history changes, add or update
+  tests only where they prove approved migration/import safety or the
+  deterministic portable archive/history closure and restoration contracts. The
+  validation chapter owns the full permitted-test boundary; ordinary search,
+  graph, context, Research, and assistant behavior is verified through builds
+  and static inspection.
 - Run `dotnet build Lorekeeper.sln` and the documented HTTP startup smoke check
   for normal source changes. Exercise provider calls, web access, embeddings,
   ingest models, or browser UI only when that integration is explicitly in

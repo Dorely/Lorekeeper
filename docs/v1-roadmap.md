@@ -26,13 +26,13 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M0 - Establish release foundations |
-| Next bounded step | M0.1 - Reconcile the approved focused-test expansion with repository instructions and the validation chapter; make a focused documentation/policy commit |
-| Completed implementation | None; this document records the approved plan only |
-| Next investigation | After M0.1, inspect existing gate/tooling and define M0.2 CI work and M0.3 baseline fixtures without duplicating existing infrastructure |
+| Active milestone | M0 - Establish release foundations (In progress) |
+| Next bounded step | M0.2 - Reuse the current repository gate in CI with isolated artifacts and no signing secrets exposed to contributions; record platform coverage and checks that remain manual |
+| Completed implementation | M0.1 - Aligned the approved focused, deterministic regression-test policy across repository instructions and current validation guidance; no product test, CI, or runtime implementation was added |
+| Next investigation | For M0.2, inspect existing gate/tooling and define the smallest CI implementation without duplicating existing infrastructure; defer M0.3 fixtures and measurements until that coherent step |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Complete M0.1, update this handoff, and stop before beginning the next coherent feature unless the user expands that session's scope |
-| Validation evidence | Planning used repository inspection and official-source research; no v1 implementation, performance baseline, Store feasibility, or integration acceptance is established |
+| Scope boundary for the next session | Complete M0.2, update this handoff, and stop before beginning the next coherent feature unless the user expands that session's scope |
+| Validation evidence | M0.1 (2026-09-16) aligned the policy documents and this handoff; its focused documentation commit records local-reference checks, stale-policy search, full commit-gate, and HTTP-startup-smoke evidence. No product test, performance baseline, Store feasibility, or external integration acceptance is established |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -105,7 +105,7 @@ the plan; follow the user's current task and the applicable execution rules.
 
 | ID | Status | Deliverable | Exit condition | Evidence / remaining work |
 |---|---|---|---|---|
-| M0 | Not started | Test policy, CI, performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Major packaging constraints identified; baseline measurements recorded | Begin M0.1 below |
+| M0 | In progress | Test policy, CI, performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Major packaging constraints identified; baseline measurements recorded | M0.1 complete; begin M0.2 CI baseline |
 | M1 | Not started | Preconfigured OpenAI account models and external-browser OAuth | Fresh connection reaches usable chat without manual model setup or Test clicks | No implementation/integration evidence |
 | M2 | Not started | Project page library, shared placements, release overrides, safe migration | Existing content survives; shared editing and release isolation work | No implementation/migration evidence |
 | M3 | Not started | Immediate manual Undo/Redo, recoverable save queue, incremental history | Latency and failure-recovery gates pass | Measure baseline first |
@@ -117,10 +117,10 @@ the plan; follow the user's current task and the applicable execution rules.
 
 Initial M0 substeps (split further only when current-code findings justify it):
 
-- [ ] **M0.1 - Test-policy alignment.** Update the owning instructions and
-  validation guidance to the approved focused-regression scope; reconcile
-  companion references, retain the full gate, and avoid granting blanket UI or
-  external-service execution permission.
+- [x] **M0.1 - Test-policy alignment (complete 2026-09-16).** Updated the owning
+  instructions and validation guidance to the approved focused-regression scope,
+  reconciled companion references, retained the full gate, and did not grant
+  blanket UI or external-service execution permission.
 - [ ] **M0.2 - CI baseline.** Reuse the current repository gate in CI with isolated
   artifacts and no signing secrets exposed to contributions; record platform
   coverage and checks that remain manual.

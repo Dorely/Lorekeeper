@@ -225,14 +225,21 @@
   requirement in the Press conformance evidence matrix. This includes the
   protocol, containment, atomicity, cancellation, determinism, typography,
   layout, raw-PDF, and adversarial evidence needed to trust the PDF result.
-- Automated tests in `Lorekeeper.Tests` may exist only to prove data
-  preservation and fail-closed behavior across application-startup database
-  migrations or versioned project import/export transformations.
-- Do not add automated UI, assistant, editor, provider, ordinary service,
-  packaging, authentication, or runtime-behavior tests. Validate those areas
-  through builds, static inspection, and user-authorized manual or browser
-  checks. A user request to add tests does not broaden this repository boundary
-  unless the user explicitly changes the two approved test purposes.
+- Automated tests in `Lorekeeper.Tests` may prove startup database migration or
+  versioned project import/export preservation and fail-closed behavior, plus
+  the approved deterministic, headless v1 contract regressions: DOCX/citation
+  conversion and formatting; shared Designed Page and release-override
+  behavior; authoring operations, Undo/save recovery, idempotency, and
+  assistant concurrency; provider catalog/account configuration and credential
+  migration; portable archive/history closure and restoration; and free/Store
+  channel and updater-policy selection.
+- Approved tests exercise production contracts without simulating browser UI,
+  Word desktop, OAuth or provider calls, Store services, packaging, or operating
+  system updates. Do not add broad UI, general editor, assistant, provider,
+  ordinary service, packaging, authentication, or runtime-behavior suites.
+  Validate excluded areas through builds, static inspection, and
+  user-authorized manual or browser checks. A user request to add tests does not
+  broaden this approved boundary unless they explicitly change it.
 - Every commit, regardless of its apparent scope, must pass the full repository
   commit gate on the exact final worktree that will be committed. Route .NET
   outputs through the ignored commit-gate artifacts directory so verification
