@@ -65,7 +65,10 @@ Documentation is authoritative by responsibility:
    packaging, release/update behavior, and local-data expectations.
 5. [`docs/publishing-roadmap.md`](../publishing-roadmap.md) sequences researched
    delivery and verification gates. Roadmap status does not override current-code
-   or architecture claims.
+   or architecture claims. [`docs/v1-roadmap.md`](../v1-roadmap.md) owns the
+   approved application-v1 scope, milestone/evidence ledger, release decisions,
+   and maintained session handoff. Planned policy changes there become current
+   repository guidance through their explicit implementation steps.
 6. [`docs/research/`](../research/) records sourced evidence and proposals.
    [`docs/decisions/`](../decisions/) records architectural decisions, including
    superseded historical choices. Neither is proof of current implementation.

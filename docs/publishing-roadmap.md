@@ -1,6 +1,12 @@
 # Publication artifact roadmap
 
-Last updated: 2026-08-12
+Last updated: 2026-09-16
+
+The [v1 application-release roadmap](v1-roadmap.md) owns the approved v1 scope,
+milestone status, distribution plan, and session handoff. This document retains
+the broader publication-artifact roadmap; neither document is proof of runtime
+implementation. Use the v1 plan for its accepted DOCX, source/citation, and
+Designed Page changes rather than treating older deferred proposals as active.
 
 ## Destination
 
@@ -274,25 +280,18 @@ supported publication pipeline; other platforms remain unclaimed until tested.
 
 ### DOCX manuscript interchange
 
-Status: `Planned after artifact completion`
+Status: `Approved v1 scope; implementation tracked in the v1 roadmap`
 
-DOCX import and export remain product goals because authors and editors need a
-common interchange format. The initial scope is not a full Word-compatible
-collaboration system. It will preserve semantic paragraphs, headings, lists,
-inline emphasis, Book Text Styles, Figures, captions, useful document metadata,
-and Lorekeeper review annotations where representable, with explicit fidelity
-warnings for unsupported content. Non-empty notes map to classic Word comments;
-highlight-only annotations map to yellow run highlighting plus an empty comment
-so they can round-trip as review highlights. Resolved comments, replies/threads,
-and tracked-change review remain excluded or flattened with diagnostics.
+The [v1 roadmap](v1-roadmap.md) owns the current Word paste, direct DOCX import,
+editable DOCX export, and richer semantic manuscript specification. Import and
+export use the same canonical manuscript and effective Core/release boundaries
+as existing formats. DOCX remains interchange, not an alternate authoritative
+manuscript or a claim of identical Word pagination.
 
-DOCX import writes through the semantic manuscript boundary. DOCX export reads
-the selected Core or effective release source; it does not become an alternate
-authoritative manuscript. The deferred, decision-complete implementation shape
-is preserved in
-[`plans/deferred-docx-interchange.md`](plans/deferred-docx-interchange.md): rich
-Word paste, one DOCX imported directly into one empty chapter, and manuscript or
-full-book DOCX export without a multi-chapter import workflow.
+The [2026-08-14 DOCX proposal](plans/deferred-docx-interchange.md) is superseded
+historical context. Its empty-chapter import restriction, comment round-tripping,
+additional formatting scope, and version assumptions are not v1 requirements.
+Native packaged-pipeline acceptance remains a release gate alongside the v1 work.
 
 ### Additional print constructions and vendors
 
@@ -326,13 +325,13 @@ semantics must remain suitable foundations for these additions.
 
 ### Nonfiction and reference books
 
-Status: `Researched`
+Status: `Tables, notes, citations, and bibliographies promoted to v1; broader reference features remain researched`
 
-Future structured authoring includes footnotes, endnotes, citations,
-bibliographies, tables, equations, code, cross-references, generated numbering,
-indexes, glossaries, and accessible reference structures. These features use
-the same Core/release and artifact pipeline rather than creating a parallel
-publishing system.
+The [v1 roadmap](v1-roadmap.md) includes tables, footnotes/endnotes, manuscript
+citations, bibliographies, and a full source-document reader. Broader equations,
+code, cross-references, indexes, glossaries, and reference structures remain
+future work. These features use the same Core/release and artifact pipeline
+rather than creating a parallel publishing system.
 
 ### Optional publisher operations
 

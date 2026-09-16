@@ -1,11 +1,14 @@
 # Deferred plan: rich Word paste, single-chapter DOCX import, and DOCX export
 
-Status: `Deferred`
+Status: `Superseded on 2026-09-16 - historical plan only`
 
-This document preserves the decision-complete implementation plan agreed on
-2026-08-14. It is not current runtime behavior and is not an active readiness
-gate. Native packaged-pipeline acceptance remains ahead of it on the
-publication-artifact roadmap.
+This document preserves the implementation plan agreed on 2026-08-14 as
+historical context. The approved [v1 roadmap](../v1-roadmap.md) now owns active
+DOCX scope, sequencing, and acceptance. In particular, v1 imports at an explicit
+manuscript location rather than requiring an empty chapter, omits Word comments
+and revision history, and includes citations/bibliographies. Do not implement
+the conflicting requirements or reuse the historical version numbers below.
+This proposal is neither current runtime behavior nor an active readiness gate.
 
 ## Summary
 

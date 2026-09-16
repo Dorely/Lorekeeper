@@ -8,7 +8,10 @@ See [VISION.md](VISION.md) for the product direction and
 task-routed architecture chapters covering current boundaries, ownership, and
 validation guidance. The researched,
 status-labeled path from the current workbench to end-to-end book production is
-in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
+in [docs/publishing-roadmap.md](docs/publishing-roadmap.md). The approved
+[v1 release roadmap](docs/v1-roadmap.md) tracks application-release scope,
+stepwise milestones, verification gates, and the current development handoff;
+its planned features are not claims about current capabilities.
 
 ## Current Capabilities
 
