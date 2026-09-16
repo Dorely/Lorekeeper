@@ -266,11 +266,33 @@ Build current Windows artifacts on Windows with:
 The builder validates tool versions and SemVer, audits managed and shipped
 npm/Electron dependencies, rebuilds isolated staging/output, rebuilds and checks
 the semantic editor, builds the locked Press runtime, probes packaged renderer and
-print-artifact profile registry identity, and verifies installer/updater artifacts and
+print-artifact profile registry identity, and verifies release artifacts and
 checksums. The shared dependency policy permits only the two exact known
 `image-size@1.2.1` parser advisories while Electron.NET's generated call remains
 provably confined to an unconfigured splash-image path. A package version, call
 site, splash configuration, or advisory change fails closed.
+
+Release builds default to the `Free` distribution channel. For the local Windows
+Store-channel package preflight only, first build an unpacked Store closure and
+then run the MSIX script:
+
+```powershell
+.\scripts\build-windows-release.ps1 -KeepUnpacked -DistributionChannel Store
+.\tools\msix\Build-M0MsixFeasibility.ps1
+```
+
+The script accepts only that local `win-unpacked` closure, validates its immutable
+Store metadata, packs a full-trust desktop MSIX with `MakeAppx` (without `/nv`),
+unpacks and checks required contents, then uses an ephemeral current-user test
+certificate to sign the package and verify its embedded CMS integrity and exact
+signer. All package output stays under ignored `.artifacts/m0.5-msix/`; the exact
+certificate is removed before the script returns. It never writes a trusted-root
+entry, installs a package, or contacts Store, GitHub, providers, or an updater.
+Windows trust-chain acceptance and installation in a disposable Windows profile,
+including packaged process/data/import/export/print boundaries, require separate
+owner authorization. This preflight does not establish Store acceptance or
+app-container confinement: the manifest intentionally uses the documented
+full-trust desktop model.
 
 The native Apple Silicon builder is
 [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1). It must

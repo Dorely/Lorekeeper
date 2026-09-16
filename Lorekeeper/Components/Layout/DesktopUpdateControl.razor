@@ -26,59 +26,14 @@
         </button>
     </div>
 }
-else if (snapshot.Status == DesktopUpdateStatus.Downloading)
+else if (snapshot.Status == DesktopUpdateStatus.StoreManaged)
 {
-    var percent = NormalizePercent(snapshot.DownloadPercent);
-    var downloadLabel = DownloadLabel(snapshot.Version);
-
-    <div class="desktop-update-control desktop-update-download" aria-live="polite">
-        <div class="desktop-update-copy">
-            <span class="desktop-update-label" title="@downloadLabel">@downloadLabel</span>
-            @if (percent.HasValue)
-            {
-                <span class="desktop-update-percent">@percent.Value%</span>
-            }
-        </div>
-
-        @if (percent is int value)
-        {
-            <div class="desktop-update-progress"
-                 role="progressbar"
-                 aria-label="@downloadLabel"
-                 aria-valuemin="0"
-                 aria-valuemax="100"
-                 aria-valuenow="@value"
-                 aria-valuetext="@($"{value}% complete")">
-                <span class="desktop-update-progress-fill" style="@ProgressStyle(value)"></span>
-            </div>
-        }
-        else
-        {
-            <div class="desktop-update-progress desktop-update-progress--indeterminate"
-                 role="progressbar"
-                 aria-label="@downloadLabel"
-                 aria-valuetext="Downloading">
-                <span class="desktop-update-progress-fill"></span>
-            </div>
-        }
-    </div>
-}
-else if (snapshot.Status is DesktopUpdateStatus.Ready or DesktopUpdateStatus.Restarting)
-{
-    var restarting = snapshot.Status == DesktopUpdateStatus.Restarting;
-
-    <div class="desktop-update-control desktop-update-available">
+    <div class="desktop-update-control desktop-update-idle">
         @if (!string.IsNullOrWhiteSpace(installedVersion))
         {
             <span class="desktop-update-version" title="@InstalledTitle(installedVersion)">v@(installedVersion)</span>
         }
-        <button type="button"
-                class="btn btn-sm btn-primary desktop-update-button"
-                disabled="@(!RendererInfo.IsInteractive || restarting)"
-                title="@RestartTitle(snapshot.Version)"
-                @onclick="RestartToUpdateAsync">
-            @(restarting ? "Restarting…" : "Restart to Update")
-        </button>
+        <span class="desktop-update-label">Updates managed by Microsoft Store</span>
     </div>
 }
 else if (!string.IsNullOrWhiteSpace(installedVersion) || canCheck || snapshot.Status is DesktopUpdateStatus.Checking or DesktopUpdateStatus.Error)
@@ -152,12 +107,6 @@ else if (!string.IsNullOrWhiteSpace(installedVersion) || canCheck || snapshot.St
         }
     }
 
-    private async Task RestartToUpdateAsync()
-    {
-        if (!RendererInfo.IsInteractive || !DesktopUpdates.Snapshot.CanRestart) return;
-        await DesktopUpdates.RestartToUpdateAsync();
-    }
-
     private async Task OpenDownloadAsync()
     {
         if (!RendererInfo.IsInteractive || !DesktopUpdates.Snapshot.CanDownload || _openingDownload) return;
@@ -180,12 +129,6 @@ else if (!string.IsNullOrWhiteSpace(installedVersion) || canCheck || snapshot.St
         }
     }
 
-    private static int? NormalizePercent(double? percent)
-    {
-        if (percent is not { } value || !double.IsFinite(value)) return null;
-        return (int)Math.Round(Math.Clamp(value, 0d, 100d), MidpointRounding.AwayFromZero);
-    }
-
     private static string InstalledTitle(string? version) =>
         version is { Length: > 0 }
             ? $"Installed Lorekeeper version {version}"
@@ -196,22 +139,10 @@ else if (!string.IsNullOrWhiteSpace(installedVersion) || canCheck || snapshot.St
             ? $"Check for Lorekeeper updates (last check failed: {error})"
             : "Check for Lorekeeper updates now";
 
-    private static string DownloadLabel(string? version) =>
-        version is { Length: > 0 }
-            ? $"Downloading Lorekeeper {version}"
-            : "Downloading update";
-
-    private static string RestartTitle(string? version) =>
-        version is { Length: > 0 }
-            ? $"Install Lorekeeper {version}"
-            : "Install the downloaded Lorekeeper update";
-
     private static string DownloadTitle(string? version) =>
         version is { Length: > 0 }
             ? $"Download Lorekeeper {version} in your default browser"
             : "Download the latest Lorekeeper update in your default browser";
-
-    private static string ProgressStyle(int percent) => $"width: {percent}%";
 
     public void Dispose()
     {

@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$Version,
-    [switch]$KeepUnpacked
+    [switch]$KeepUnpacked,
+    [ValidateSet('Free', 'Store')]
+    [string]$DistributionChannel = 'Free'
 )
 
 Set-StrictMode -Version Latest
@@ -244,7 +246,8 @@ try
         'build',
         $solutionPath,
         '-c', 'Release',
-        "-p:Version=$Version"
+        "-p:Version=$Version",
+        "-p:LorekeeperDistributionChannel=$DistributionChannel"
     )
 
     $previousCi = $env:CI
@@ -259,6 +262,7 @@ try
             '-c', 'Release',
             '-p:PublishProfile=win-x64',
             "-p:Version=$Version",
+            "-p:LorekeeperDistributionChannel=$DistributionChannel",
             '--no-restore'
         )
     }

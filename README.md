@@ -567,7 +567,8 @@ block the driver and publisher unless the maintainer explicitly supplies
 `-ConfirmOpenPullRequests` after reviewing the excluded work.
 
 The Windows-only path omits macOS and publishes the installer, portable
-executable, updater metadata, blockmap, and checksum file as the latest release.
+executable, Electron-generated release metadata, blockmap, and checksum file as
+the latest release.
 Portable/macOS discovery ignores releases without an applicable platform asset.
 Unless `-WindowsOnly` is used, the publisher dispatches
 `.github/workflows/build-macos-release.yml` for the Apple Silicon package,
@@ -580,24 +581,28 @@ release notes to draft releases in both the private `Dorely/Lorekeeper` source
 repository and the public `Dorely/Lorekeeper-Releases` repository. It verifies
 both asset sets before publishing either release and removes releases/tags it
 created if dual publication fails. It warns if GitHub prevents compensating
-cleanup. The public repository remains the updater and user-download authority.
+cleanup. The public repository remains the manual-update-notification and
+user-download authority.
 
 Each completed release contains the Windows installer, portable executable,
-updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`, and one checksum
-file covering every asset. Add
+Electron-generated release metadata and blockmap,
+`Lorekeeper-<version>-arm64.dmg`, and one checksum file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
 prereleases are published as GitHub prereleases by the lower-level publisher.
 Published versions are immutable; fixes require a higher version.
 
-Installed Windows builds use automatic updates and require the Setup executable,
-its `.blockmap`, and `latest.yml` to remain together. macOS and Windows portable
-builds instead query the public stable release API at startup and every 15
-minutes. They show **Download Update** only when the latest stable release is
-newer, and open that release in the operating system's default browser. Change
-the interval with `Desktop:UpdateCheckIntervalMinutes`. The top bar always shows
-the installed version next to the update control, and
-while no update is pending it offers **Check for updates**, which re-runs the
-same check immediately instead of waiting for the next automatic poll.
+Every build carries immutable distribution-channel metadata. Development builds
+never check for updates. Release builds default to the `Free` channel: the user
+may select **Check for updates**, which queries the public GitHub release
+metadata and, for a newer release, offers **Download Update** to open that
+release in the default browser. Lorekeeper never downloads, installs, or
+restarts itself for a Free update. A `Store` package must be explicitly built
+with the Store channel; it makes no GitHub query or browser handoff and instead
+states that updates are managed by Microsoft Store. The existing release builder
+uses `Free` by default; `-DistributionChannel Store` is reserved for local
+Store-channel packaging evidence until a separately authorized Store submission.
+Generated Electron update metadata can remain a release artifact, but it is not
+an automatic-update contract.
 
 Release builds store the SQLite database in per-user application data, outside
 the installed application, mounted DMG, and portable executable's extraction

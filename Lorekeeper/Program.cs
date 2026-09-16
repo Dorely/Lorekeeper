@@ -42,13 +42,13 @@ var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
 IDesktopReleaseUpdateChecker? desktopReleaseUpdateChecker = null;
 var isElectronMode = IsElectronMode(args);
+var distributionChannelPolicy = DistributionChannelPolicy.Resolve(
+    builder.Environment.IsDevelopment(),
+    GetDistributionChannelBuildMetadata());
+if (!string.IsNullOrWhiteSpace(distributionChannelPolicy.ValidationError))
+    Console.Error.WriteLine($"Desktop updates are disabled: {distributionChannelPolicy.ValidationError}");
 var desktopUrl = isElectronMode ? GetDesktopUrl(builder.Configuration) : null;
 var enableDesktopDevTools = builder.Environment.IsDevelopment();
-var desktopUpdateCheckIntervalMinutes = builder.Configuration.GetValue("Desktop:UpdateCheckIntervalMinutes", 15);
-if (desktopUpdateCheckIntervalMinutes <= 0)
-    throw new InvalidOperationException("Desktop:UpdateCheckIntervalMinutes must be greater than zero.");
-var desktopUpdateCheckInterval = TimeSpan.FromMinutes(desktopUpdateCheckIntervalMinutes);
-using var desktopUpdateMonitorCancellation = new CancellationTokenSource();
 var usePerUserDataDirectory = isElectronMode
     && !builder.Environment.IsDevelopment()
     && builder.Configuration.GetValue("Desktop:UsePerUserDataDirectory", true);
@@ -83,13 +83,16 @@ builder.Services.AddSingleton(new ApplicationStartupOptions(
 builder.Services.AddHostedService<ApplicationStartupWorker>();
 
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
+if (isElectronMode && distributionChannelPolicy.UsesGitHubReleaseChecks)
 {
-    client.Timeout = TimeSpan.FromSeconds(15);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("Lorekeeper/1.0");
-    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-    client.DefaultRequestHeaders.TryAddWithoutValidation("X-GitHub-Api-Version", "2026-03-10");
-});
+    builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(15);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Lorekeeper/1.0");
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-GitHub-Api-Version", "2026-03-10");
+    });
+}
 
 if (isElectronMode)
 {
@@ -98,12 +101,9 @@ if (isElectronMode)
     builder.UseElectron(args, () => ElectronAppReady(
         desktopUrl!,
         enableDesktopDevTools,
-        enableAutoUpdates: !builder.Environment.IsDevelopment() && OperatingSystem.IsWindows(),
+        distributionChannelPolicy,
         desktopUpdates,
-        () => desktopReleaseUpdateChecker
-            ?? throw new InvalidOperationException("Desktop release update checker is unavailable."),
-        desktopUpdateCheckInterval,
-        desktopUpdateMonitorCancellation.Token));
+        () => desktopReleaseUpdateChecker));
     builder.WebHost.UseUrls(desktopUrl!);
 }
 else
@@ -388,10 +388,9 @@ builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
 builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 
 var app = builder.Build();
-if (isElectronMode)
+if (isElectronMode && distributionChannelPolicy.UsesGitHubReleaseChecks)
     desktopReleaseUpdateChecker = app.Services.GetRequiredService<IDesktopReleaseUpdateChecker>();
 desktopUpdates.SetInstalledVersion(GetInstalledAppVersion());
-app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cancel);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -424,11 +423,9 @@ app.Run();
 static async Task ElectronAppReady(
     string desktopUrl,
     bool enableDevTools,
-    bool enableAutoUpdates,
+    DistributionChannelPolicy distributionChannelPolicy,
     DesktopUpdateService desktopUpdates,
-    Func<IDesktopReleaseUpdateChecker> getReleaseUpdateChecker,
-    TimeSpan updateCheckInterval,
-    CancellationToken cancellationToken)
+    Func<IDesktopReleaseUpdateChecker?> getReleaseUpdateChecker)
 {
     var options = new BrowserWindowOptions
     {
@@ -466,28 +463,21 @@ static async Task ElectronAppReady(
     var browserWindow = await Electron.WindowManager.CreateWindowAsync(options, desktopUrl);
     browserWindow.OnReadyToShow += () => browserWindow.Show();
 
-    var isPortable = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PORTABLE_EXECUTABLE_DIR"));
-    var currentVersion = await Electron.App.GetVersionAsync(cancellationToken);
+    var currentVersion = await Electron.App.GetVersionAsync();
     desktopUpdates.SetInstalledVersion(currentVersion);
-    if (enableAutoUpdates && !isPortable)
+    if (distributionChannelPolicy.UpdatePolicy == DesktopUpdatePolicy.StoreManaged)
     {
-        ConfigureElectronAutoUpdater(desktopUpdates);
-        desktopUpdates.EnableManualCheck(
-            cancellation => CheckForElectronUpdatesAsync(desktopUpdates, cancellation));
-        _ = MonitorElectronUpdatesAsync(desktopUpdates, updateCheckInterval, cancellationToken);
+        desktopUpdates.MarkStoreManaged(currentVersion);
     }
-    else if (!enableDevTools && (OperatingSystem.IsMacOS() || isPortable))
+    else if (distributionChannelPolicy.UpdatePolicy == DesktopUpdatePolicy.ManualGitHubRelease)
     {
-        desktopUpdates.EnableManualDownloads(OpenReleaseInDefaultBrowserAsync);
         var releaseUpdateChecker = getReleaseUpdateChecker();
+        if (releaseUpdateChecker is null)
+            throw new InvalidOperationException("The Free distribution channel requires its release update checker.");
+
+        desktopUpdates.EnableManualDownloads(OpenReleaseInDefaultBrowserAsync);
         desktopUpdates.EnableManualCheck(
             cancellation => CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellation));
-        _ = MonitorManualUpdatesAsync(
-            currentVersion,
-            releaseUpdateChecker,
-            desktopUpdates,
-            updateCheckInterval,
-            cancellationToken);
     }
 }
 
@@ -497,95 +487,6 @@ static async Task OpenReleaseInDefaultBrowserAsync(Uri releaseUri, CancellationT
     var error = await Electron.Shell.OpenExternalAsync(releaseUri.AbsoluteUri);
     if (!string.IsNullOrWhiteSpace(error))
         throw new InvalidOperationException($"The default browser could not open the release page: {error}");
-}
-
-static void ConfigureElectronAutoUpdater(DesktopUpdateService desktopUpdates)
-{
-    Electron.AutoUpdater.AutoDownload = true;
-    Electron.AutoUpdater.AutoInstallOnAppQuit = true;
-    Electron.AutoUpdater.AllowPrerelease = false;
-    desktopUpdates.Enable(() => Electron.AutoUpdater.QuitAndInstall(isSilent: true, isForceRunAfter: true));
-    Electron.AutoUpdater.OnCheckingForUpdate += desktopUpdates.MarkChecking;
-    Electron.AutoUpdater.OnUpdateAvailable += info => desktopUpdates.MarkDownloading(info.Version);
-    Electron.AutoUpdater.OnUpdateNotAvailable += info => desktopUpdates.MarkIdle(info.Version);
-    Electron.AutoUpdater.OnDownloadProgress += progress =>
-        desktopUpdates.MarkDownloading(desktopUpdates.Snapshot.Version, progress.Percent);
-    Electron.AutoUpdater.OnUpdateDownloaded += info => desktopUpdates.MarkReady(info.Version);
-    Electron.AutoUpdater.OnError += error =>
-    {
-        desktopUpdates.MarkError(error);
-        Console.Error.WriteLine($"Electron auto-update failed: {error}");
-    };
-}
-
-static async Task MonitorElectronUpdatesAsync(
-    DesktopUpdateService desktopUpdates,
-    TimeSpan updateCheckInterval,
-    CancellationToken cancellationToken)
-{
-    if (cancellationToken.IsCancellationRequested) return;
-
-    await CheckForElectronUpdatesAsync(desktopUpdates);
-
-    using var timer = new PeriodicTimer(updateCheckInterval);
-    try
-    {
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-        {
-            if (desktopUpdates.Snapshot.Status is DesktopUpdateStatus.Downloading
-                or DesktopUpdateStatus.Ready
-                or DesktopUpdateStatus.Restarting)
-            {
-                continue;
-            }
-
-            await CheckForElectronUpdatesAsync(desktopUpdates);
-        }
-    }
-    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-    {
-        // Normal application shutdown.
-    }
-}
-
-static async Task CheckForElectronUpdatesAsync(
-    DesktopUpdateService desktopUpdates,
-    CancellationToken cancellationToken = default)
-{
-    if (cancellationToken.IsCancellationRequested) return;
-
-    try
-    {
-        await Electron.AutoUpdater.CheckForUpdatesAsync();
-    }
-    catch (Exception exception)
-    {
-        desktopUpdates.MarkError(exception.Message);
-        Console.Error.WriteLine($"Electron auto-update check failed: {exception.Message}");
-    }
-}
-
-static async Task MonitorManualUpdatesAsync(
-    string currentVersion,
-    IDesktopReleaseUpdateChecker releaseUpdateChecker,
-    DesktopUpdateService desktopUpdates,
-    TimeSpan updateCheckInterval,
-    CancellationToken cancellationToken)
-{
-    if (cancellationToken.IsCancellationRequested) return;
-
-    await CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellationToken);
-
-    using var timer = new PeriodicTimer(updateCheckInterval);
-    try
-    {
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-            await CheckForManualUpdateAsync(currentVersion, releaseUpdateChecker, desktopUpdates, cancellationToken);
-    }
-    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-    {
-        // Normal application shutdown.
-    }
 }
 
 static async Task CheckForManualUpdateAsync(
@@ -631,6 +532,17 @@ static bool IsElectronArgument(string arg)
         || normalized.StartsWith("electronPort=", StringComparison.OrdinalIgnoreCase)
         || normalized.StartsWith("electronPID=", StringComparison.OrdinalIgnoreCase)
         || normalized.StartsWith("electronAuthToken=", StringComparison.OrdinalIgnoreCase);
+}
+
+static string? GetDistributionChannelBuildMetadata()
+{
+    var values = Assembly.GetEntryAssembly()?
+        .GetCustomAttributes<AssemblyMetadataAttribute>()
+        .Where(attribute => attribute.Key.Equals(DistributionChannelPolicy.BuildMetadataKey, StringComparison.Ordinal))
+        .Select(attribute => attribute.Value)
+        .ToArray();
+
+    return values is { Length: 1 } ? values[0] : null;
 }
 
 static string? GetInstalledAppVersion()

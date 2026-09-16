@@ -3,23 +3,19 @@ namespace Lorekeeper.Desktop;
 public enum DesktopUpdateStatus
 {
     Unsupported,
+    StoreManaged,
     Idle,
     Checking,
     ManualUpdateAvailable,
-    Downloading,
-    Ready,
-    Restarting,
     Error,
 }
 
 public sealed record DesktopUpdateSnapshot(
     DesktopUpdateStatus Status,
     string? Version = null,
-    double? DownloadPercent = null,
     string? Error = null,
     Uri? ReleaseUri = null)
 {
-    public bool CanRestart => Status == DesktopUpdateStatus.Ready;
     public bool CanDownload => Status == DesktopUpdateStatus.ManualUpdateAvailable && ReleaseUri is not null;
 }
 
@@ -32,7 +28,6 @@ public interface IDesktopUpdateService
     bool CanCheckForUpdates { get; }
     Task CheckForUpdatesAsync(CancellationToken cancellationToken = default);
     Task OpenDownloadAsync(CancellationToken cancellationToken = default);
-    Task RestartToUpdateAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class DesktopUpdateService : IDesktopUpdateService
@@ -42,7 +37,6 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
     private string? _installedVersion;
     private Func<Uri, CancellationToken, Task>? _openDownload;
     private Func<CancellationToken, Task>? _checkForUpdates;
-    private Action? _restart;
 
     public event EventHandler? StateChanged;
 
@@ -83,10 +77,7 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
                 throw new InvalidOperationException("Manual update checks are unavailable.");
 
             if (_snapshot.Status is DesktopUpdateStatus.Checking
-                or DesktopUpdateStatus.ManualUpdateAvailable
-                or DesktopUpdateStatus.Downloading
-                or DesktopUpdateStatus.Ready
-                or DesktopUpdateStatus.Restarting)
+                or DesktopUpdateStatus.ManualUpdateAvailable)
             {
                 return Task.CompletedTask;
             }
@@ -112,30 +103,6 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
         }
 
         return openDownload(releaseUri, cancellationToken);
-    }
-
-    public Task RestartToUpdateAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        Action restart;
-        lock (_lock)
-        {
-            if (!_snapshot.CanRestart || _restart is null)
-                throw new InvalidOperationException("No downloaded update is ready to install.");
-
-            _snapshot = _snapshot with { Status = DesktopUpdateStatus.Restarting, Error = null };
-            restart = _restart;
-        }
-
-        NotifyStateChanged();
-        restart();
-        return Task.CompletedTask;
-    }
-
-    public void Enable(Action restart)
-    {
-        lock (_lock)
-            _restart = restart;
     }
 
     public void EnableManualDownloads(Func<Uri, CancellationToken, Task> openDownload)
@@ -182,6 +149,17 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
         SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Idle, Clean(version)));
     }
 
+    public void MarkStoreManaged(string? version = null)
+    {
+        lock (_lock)
+        {
+            if (_installedVersion is null)
+                _installedVersion = Clean(version);
+        }
+
+        SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.StoreManaged, Clean(version)));
+    }
+
     public void MarkManualUpdateAvailable(string version, Uri releaseUri)
     {
         ArgumentNullException.ThrowIfNull(releaseUri);
@@ -190,12 +168,6 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
             Clean(version),
             ReleaseUri: releaseUri));
     }
-
-    public void MarkDownloading(string? version, double? percent = null) =>
-        SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Downloading, Clean(version), percent));
-
-    public void MarkReady(string? version) =>
-        SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Ready, Clean(version)));
 
     public void MarkError(string error) =>
         SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Error, Error: Clean(error)));

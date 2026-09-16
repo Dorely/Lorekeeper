@@ -10,6 +10,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <LorekeeperDistributionChannel Condition="'$(LorekeeperDistributionChannel)' == '' and '$(Configuration)' == 'Release'">Free</LorekeeperDistributionChannel>
+    <LorekeeperDistributionChannel Condition="'$(LorekeeperDistributionChannel)' == ''">Development</LorekeeperDistributionChannel>
     <Title>Lorekeeper</Title>
     <Description>AI-assisted narrative coherence engine.</Description>
     <Version>0.3.17</Version>
@@ -48,10 +50,16 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
+    <AssemblyMetadata Include="LorekeeperDistributionChannel" Value="$(LorekeeperDistributionChannel)" />
     <Content Include="ElectronHostHook\index.js" Link=".electron\ElectronHostHook\index.js" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\print-artifact-profiles-v1.json" Link="PrintArtifactProfiles\print-artifact-profiles-v1.json" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v2.json" Link="Typography\manuscript-typography-v2.json" />
   </ItemGroup>
+
+  <Target Name="ValidateLorekeeperDistributionChannel" BeforeTargets="CoreCompile">
+    <Error Condition="'$(LorekeeperDistributionChannel)' != 'Development' and '$(LorekeeperDistributionChannel)' != 'Free' and '$(LorekeeperDistributionChannel)' != 'Store'"
+           Text="LorekeeperDistributionChannel must be Development, Free, or Store." />
+  </Target>
 
   <!-- Keep the pinned connector/template metadata; replace only its empty hook. -->
   <Target Name="UseLorekeeperPrintHook" AfterTargets="ElectronResolvePaths">

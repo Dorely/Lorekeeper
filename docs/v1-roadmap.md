@@ -26,13 +26,13 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M0 - Establish release foundations (In progress; M0.3 local baseline measurement remains blocked) |
-| Next bounded step | M0.5 - Implement deterministic free/Store channel policy and create an unsigned local full-trust MSIX feasibility package; do not install it without a separately authorized disposable test profile |
-| Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure |
-| Next investigation | Confirm the MSIX manifest/toolchain boundary and use pure channel-policy tests; retain M0.3's native-input blocker and do not substitute browser automation, simulated UI input, or hosted CI |
+| Active milestone | M0 - Establish release foundations (In progress; M0.3 measurement and M0.5 native-package evidence remain blocked) |
+| Next bounded step | M0.6 - Record the Mac App Store prerequisite block; do not add a MAS flavor, entitlements, signing, or workflow change until the owner supplies the required Apple inputs and selects the signed Apple-silicon build host |
+| Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight |
+| Next investigation | Retain M0.3's native-input blocker; for M0.5, obtain separately authorized disposable-profile installation evidence and safe OAuth authorization rather than simulating either; do not substitute browser automation, simulated UI input, or hosted CI |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Complete one coherent M0.5 policy/package-preflight step, update its evidence, and stop before any installation, Store submission, or M0.6 signing work unless the owner expands the scope |
-| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. No performance baseline, Store feasibility, or external integration acceptance is established |
+| Scope boundary for the next session | Record only the M0.6 Apple prerequisite block, then stop. Do not install an MSIX, create a Store submission, use OAuth, create MAS signing assets, or alter the existing dispatch-only macOS workflow unless the owner separately expands scope |
+| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only; they do not establish a trusted installed package, Store acceptance, OAuth, provider use, printing, import/export, process/data paths, or updates on a real package |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -105,7 +105,7 @@ the plan; follow the user's current task and the applicable execution rules.
 
 | ID | Status | Deliverable | Exit condition | Evidence / remaining work |
 |---|---|---|---|---|
-| M0 | In progress | Test policy, local performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Major packaging constraints identified; baseline measurements recorded | M0.1 complete; M0.2 superseded; M0.3 measurement blocked pending a native local Electron input surface |
+| M0 | In progress | Test policy, local performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Documented local package constraints and target-specific evidence | M0.1/M0.4 complete; M0.2 superseded; M0.3 remains blocked pending a native local Electron input surface; M0.5 remains blocked pending authorized installed-package/OAuth evidence; M0.6 requires Apple account, signing, and host inputs |
 | M1 | Not started | Preconfigured OpenAI account models and external-browser OAuth | Fresh connection reaches usable chat without manual model setup or Test clicks | No implementation/integration evidence |
 | M2 | Not started | Project page library, shared placements, release overrides, safe migration | Existing content survives; shared editing and release isolation work | No implementation/migration evidence |
 | M3 | Not started | Immediate manual Undo/Redo, recoverable save queue, incremental history | Latency and failure-recovery gates pass | Measure baseline first |
@@ -146,9 +146,19 @@ Initial M0 substeps (split further only when current-code findings justify it):
   mirror-and-review history audit without performing it. No terms were adopted,
   no history was scanned, and no repository, Store, signing, or publishing action
   occurred.
-- [ ] **M0.5 - Windows MSIX feasibility.** Validate the actual packaged process
-  tree, data paths, OAuth/printing/import/export boundaries, and update-channel
-  separation before relying on Store distribution.
+- [ ] **M0.5 - Windows MSIX feasibility (blocked after local preflight, 2026-09-16).**
+  `DistributionChannelPolicy` makes Development update-disabled, defaults Release
+  to Free manual GitHub-release/browser handoff only, and makes explicit Store
+  builds Store-managed with no GitHub checker, browser handoff, or Electron
+  updater. The focused deterministic production-policy tests pass. The local
+  full-trust `MakeAppx` preflight packages the Store `win-unpacked` closure,
+  validates required contents and its embedded CMS signer, and removes its exact
+  ephemeral current-user certificate. See
+  [M0.5 evidence](evidence/m0.5-windows-msix-feasibility.md). It does not install
+  a package or establish Windows trust-chain, Store, process-tree, data-path,
+  import/export, print, OAuth, provider, or updater evidence. Resume only with
+  separately authorized disposable-profile installation and safe OAuth-test
+  authority; do not simulate those boundaries.
 - [ ] **M0.6 - Mac sandbox feasibility.** Build/test the actual Electron/.NET/
   Press process tree under the MAS constraints; record entitlement/signing
   findings and real-device evidence still required. An unavailable account or
@@ -167,6 +177,7 @@ because the feature milestones are ready.
 | 2026-09-16 | Superseded M0.2 and declined general hosted CI | Keep general repository gates and focused regressions local; retain only the dispatch-only macOS release builder because it provides required native Mac compute | Owner decision |
 | 2026-09-16 | Defined M0.3 as a local Windows Release reference baseline, not a hardware minimum | The documented 32 GiB Windows machine is a comparison environment only; latency targets remain v1 goals and do not establish macOS, Store, updater, provider, or large-library performance | Owner-approved M0.3 scope; [local evidence](evidence/m0.3-local-performance-baseline.md) |
 | 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit legal/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
+| 2026-09-16 | Added M0.5 local update-channel policy and full-trust MSIX preflight | Free builds use user-initiated GitHub release notification/browser download only; Store builds suppress GitHub, browser, and Electron updater paths. The local package preflight proves the Store closure, contents, and embedded CMS signer without installation, trusted-store mutation, Store submission, or OAuth | [M0.5 evidence](evidence/m0.5-windows-msix-feasibility.md) |
 
 ## 2. Release definition and settled scope
 

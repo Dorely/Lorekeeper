@@ -135,24 +135,24 @@ binding and an accepted OAuth redirect together. The host remains local-only
 unless a deliberate architecture and security change expands its exposure.
 
 Electron-only responsibilities include hardened binding, desktop-window creation,
-shutdown, installed-Windows automatic updates, and opening deliberate external
-handoffs. Installed Windows builds use Electron's updater. Windows portable and
-macOS builds use the constrained public latest-release endpoint, require a newer
-stable version with an applicable platform/architecture asset, and open the
-release in the operating system browser. Update state is exposed to the shared
-top-bar control rather than owned by individual pages. That control also shows
-the installed application version and, while no update is pending or in
-progress, offers a manual "Check for updates" action that re-runs the same
-discovery immediately: the Electron updater check for installed Windows builds,
-or the constrained public latest-release check for portable and macOS builds.
+shutdown, and the deliberately narrow external-browser handoff used by the Free
+distribution channel. `DistributionChannelPolicy` resolves immutable assembly
+metadata at startup; it is not a user setting. Development always disables update
+checks. A Release build defaults to `Free`, which registers the constrained public
+GitHub release checker only after the user chooses the shared-top-bar **Check for
+updates** action. A newer stable release can expose **Download Update**, which
+opens the release page in the operating system browser. It never downloads,
+installs, or restarts Electron automatically, and it never polls in the
+background.
 
-The automatic updater downloads in the background and offers an application-owned
-restart action only after Electron reports readiness. Manual discovery reuses an
-ETag, accepts stable SemVer releases only, constrains release and asset URLs to the
-configured public repository, and shows a download action only for an applicable
-newer artifact. Failures remain non-fatal UI state and must not prevent the local
-workspace from opening. Never treat public release metadata as trusted executable
-content without the packaging and updater checks described in the validation
+`Store` is an explicit Release build channel. It does not register a GitHub
+checker, invoke a browser handoff, or configure an Electron updater; the shared
+top bar says that Microsoft Store manages updates. Missing, duplicate, or malformed
+Release metadata fails closed with all update behavior disabled. The Free checker
+accepts stable SemVer releases only and constrains release and asset URLs to the
+configured public repository. Its failures remain non-fatal UI state and must not
+prevent the local workspace from opening. Never treat public release metadata as
+trusted executable content without the package evidence described in the validation
 chapter.
 
 Development uses the repository-local database by default. Packaged builds use a
@@ -261,9 +261,9 @@ agents, and web research. Do not hard-code configuration in components or featur
 entities.
 
 `Desktop:BindHost` and `Desktop:HttpPort` define the Electron-backed local URL;
-`Desktop:UsePerUserDataDirectory` controls packaged data placement;
-`Desktop:UpdateCheckIntervalMinutes` and `Desktop:ReleaseApiUrl` define update
-discovery; `Startup:MinimumSplashMilliseconds` controls the minimum startup
+`Desktop:UsePerUserDataDirectory` controls packaged data placement; and
+`Desktop:ReleaseApiUrl` defines the Free-channel, user-initiated discovery
+endpoint. `Startup:MinimumSplashMilliseconds` controls the minimum startup
 surface duration; and `Blazor:MaximumReceiveMessageSizeBytes` bounds interactive
 payloads. `VersionHistory:HistoryRoot` optionally overrides the local Git
 history root. The distributable supplies Lorekeeper's public GitHub OAuth client
