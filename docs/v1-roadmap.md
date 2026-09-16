@@ -26,13 +26,13 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M0 - Establish release foundations (In progress; M0.3 measurement and M0.5 native-package evidence remain blocked) |
-| Next bounded step | M0.6 - Record the Mac App Store prerequisite block; do not add a MAS flavor, entitlements, signing, or workflow change until the owner supplies the required Apple inputs and selects the signed Apple-silicon build host |
+| Active milestone | M0 - Establish release foundations (In progress; M0.3 measurement, M0.5 native-package evidence, and M0.6 Mac sandbox feasibility remain blocked) |
+| Next bounded step | M0.6 - Mac App Store sandbox feasibility (Blocked until the owner supplies the Apple Developer Team ID, MAS development certificate/profile, test App ID, Apple-silicon test Mac, and selected signed-build host) |
 | Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight |
-| Next investigation | Retain M0.3's native-input blocker; for M0.5, obtain separately authorized disposable-profile installation evidence and safe OAuth authorization rather than simulating either; do not substitute browser automation, simulated UI input, or hosted CI |
+| Next investigation | Retain M0.3's native-input blocker; for M0.5, obtain separately authorized disposable-profile installation evidence and safe OAuth authorization rather than simulating either. M0.6 has no implementation work until its owner-supplied Apple inputs and signed-host decision exist; do not substitute cloud-only Mac access, browser automation, or a normal Electron build |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Record only the M0.6 Apple prerequisite block, then stop. Do not install an MSIX, create a Store submission, use OAuth, create MAS signing assets, or alter the existing dispatch-only macOS workflow unless the owner separately expands scope |
-| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only; they do not establish a trusted installed package, Store acceptance, OAuth, provider use, printing, import/export, process/data paths, or updates on a real package |
+| Scope boundary for the next session | Wait for the owner’s M0.6 Apple prerequisites/host decision or separately authorized M0.3/M0.5 native evidence. Do not install an MSIX, create a Store submission, use OAuth, create MAS signing assets, or alter the existing dispatch-only macOS workflow unless the owner separately expands scope |
+| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only; they do not establish a trusted installed package, Store acceptance, OAuth, provider use, printing, import/export, process/data paths, or updates on a real package. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -159,10 +159,28 @@ Initial M0 substeps (split further only when current-code findings justify it):
   import/export, print, OAuth, provider, or updater evidence. Resume only with
   separately authorized disposable-profile installation and safe OAuth-test
   authority; do not simulate those boundaries.
-- [ ] **M0.6 - Mac sandbox feasibility.** Build/test the actual Electron/.NET/
-  Press process tree under the MAS constraints; record entitlement/signing
-  findings and real-device evidence still required. An unavailable account or
-  runner is a named blocker, not a successful feasibility result.
+- [ ] **M0.6 - Mac App Store sandbox feasibility (blocked, 2026-09-16).** The
+  owner must first supply an Apple Developer Team ID, MAS development
+  certificate/profile, test App ID, and Apple-silicon test Mac, then explicitly
+  select the signed build host. Until then, there is no `mas-dev` flavor, MAS
+  Electron runtime, entitlement file, Apple credential, signing configuration,
+  artifact, or workflow change. The current dispatch-only macOS workflow and
+  direct-DMG path remain unchanged.
+
+  Once unblocked, add a separate `mas-dev` flavor that uses Electron’s MAS
+  runtime rather than the ordinary macOS Electron build. Give the app and each
+  helper separate entitlements, initially limited to App Sandbox, loopback/network
+  client and server access, user-selected read/write files, and printing; include
+  no embedded credential, broad filesystem entitlement, App Group, or
+  library-validation exception unless a specific signed-device failure proves it
+  necessary. Build only on the selected signed Apple-silicon host and capture
+  sanitized signing/entitlement, Electron/.NET/Press process-tree, loopback,
+  sandboxed SQLite/history, file-picker import/export, print-handoff, and Store
+  updater-suppression evidence. OAuth and external services remain separately
+  authorized. If Press, .NET, SQLite, printing, or file access cannot work within
+  that minimum sandbox, stop the Store channel and record the evidence rather
+  than weakening the sandbox speculatively. See
+  [M0.6 evidence and prerequisites](evidence/m0.6-mac-app-store-feasibility.md).
 
 M0.4-M0.6 may proceed alongside independent work after their prerequisites are
 met. They remain explicit release gates; do not fabricate evidence or skip them
@@ -178,6 +196,7 @@ because the feature milestones are ready.
 | 2026-09-16 | Defined M0.3 as a local Windows Release reference baseline, not a hardware minimum | The documented 32 GiB Windows machine is a comparison environment only; latency targets remain v1 goals and do not establish macOS, Store, updater, provider, or large-library performance | Owner-approved M0.3 scope; [local evidence](evidence/m0.3-local-performance-baseline.md) |
 | 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit legal/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
 | 2026-09-16 | Added M0.5 local update-channel policy and full-trust MSIX preflight | Free builds use user-initiated GitHub release notification/browser download only; Store builds suppress GitHub, browser, and Electron updater paths. The local package preflight proves the Store closure, contents, and embedded CMS signer without installation, trusted-store mutation, Store submission, or OAuth | [M0.5 evidence](evidence/m0.5-windows-msix-feasibility.md) |
+| 2026-09-16 | Recorded M0.6 as blocked pending owner-supplied Apple signing and Apple-silicon host inputs | Preserve the direct-DMG/macOS workflow while defining the minimum MAS sandbox acceptance boundary; no MAS build flavor, entitlement, certificate, device test, signing, notarization, Store submission, or GitHub secret was added | [M0.6 prerequisite record](evidence/m0.6-mac-app-store-feasibility.md) |
 
 ## 2. Release definition and settled scope
 

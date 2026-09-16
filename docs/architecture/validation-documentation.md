@@ -301,6 +301,21 @@ checks, creates an ad-hoc-signed DMG, verifies architectures/signatures, mounts 
 smoke-tests the application, and writes a checksum. Do not substitute a
 cross-compiled artifact for that native evidence.
 
+M0.6 Mac App Store feasibility is blocked, not implemented, until the owner
+supplies an Apple Developer Team ID, MAS development certificate/profile, test App
+ID, an Apple-silicon test Mac, and selects the signed build host. The existing
+direct-DMG builder is not a MAS builder and must remain unchanged. Once unblocked,
+the acceptance build uses Electron’s MAS runtime with App Sandbox and distinct app/
+helper entitlement files. Begin only with evidenced sandbox, loopback/network
+client/server, user-selected read/write-file, and printing entitlements; do not
+add broad filesystem access, App Groups, or a library-validation exception without
+a reproducible signed-device failure. Capture sanitized signing/entitlement,
+process-tree, loopback, SQLite/history, file-picker, print-handoff, and Store
+updater-suppression evidence on the selected device. Stop the Store channel rather
+than weaken the sandbox speculatively if a required native boundary fails. Do not
+upload, notarize, publish, submit to App Store Connect, add GitHub signing secrets,
+or change the macOS workflow without a new explicit authorization.
+
 The Windows stable-release entry point is `scripts/release.ps1`, also exposed by
 the **Release Lorekeeper** VS Code task. Invoking it authorizes preparation and
 direct publication from `main`. It requires a clean worktree/index, the intended

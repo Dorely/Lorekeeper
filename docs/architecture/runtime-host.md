@@ -155,6 +155,16 @@ prevent the local workspace from opening. Never treat public release metadata as
 trusted executable content without the package evidence described in the validation
 chapter.
 
+The current macOS distribution remains the direct-DMG path. No Mac App Store
+runtime or sandboxed `mas-dev` flavor exists while M0.6 lacks the owner-supplied
+Apple Developer Team ID, MAS development certificate/profile, test App ID,
+Apple-silicon test Mac, and signed-host decision. Do not treat the ordinary
+macOS Electron runtime, ad-hoc package, or dispatch-only release workflow as MAS
+evidence. When those prerequisites exist, the MAS channel must use Electron’s
+MAS runtime with separate application/helper entitlements and validate the full
+native process/data/file/print boundary on that signed device; the validation
+chapter owns the evidence procedure.
+
 Development uses the repository-local database by default. Packaged builds use a
 per-user application-data location so installers, portable executables, and
 mounted DMGs remain disposable. Database-path and migration safety details belong
