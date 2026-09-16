@@ -1,0 +1,3998 @@
+{
+  "formatVersion": 1,
+  "scope": "M0.4 local inventory only; no license adoption, publication, signing, Store submission, or history scan.",
+  "channels": [
+    "direct-mac",
+    "free-windows",
+    "mac-app-store",
+    "store-windows"
+  ],
+  "summary": {
+    "satisfied": 24,
+    "needs-inclusion": 2,
+    "legal-review": 166,
+    "unresolved-provenance": 30
+  },
+  "entries": [
+    {
+      "kind": "application-source",
+      "name": "Lorekeeper source license",
+      "version": "unselected",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "No repository-wide LICENSE file exists.",
+      "attributionAction": "Owner must select and add the approved repository license before publication.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "LICENSE"
+      ]
+    },
+    {
+      "kind": "branding-asset",
+      "name": "Lorekeeper branding and icons",
+      "version": "current",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "No recorded ownership or source provenance accompanies the bundled branding assets.",
+      "attributionAction": "Record ownership or upstream license/provenance before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/branding"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "andika",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/andika",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "atkinson-hyperlegible",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/atkinson-hyperlegible",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "balsamiq-sans",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/balsamiq-sans",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "fredoka",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/fredoka",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "kalam",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/kalam",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "lexend",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/lexend",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "lora",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/lora",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "merriweather",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/merriweather",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "nunito",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/nunito",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "patrick-hand",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/patrick-hand",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "bundled-font",
+      "name": "roboto-mono",
+      "version": "Google Fonts source commit ec0464b978de222073645d6d3366f3fdf03376d8",
+      "status": "satisfied",
+      "licenseEvidence": "Sourced and licensed in Lorekeeper/wwwroot/fonts/SOURCES.md with an adjacent OFL.txt.",
+      "attributionAction": "Ship the unchanged OFL.txt with this font family.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/fonts/roboto-mono",
+        "Lorekeeper/wwwroot/fonts/SOURCES.md"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "adler2",
+      "version": "2.0.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license '0BSD OR MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "aes",
+      "version": "0.9.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "arrayvec",
+      "version": "0.7.8",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "autocfg",
+      "version": "1.5.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "bitflags",
+      "version": "2.13.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "block-padding",
+      "version": "0.4.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "bytemuck",
+      "version": "1.25.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Zlib OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "bytemuck_derive",
+      "version": "1.11.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Zlib OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "cbc",
+      "version": "0.2.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "chacha20",
+      "version": "0.10.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "cipher",
+      "version": "0.5.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "const-oid",
+      "version": "0.10.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "cpubits",
+      "version": "0.1.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "cpufeatures",
+      "version": "0.3.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "crc32fast",
+      "version": "1.5.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "digest",
+      "version": "0.11.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "ecb",
+      "version": "0.2.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "encoding_rs",
+      "version": "0.8.35",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license '(Apache-2.0 OR MIT) AND BSD-3-Clause'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "equivalent",
+      "version": "1.0.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "errno",
+      "version": "0.3.14",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "euclid",
+      "version": "0.22.14",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "fastrand",
+      "version": "2.5.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "fdeflate",
+      "version": "0.3.7",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "flate2",
+      "version": "1.1.9",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "font-types",
+      "version": "0.11.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "font-types",
+      "version": "0.12.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "getrandom",
+      "version": "0.3.4",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "getrandom",
+      "version": "0.4.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "harfrust",
+      "version": "0.12.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "hashbrown",
+      "version": "0.17.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "hybrid-array",
+      "version": "0.4.13",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "hypher",
+      "version": "0.1.7",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "indexmap",
+      "version": "2.14.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "inout",
+      "version": "0.2.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "itoa",
+      "version": "1.0.18",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "kurbo",
+      "version": "0.13.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "libc",
+      "version": "0.2.189",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "linux-raw-sys",
+      "version": "0.12.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "log",
+      "version": "0.4.33",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "lopdf",
+      "version": "0.44.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "md-5",
+      "version": "0.11.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "memchr",
+      "version": "2.8.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Unlicense OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "miniz_oxide",
+      "version": "0.8.9",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Zlib OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "moxcms",
+      "version": "0.9.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'BSD-3-Clause OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "nom",
+      "version": "8.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "num-traits",
+      "version": "0.2.19",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "once_cell",
+      "version": "1.21.4",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "pdf-writer",
+      "version": "0.15.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "png",
+      "version": "0.18.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "polycool",
+      "version": "0.4.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "pxfm",
+      "version": "0.1.30",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'BSD-3-Clause OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "quote",
+      "version": "1.0.47",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "r-efi",
+      "version": "5.3.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0 OR LGPL-2.1-or-later'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "r-efi",
+      "version": "6.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0 OR LGPL-2.1-or-later'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "rand",
+      "version": "0.10.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "rand_core",
+      "version": "0.10.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "rangemap",
+      "version": "1.7.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT/Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "read-fonts",
+      "version": "0.39.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "read-fonts",
+      "version": "0.41.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "rustix",
+      "version": "1.1.4",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "ryu",
+      "version": "1.0.23",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 OR BSL-1.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "serde",
+      "version": "1.0.229",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "serde_core",
+      "version": "1.0.229",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "serde_derive",
+      "version": "1.0.229",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "serde_json",
+      "version": "1.0.151",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "sha2",
+      "version": "0.11.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "simd-adler32",
+      "version": "0.3.10",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "skrifa",
+      "version": "0.42.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "smallvec",
+      "version": "1.15.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "stringprep",
+      "version": "0.1.5",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT/Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "subsetter",
+      "version": "0.2.6",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "syn",
+      "version": "2.0.119",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "syn",
+      "version": "3.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "tempfile",
+      "version": "3.23.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "thiserror",
+      "version": "2.0.19",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "thiserror-impl",
+      "version": "2.0.19",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "tinyvec",
+      "version": "1.12.0",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Zlib OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "tinyvec_macros",
+      "version": "0.1.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0 OR Zlib'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "typenum",
+      "version": "1.20.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-bidi",
+      "version": "0.3.18",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license '(MIT OR Apache-2.0) AND Unicode-3.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-linebreak",
+      "version": "0.1.5",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-normalization",
+      "version": "0.1.25",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-properties",
+      "version": "0.1.4",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT/Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "unicode-segmentation",
+      "version": "1.13.3",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "wasip2",
+      "version": "1.0.4+wasi-0.2.12",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "weezl",
+      "version": "0.2.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "windows-link",
+      "version": "0.2.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "wit-bindgen",
+      "version": "0.57.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "write-fonts",
+      "version": "0.48.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "zmij",
+      "version": "1.0.23",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "zune-core",
+      "version": "0.5.1",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0 OR Zlib'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "cargo-package",
+      "name": "zune-jpeg",
+      "version": "0.5.15",
+      "status": "legal-review",
+      "licenseEvidence": "Cargo metadata license 'MIT OR Apache-2.0 OR Zlib'.",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/Cargo.lock",
+        "Lorekeeper.Press/Cargo.toml"
+      ]
+    },
+    {
+      "kind": "distribution-prerequisite",
+      "name": "Apple Developer identity, MAS profile, and real-device evidence",
+      "version": "owner input required",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "M0.6 remains account-gated; no Apple credentials, profile, or signed-device result exists.",
+      "attributionAction": "Owner selects the signing host and supplies account/test-device access before M0.6 execution.",
+      "channels": [
+        "direct-mac",
+        "mac-app-store"
+      ],
+      "sources": [
+        "docs/v1-roadmap.md"
+      ]
+    },
+    {
+      "kind": "distribution-prerequisite",
+      "name": "GitHub public-repository clearance",
+      "version": "not started",
+      "status": "legal-review",
+      "licenseEvidence": "Public repository visibility requires the future M6 tracked-file and history audit.",
+      "attributionAction": "Complete the documented M6 audit and resolve findings before changing repository visibility.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "docs/research/m0.4-distribution-inventory.md"
+      ]
+    },
+    {
+      "kind": "distribution-prerequisite",
+      "name": "macOS dependency and artifact closure",
+      "version": "not measured",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "This inventory examines the Windows staged closure only; native macOS closure belongs to M0.6.",
+      "attributionAction": "Generate and review the signed native macOS closure only after M0.6 is unblocked.",
+      "channels": [
+        "direct-mac",
+        "mac-app-store"
+      ],
+      "sources": [
+        "docs/v1-roadmap.md",
+        "scripts/build-macos-release.ps1"
+      ]
+    },
+    {
+      "kind": "distribution-prerequisite",
+      "name": "Microsoft Partner Center identity, product, price, and Store signing",
+      "version": "owner input required",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "No publisher identity, Store product reservation, pricing decision, or production signing material is in scope.",
+      "attributionAction": "Owner supplies the account decisions only when M7 Store submission is authorized.",
+      "channels": [
+        "store-windows"
+      ],
+      "sources": [
+        "docs/v1-roadmap.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/aix-ppc64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/android-arm",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/android-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/android-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/darwin-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/darwin-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/freebsd-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/freebsd-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-arm",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-ia32",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-loong64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-mips64el",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-ppc64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-riscv64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-s390x",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/linux-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/netbsd-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/netbsd-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/openbsd-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/openbsd-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/openharmony-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/sunos-x64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/win32-arm64",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/win32-ia32",
+      "version": "0.28.1",
+      "status": "unresolved-provenance",
+      "licenseEvidence": "Installed package metadata is unavailable or has no license field.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "@esbuild/win32-x64",
+      "version": "0.28.1",
+      "status": "satisfied",
+      "licenseEvidence": "Build-only package license 'MIT' in installed package metadata.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "esbuild",
+      "version": "0.28.1",
+      "status": "satisfied",
+      "licenseEvidence": "Build-only package license 'MIT' in installed package metadata.",
+      "attributionAction": "Keep out of shipped runtime closure; re-review if its role changes.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "orderedmap",
+      "version": "2.1.1",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-commands",
+      "version": "1.7.1",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-gapcursor",
+      "version": "1.4.1",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-keymap",
+      "version": "1.2.3",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-model",
+      "version": "1.25.11",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-state",
+      "version": "1.4.4",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-transform",
+      "version": "1.12.0",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "prosemirror-view",
+      "version": "1.42.2",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "npm-package",
+      "name": "w3c-keyname",
+      "version": "2.2.8",
+      "status": "satisfied",
+      "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
+      "attributionAction": "Retain the checked-in semantic-editor notice with every shipped bundle.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "tools/semantic-editor/package-lock.json",
+        "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Docnet.Core",
+      "version": "2.6.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Docnet.Core/2.6.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Docnet.Core/2.6.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "ElectronNET.Core",
+      "version": "0.5.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (ElectronNET.Core/0.5.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:ElectronNET.Core/0.5.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "ElectronNET.Core.API",
+      "version": "0.5.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (ElectronNET.Core.API/0.5.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:ElectronNET.Core.API/0.5.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "ElectronNET.Core.AspNet",
+      "version": "0.5.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (ElectronNET.Core.AspNet/0.5.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:ElectronNET.Core.AspNet/0.5.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Google.Protobuf",
+      "version": "3.30.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'BSD-3-Clause' (Google.Protobuf/3.30.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Google.Protobuf/3.30.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Humanizer.Core",
+      "version": "2.14.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Humanizer.Core/2.14.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Humanizer.Core/2.14.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "LibGit2Sharp",
+      "version": "0.32.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license file 'App_Readme/LICENSE.md' (LibGit2Sharp/0.32.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:LibGit2Sharp/0.32.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "LibGit2Sharp.NativeBinaries",
+      "version": "2.0.324",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license file 'libgit2/libgit2.license.txt' (LibGit2Sharp.NativeBinaries/2.0.324).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:LibGit2Sharp.NativeBinaries/2.0.324"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.AspNetCore.App.Internal.Assets",
+      "version": "10.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.AspNetCore.App.Internal.Assets/10.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.AspNetCore.App.Internal.Assets/10.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Bcl.AsyncInterfaces",
+      "version": "9.0.4",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Bcl.AsyncInterfaces/9.0.4).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Bcl.AsyncInterfaces/9.0.4"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Bcl.HashCode",
+      "version": "6.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Bcl.HashCode/6.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Bcl.HashCode/6.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Bcl.Memory",
+      "version": "10.0.7",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Bcl.Memory/10.0.7).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Bcl.Memory/10.0.7"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Build.Framework",
+      "version": "18.0.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Build.Framework/18.0.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Build.Framework/18.0.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.Analyzers",
+      "version": "3.11.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.Analyzers/3.11.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.Analyzers/3.11.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.Common",
+      "version": "5.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.Common/5.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.Common/5.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.CSharp",
+      "version": "5.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.CSharp/5.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.CSharp/5.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.CSharp.Workspaces",
+      "version": "5.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.Workspaces.Common",
+      "version": "5.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.Workspaces.Common/5.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.Workspaces.Common/5.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.CodeAnalysis.Workspaces.MSBuild",
+      "version": "5.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Data.Sqlite.Core",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Data.Sqlite.Core/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Data.Sqlite.Core/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Abstractions",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Abstractions/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Abstractions/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Analyzers",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Analyzers/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Analyzers/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Design",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Design/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Design/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Relational",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Relational/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Relational/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Sqlite",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Sqlite/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Sqlite/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.EntityFrameworkCore.Sqlite.Core",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.EntityFrameworkCore.Sqlite.Core/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.EntityFrameworkCore.Sqlite.Core/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Extensions.AI",
+      "version": "10.4.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Extensions.AI/10.4.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Extensions.AI/10.4.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Extensions.AI.Abstractions",
+      "version": "10.4.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Extensions.AI.Abstractions/10.4.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Extensions.AI.Abstractions/10.4.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Extensions.AI.OpenAI",
+      "version": "10.3.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Extensions.AI.OpenAI/10.3.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Extensions.AI.OpenAI/10.3.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Extensions.DependencyModel",
+      "version": "10.0.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Extensions.DependencyModel/10.0.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Extensions.DependencyModel/10.0.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.ML.Tokenizers",
+      "version": "2.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.ML.Tokenizers/2.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.ML.Tokenizers/2.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.ML.Tokenizers.Data.Cl100kBase",
+      "version": "2.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.ML.Tokenizers.Data.Cl100kBase/2.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.ML.Tokenizers.Data.Cl100kBase/2.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.ML.Tokenizers.Data.O200kBase",
+      "version": "2.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.ML.Tokenizers.Data.O200kBase/2.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.ML.Tokenizers.Data.O200kBase/2.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.VisualStudio.SolutionPersistence",
+      "version": "1.0.52",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.VisualStudio.SolutionPersistence/1.0.52).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.VisualStudio.SolutionPersistence/1.0.52"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Microsoft.Win32.SystemEvents",
+      "version": "8.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.Win32.SystemEvents/8.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Microsoft.Win32.SystemEvents/8.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Mono.TextTemplating",
+      "version": "3.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Mono.TextTemplating/3.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Mono.TextTemplating/3.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "Newtonsoft.Json",
+      "version": "13.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Newtonsoft.Json/13.0.3).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:Newtonsoft.Json/13.0.3"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "OpenAI",
+      "version": "2.8.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (OpenAI/2.8.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:OpenAI/2.8.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "PdfPig",
+      "version": "0.1.14",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Apache-2.0' (PdfPig/0.1.14).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:PdfPig/0.1.14"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SkiaSharp",
+      "version": "3.119.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SkiaSharp/3.119.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SkiaSharp/3.119.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SkiaSharp.NativeAssets.macOS",
+      "version": "3.119.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SkiaSharp.NativeAssets.macOS/3.119.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SkiaSharp.NativeAssets.macOS/3.119.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SkiaSharp.NativeAssets.Win32",
+      "version": "3.119.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SkiaSharp.NativeAssets.Win32/3.119.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SkiaSharp.NativeAssets.Win32/3.119.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SocketIO.Core",
+      "version": "3.1.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SocketIO.Core/3.1.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SocketIO.Core/3.1.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SocketIO.Serializer.Core",
+      "version": "3.1.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SocketIO.Serializer.Core/3.1.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SocketIO.Serializer.Core/3.1.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SocketIO.Serializer.SystemTextJson",
+      "version": "3.1.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SocketIO.Serializer.SystemTextJson/3.1.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SocketIO.Serializer.SystemTextJson/3.1.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SocketIOClient",
+      "version": "3.1.2",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (SocketIOClient/3.1.2).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SocketIOClient/3.1.2"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SourceGear.sqlite3",
+      "version": "3.50.4.5",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license file 'LICENSE.txt' (SourceGear.sqlite3/3.50.4.5).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SourceGear.sqlite3/3.50.4.5"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "sqlite-vec",
+      "version": "0.1.7-alpha.2.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (sqlite-vec/0.1.7-alpha.2.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:sqlite-vec/0.1.7-alpha.2.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "3.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Apache-2.0' (SQLitePCLRaw.bundle_e_sqlite3/3.0.3).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SQLitePCLRaw.bundle_e_sqlite3/3.0.3"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SQLitePCLRaw.config.e_sqlite3",
+      "version": "3.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Apache-2.0' (SQLitePCLRaw.config.e_sqlite3/3.0.3).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SQLitePCLRaw.config.e_sqlite3/3.0.3"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SQLitePCLRaw.core",
+      "version": "3.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Apache-2.0' (SQLitePCLRaw.core/3.0.3).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SQLitePCLRaw.core/3.0.3"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "SQLitePCLRaw.provider.e_sqlite3",
+      "version": "3.0.3",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Apache-2.0' (SQLitePCLRaw.provider.e_sqlite3/3.0.3).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:SQLitePCLRaw.provider.e_sqlite3/3.0.3"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.ClientModel",
+      "version": "1.8.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.ClientModel/1.8.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.ClientModel/1.8.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.CodeDom",
+      "version": "6.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.CodeDom/6.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.CodeDom/6.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition.AttributedModel",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition.AttributedModel/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition.AttributedModel/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition.Convention",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition.Convention/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition.Convention/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition.Hosting",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition.Hosting/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition.Hosting/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition.Runtime",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition.Runtime/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition.Runtime/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Composition.TypedParts",
+      "version": "9.0.0",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Composition.TypedParts/9.0.0).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Composition.TypedParts/9.0.0"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Drawing.Common",
+      "version": "8.0.22",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Drawing.Common/8.0.22).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Drawing.Common/8.0.22"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Memory.Data",
+      "version": "8.0.1",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Memory.Data/8.0.1).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Memory.Data/8.0.1"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.Numerics.Tensors",
+      "version": "10.0.4",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.Numerics.Tensors/10.0.4).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.Numerics.Tensors/10.0.4"
+      ]
+    },
+    {
+      "kind": "nuget-package",
+      "name": "VersOne.Epub",
+      "version": "3.3.6",
+      "status": "legal-review",
+      "licenseEvidence": "NuGet nuspec license expression 'Unlicense' (VersOne.Epub/3.3.6).",
+      "attributionAction": "Confirm redistribution obligations and add the approved notice before public distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:VersOne.Epub/3.3.6"
+      ]
+    },
+    {
+      "kind": "press-asset",
+      "name": "CGATS21 CRPC1 ICC profile",
+      "version": "registry file",
+      "status": "satisfied",
+      "licenseEvidence": "Lorekeeper.Press/assets/profiles/SOURCE.md records the registry source, SHA-256, and unaltered distribution terms.",
+      "attributionAction": "Retain the documented source record and distribute the unaltered profile only.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper.Press/assets/profiles/CGATS21_CRPC1.icc",
+        "Lorekeeper.Press/assets/profiles/SOURCE.md"
+      ]
+    },
+    {
+      "kind": "shipped-web-asset",
+      "name": "Bootstrap",
+      "version": "5.3.3",
+      "status": "needs-inclusion",
+      "licenseEvidence": "Shipped CSS/JS headers identify Bootstrap 5.3.3 as MIT, but no Bootstrap license file is retained beside the copied distribution.",
+      "attributionAction": "Add the verified Bootstrap MIT notice to the approved consolidated distribution notice.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/lib/bootstrap/dist/css/bootstrap.css"
+      ]
+    },
+    {
+      "kind": "shipped-web-asset",
+      "name": "vis-network",
+      "version": "checked-in distribution",
+      "status": "satisfied",
+      "licenseEvidence": "Both Apache-2.0 and MIT license texts are retained beside the shipped distribution.",
+      "attributionAction": "Retain both existing license texts in the shipped web asset closure.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/wwwroot/lib/vis-network/LICENSE-APACHE-2.0",
+        "Lorekeeper/wwwroot/lib/vis-network/LICENSE-MIT"
+      ]
+    },
+    {
+      "kind": "third-party-notices",
+      "name": "repository-wide third-party notice",
+      "version": "absent",
+      "status": "needs-inclusion",
+      "licenseEvidence": "No repository-wide NOTICE or THIRD-PARTY-NOTICES file exists.",
+      "attributionAction": "Create the approved consolidated notice after the legal review resolves each dependency obligation.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "NOTICE",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "kind": "windows-stage-closure",
+      "name": "unsigned Windows win-unpacked closure",
+      "version": "current local Release stage",
+      "status": "legal-review",
+      "licenseEvidence": "Deterministic aggregate SHA-256 c604f870e07f732d9ca8b48a7e68cbe8654548578a25520d21e93b21e8d60a66 over 778 staged files; retained evidence files: resources/bin/press-runtime/sbom.json, resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.br, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.gz.",
+      "attributionAction": "Compare the final Windows closure with the approved source license and third-party notice set before publishing.",
+      "channels": [
+        "free-windows",
+        "store-windows"
+      ],
+      "sources": [
+        "publish/win-x64/win-unpacked"
+      ]
+    }
+  ]
+}

@@ -26,13 +26,13 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M0 - Establish release foundations (In progress; M0.3 local baseline measurement is blocked) |
-| Next bounded step | M0.3 - Restore a local native-Electron input surface, then execute the approved five-warm-up/30-sample measurement protocol using the existing isolated Release package runner |
-| Completed implementation | M0.1 - Aligned the approved focused, deterministic regression-test policy across repository instructions and current validation guidance; M0.2 is superseded by the owner’s local-validation decision |
-| Next investigation | Resolve the missing native-app control surface or use an explicitly authorized local operator for M0.3; do not substitute browser automation, simulated UI input, or hosted CI for the packaged Electron measurement |
+| Active milestone | M0 - Establish release foundations (In progress; M0.3 local baseline measurement remains blocked) |
+| Next bounded step | M0.5 - Implement deterministic free/Store channel policy and create an unsigned local full-trust MSIX feasibility package; do not install it without a separately authorized disposable test profile |
+| Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure |
+| Next investigation | Confirm the MSIX manifest/toolchain boundary and use pure channel-policy tests; retain M0.3's native-input blocker and do not substitute browser automation, simulated UI input, or hosted CI |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Complete the blocked M0.3 measurement, update its evidence, and stop before beginning M0.4 unless the user expands that session's scope |
-| Validation evidence | M0.1 (2026-09-16) aligned the policy documents and this handoff; its focused documentation commit records local-reference checks, stale-policy search, full commit-gate, and HTTP-startup-smoke evidence. M0.3 tooling generated deterministic fixtures, built and started an isolated unsigned Windows Release package, and captured package/host/memory artifacts, but no UI timing sample was recorded because this environment exposed no native-app control target. No performance baseline, Store feasibility, or external integration acceptance is established |
+| Scope boundary for the next session | Complete one coherent M0.5 policy/package-preflight step, update its evidence, and stop before any installation, Store submission, or M0.6 signing work unless the owner expands the scope |
+| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. No performance baseline, Store feasibility, or external integration acceptance is established |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -134,10 +134,18 @@ Initial M0 substeps (split further only when current-code findings justify it):
   input surface; load fixtures only through the production import UI, execute
   five warm-ups and 30 samples per metric, then update the evidence before
   marking this step complete.
-- [ ] **M0.4 - License and distribution inventory.** Inventory code/assets and
-  dependency obligations, publisher/account prerequisites, and public-history
-  review work. Do not adopt the candidate license or publish anything merely to
-  complete the inventory.
+- [x] **M0.4 - Local license and distribution inventory (complete 2026-09-16).**
+  [`tools/distribution/Export-M0DistributionInventory.ps1`](../tools/distribution/Export-M0DistributionInventory.ps1)
+  deterministically inventories restored managed, Cargo, and semantic-editor
+  dependency metadata; shipped web/font/Press assets; the unsigned Windows
+  `win-unpacked` closure; and account prerequisites. Its committed
+  [JSON](research/m0.4-distribution-inventory.json) and
+  [report](research/m0.4-distribution-inventory.md) record the absence of a
+  root license/notice, Bootstrap attribution work, branding provenance, and
+  native macOS closure as explicit blockers. It also defines the future M6
+  mirror-and-review history audit without performing it. No terms were adopted,
+  no history was scanned, and no repository, Store, signing, or publishing action
+  occurred.
 - [ ] **M0.5 - Windows MSIX feasibility.** Validate the actual packaged process
   tree, data paths, OAuth/printing/import/export boundaries, and update-channel
   separation before relying on Store distribution.
@@ -158,6 +166,7 @@ because the feature milestones are ready.
 | 2026-09-16 | Recorded stepwise handoff and maintenance workflow; marked the older DOCX proposal superseded | Preserve the accepted plan across sessions without competing implementation instructions | Owner requested a maintained repository plan and a separate starting prompt |
 | 2026-09-16 | Superseded M0.2 and declined general hosted CI | Keep general repository gates and focused regressions local; retain only the dispatch-only macOS release builder because it provides required native Mac compute | Owner decision |
 | 2026-09-16 | Defined M0.3 as a local Windows Release reference baseline, not a hardware minimum | The documented 32 GiB Windows machine is a comparison environment only; latency targets remain v1 goals and do not establish macOS, Store, updater, provider, or large-library performance | Owner-approved M0.3 scope; [local evidence](evidence/m0.3-local-performance-baseline.md) |
+| 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit legal/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
 
 ## 2. Release definition and settled scope
 

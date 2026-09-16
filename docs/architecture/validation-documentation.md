@@ -382,6 +382,7 @@ target-specific evidence.
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
+| [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1) and [M0.4 inventory](../research/m0.4-distribution-inventory.md) | Deterministic local release-input inventory. It reads restored managed/Cargo/npm metadata, shipped assets, and the unsigned Windows `win-unpacked` closure; it writes only the committed research JSON/Markdown and records unresolved obligations rather than selecting a license, credential, account, or publication action. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |
 | [`.mcp.json`](../../.mcp.json) and [`.commandcode/settings.json`](../../.commandcode/settings.json) | Project-only optional Command Code Roslynk configuration mirroring the Codex allowlist: the same stdio server with permission rules that expose the read-only tools and deny the mutating tools plus `reload_solution`; not an application dependency or final-verification substitute. |
 
@@ -437,6 +438,16 @@ inputs, host configuration, process-tree working/private memory every 250 ms,
 raw trace, five warm-ups plus 30 samples per metric, and nearest-rank p95. This
 is an explicitly authorized local UI session, not an automated browser/UI suite;
 terminate the app and retain only the summarized committed evidence.
+
+For M0.4, first confirm `publish/win-x64-stage` and `publish/win-x64` are
+disposable ignored outputs, then run
+`scripts/build-windows-release.ps1 -KeepUnpacked` without signing or publishing. Run
+`tools/distribution/Export-M0DistributionInventory.ps1` twice and compare the
+JSON and Markdown SHA-256 hashes. Inspect the generated source-controlled report
+for the required missing root license/notice, Bootstrap, branding, macOS-closure,
+and account blockers. The inventory may define a future history-audit procedure,
+but it must not scan history, add CI, adopt license terms, create credentials,
+or modify external distribution state.
 
 For printing changes, syntax-check the print browser modules and desktop hook,
 then use explicitly authorized preview checks for source orientation, fit/crop,
