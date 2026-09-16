@@ -340,6 +340,13 @@ GitHub permits, and reports any resource requiring manual inspection. Temporary
 Actions artifacts are deleted only after successful publication. The public
 release repository is the automatic and manual update authority.
 
+The owner has declined general hosted CI, PR-validation workflows, and non-macOS
+GitHub compute for v1. The dispatch-only macOS arm64 release builder remains the
+sole hosted workflow because native Mac packaging needs a Mac host. Every normal
+repository gate and approved focused regression stays local, with evidence
+recorded in the work item or pull request; do not turn the release builder into
+a general validation lane without a new owner decision.
+
 Packaging and updater claims require execution on the relevant operating system.
 Never claim OAuth, provider calls, embeddings, web search, image generation,
 publishing output, packaging, automatic updates, or platform-specific Electron
@@ -364,7 +371,7 @@ target-specific evidence.
 | File or family | Architectural role |
 |---|---|
 | [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, branches, pull requests, documentation, and commits. |
-| [`CONTRIBUTING.md`](../../CONTRIBUTING.md), [pull-request template](../../.github/pull_request_template.md), and [GitHub settings checklist](../github-repository-settings.md) | Human contribution workflow, local commit-gate evidence, and maintainer-owned server protection settings. The repository currently has no pull-request validation workflow. |
+| [`CONTRIBUTING.md`](../../CONTRIBUTING.md), [pull-request template](../../.github/pull_request_template.md), and [GitHub settings checklist](../github-repository-settings.md) | Human contribution workflow, local commit-gate evidence, and maintainer-owned server protection settings. General hosted validation is owner-declined; the dispatch-only macOS release builder is not a PR-validation workflow. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
@@ -374,6 +381,7 @@ target-specific evidence.
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared repository gate/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
+| [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |
 | [`.mcp.json`](../../.mcp.json) and [`.commandcode/settings.json`](../../.commandcode/settings.json) | Project-only optional Command Code Roslynk configuration mirroring the Codex allowlist: the same stdio server with permission rules that expose the read-only tools and deny the mutating tools plus `reload_solution`; not an application dependency or final-verification substitute. |
 
@@ -417,6 +425,18 @@ Electron, packaging, or target-native release checks only when their boundaries
 are affected. In the completion report, state exact commands and results, manual
 or integration checks performed, checks intentionally not run, final commit, and
 working-tree status.
+
+For the M0.3 local performance baseline, build the unsigned Windows Release
+package only after confirming `publish/win-x64-stage` and `publish/win-x64` are
+disposable ignored outputs. Run the packaged Electron app only with the sampler's
+isolated database/history directories and Development environment, which disables
+desktop update behavior. The trace path is valid only below
+`.artifacts/performance/` and records timestamp, metric, duration, and sequence
+only—never manuscript text, credentials, or network traffic. Capture package
+inputs, host configuration, process-tree working/private memory every 250 ms,
+raw trace, five warm-ups plus 30 samples per metric, and nearest-rank p95. This
+is an explicitly authorized local UI session, not an automated browser/UI suite;
+terminate the app and retain only the summarized committed evidence.
 
 For printing changes, syntax-check the print browser modules and desktop hook,
 then use explicitly authorized preview checks for source orientation, fit/crop,

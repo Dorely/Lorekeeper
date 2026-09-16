@@ -272,6 +272,16 @@ ID; forks and custom deployments can replace it through
 The version-history chapter owns those feature contracts;
 provider-owned keys are described in the providers chapter.
 
+`Diagnostics:PerformanceTracePath` is absent by default. When set, startup
+accepts it only for a file below `.artifacts/performance/`; any other value fails
+closed. The opt-in writer records only UTC timestamp, fixed metric name, numeric
+duration, and sequence for the M0.3 local diagnostic path. It never records
+manuscript text, document identity, credentials, provider payloads, or requests,
+and it does not change authoring, save, update, or provider behavior.
+`Diagnostics:PerformanceTraceLimitPerMetric` is an optional positive local-run
+bound used to separate warm-ups from measured samples. Neither key is a shipped
+product setting or a replacement for target-platform validation.
+
 ## Key files and file families
 
 | File or family | Architectural role |
@@ -282,7 +292,7 @@ provider-owned keys are described in the providers chapter.
 | [`Lorekeeper/Properties/launchSettings.json`](../../Lorekeeper/Properties/launchSettings.json) | Local Electron, HTTP, and HTTPS profiles; Electron is the default product/debug shape and HTTP is the explicit browser-validation profile. |
 | [`Lorekeeper/Properties/electron-builder.json`](../../Lorekeeper/Properties/electron-builder.json) and [`PublishProfiles/`](../../Lorekeeper/Properties/PublishProfiles/) | Electron packaging metadata/targets and runtime-specific self-contained .NET publication profiles. |
 | [`Lorekeeper/Startup/`](../../Lorekeeper/Startup/) | Immutable startup state/readiness gate and the hosted bootstrap worker that releases normal workers only after migration and initialization are safe. |
-| [`Lorekeeper/Diagnostics/DevFileLoggerProvider.cs`](../../Lorekeeper/Diagnostics/DevFileLoggerProvider.cs) and [`LogRedaction.cs`](../../Lorekeeper/Diagnostics/LogRedaction.cs) | Development-only diagnostic file logging (bounded daily files under `%LOCALAPPDATA%\Lorekeeper\dev-logs`, 14-day/50 MB retention) and the fail-safe redaction every provider/tool log payload passes through; registered by the composition root only in the Development environment. |
+| [`Lorekeeper/Diagnostics/DevFileLoggerProvider.cs`](../../Lorekeeper/Diagnostics/DevFileLoggerProvider.cs), [`LogRedaction.cs`](../../Lorekeeper/Diagnostics/LogRedaction.cs), and [`PerformanceTraceWriter.cs`](../../Lorekeeper/Diagnostics/PerformanceTraceWriter.cs) | Development-only diagnostic file logging (bounded daily files under `%LOCALAPPDATA%\Lorekeeper\dev-logs`, 14-day/50 MB retention), fail-safe provider/tool log redaction, and the separately opt-in timestamp-only M0.3 local trace writer. The trace writer rejects outputs outside ignored `.artifacts/performance/`. |
 | [`Lorekeeper/Components/App.razor`](../../Lorekeeper/Components/App.razor), [`Routes.razor`](../../Lorekeeper/Components/Routes.razor), and [`StartupScreen.razor`](../../Lorekeeper/Components/StartupScreen.razor) | Document shell, route wiring, pre-paint theming, and gated startup/recovery/failure presentation. |
 | [`Lorekeeper/Components/Layout/`](../../Lorekeeper/Components/Layout/) | Shared application chrome, update control, theme switch, configuration shell, print layout, headings, and reconnect UI. |
 | [`Lorekeeper/Components/ConfirmationDialog.razor`](../../Lorekeeper/Components/ConfirmationDialog.razor) | Required application-owned destructive/consequential confirmation surface. |

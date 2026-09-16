@@ -1,10 +1,12 @@
 # GitHub repository settings
 
 This is the maintainer checklist for making `main` a reviewed, pull-request-only
-branch. Repository instructions assume these controls are active. The repository
-currently has no pull-request validation workflow, so the full commit gate is
-run locally and recorded in the pull-request checklist unless a workflow is
-added deliberately later.
+branch. Repository instructions assume these controls are active. The owner has
+declined general hosted CI and pull-request validation workflows for v1: the full
+commit gate and focused regressions run locally and their evidence is recorded in
+the pull-request checklist. The dispatch-only macOS release builder is the sole
+hosted workflow, because a native Mac build needs macOS compute; it is not a
+general validation lane.
 
 ## Prerequisite
 
@@ -32,7 +34,7 @@ and force the reusable branch into divergence.
 
 Open **Settings > Actions > General**:
 
-- Allow the actions needed by the repository workflows.
+- Allow only the actions used by the dispatch-only macOS release builder.
 - Set workflow permissions to **Read repository contents and packages**.
 - Leave **Allow GitHub Actions to create and approve pull requests** disabled.
 
@@ -51,9 +53,10 @@ protection rule for `main` with these settings:
 - Do not allow force pushes.
 - Do not allow deletions.
 
-If a pull-request validation workflow is added later, run it on `main` first,
-then require its exact successful check here. GitHub may not offer a status check
-in branch settings until that check has run recently.
+Do not add a general pull-request validation status check or workflow. Local
+commit-gate evidence remains required until the owner explicitly changes this
+decision. GitHub may offer the macOS release workflow as a check after a dispatch;
+that does not turn it into a required general validation lane.
 
 Do not enable code-owner review unless a deliberate `CODEOWNERS` policy is added
 later. The repository currently requires one independent review, not ownership

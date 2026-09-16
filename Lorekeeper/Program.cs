@@ -71,6 +71,10 @@ if (builder.Environment.IsDevelopment())
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddHubOptions(options => options.MaximumReceiveMessageSize = maxInteractiveServerMessageSize);
+builder.Services.AddSingleton<PerformanceTraceWriter>();
+builder.Services.AddSingleton<IPerformanceTraceWriter>(services =>
+    services.GetRequiredService<PerformanceTraceWriter>());
+builder.Services.AddHostedService(services => services.GetRequiredService<PerformanceTraceWriter>());
 builder.Services.AddSingleton<ApplicationStartupState>();
 builder.Services.AddSingleton<IApplicationStartupState>(services =>
     services.GetRequiredService<ApplicationStartupState>());

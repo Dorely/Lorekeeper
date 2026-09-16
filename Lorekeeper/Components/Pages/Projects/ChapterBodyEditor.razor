@@ -4,6 +4,7 @@
 @using Lorekeeper.Composition
 @using Lorekeeper.Fonts
 @using Lorekeeper.Authoring
+@using Lorekeeper.Diagnostics
 @using Microsoft.EntityFrameworkCore
 @using System.Text.Json
 @implements IAsyncDisposable
@@ -17,6 +18,7 @@
 @inject ITypographyDefaultsService TypographyDefaults
 @inject Lorekeeper.Composition.ICompositionService Compositions
 @inject IAuthoringHistoryRuntime AuthoringHistory
+@inject IPerformanceTraceWriter PerformanceTrace
 @inject ILogger<ChapterBodyEditor> Logger
 
 <div class="@RootClass()">
@@ -137,7 +139,8 @@
                     AllowDesignedPages,
                     annotationsJson,
                     typographyJson,
-                    AllowAnnotations);
+                    AllowAnnotations,
+                    PerformanceTrace.IsEnabled);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -521,6 +524,10 @@
         }
         return Task.CompletedTask;
     }
+
+    [JSInvokable]
+    public void RecordPerformanceTrace(string metric, double durationMilliseconds, long sequence) =>
+        PerformanceTrace.Record(metric, durationMilliseconds, sequence);
 
     public async Task<bool> FlushAsync()
     {

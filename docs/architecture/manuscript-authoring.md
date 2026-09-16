@@ -244,6 +244,15 @@ newer state. JavaScript attachment validates that the target element still
 exists, and asynchronous component work rechecks disposal so navigation cannot
 turn stale element references into circuit-ending errors.
 
+For an explicitly authorized local M0.3 baseline only, the editor bridge may
+emit a timestamp-only diagnostic event after the next visible frame for accepted
+input, save acknowledgment, Undo/Redo completion, and editor attachment after
+chapter navigation. The bridge sends a fixed metric name, numeric duration, and
+sequence to the host trace writer; it never sends manuscript text, document IDs,
+selection content, credentials, or provider data. The path is absent unless the
+host has enabled an output below `.artifacts/performance/`; it is neither a UI
+test hook nor an authoring behavior branch.
+
 Editor has Edit, Read, Pages, and Review modes. A chapter containing only
 Designed Pages initially opens Pages; after the user chooses, per-project
 browser-local preferences restore its mode. Read flushes edits and asks the
@@ -440,7 +449,7 @@ mutation boundary as other persisted manuscript changes.
 | [`Lorekeeper/Manuscripts/ManuscriptStyleService.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleService.cs) and [`ManuscriptStyleTemplateExtractor.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleTemplateExtractor.cs) | Revision-safe Book Text Style ownership and the shared manual/assistant style-capture policy. |
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
 | [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) | In-process manual history runtime, selection/dependency state, and assistant mutation identity; Git-backed review owns pending/approved comparison. |
-| [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
+| [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, authoring workspace state, and the opt-in timestamp-only local performance-trace bridge. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
 | [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and direct apply over the canonical manuscript service. |
 | [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |
@@ -485,6 +494,10 @@ mutation boundary as other persisted manuscript changes.
   cross-view location anchors, normalized fallback, selection/non-text blocks,
   paste diagnostics, and action grouping. Browser UI checks require explicit
   authorization.
+- For local performance tracing, inspect the fixed event schema and the host
+  path guard, confirm no text or identifiers cross the JS bridge, and run a
+  user-authorized packaged Electron session only when baseline evidence is in
+  scope. Never convert this diagnostic path into browser automation or a UI suite.
 - For annotation/history changes, verify same-transaction rebasing, inherited
   release behavior, outdated-state fallback, action coalescing, stale-stream
   reconciliation, Git pending/historical review, dependency retention, and

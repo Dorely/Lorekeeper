@@ -2185,10 +2185,11 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}", allowAnnotations = true) {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}", allowAnnotations = true, performanceTraceEnabled = false) {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
+    const attachmentStartedAt = performance.now();
     const initial = JSON.parse(initialJson);
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
@@ -2222,6 +2223,19 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let updateFormattingControls = () => {};
     let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
     let performPersistentHistory = async () => false;
+    let traceSequence = 0;
+    const recordVisibleFrame = (metric, startedAt) => {
+        if (!performanceTraceEnabled || !Number.isFinite(startedAt)) return;
+        requestAnimationFrame(() => {
+            const durationMilliseconds = performance.now() - startedAt;
+            if (!Number.isFinite(durationMilliseconds) || durationMilliseconds < 0) return;
+            void dotNetRef.invokeMethodAsync(
+                "RecordPerformanceTrace",
+                metric,
+                durationMilliseconds,
+                ++traceSequence).catch(() => {});
+        });
+    };
     const applyEffectiveReadOnly = () => {
         readOnly = requestedReadOnly;
         if (!view) return;
@@ -2295,6 +2309,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             timer = null;
         }
         const targetGeneration = changeGeneration;
+        const saveStartedAt = performance.now();
         const snapshotJson = JSON.stringify(
             domainFromDocument(view.state.doc, manuscriptId, revision));
         const selectionJson = JSON.stringify(captureStableSelection(view));
@@ -2315,6 +2330,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                     await refreshReviewAnnotations();
                     persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
                     updateFormattingControls();
+                    recordVisibleFrame("save-acknowledgment", saveStartedAt);
                     return true;
                 }
                 if (!result?.saved) return false;
@@ -2326,6 +2342,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                     updateFormattingControls();
                 } catch {}
                 updateStatus();
+                recordVisibleFrame("save-acknowledgment", saveStartedAt);
             } catch {
                 return false;
             }
@@ -2398,6 +2415,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         dispatchTransaction(transaction) {
             if (readOnly && transaction.docChanged)
                 return;
+            const inputStartedAt = transaction.docChanged ? performance.now() : null;
             const next = view.state.apply(transaction);
             view.updateState(next);
             if (transaction.docChanged) {
@@ -2410,6 +2428,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             updateFormattingControls();
             updateStatus();
             schedulePersistentCaret();
+            if (inputStartedAt !== null)
+                recordVisibleFrame("input-to-visible-frame", inputStartedAt);
         },
         handleDOMEvents: {
             focus() {
@@ -2860,6 +2880,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     updateFormattingControls();
     performPersistentHistory = async redoDirection => {
         if (readOnly) return false;
+        const historyStartedAt = performance.now();
         const flushed = await saveNow();
         if (!flushed) return false;
         try {
@@ -2879,6 +2900,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             persistentHistoryState = result;
             updateFormattingControls();
             view.focus();
+            recordVisibleFrame(
+                redoDirection ? "redo-to-visible-frame" : "undo-to-visible-frame",
+                historyStartedAt);
             return true;
         } catch (error) {
             status.textContent = error?.message || "History could not be applied.";
@@ -2896,6 +2920,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     }).catch(() => {});
     updateStatus();
     outline.update();
+    recordVisibleFrame("editor-ready-after-navigation", attachmentStartedAt);
 
     return {
         flush: saveNow,

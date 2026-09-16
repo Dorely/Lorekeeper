@@ -1,6 +1,6 @@
 # Lorekeeper v1: technical roadmap and release specification
 
-Status: **Approved plan; implementation not started**
+Status: **Approved plan; M0 execution in progress**
 
 Approved: 2026-09-16
 
@@ -26,13 +26,13 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M0 - Establish release foundations (In progress) |
-| Next bounded step | M0.2 - Reuse the current repository gate in CI with isolated artifacts and no signing secrets exposed to contributions; record platform coverage and checks that remain manual |
-| Completed implementation | M0.1 - Aligned the approved focused, deterministic regression-test policy across repository instructions and current validation guidance; no product test, CI, or runtime implementation was added |
-| Next investigation | For M0.2, inspect existing gate/tooling and define the smallest CI implementation without duplicating existing infrastructure; defer M0.3 fixtures and measurements until that coherent step |
+| Active milestone | M0 - Establish release foundations (In progress; M0.3 local baseline measurement is blocked) |
+| Next bounded step | M0.3 - Restore a local native-Electron input surface, then execute the approved five-warm-up/30-sample measurement protocol using the existing isolated Release package runner |
+| Completed implementation | M0.1 - Aligned the approved focused, deterministic regression-test policy across repository instructions and current validation guidance; M0.2 is superseded by the owner’s local-validation decision |
+| Next investigation | Resolve the missing native-app control surface or use an explicitly authorized local operator for M0.3; do not substitute browser automation, simulated UI input, or hosted CI for the packaged Electron measurement |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Complete M0.2, update this handoff, and stop before beginning the next coherent feature unless the user expands that session's scope |
-| Validation evidence | M0.1 (2026-09-16) aligned the policy documents and this handoff; its focused documentation commit records local-reference checks, stale-policy search, full commit-gate, and HTTP-startup-smoke evidence. No product test, performance baseline, Store feasibility, or external integration acceptance is established |
+| Scope boundary for the next session | Complete the blocked M0.3 measurement, update its evidence, and stop before beginning M0.4 unless the user expands that session's scope |
+| Validation evidence | M0.1 (2026-09-16) aligned the policy documents and this handoff; its focused documentation commit records local-reference checks, stale-policy search, full commit-gate, and HTTP-startup-smoke evidence. M0.3 tooling generated deterministic fixtures, built and started an isolated unsigned Windows Release package, and captured package/host/memory artifacts, but no UI timing sample was recorded because this environment exposed no native-app control target. No performance baseline, Store feasibility, or external integration acceptance is established |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -105,7 +105,7 @@ the plan; follow the user's current task and the applicable execution rules.
 
 | ID | Status | Deliverable | Exit condition | Evidence / remaining work |
 |---|---|---|---|---|
-| M0 | In progress | Test policy, CI, performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Major packaging constraints identified; baseline measurements recorded | M0.1 complete; begin M0.2 CI baseline |
+| M0 | In progress | Test policy, local performance fixtures, licensing inventory, Windows MSIX and Mac sandbox feasibility | Major packaging constraints identified; baseline measurements recorded | M0.1 complete; M0.2 superseded; M0.3 measurement blocked pending a native local Electron input surface |
 | M1 | Not started | Preconfigured OpenAI account models and external-browser OAuth | Fresh connection reaches usable chat without manual model setup or Test clicks | No implementation/integration evidence |
 | M2 | Not started | Project page library, shared placements, release overrides, safe migration | Existing content survives; shared editing and release isolation work | No implementation/migration evidence |
 | M3 | Not started | Immediate manual Undo/Redo, recoverable save queue, incremental history | Latency and failure-recovery gates pass | Measure baseline first |
@@ -121,13 +121,19 @@ Initial M0 substeps (split further only when current-code findings justify it):
   instructions and validation guidance to the approved focused-regression scope,
   reconciled companion references, retained the full gate, and did not grant
   blanket UI or external-service execution permission.
-- [ ] **M0.2 - CI baseline.** Reuse the current repository gate in CI with isolated
-  artifacts and no signing secrets exposed to contributions; record platform
-  coverage and checks that remain manual.
-- [ ] **M0.3 - Performance fixtures and baseline.** Define reproducible sanitized
-  authoring/source fixtures, measurement boundaries, reference hardware, and
-  current timings/memory before optimization. Obtain any needed UI-run
-  authorization as part of that session's task.
+- [x] **M0.2 - Superseded (2026-09-16; owner declined general hosted CI).** Do not
+  add GitHub CI, PR-validation workflows, or non-macOS GitHub compute. The
+  dispatch-only macOS release builder remains the sole hosted workflow; local
+  commit-gate evidence and approved focused regressions remain required until an
+  owner decision changes this boundary.
+- [ ] **M0.3 - Local performance fixtures and baseline (blocked).** The local-only
+  fixture generator, trace, Release-package runner, and reference-environment
+  report are implemented. The first isolated Windows Release launch succeeded,
+  but its timestamp-only trace has no samples because the available control
+  surface exposes no native app target. Resume with a local native Electron
+  input surface; load fixtures only through the production import UI, execute
+  five warm-ups and 30 samples per metric, then update the evidence before
+  marking this step complete.
 - [ ] **M0.4 - License and distribution inventory.** Inventory code/assets and
   dependency obligations, publisher/account prerequisites, and public-history
   review work. Do not adopt the candidate license or publish anything merely to
@@ -150,6 +156,8 @@ because the feature milestones are ready.
 |---|---|---|---|
 | 2026-09-16 | Approved the v1 scope and specification recorded below | All six feature areas precede v1; staged Windows/Mac launches; public beta first | Owner approval in the v1 planning conversation |
 | 2026-09-16 | Recorded stepwise handoff and maintenance workflow; marked the older DOCX proposal superseded | Preserve the accepted plan across sessions without competing implementation instructions | Owner requested a maintained repository plan and a separate starting prompt |
+| 2026-09-16 | Superseded M0.2 and declined general hosted CI | Keep general repository gates and focused regressions local; retain only the dispatch-only macOS release builder because it provides required native Mac compute | Owner decision |
+| 2026-09-16 | Defined M0.3 as a local Windows Release reference baseline, not a hardware minimum | The documented 32 GiB Windows machine is a comparison environment only; latency targets remain v1 goals and do not establish macOS, Store, updater, provider, or large-library performance | Owner-approved M0.3 scope; [local evidence](evidence/m0.3-local-performance-baseline.md) |
 
 ## 2. Release definition and settled scope
 
@@ -572,7 +580,10 @@ a migration test target.
 
 ### Performance gates
 
-Measure production builds using a documented 16 GB reference machine and fixed fixtures:
+Measure production builds using a fully documented local reference environment
+and fixed fixtures. The current M0.3 reference is the local Windows 10 Pro
+10.0.19045 (build 19045), AMD Ryzen 7 9700X, 16-logical-processor, 31.6 GiB
+machine; it is a comparison environment, not a minimum hardware requirement.
 
 | Workflow | Target |
 |---|---|
@@ -585,8 +596,12 @@ Measure production builds using a documented 16 GB reference machine and fixed f
 
 Include a 250,000-word project, a 1 MiB/10,000-block editor stress document,
 shared/release pages, and a 50-source/few-GB library. These are acceptance
-targets, not current measurements. Record hardware, OS, build, sample counts,
-warm/cold conditions, background activity, and measurement method with results.
+targets, not current measurements. M0.3 supplies the two v30 project fixtures
+and an opt-in manifest-defined 50-source/3.125 GiB library, but the present
+64 MiB full-memory import UI cannot establish few-GB source-library, streaming
+import/export, history, or M2 shared-page results; those remain M2/M4 work.
+Record hardware, OS, build, sample counts, warm/cold conditions, background
+activity, and measurement method with results.
 
 ### Beta exit
 
@@ -602,8 +617,9 @@ Require:
   and updates. Windows evidence does not establish Mac readiness.
 - Current documentation and a reviewed complete diff.
 
-Automate contract checks and CI; use targeted human/UI validation for actual
-desktop and external integrations. Record unperformed checks explicitly.
+Run the local commit gate and approved focused contract regressions; use targeted
+human/UI validation for actual desktop and external integrations. General hosted
+CI is owner-declined; record unperformed checks explicitly.
 
 ## 6. Distribution, public repository, and launch (M6-M8)
 
@@ -665,8 +681,8 @@ Before publication:
 - Add the approved license, third-party notices, contribution terms covering
   official commercial distribution, security reporting, issue templates,
   support policy, and build instructions.
-- Add CI that runs the repository gate and focused tests without exposing
-  signing credentials to contributions.
+- Keep repository-gate and focused-regression evidence local; do not add general
+  GitHub CI or PR validation unless the owner explicitly revisits the decision.
 - Configure GitHub's funding button and README donation link using the owner's
   verified Buy Me a Coffee URL.
 - Keep donations optional and unrelated to feature access.
