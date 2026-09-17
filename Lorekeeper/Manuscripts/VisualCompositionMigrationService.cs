@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Legacy;
 using Lorekeeper.Composition;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -153,7 +154,7 @@ public sealed class VisualCompositionMigrationService(
                                     Id = DeterministicId(chapter.Id, "designed-page"),
                                     Type = ManuscriptBlockType.DesignedPage,
                                     StyleRole = ManuscriptStyleRoles.DesignedPage,
-                                    PageCompositionId = composition.Id,
+                                    DesignedPageId = composition.Id,
                                 },
                             ],
                         });
@@ -357,6 +358,13 @@ public sealed class VisualCompositionMigrationService(
                 chapter.ManuscriptJson,
                 chapter.Id,
                 chapter.ManuscriptRevision),
+            4 => ManuscriptCodec.Deserialize(
+                ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(
+                    chapter.ManuscriptJson,
+                    chapter.Id,
+                    chapter.ManuscriptRevision),
+                chapter.Id,
+                chapter.ManuscriptRevision),
             3 => ManuscriptCodec.Deserialize(
                 ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(
                     chapter.ManuscriptJson,
@@ -371,7 +379,7 @@ public sealed class VisualCompositionMigrationService(
                     chapter.ManuscriptRevision),
                 chapter.Id,
                 chapter.ManuscriptRevision),
-            _ => throw new InvalidDataException($"Chapter {chapter.Id:N} is not ready for schema-v3 migration."),
+            _ => throw new InvalidDataException($"Chapter {chapter.Id:N} is not ready for structured manuscript migration."),
         };
     }
 
@@ -436,7 +444,7 @@ public sealed class VisualCompositionMigrationService(
         return source with { Content = content };
     }
 
-    private static PageComposition ConvertPicturePage(
+    private static LegacyPageComposition ConvertPicturePage(
         LegacyChapterVisualRow chapter,
         ManuscriptDocument source,
         IReadOnlyList<PublicationEdition> editions,
@@ -547,7 +555,7 @@ public sealed class VisualCompositionMigrationService(
             Layers = [new CompositionLayer(layerId, "Content", 0)],
             Objects = objects,
         };
-        return new PageComposition
+        return new LegacyPageComposition
         {
             Id = compositionId,
             ProjectId = chapter.ProjectId,
@@ -557,7 +565,7 @@ public sealed class VisualCompositionMigrationService(
             Revision = source.Revision,
             Variants =
             [
-                new PageCompositionVariant
+                new LegacyPageCompositionVariant
                 {
                     GeometryKey = "migration-seed",
                     SceneJson = JsonSerializer.Serialize(legacyScene, ManuscriptCodec.JsonOptions),
@@ -569,11 +577,11 @@ public sealed class VisualCompositionMigrationService(
                     })
                     .Select(item => new
                     {
-                        Key = CompositionService.GeometryKey(item.Edition, item.Scene),
+                        Key = DesignedPageService.GeometryKey(item.Edition, item.Scene),
                         item.Scene,
                     })
                     .GroupBy(item => item.Key, StringComparer.Ordinal)
-                    .Select(group => new PageCompositionVariant
+                    .Select(group => new LegacyPageCompositionVariant
                     {
                         GeometryKey = group.Key,
                         SceneJson = JsonSerializer.Serialize(group.First().Scene, ManuscriptCodec.JsonOptions),
@@ -582,11 +590,11 @@ public sealed class VisualCompositionMigrationService(
         };
     }
 
-    private static CompositionMutationStage CreateCompositionSeed(PageComposition composition, string sceneJson) => new()
+    private static CompositionMutationStage CreateCompositionSeed(LegacyPageComposition composition, string sceneJson) => new()
     {
         ProjectId = composition.ProjectId,
         ConversationId = Guid.Empty,
-        TargetKind = "page-composition-seed",
+        TargetKind = "designed-page-seed",
         TargetId = composition.Id,
         ExpectedRevision = composition.Revision,
         OperationsJson = sceneJson,
@@ -596,7 +604,7 @@ public sealed class VisualCompositionMigrationService(
 
     private static async Task InsertPreAuthoringCompositionAsync(
         AppDbContext db,
-        PageComposition composition,
+        LegacyPageComposition composition,
         CancellationToken cancellationToken)
     {
         await db.Database.ExecuteSqlInterpolatedAsync(
@@ -635,10 +643,15 @@ public sealed class VisualCompositionMigrationService(
         }
 
         var editions = await ReadMigrationEditionsAsync(db, cancellationToken);
-        var compositionProjects = await db.PageCompositions.AsNoTracking()
+        if (!await HasColumnAsync(db, "PageCompositions", "Id", cancellationToken))
+        {
+            await ApplyCurrentGeometryPolicyMigrationAsync(db, editions, cancellationToken);
+            return;
+        }
+        var compositionProjects = await db.LegacyPageCompositions.AsNoTracking()
             .Select(item => new { item.Id, item.ProjectId })
             .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
-        var variants = await db.PageCompositionVariants.ToListAsync(cancellationToken);
+        var variants = await db.LegacyPageCompositionVariants.ToListAsync(cancellationToken);
         if (variants.Count == 0)
         {
             db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
@@ -678,9 +691,9 @@ public sealed class VisualCompositionMigrationService(
                     ?? throw new InvalidDataException($"Composition variant {source.Id:N} has no scene.");
                 var projectEditions = editions.Where(item => item.ProjectId == compositionProjects[source.CompositionId]).ToList();
                 var matched = projectEditions.Where(edition =>
-                    string.Equals(source.GeometryKey, CompositionService.GeometryKey(edition, sourceScene), StringComparison.Ordinal)
-                    || string.Equals(source.GeometryKey, CompositionService.LegacyEditionOnlyGeometryKey(edition), StringComparison.Ordinal)
-                    || string.Equals(source.GeometryKey, CompositionService.LegacyGeometryKey(edition), StringComparison.Ordinal)).ToList();
+                    string.Equals(source.GeometryKey, DesignedPageService.GeometryKey(edition, sourceScene), StringComparison.Ordinal)
+                    || string.Equals(source.GeometryKey, DesignedPageService.LegacyEditionOnlyGeometryKey(edition), StringComparison.Ordinal)
+                    || string.Equals(source.GeometryKey, DesignedPageService.LegacyGeometryKey(edition), StringComparison.Ordinal)).ToList();
                 var candidates = matched.Count > 0
                     ? matched
                     : projectEditions.Where(edition => CanNormalizeForEdition(sourceScene, edition)).ToList();
@@ -688,8 +701,8 @@ public sealed class VisualCompositionMigrationService(
                 foreach (var edition in candidates)
                 {
                     var normalized = NormalizeForEdition(sourceScene, edition);
-                    CompositionService.ValidateVariantGeometry(edition, normalized);
-                    destinations.TryAdd(CompositionService.GeometryKey(edition, normalized), normalized);
+                    DesignedPageService.ValidateVariantGeometry(edition, normalized);
+                    destinations.TryAdd(DesignedPageService.GeometryKey(edition, normalized), normalized);
                 }
                 if (destinations.Count == 0)
                     throw new InvalidDataException($"Composition variant {source.Id:N} does not match any edition geometry in its project.");
@@ -724,7 +737,7 @@ public sealed class VisualCompositionMigrationService(
                     }
                     else
                     {
-                        var clone = new PageCompositionVariant
+                        var clone = new LegacyPageCompositionVariant
                         {
                             CompositionId = source.CompositionId,
                             GeometryKey = destination.Key,
@@ -733,13 +746,13 @@ public sealed class VisualCompositionMigrationService(
                             CreatedAt = source.CreatedAt,
                             UpdatedAt = source.UpdatedAt,
                         };
-                        db.PageCompositionVariants.Add(clone);
+                        db.LegacyPageCompositionVariants.Add(clone);
                         variants.Add(clone);
                     }
                     changed++;
                 }
                 if (!sourceWasReused)
-                    db.PageCompositionVariants.Remove(source);
+                    db.LegacyPageCompositionVariants.Remove(source);
             }
             journal.Phase = ManuscriptMigrationPhase.Complete;
             journal.Status = ManuscriptMigrationStatus.Completed;
@@ -935,7 +948,7 @@ public sealed class VisualCompositionMigrationService(
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
-    private static string HashCompositionVisual(PageComposition composition)
+    private static string HashCompositionVisual(LegacyPageComposition composition)
     {
         var canonical = new List<string>();
         foreach (var variant in composition.Variants.OrderBy(item => item.GeometryKey, StringComparer.Ordinal))
@@ -1104,8 +1117,8 @@ public sealed class VisualCompositionMigrationService(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        var compositions = await db.PageCompositions.AsNoTracking()
-            .Select(item => new PageComposition
+        var compositions = await db.LegacyPageCompositions.AsNoTracking()
+            .Select(item => new LegacyPageComposition
             {
                 Id = item.Id,
                 ProjectId = item.ProjectId,
@@ -1117,9 +1130,11 @@ public sealed class VisualCompositionMigrationService(
                 UpdatedAt = item.UpdatedAt,
             })
             .ToListAsync(cancellationToken);
-        var variants = await db.PageCompositionVariants.AsNoTracking().ToListAsync(cancellationToken);
+        var variants = await db.LegacyPageCompositionVariants.AsNoTracking().ToListAsync(cancellationToken);
         var picturePageSeeds = await db.CompositionMutationStages.AsNoTracking()
-            .Where(item => item.TargetKind == "page-composition-seed" && item.ConversationId == Guid.Empty)
+            .Where(item => (item.TargetKind == "designed-page-seed"
+                    || item.TargetKind == "page-composition-seed")
+                && item.ConversationId == Guid.Empty)
             .ToListAsync(cancellationToken);
         var imageOwners = await db.PublishAssets.AsNoTracking()
             .Select(item => new { item.Id, item.ProjectId })
@@ -1140,11 +1155,11 @@ public sealed class VisualCompositionMigrationService(
             {
                 var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidDataException($"Composition variant {variant.Id:N} has no scene.");
-                CompositionService.Validate(scene, semantic);
+                DesignedPageService.Validate(scene, semantic);
                 var matchingEdition = editions.FirstOrDefault(item => item.ProjectId == composition.ProjectId
-                    && CompositionService.VariantMatchesEdition(variant, item));
+                    && VariantMatchesEdition(variant, item));
                 if (matchingEdition is not null)
-                    CompositionService.ValidateVariantGeometry(matchingEdition, scene);
+                    DesignedPageService.ValidateVariantGeometry(matchingEdition, scene);
             }
             foreach (var seed in seeds)
             {
@@ -1158,7 +1173,7 @@ public sealed class VisualCompositionMigrationService(
                     throw new InvalidDataException($"Migrated Picture Page seed {seed.Id:N} failed its ownership, revision, or hash validation.");
                 var scene = JsonSerializer.Deserialize<CompositionScene>(seed.OperationsJson, ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidDataException($"Migrated Picture Page seed {seed.Id:N} has no scene.");
-                CompositionService.Validate(scene, semantic);
+                DesignedPageService.Validate(scene, semantic);
                 foreach (var imageId in scene.Objects
                     .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
                     .Select(item => item.ImageId!.Value)
@@ -1173,7 +1188,116 @@ public sealed class VisualCompositionMigrationService(
         {
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException($"Cover {cover.Id:N} has no composition scene.");
-            CompositionService.Validate(scene, ManuscriptCodec.CreateEmpty(cover.Id), allowCanonicalTextBindings: true);
+            DesignedPageService.Validate(scene, ManuscriptCodec.CreateEmpty(cover.Id), allowCanonicalTextBindings: true);
+        }
+    }
+
+    private async Task ApplyCurrentGeometryPolicyMigrationAsync(
+        AppDbContext db,
+        IReadOnlyList<PublicationEdition> editions,
+        CancellationToken cancellationToken)
+    {
+        var contentProjects = await db.DesignedPageContents.AsNoTracking()
+            .Select(item => new { item.Id, item.ProjectId })
+            .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
+        var variants = await db.DesignedPageVariants.ToListAsync(cancellationToken);
+        var changed = 0;
+        foreach (var source in variants.ToList())
+        {
+            var sourceScene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException($"Designed Page variant {source.Id:N} has no scene.");
+            var projectEditions = editions
+                .Where(item => item.ProjectId == contentProjects[source.ContentId])
+                .ToList();
+            var matched = projectEditions.Where(edition =>
+                string.Equals(source.GeometryKey, DesignedPageService.GeometryKey(edition, sourceScene), StringComparison.Ordinal)
+                || string.Equals(source.GeometryKey, DesignedPageService.LegacyEditionOnlyGeometryKey(edition), StringComparison.Ordinal)
+                || string.Equals(source.GeometryKey, DesignedPageService.LegacyGeometryKey(edition), StringComparison.Ordinal)).ToList();
+            var candidates = matched.Count > 0
+                ? matched
+                : projectEditions.Where(edition => CanNormalizeForEdition(sourceScene, edition)).ToList();
+            var destinations = new Dictionary<string, CompositionScene>(StringComparer.Ordinal);
+            foreach (var edition in candidates)
+            {
+                var normalized = NormalizeForEdition(sourceScene, edition);
+                DesignedPageService.ValidateVariantGeometry(edition, normalized);
+                destinations.TryAdd(DesignedPageService.GeometryKey(edition, normalized), normalized);
+            }
+            if (destinations.Count == 0)
+            {
+                var normalized = sourceScene with
+                {
+                    Surface = sourceScene.Surface with { AllowIndependentPdfPage = false },
+                };
+                destinations[DesignedPageService.SceneGeometryKey(normalized)] = normalized;
+            }
+            var sourceWasReused = false;
+            foreach (var destination in destinations)
+            {
+                var sceneJson = JsonSerializer.Serialize(destination.Value, ManuscriptCodec.JsonOptions);
+                var existing = variants.FirstOrDefault(item => item.ContentId == source.ContentId
+                    && item.Id != source.Id
+                    && string.Equals(item.GeometryKey, destination.Key, StringComparison.Ordinal));
+                if (existing is not null)
+                {
+                    if (!string.Equals(existing.SceneJson, sceneJson, StringComparison.Ordinal))
+                        throw new InvalidDataException($"Designed Page content {source.ContentId:N} has conflicting exact geometry {destination.Key}.");
+                    continue;
+                }
+                if (!sourceWasReused)
+                {
+                    source.GeometryKey = destination.Key;
+                    source.SceneJson = sceneJson;
+                    source.UpdatedAt = DateTime.UtcNow;
+                    sourceWasReused = true;
+                }
+                else
+                {
+                    var clone = new DesignedPageVariant
+                    {
+                        ContentId = source.ContentId,
+                        GeometryKey = destination.Key,
+                        SceneJson = sceneJson,
+                        Revision = source.Revision,
+                        CreatedAt = source.CreatedAt,
+                        UpdatedAt = source.UpdatedAt,
+                    };
+                    db.DesignedPageVariants.Add(clone);
+                    variants.Add(clone);
+                }
+                changed++;
+            }
+            if (!sourceWasReused)
+                db.DesignedPageVariants.Remove(source);
+        }
+        db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
+        {
+            MigrationName = GeometryPolicyMigrationName,
+            SourceSchemaVersion = TargetVersion,
+            TargetSchemaVersion = TargetVersion,
+            Phase = ManuscriptMigrationPhase.Complete,
+            Status = ManuscriptMigrationStatus.Completed,
+            ValidationReportJson = JsonSerializer.Serialize(new { variants = changed }),
+            CompletedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool VariantMatchesEdition(
+        LegacyPageCompositionVariant variant,
+        PublicationEdition edition)
+    {
+        try
+        {
+            var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
+            if (scene is null)
+                return false;
+            DesignedPageService.ValidateVariantGeometry(edition, scene);
+            return true;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
         }
     }
 

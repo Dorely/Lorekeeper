@@ -225,11 +225,10 @@
         if (_review is null)
             return false;
 
-        if (group.Key.StartsWith("composition/compositions", StringComparison.Ordinal)
-            && Guid.TryParse(entry.Key, out var compositionId))
+        if (group.Key.StartsWith("composition/designed-pages", StringComparison.Ordinal)
+            && Guid.TryParse(entry.Key, out var designedPageId))
         {
-            return _review.Chapters.Any(chapter => chapter.CompositionChanges.Any(composition =>
-                composition.CompositionId == compositionId));
+            return _review.DesignedPageChanges.Any(page => page.DesignedPageId == designedPageId);
         }
 
         // An edition entry whose only semantic changes are chapter overrides

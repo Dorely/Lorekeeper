@@ -90,7 +90,6 @@ public class PublicationSection
     public int LocalOrder { get; set; }
     public string ManuscriptJson { get; set; } = string.Empty;
     public long Revision { get; set; }
-    public ICollection<PageComposition> PageCompositions { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

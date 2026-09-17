@@ -104,11 +104,10 @@ public sealed class ProjectFontService(
             return;
 
         var key = CustomKey(family.Id);
-        var usedBy = (await db.PageCompositionVariants
+        var usedBy = (await db.DesignedPageVariants
                 .AsNoTracking()
-                .Where(variant => variant.Composition.ProjectId == projectId
-                    && variant.DetachedAt == null && variant.Composition.DetachedAt == null)
-                .Select(variant => new { variant.Composition.Name, variant.SceneJson })
+                .Where(variant => variant.Content.ProjectId == projectId)
+                .Select(variant => new { variant.Content.Page.Name, variant.SceneJson })
                 .ToListAsync(cancellationToken))
             .Where(item => SceneUsesFont(item.SceneJson, key))
             .Select(item => item.Name)

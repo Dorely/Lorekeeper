@@ -6,7 +6,7 @@ namespace Lorekeeper.Composition;
 public static class CompositionAgentPayloads
 {
     public static async Task<string> ReadVariantAsync(
-        ICompositionService compositions,
+        IDesignedPageService compositions,
         Guid projectId,
         Guid compositionId,
         Guid variantId,
@@ -19,9 +19,9 @@ public static class CompositionAgentPayloads
         CancellationToken cancellationToken)
     {
         var variant = await compositions.ReadVariantAsync(projectId, variantId, cancellationToken);
-        if (variant.CompositionId != compositionId)
+        if (variant.ContentId != compositionId)
             throw new KeyNotFoundException("The selected variant does not belong to this page composition.");
-        var semantic = ManuscriptCodec.Deserialize(variant.Composition.SemanticManuscriptJson);
+        var semantic = ManuscriptCodec.Deserialize(variant.Content.SemanticManuscriptJson);
         var scene = JsonSerializer.Deserialize<Lorekeeper.Models.CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         semanticStart = Math.Clamp(semanticStart, 0, semantic.Content.Count);
@@ -57,7 +57,7 @@ public static class CompositionAgentPayloads
             targetId = variant.Id,
             revision = variant.Revision,
             summary = $"Selected variant contains {scene.Objects.Count} object(s) and {semantic.Content.Count} semantic block(s).",
-            composition = new { variant.CompositionId, variant.Composition.Name, revision = variant.Composition.Revision },
+            composition = new { contentId = variant.ContentId, pageId = variant.Content.DesignedPageId, revision = variant.Content.Revision },
             variant.GeometryKey,
             scene = new
             {
@@ -85,7 +85,7 @@ public static class CompositionAgentPayloads
     }
 
     public static async Task<string> PatchElementAsync(
-        ICompositionService compositions,
+        IDesignedPageService compositions,
         EditorContentTarget target,
         Guid projectId,
         Guid variantId,
@@ -110,15 +110,16 @@ public static class CompositionAgentPayloads
             {
                 ok = true,
                 targetId,
-                compositionId = variant.CompositionId,
+                pageId = variant.Content.DesignedPageId,
+                contentId = variant.ContentId,
                 variantId = variant.Id,
                 revision = variant.Revision,
                 summary = $"Patched composition {targetKind} {targetId:N}.",
                 changedIds = new[] { targetId },
-                mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id, selectId = targetId },
+                mutation = new { kind = "designedPage", id = variant.Content.DesignedPageId, contentId = variant.ContentId, variantId = variant.Id, selectId = targetId },
             });
         }
-        catch (CompositionRevisionConflictException exception)
+        catch (DesignedPageRevisionConflictException exception)
         {
             return JsonSerializer.Serialize(new
             {

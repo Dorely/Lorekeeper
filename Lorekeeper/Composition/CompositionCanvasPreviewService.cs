@@ -27,7 +27,7 @@ public sealed record CompositionCanvasPreviewDiagnostic(
     Guid? ObjectId = null);
 
 public sealed record CompositionCanvasPreviewResult(
-    Guid CompositionId,
+    Guid ContentId,
     Guid VariantId,
     long CompositionRevision,
     long VariantRevision,
@@ -45,7 +45,7 @@ public interface ICompositionCanvasPreviewService
 {
     Task<CompositionCanvasPreviewResult> RenderAsync(
         Guid projectId,
-        Guid compositionId,
+        Guid contentId,
         Guid variantId,
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default);
@@ -88,29 +88,27 @@ public sealed partial class CompositionCanvasPreviewService(
 
     public async Task<CompositionCanvasPreviewResult> RenderAsync(
         Guid projectId,
-        Guid compositionId,
+        Guid contentId,
         Guid variantId,
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        var variant = await db.PageCompositionVariants
+        var variant = await db.DesignedPageVariants
             .AsNoTracking()
-            .Include(item => item.Composition)
+            .Include(item => item.Content)
             .SingleOrDefaultAsync(item => item.Id == variantId
-                && item.CompositionId == compositionId
-                && item.DetachedAt == null
-                && item.Composition.ProjectId == projectId
-                && item.Composition.DetachedAt == null,
+                && item.ContentId == contentId
+                && item.Content.ProjectId == projectId,
                 cancellationToken)
-            ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
+            ?? throw new KeyNotFoundException("Designed Page variant was not found in this project.");
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         var semantic = ManuscriptCodec.Deserialize(
-            variant.Composition.SemanticManuscriptJson,
-            variant.Composition.Id,
-            variant.Composition.Revision);
+            variant.Content.SemanticManuscriptJson,
+            variant.Content.Id,
+            variant.Content.Revision);
         var imageIds = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .Select(item => item.ImageId!.Value)
@@ -202,13 +200,13 @@ public sealed partial class CompositionCanvasPreviewService(
             .Select(item => new { item.Id, item.FamilyId, item.Weight, item.Italic, item.Data })
             .ToListAsync(cancellationToken);
         var sceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
-        var syntheticVariant = new PageCompositionVariant
+        var syntheticVariant = new DesignedPageVariant
         {
             Id = targetId,
-            CompositionId = targetId,
+            ContentId = targetId,
             Revision = revision,
             SceneJson = sceneJson,
-            Composition = new PageComposition
+            Content = new DesignedPageContent
             {
                 Id = targetId,
                 ProjectId = projectId,
@@ -238,7 +236,7 @@ public sealed partial class CompositionCanvasPreviewService(
 
     private async Task<CompositionCanvasPreviewResult> RasterizeAsync(
         Guid projectId,
-        PageCompositionVariant variant,
+        DesignedPageVariant variant,
         CompositionScene scene,
         ManuscriptDocument semantic,
         IReadOnlyList<PublishAsset> assets,
@@ -311,9 +309,9 @@ public sealed partial class CompositionCanvasPreviewService(
             using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
                 ?? throw new InvalidOperationException("The composition preview could not be encoded as PNG.");
             return new CompositionCanvasPreviewResult(
-                variant.CompositionId,
+                variant.ContentId,
                 variant.Id,
-                variant.Composition.Revision,
+                variant.Content.Revision,
                 variant.Revision,
                 mode,
                 surfaceWidth,
@@ -825,7 +823,7 @@ public sealed partial class CompositionCanvasPreviewService(
         (byte)Math.Clamp(Math.Round(Math.Clamp(opacity, 0, 1) * 255), 0, 255);
 
     private static string CacheKey(
-        PageCompositionVariant variant,
+        DesignedPageVariant variant,
         CompositionCanvasPreviewMode mode,
         IReadOnlyList<PublishAsset> assets,
         IEnumerable<(Guid Id, Guid FamilyId, int Weight, bool Italic, byte[] Data)> fontFaces,
@@ -834,13 +832,13 @@ public sealed partial class CompositionCanvasPreviewService(
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Append(hash, "composition-canvas-preview-v3");
-        Append(hash, variant.CompositionId.ToString("N"));
-        Append(hash, variant.Composition.Revision.ToString());
+        Append(hash, variant.ContentId.ToString("N"));
+        Append(hash, variant.Content.Revision.ToString());
         Append(hash, variant.Revision.ToString());
         Append(hash, mode.ToString());
         Append(hash, $"edge:{maximumEdge?.ToString() ?? "default"}");
         Append(hash, variant.SceneJson);
-        Append(hash, variant.Composition.SemanticManuscriptJson);
+        Append(hash, variant.Content.SemanticManuscriptJson);
         if (textBindings is null)
             Append(hash, "text-bindings:none");
         else

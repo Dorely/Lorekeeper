@@ -200,12 +200,12 @@ public sealed class PublishService(
             chapter.ManuscriptJson = chapterOverride.ManuscriptJson;
             chapter.ManuscriptRevision = chapterOverride.Revision;
         }
-        var compositions = await db.PageCompositions
+        var designedPages = await db.DesignedPages
             .AsNoTracking()
-            .Where(composition => composition.ProjectId == projectId
-                && composition.DetachedAt == null
-                && (composition.EditionId == null || composition.EditionId == editionId))
-            .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(page => page.ProjectId == projectId
+                && (page.ScopeEditionId == null || page.ScopeEditionId == editionId))
+            .Include(page => page.Contents)
+            .ThenInclude(content => content.Variants)
             .ToListAsync(cancellationToken);
         var boundValues = new Dictionary<PublicationBoundField, string>();
         foreach (var field in Enum.GetValues<PublicationBoundField>())
@@ -254,10 +254,7 @@ public sealed class PublishService(
                     chapter,
                     profile,
                     chapterNumber,
-                    compositions.Where(composition => composition.ChapterId == chapter.Id
-                        && (chapterOverrides.ContainsKey(chapter.Id)
-                            ? composition.EditionId == editionId
-                            : composition.EditionId == null)).ToList(),
+                    DesignedPagesForManuscript(chapter.Manuscript, designedPages, coreTarget ? null : editionId),
                     boundValues));
             }
 
@@ -290,9 +287,6 @@ public sealed class PublishService(
                 chapterDocuments));
         }
 
-        var publicationSectionIds = publicationSectionViews.Select(item => item.Id).ToHashSet();
-        var sectionCompositions = compositions.Where(item => item.PublicationSectionId is Guid sectionId && publicationSectionIds.Contains(sectionId))
-            .GroupBy(item => item.PublicationSectionId!.Value).ToDictionary(group => group.Key, group => group.ToList());
         var publicationSectionDocuments = publicationSectionViews.Select(item => new PublishPublicationSectionDocument(
             item.Id,
             item.CoreSectionId,
@@ -305,7 +299,8 @@ public sealed class PublishService(
             item.LocalOrder,
             item.StartSide,
             PublicationSectionService.ResolveBindings(item.Manuscript, boundValues),
-            sectionCompositions.GetValueOrDefault(item.Id, []).Select(composition => CompositionDocument(composition, profile, boundValues)).ToList())).ToList();
+            DesignedPagesForManuscript(item.Manuscript, designedPages, coreTarget ? null : editionId)
+                .Select(page => DesignedPageDocument(page, profile, boundValues, coreTarget ? null : editionId)).ToList())).ToList();
         var coverDesign = coreTarget || profile.InheritsCoreCover
             ? await CoreCoverAsync(projectId, cancellationToken)
             : await db.PublicationCoverDesigns.AsNoTracking()
@@ -327,7 +322,7 @@ public sealed class PublishService(
             .SelectMany(chapter => chapter.Manuscript.Content
                     .Where(block => block.Type == ManuscriptBlockType.Figure)
                     .Select(block => block.ImageId!.Value)
-                .Concat(chapter.PageCompositions
+                .Concat(chapter.DesignedPages
                     .SelectMany(composition => composition.Variants)
                     .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
                     .Where(item => item.ImageId is not null)
@@ -337,7 +332,7 @@ public sealed class PublishService(
                 .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId.HasValue)
                 .Select(block => block.ImageId!.Value))
             .Concat(publicationSectionDocuments
-                .SelectMany(item => item.PageCompositions)
+                .SelectMany(item => item.DesignedPages)
                 .SelectMany(item => item.Variants)
                 .SelectMany(item => CompositionSceneResolver.Flatten(item.Scene))
                 .Where(item => item.ImageId.HasValue)
@@ -386,7 +381,7 @@ public sealed class PublishService(
                 .SelectMany(chapter => chapter.Manuscript.Content)
                 .Select(block => block.ParagraphPresentation?.FontFamilyKey))
             .Concat(sections.SelectMany(section => section.Chapters)
-                .SelectMany(chapter => chapter.PageCompositions)
+                .SelectMany(chapter => chapter.DesignedPages)
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene).Select(item => item.FontFamilyKey)
                     .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
@@ -694,7 +689,7 @@ public sealed class PublishService(
         Chapter chapter,
         PublicationEdition profile,
         int chapterNumber,
-        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyList<DesignedPage> pages,
         IReadOnlyDictionary<PublicationBoundField, string> boundValues)
     {
         return new(
@@ -706,33 +701,55 @@ public sealed class PublishService(
             chapterNumber - 1,
             profile.IncludeChapterHeadings,
             chapter.Manuscript,
-            compositions.Select(composition => CompositionDocument(composition, profile, boundValues)).ToList());
+            pages.Select(page => DesignedPageDocument(page, profile, boundValues, profile.Id == Guid.Empty ? null : profile.Id)).ToList());
     }
 
-    private static PublishPageCompositionDocument CompositionDocument(
-        PageComposition composition,
+    private static PublishDesignedPageDocument DesignedPageDocument(
+        DesignedPage page,
         PublicationEdition profile,
-        IReadOnlyDictionary<PublicationBoundField, string> boundValues) => new(
-            composition.Id,
-            composition.Name,
+        IReadOnlyDictionary<PublicationBoundField, string> boundValues,
+        Guid? editionId)
+    {
+        var content = page.Contents.SingleOrDefault(item => item.EditionId == editionId)
+            ?? page.Contents.SingleOrDefault(item => item.EditionId is null)
+            ?? throw new InvalidOperationException($"Designed Page {page.Id:N} has no effective content.");
+        return new(
+            page.Id,
+            page.Name,
             PublicationSectionService.ResolveBindings(
-                ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
+                ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision),
                 boundValues),
-            composition.Revision,
-            composition.Variants
-                .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
-                .OrderByDescending(variant => composition.ActiveAuthoringVariantId == variant.Id)
+            content.Revision,
+            content.Variants
+                .Where(variant => DesignedPageService.VariantMatchesEdition(variant, profile))
+                .OrderByDescending(variant => content.ActiveVariantId == variant.Id)
                 .ThenByDescending(variant => variant.UpdatedAt)
                 .Take(1)
-                .Select(variant => new PublishPageCompositionVariantDocument(
+                .Select(variant => new PublishDesignedPageVariantDocument(
                     variant.Id,
                     variant.GeometryKey,
                     NormalizeSceneLanguages(PdfPresentationScene(
                         JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
-                            ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
+                            ?? throw new InvalidOperationException($"Designed Page {page.Id:N} has no scene."),
                         profile)),
                     variant.Revision))
                 .ToList());
+    }
+
+    private static IReadOnlyList<DesignedPage> DesignedPagesForManuscript(
+        ManuscriptDocument manuscript,
+        IReadOnlyList<DesignedPage> pages,
+        Guid? editionId)
+    {
+        var byId = pages.ToDictionary(page => page.Id);
+        return manuscript.Content
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage)
+            .Select(block => block.DesignedPageId is Guid pageId && byId.TryGetValue(pageId, out var page)
+                && (page.ScopeEditionId is null || page.ScopeEditionId == editionId)
+                    ? page
+                    : throw new InvalidOperationException($"Designed Page block {block.Id} references a page that is unavailable for this publication target."))
+            .ToList();
+    }
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
     {

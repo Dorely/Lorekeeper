@@ -101,8 +101,8 @@ public sealed class ManuscriptStyleService(
             .Where(item => item.Edition.ProjectId == projectId)
             .Select(item => item.ManuscriptJson)
             .ToListAsync(cancellationToken));
-        documents.AddRange(await db.PageCompositions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && item.DetachedAt == null)
+        documents.AddRange(await db.DesignedPageContents.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
             .Select(item => item.SemanticManuscriptJson)
             .ToListAsync(cancellationToken));
         documents.AddRange(await db.PublicationBookMatter.AsNoTracking()

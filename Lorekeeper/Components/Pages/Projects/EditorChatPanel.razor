@@ -99,7 +99,7 @@
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
-    [Parameter] public Guid? CurrentCompositionId { get; set; }
+    [Parameter] public Guid? CurrentDesignedPageId { get; set; }
     [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter] public int ContextRefreshSignal { get; set; }
     [Parameter] public int ReviewRefreshSignal { get; set; }
@@ -429,7 +429,7 @@
                 await OnAiTurnStarting.InvokeAsync();
 
             phase = "starting editor chat turn";
-            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, CurrentCompositionId, ContentTarget, text, submission.Images, model))
+            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, CurrentDesignedPageId, ContentTarget, text, submission.Images, model))
             {
                 _error = "Editor chat already has a running turn.";
                 if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)

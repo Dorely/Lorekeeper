@@ -185,12 +185,12 @@ public static partial class ManuscriptCodec
                     $"Non-figure block {block.Id} cannot contain figure image metadata.");
             }
             if (block.Type == ManuscriptBlockType.DesignedPage
-                && (block.PageCompositionId is not { } compositionId || compositionId == Guid.Empty))
+                && (block.DesignedPageId is not { } pageId || pageId == Guid.Empty))
             {
-                throw new InvalidDataException($"Designed-page block {block.Id} requires a page composition ID.");
+                throw new InvalidDataException($"Designed-page block {block.Id} requires a Designed Page ID.");
             }
-            if (block.Type != ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
-                throw new InvalidDataException($"Block {block.Id} cannot reference a page composition.");
+            if (block.Type != ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
+                throw new InvalidDataException($"Block {block.Id} cannot reference a Designed Page.");
             ValidateParagraphPresentation(block);
             if (block.Type != ManuscriptBlockType.SceneBreak
                 && block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))

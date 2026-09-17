@@ -6,6 +6,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Publish;
+using Lorekeeper.Persistence.Legacy;
 using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -37,6 +38,7 @@ public sealed class DatabaseStartupMigrationService(
     IPublicationCoreMigrationService publicationCoreMigration,
     IEditionContentMigrationService editionContentMigration,
     IPublicationSectionMigrationService publicationSectionMigration,
+    IDesignedPageMigrationService designedPageMigration,
     IPrintArtifactProfileMigrationService printArtifactProfileMigration,
     IDatabaseMigrationRecoveryService recovery,
     IServiceProvider? serviceProvider = null) : IDatabaseStartupMigrationService
@@ -232,16 +234,82 @@ public sealed class DatabaseStartupMigrationService(
         await RemoveRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePrintArtifactProfileCompatibilityColumnsAsync(db, cancellationToken);
-        await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await CleanupDetachedCompositionsAsync(db, cancellationToken);
+        await PrepareDesignedPageTransitionAsync(db, designedPageMigration, cancellationToken);
+        if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
+            return false;
+        await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
+    }
+
+    private async Task PrepareDesignedPageTransitionAsync(
+        AppDbContext db,
+        IDesignedPageMigrationService migration,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(DesignedPageMigrationService.CleanupMigrationId))
+            return;
+        var backupPath = await recovery.CreateBackupAsync(
+            "designed-pages",
+            "pre-m2-page-ownership",
+            cancellationToken);
+        try
+        {
+            if (!applied.Contains(DesignedPageMigrationService.AdditiveMigrationId))
+            {
+                await db.GetService<IMigrator>().MigrateAsync(
+                    DesignedPageMigrationService.AdditiveMigrationId,
+                    cancellationToken);
+                db.ChangeTracker.Clear();
+            }
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await migration.ApplyPendingAsync(db, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidOperationException("The Designed Page data transform failed.", exception);
+            }
+            await db.GetService<IMigrator>().MigrateAsync(
+                DesignedPageMigrationService.CleanupMigrationId,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            db.ChangeTracker.Clear();
+        }
+        catch (Exception exception)
+        {
+            db.ChangeTracker.Clear();
+            try
+            {
+                await recovery.EnterRecoveryModeAsync(
+                    db,
+                    backupPath,
+                    "designed-pages-v1",
+                    4,
+                    ManuscriptDocument.CurrentSchemaVersion,
+                    exception,
+                    cancellationToken);
+            }
+            catch (Exception recoveryException)
+            {
+                throw new AggregateException(
+                    "The Designed Page migration failed and recovery mode could not be recorded.",
+                    exception,
+                    recoveryException);
+            }
+        }
     }
 
     internal static async Task CleanupDetachedCompositionsAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
+        if (!await HasTableAsync(db, "PageCompositions", cancellationToken))
+            return;
         // Detached rows are retained only while an in-process history snapshot
         // can restore them. History is empty before the first startup request,
         // so remove detached variants first, then detached compositions with
@@ -1097,7 +1165,7 @@ public sealed class DatabaseStartupMigrationService(
         var addedBlocks = after.Manuscript.Content.Where(block => !beforeIds.Contains(block.Id)).ToList();
         if (addedBlocks is not [var added]
             || added.Type != ManuscriptBlockType.DesignedPage
-            || added.PageCompositionId is not Guid compositionId)
+            || added.DesignedPageId is not Guid compositionId)
             throw new InvalidDataException($"Legacy Designed Page change {change.Id:N} must add exactly one Designed Page block.");
 
         var projected = ManuscriptOperations.Apply(
@@ -1107,12 +1175,12 @@ public sealed class DatabaseStartupMigrationService(
                 ManuscriptBlockType.DesignedPage,
                 string.Empty,
                 ManuscriptStyleRoles.DesignedPage,
-                PageCompositionId: compositionId,
+                DesignedPageId: compositionId,
                 BlockId: added.Id)]).Document;
         if (projected.Revision != after.Revision || !ManuscriptCodec.ContentEquals(projected, after.Manuscript))
             throw new InvalidDataException($"Legacy Designed Page change {change.Id:N} has an inconsistent manuscript projection.");
 
-        if (await db.PageCompositions.IgnoreQueryFilters().AnyAsync(item => item.Id == compositionId, cancellationToken))
+        if (await db.LegacyPageCompositions.IgnoreQueryFilters().AnyAsync(item => item.Id == compositionId, cancellationToken))
             throw new InvalidDataException($"Legacy Designed Page change {change.Id:N} reuses composition {compositionId:N}.");
 
         var layoutMode = arguments.LayoutMode;
@@ -1122,7 +1190,7 @@ public sealed class DatabaseStartupMigrationService(
             var edition = await db.PublicationEditions.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.ProjectId == change.ProjectId && item.Id == targetEditionId, cancellationToken)
                 ?? throw new InvalidDataException($"Legacy Designed Page change {change.Id:N} references a missing edition.");
-            scene = CompositionService.CreatePageScene(edition, layoutMode);
+            scene = DesignedPageService.CreatePageScene(edition, layoutMode);
         }
         else
         {
@@ -1133,7 +1201,7 @@ public sealed class DatabaseStartupMigrationService(
                 setup = new ProjectPageSetup { ProjectId = change.ProjectId };
                 db.ProjectPageSetups.Add(setup);
             }
-            scene = CompositionService.CreatePageScene(setup, layoutMode);
+            scene = DesignedPageService.CreatePageScene(setup, layoutMode);
         }
 
         if (arguments.ImageId is Guid imageId)
@@ -1172,7 +1240,7 @@ public sealed class DatabaseStartupMigrationService(
             };
         }
 
-        var composition = new PageComposition
+        var composition = new LegacyPageComposition
         {
             Id = compositionId,
             ProjectId = change.ProjectId,
@@ -1181,17 +1249,17 @@ public sealed class DatabaseStartupMigrationService(
             Name = string.IsNullOrWhiteSpace(arguments.Name) ? "Designed page" : arguments.Name.Trim(),
             SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(compositionId)),
         };
-        var variant = new PageCompositionVariant
+        var variant = new LegacyPageCompositionVariant
         {
             Id = Guid.NewGuid(),
             CompositionId = composition.Id,
             Composition = composition,
-            GeometryKey = CompositionService.SceneGeometryKey(scene),
+            GeometryKey = DesignedPageService.SceneGeometryKey(scene),
             SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
         };
         composition.ActiveAuthoringVariantId = variant.Id;
-        db.PageCompositions.Add(composition);
-        db.PageCompositionVariants.Add(variant);
+        db.LegacyPageCompositions.Add(composition);
+        db.LegacyPageCompositionVariants.Add(variant);
 
         if (contentTarget.IsCore)
         {

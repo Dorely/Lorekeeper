@@ -23,7 +23,7 @@ public sealed record PublicationDiagnosticPresentation(
     Guid? ChapterId = null,
     Guid? EditionId = null,
     Guid? PublicationSectionId = null,
-    Guid? CompositionId = null,
+    Guid? DesignedPageId = null,
     Guid? ObjectId = null);
 
 public static partial class PublicationDiagnosticText
@@ -98,7 +98,7 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
                 target?.ChapterId,
                 target?.EditionId,
                 target?.PublicationSectionId,
-                target?.CompositionId,
+                target?.DesignedPageId,
                 target?.ObjectId));
         }
         return output;
@@ -118,40 +118,45 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
         {
             var canonicalCandidate = candidateId.ToString("D");
             var compactCandidate = candidateId.ToString("N");
-            var matchingVariants = await db.PageCompositionVariants.AsNoTracking()
-                .Include(item => item.Composition).ThenInclude(item => item.Chapter)
-                .Include(item => item.Composition).ThenInclude(item => item.PublicationSection)
-                .Where(item => item.Composition.ProjectId == projectId
-                    && item.DetachedAt == null
-                    && item.Composition.DetachedAt == null
+            var matchingVariants = await db.DesignedPageVariants.AsNoTracking()
+                .Include(item => item.Content).ThenInclude(item => item.Page)
+                .Where(item => item.Content.ProjectId == projectId
                     && (selectedEditionId == null
-                        ? item.Composition.EditionId == null
-                        : item.Composition.EditionId == selectedEditionId
-                            || item.Composition.EditionId == null)
+                        ? item.Content.EditionId == null
+                        : item.Content.EditionId == selectedEditionId || item.Content.EditionId == null)
                     && (item.SceneJson.Contains(canonicalCandidate)
                         || item.SceneJson.Contains(compactCandidate)))
                 .ToListAsync(cancellationToken);
             var variantMatch = matchingVariants
                 .Select(item => (Variant: item, ObjectId: SceneObjectReference(item.SceneJson, candidateId)))
                 .Where(item => item.ObjectId is not null)
-                .OrderByDescending(item => item.Variant.Composition.EditionId == selectedEditionId)
+                .OrderByDescending(item => item.Variant.Content.EditionId == selectedEditionId)
                 .FirstOrDefault();
             if (variantMatch.Variant is not null)
-                return CompositionTarget(variantMatch.Variant.Composition, variantMatch.ObjectId, selectedEditionId, chapterOrdinals);
+                return await DesignedPageTargetAsync(
+                    db,
+                    variantMatch.Variant.Content.Page,
+                    variantMatch.ObjectId,
+                    selectedEditionId,
+                    chapterOrdinals,
+                    cancellationToken);
 
-            var composition = await db.PageCompositions.AsNoTracking()
-                .Include(item => item.Chapter)
-                .Include(item => item.PublicationSection)
+            var composition = await db.DesignedPages.AsNoTracking()
                 .Where(item => item.ProjectId == projectId
                     && item.Id == candidateId
-                    && item.DetachedAt == null
                     && (selectedEditionId == null
-                        ? item.EditionId == null
-                        : item.EditionId == selectedEditionId || item.EditionId == null))
-                .OrderByDescending(item => item.EditionId == selectedEditionId)
+                        ? item.ScopeEditionId == null
+                        : item.ScopeEditionId == selectedEditionId || item.ScopeEditionId == null))
+                .OrderByDescending(item => item.ScopeEditionId == selectedEditionId)
                 .FirstOrDefaultAsync(cancellationToken);
             if (composition is not null)
-                return CompositionTarget(composition, null, selectedEditionId, chapterOrdinals);
+                return await DesignedPageTargetAsync(
+                    db,
+                    composition,
+                    null,
+                    selectedEditionId,
+                    chapterOrdinals,
+                    cancellationToken);
 
             if (selectedEditionId is Guid editionId)
             {
@@ -217,45 +222,56 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
         return null;
     }
 
-    private static ResolvedTarget CompositionTarget(
-        PageComposition composition,
+    private static async Task<ResolvedTarget> DesignedPageTargetAsync(
+        AppDbContext db,
+        DesignedPage page,
         Guid? objectId,
         Guid? selectedEditionId,
-        IReadOnlyDictionary<Guid, int> chapterOrdinals)
+        IReadOnlyDictionary<Guid, int> chapterOrdinals,
+        CancellationToken cancellationToken)
     {
-        var pageLabel = string.IsNullOrWhiteSpace(composition.Name)
+        var placement = await db.DesignedPagePlacementReferences.AsNoTracking()
+            .Where(item => item.ProjectId == page.ProjectId && item.DesignedPageId == page.Id
+                && (selectedEditionId == null
+                    ? item.EditionId == null
+                    : item.EditionId == selectedEditionId || item.EditionId == null))
+            .OrderByDescending(item => item.EditionId == selectedEditionId)
+            .ThenBy(item => item.ContainerKind)
+            .ThenBy(item => item.ContainerId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (placement?.ContainerKind == DesignedPageContainerKind.Chapter)
+        {
+            var chapter = await db.Chapters.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == placement.ContainerId, cancellationToken);
+            if (chapter is not null)
+            {
+                var label = chapterOrdinals.TryGetValue(chapter.Id, out var ordinal)
+                    ? $"Chapter {ordinal}: {chapter.Title}"
+                    : chapter.Title;
+                return new(PublicationDiagnosticTargetKind.ChapterPage, label, chapter.Id,
+                    selectedEditionId ?? placement.EditionId, DesignedPageId: page.Id, ObjectId: objectId);
+            }
+        }
+        if (placement?.ContainerKind == DesignedPageContainerKind.PublicationSection)
+        {
+            var section = await db.PublicationSections.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == placement.ContainerId, cancellationToken);
+            if (section is not null)
+            {
+                return new(PublicationDiagnosticTargetKind.PublicationSectionPage, section.Title,
+                    EditionId: selectedEditionId ?? placement.EditionId,
+                    PublicationSectionId: section.Id, DesignedPageId: page.Id, ObjectId: objectId);
+            }
+        }
+
+        var pageLabel = string.IsNullOrWhiteSpace(page.Name)
             ? "Designed page"
-            : composition.Name.Trim();
-        if (composition.PublicationSection is { } section)
-        {
-            return new(
-                PublicationDiagnosticTargetKind.PublicationSectionPage,
-                $"{section.Title} · {pageLabel}",
-                EditionId: selectedEditionId ?? section.EditionId,
-                PublicationSectionId: section.Id,
-                CompositionId: composition.Id,
-                ObjectId: objectId);
-        }
-
-        if (composition.Chapter is { } chapter)
-        {
-            var chapterLabel = chapterOrdinals.TryGetValue(chapter.Id, out var ordinal)
-                ? $"Chapter {ordinal}: {chapter.Title}"
-                : chapter.Title;
-            return new(
-                PublicationDiagnosticTargetKind.ChapterPage,
-                $"{chapterLabel} · {pageLabel}",
-                ChapterId: chapter.Id,
-                EditionId: selectedEditionId ?? composition.EditionId,
-                CompositionId: composition.Id,
-                ObjectId: objectId);
-        }
-
+            : page.Name.Trim();
         return new(
             PublicationDiagnosticTargetKind.None,
             pageLabel,
-            EditionId: selectedEditionId ?? composition.EditionId,
-            CompositionId: composition.Id,
+            EditionId: selectedEditionId ?? page.ScopeEditionId,
+            DesignedPageId: page.Id,
             ObjectId: objectId);
     }
 
@@ -353,6 +369,6 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
         Guid? ChapterId = null,
         Guid? EditionId = null,
         Guid? PublicationSectionId = null,
-        Guid? CompositionId = null,
+        Guid? DesignedPageId = null,
         Guid? ObjectId = null);
 }

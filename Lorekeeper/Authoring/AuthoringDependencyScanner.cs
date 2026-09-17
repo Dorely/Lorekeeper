@@ -66,9 +66,9 @@ internal static class AuthoringDependencyScanner
         else if (string.Equals(propertyName, "imageId", StringComparison.OrdinalIgnoreCase)
             && Guid.TryParse(value, out var imageId))
             result.Add((AuthoringHistoryDependencyKind.ProjectImage, imageId));
-        else if ((string.Equals(propertyName, "pageCompositionId", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(propertyName, "compositionId", StringComparison.OrdinalIgnoreCase))
-            && Guid.TryParse(value, out var compositionId))
-            result.Add((AuthoringHistoryDependencyKind.PageComposition, compositionId));
+        else if ((string.Equals(propertyName, "designedPageId", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(propertyName, "pageId", StringComparison.OrdinalIgnoreCase))
+            && Guid.TryParse(value, out var pageId))
+            result.Add((AuthoringHistoryDependencyKind.DesignedPage, pageId));
     }
 }

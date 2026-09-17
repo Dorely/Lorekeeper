@@ -73,7 +73,7 @@ public sealed class ImageGenerationTarget
     public string TargetKind { get; init; } = string.Empty;
     [Description("Project ID for ProjectPage, otherwise the stable Figure block, composition object/surface, or cover object/surface ID.")]
     public Guid? TargetId { get; init; }
-    [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
+    [Description("Exact Designed Page variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
     [Description("Optional W:H, W/H, or decimal aspect for free-standing work. A regional-guided edit accepts only the source image aspect. Layout-bound targets derive their aspect from Lorekeeper.")]
     public string AspectRatio { get; init; } = string.Empty;
@@ -198,7 +198,7 @@ public interface IImagePromptComposer
 }
 
 public sealed class ImagePromptComposer(
-    ICompositionService compositions,
+    IDesignedPageService compositions,
     IProjectImageService images,
     IProjectImageDefaultRasterResolver defaultRasters,
     IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer

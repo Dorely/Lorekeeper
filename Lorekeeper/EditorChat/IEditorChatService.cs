@@ -25,7 +25,7 @@ public interface IEditorChatService
     Task CancelContestAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
     Task KeepContestCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default);
     Task FinishContestBatchAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentDesignedPageId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 
@@ -33,7 +33,7 @@ public sealed class EditorChatContext(
     Guid projectId,
     Guid conversationId,
     Guid? currentChapterId,
-    Guid? currentCompositionId,
+    Guid? currentDesignedPageId,
     EditorContentTarget contentTarget,
     int providerId,
     bool visionReady,
@@ -53,7 +53,7 @@ public sealed class EditorChatContext(
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
     public Guid? CurrentChapterId { get; } = currentChapterId;
-    public Guid? CurrentCompositionId { get; } = currentCompositionId;
+    public Guid? CurrentDesignedPageId { get; } = currentDesignedPageId;
     public EditorContentTarget ContentTarget { get; } = contentTarget;
     public int ProviderId { get; } = providerId;
     public bool VisionReady { get; } = visionReady;

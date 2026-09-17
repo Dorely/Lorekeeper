@@ -75,10 +75,10 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
             foreach (var block in item.Manuscript.Content)
             {
                 if (block.Type == ManuscriptBlockType.DesignedPage
-                    && block.PageCompositionId is Guid compositionId
-                    && item.PageCompositions.FirstOrDefault(value => value.Id == compositionId) is { } composition)
+                    && block.DesignedPageId is Guid designedPageId
+                    && item.DesignedPages.FirstOrDefault(value => value.Id == designedPageId) is { } designedPage)
                 {
-                    foreach (var projected in DesignedPageSemanticProjection.Blocks(composition))
+                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
                         AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId)));
                 }
                 else
@@ -144,10 +144,10 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         foreach (var block in chapter.Manuscript.Content)
         {
             if (block.Type == ManuscriptBlockType.DesignedPage
-                && block.PageCompositionId is Guid compositionId
-                && chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId) is { } composition)
+                && block.DesignedPageId is Guid designedPageId
+                && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } designedPage)
             {
-                foreach (var projected in DesignedPageSemanticProjection.Blocks(composition))
+                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
                     AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId)));
                 continue;
             }
@@ -240,10 +240,10 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             foreach (var block in item.Manuscript.Content)
             {
                 if (block.Type == ManuscriptBlockType.DesignedPage
-                    && block.PageCompositionId is Guid compositionId
-                    && item.PageCompositions.FirstOrDefault(value => value.Id == compositionId) is { } composition)
+                    && block.DesignedPageId is Guid designedPageId
+                    && item.DesignedPages.FirstOrDefault(value => value.Id == designedPageId) is { } designedPage)
                 {
-                    foreach (var projected in DesignedPageSemanticProjection.Blocks(composition))
+                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
                         sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId)));
                 }
                 else
@@ -307,10 +307,10 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         foreach (var manuscriptBlock in chapter.Manuscript.Content)
         {
             if (manuscriptBlock.Type == ManuscriptBlockType.DesignedPage
-                && manuscriptBlock.PageCompositionId is Guid compositionId
-                && chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId) is { } composition)
+                && manuscriptBlock.DesignedPageId is Guid designedPageId
+                && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } designedPage)
             {
-                foreach (var projected in DesignedPageSemanticProjection.Blocks(composition))
+                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
                     sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId)));
                 continue;
             }
@@ -410,15 +410,15 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static void ValidateDigitalAccessibility(PublishDocument document)
     {
         var manuscripts = document.Sections.SelectMany(section => section.Chapters).Select(chapter => chapter.Manuscript)
-            .Concat(document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter => chapter.PageCompositions).Select(composition => composition.SemanticManuscript))
+            .Concat(document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter => chapter.DesignedPages).Select(designedPage => designedPage.SemanticManuscript))
             .Concat(document.PublicationSections.Select(item => item.Manuscript))
-            .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions).Select(item => item.SemanticManuscript));
+            .Concat(document.PublicationSections.SelectMany(item => item.DesignedPages).Select(item => item.SemanticManuscript));
         if (manuscripts.Any(manuscript => manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure
             && !block.Decorative && string.IsNullOrWhiteSpace(block.AltText))))
             throw new InvalidDataException("EPUB export requires alternative text or an explicit decorative decision for every Figure.");
         var scenes = document.Sections.SelectMany(section => section.Chapters)
-            .SelectMany(chapter => chapter.PageCompositions)
-            .Concat(document.PublicationSections.SelectMany(section => section.PageCompositions))
+            .SelectMany(chapter => chapter.DesignedPages)
+            .Concat(document.PublicationSections.SelectMany(section => section.DesignedPages))
             .SelectMany(composition => composition.Variants)
             .Select(variant => variant.Scene)
             .Concat(document.Cover is null ? [] : [document.Cover.Scene]);
@@ -526,14 +526,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             var designedIndex = 0;
             foreach (var block in section.Manuscript.Content)
             {
-                if (block.Type != ManuscriptBlockType.DesignedPage || block.PageCompositionId is not Guid compositionId)
+                if (block.Type != ManuscriptBlockType.DesignedPage || block.DesignedPageId is not Guid designedPageId)
                 {
                     segment.Add(block);
                     continue;
                 }
                 Flush();
-                var composition = section.PageCompositions.FirstOrDefault(item => item.Id == compositionId)
-                    ?? throw new InvalidOperationException($"Designed Page '{compositionId:N}' is missing from publication section '{section.Title}'.");
+                var composition = section.DesignedPages.FirstOrDefault(item => item.Id == designedPageId)
+                    ?? throw new InvalidOperationException($"Designed Page '{designedPageId:N}' is missing from publication section '{section.Title}'.");
                 var variant = composition.Variants.FirstOrDefault()
                     ?? throw new InvalidOperationException($"Designed Page '{composition.Name}' has no layout for EPUB export.");
                 var id = first ? baseId : $"{baseId}-designed-{++designedIndex}";
@@ -592,14 +592,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         foreach (var block in chapter.Manuscript.Content)
         {
             if (block.Type != ManuscriptBlockType.DesignedPage
-                || block.PageCompositionId is not Guid compositionId)
+                || block.DesignedPageId is not Guid designedPageId)
             {
                 segment.Add(block);
                 continue;
             }
             FlushReflow();
-            var composition = chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId)
-                ?? throw new InvalidOperationException($"Designed Page '{compositionId:N}' is missing from the chapter publication document.");
+            var composition = chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId)
+                ?? throw new InvalidOperationException($"Designed Page '{designedPageId:N}' is missing from the chapter publication document.");
             var variant = composition.Variants.FirstOrDefault()
                 ?? throw new InvalidOperationException($"Designed Page '{composition.Name}' has no layout for EPUB export.");
             var id = firstReflow ? chapterId : $"{chapterId}-designed-{++designedIndex}";
@@ -636,7 +636,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     assets[asset.Id] = asset;
                 }
             }
-            foreach (var imageId in chapter.PageCompositions
+            foreach (var imageId in chapter.DesignedPages
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects)
                 .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
@@ -654,7 +654,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     && document.Assets.FirstOrDefault(asset => asset.Id == imageId) is { } asset)
                     assets[asset.Id] = asset;
             }
-            foreach (var imageId in section.PageCompositions.SelectMany(composition => composition.Variants)
+            foreach (var imageId in section.DesignedPages.SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects)
                 .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
                 .Select(item => item.ImageId!.Value))
@@ -881,13 +881,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static void AppendDesignedPage(
         StringBuilder sb,
-        PublishPageCompositionDocument composition,
+        PublishDesignedPageDocument composition,
         IReadOnlyList<EpubImageItem> imageItems)
     {
         var variant = composition.Variants.FirstOrDefault();
         if (variant is null)
             throw new InvalidOperationException($"Designed Page '{composition.Name}' has no layout for EPUB export.");
-        var scene = CompositionService.WithDerivedTextSemanticRoles(
+        var scene = DesignedPageService.WithDerivedTextSemanticRoles(
             variant.Scene,
             composition.SemanticManuscript);
         var visibleLayers = scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
@@ -1652,7 +1652,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
 internal static class DesignedPageSemanticProjection
 {
-    public static IReadOnlyList<ManuscriptBlock> Blocks(PublishPageCompositionDocument composition)
+    public static IReadOnlyList<ManuscriptBlock> Blocks(PublishDesignedPageDocument composition)
     {
         var variant = composition.Variants.FirstOrDefault()
             ?? throw new InvalidOperationException($"Designed Page '{composition.Name}' has no active layout variant.");

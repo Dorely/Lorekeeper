@@ -283,7 +283,7 @@ public sealed record PublishPublicationSectionDocument(
     int LocalOrder,
     PublicationSectionStartSide StartSide,
     ManuscriptDocument Manuscript,
-    IReadOnlyList<PublishPageCompositionDocument> PageCompositions);
+    IReadOnlyList<PublishDesignedPageDocument> DesignedPages);
 
 public sealed record PublishManuscriptStyleDocument(
     string Name,
@@ -339,16 +339,16 @@ public sealed record PublishChapterDocument(
     int Order,
     bool IncludeHeading,
     ManuscriptDocument Manuscript,
-    IReadOnlyList<PublishPageCompositionDocument> PageCompositions);
+    IReadOnlyList<PublishDesignedPageDocument> DesignedPages);
 
-public sealed record PublishPageCompositionDocument(
+public sealed record PublishDesignedPageDocument(
     Guid Id,
     string Name,
     ManuscriptDocument SemanticManuscript,
     long Revision,
-    IReadOnlyList<PublishPageCompositionVariantDocument> Variants);
+    IReadOnlyList<PublishDesignedPageVariantDocument> Variants);
 
-public sealed record PublishPageCompositionVariantDocument(
+public sealed record PublishDesignedPageVariantDocument(
     Guid Id,
     string GeometryKey,
     CompositionScene Scene,

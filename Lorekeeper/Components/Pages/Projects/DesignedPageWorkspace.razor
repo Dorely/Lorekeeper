@@ -7,7 +7,7 @@
 @using Lorekeeper.Publish
 @using Lorekeeper.Images
 @implements IAsyncDisposable
-@inject ICompositionService Compositions
+@inject IDesignedPageService DesignedPages
 @inject IManuscriptService Manuscripts
 @inject IPublicationBookService Books
 @inject IPublicationSectionService PublicationSections
@@ -20,13 +20,17 @@
 <section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger">@PublicationDiagnosticText.SanitizeIdentifiers(_error)</div> }
+    @if (IsInheritedReleasePage)
+    {
+        <div class="alert alert-info" role="status">This release is currently inheriting the Core Designed Page. Your first saved change creates an independent release copy; Core content and layout stay unchanged.</div>
+    }
     @if (_scene is null) { <p class="text-muted">Loading composition...</p> }
     else
     {
         <CompositionVisualEditorShell AccessibleLabel="Designed page visual editor">
             <Toolbar>
                 <nav class="composition-page-strip" aria-label="Page and spread mode">
-                    <div class="composition-page-identity"><strong>@(_composition?.Name ?? "Designed page")</strong><small>@($"{_scene.Surface.WidthPoints / 72:0.##} × {_scene.Surface.HeightPoints / 72:0.##} in")</small></div>
+                    <div class="composition-page-identity"><strong>@(_page?.Name ?? "Designed page")</strong><small>@($"{_scene.Surface.WidthPoints / 72:0.##} × {_scene.Surface.HeightPoints / 72:0.##} in")</small></div>
                     <div class="composition-view-modes" role="group" aria-label="Page surface">
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.SinglePage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.SinglePage)"><span class="page-thumb single"></span>Single page</button>
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.FacingSpread)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.FacingSpread)"><span class="page-thumb spread"></span>Facing spread</button>
@@ -314,8 +318,8 @@
             throw new InvalidOperationException(_error ?? "Save this page before printing.");
         var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList(), Guides = [] };
         var semantic = ManuscriptCodec.Deserialize(_composition.SemanticManuscriptJson, _composition.Id, _composition.Revision);
-        return await Printing.CreateCompositionAsync(ProjectId, _composition.Id, _variant.Revision,
-            _composition.Name, scene, semantic, null, cancellationToken);
+        return await Printing.CreateCompositionAsync(ProjectId, PageId, _variant.Revision,
+            _page?.Name ?? "Designed page", scene, semantic, null, cancellationToken);
     }
 
     [Parameter] public int RefreshSignal { get; set; }
@@ -323,14 +327,15 @@
     [Parameter] public Guid? RequestedVariantId { get; set; }
     [Parameter] public bool InteractionLocked { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
-    [Parameter, EditorRequired] public Guid CompositionId { get; set; }
+    [Parameter, EditorRequired] public Guid PageId { get; set; }
+    [Parameter, EditorRequired] public string PlacementBlockId { get; set; } = string.Empty;
     [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
-    [Parameter] public EventCallback<Guid> CompositionForked { get; set; }
     [Parameter] public EventCallback<WorkspaceState> WorkspaceChanged { get; set; }
 
-    private PageComposition? _composition;
-    private PageCompositionVariant? _variant;
-    private IReadOnlyList<PageCompositionVariant> _variants = [];
+    private DesignedPage? _page;
+    private DesignedPageContent? _composition;
+    private DesignedPageVariant? _variant;
+    private IReadOnlyList<DesignedPageVariant> _variants = [];
     private CompositionScene? _scene;
     private List<CompositionObject> _objects = [];
     private List<CompositionLayer> _layers = [];
@@ -354,7 +359,7 @@
     private Guid? _suppressTextEditId;
     private TextSelectionRestore? _textSelectionRestore;
     private Guid _loadedProjectId;
-    private Guid _loadedCompositionId;
+    private Guid _loadedPageId;
     private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedRefreshSignal = -1;
     private Guid? _loadedRequestedVariantId;
@@ -478,7 +483,7 @@
             try
             {
                 return ManuscriptRangeResolver.ValidateCoverage(
-                    new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks },
+                    new ManuscriptDocument { ManuscriptId = _composition?.Id ?? PageId, Content = _semanticBlocks },
                     _objects.Where(item => item.Kind == CompositionObjectKind.Text && IsVisible(item)).Select(item => item.ContentReferences))
                     .ToHashSet(StringComparer.Ordinal);
             }
@@ -493,7 +498,7 @@
     protected override async Task OnParametersSetAsync()
     {
         if (_loadedProjectId == ProjectId
-            && _loadedCompositionId == CompositionId
+            && _loadedPageId == PageId
             && _loadedContentTarget == ContentTarget
             && _loadedRefreshSignal == RefreshSignal
             && _loadedRequestedVariantId == RequestedVariantId)
@@ -507,11 +512,10 @@
         _error = null;
         try
         {
-            _composition = await Compositions.GetAsync(ProjectId, CompositionId)
+            var view = await DesignedPages.GetAsync(ProjectId, PageId, ContentTarget)
                 ?? throw new InvalidOperationException("Designed page was not found.");
-            if (_composition.EditionId != ContentTarget.EditionId
-                && !(ContentTarget.EditionId is not null && _composition.EditionId is null))
-                throw new InvalidOperationException("This Designed Page belongs to a different Editor content target.");
+            _page = view.Page;
+            _composition = view.Content;
             _semanticBlocks = ManuscriptCodec.Deserialize(
                 _composition.SemanticManuscriptJson,
                 _composition.Id,
@@ -521,14 +525,14 @@
             _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList();
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
             await LoadVariantAsync();
-            _history = await Compositions.GetHistoryStateAsync(ProjectId, CompositionId);
+            _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
             if (RequestedSelectionId is Guid requestedSelectionId
                 && _objects.Any(item => item.Id == requestedSelectionId))
             {
                 _selectedId = requestedSelectionId;
             }
             _loadedProjectId = ProjectId;
-            _loadedCompositionId = CompositionId;
+            _loadedPageId = PageId;
             _loadedContentTarget = ContentTarget;
             _loadedRefreshSignal = RefreshSignal;
             _loadedRequestedVariantId = RequestedVariantId;
@@ -540,10 +544,10 @@
     private async Task LoadVariantAsync()
     {
         _authoringGeometry = ContentTarget.EditionId is Guid editionId
-            ? await Compositions.GetEditionGeometryAsync(ProjectId, editionId)
-            : await Compositions.GetAuthoringGeometryAsync(ProjectId);
+            ? await DesignedPages.GetEditionGeometryAsync(ProjectId, editionId)
+            : await DesignedPages.GetAuthoringGeometryAsync(ProjectId);
         _variant = await ResolveRequestedOrDefaultVariantAsync();
-        _variants = await Compositions.ListVariantsAsync(ProjectId, CompositionId);
+        _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition!.Id);
         _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Composition scene is empty.");
         _objects = _scene.Objects.ToList();
@@ -563,35 +567,35 @@
             if (_dirty) return;
         }
         _variant = ContentTarget.EditionId is Guid editionId
-            ? await Compositions.SelectVariantAsync(ProjectId, CompositionId, editionId, variantId)
-            : await Compositions.SelectAuthoringVariantAsync(ProjectId, CompositionId, variantId);
+            ? await DesignedPages.SelectVariantAsync(ProjectId, _composition!.Id, editionId, variantId)
+            : await DesignedPages.SelectAuthoringVariantAsync(ProjectId, _composition!.Id, variantId);
         _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Composition scene is empty.");
         _objects = _scene.Objects.ToList();
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
         _selectedId = _objects.FirstOrDefault()?.Id;
-        _history = await Compositions.GetHistoryStateAsync(ProjectId, CompositionId);
+        _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition!.Id);
         await NotifyWorkspaceChangedAsync();
     }
 
-    private async Task<PageCompositionVariant> ResolveRequestedOrDefaultVariantAsync()
+    private async Task<DesignedPageVariant> ResolveRequestedOrDefaultVariantAsync()
     {
         if (RequestedVariantId is Guid requestedVariantId)
         {
-            var requested = await Compositions.ReadVariantAsync(ProjectId, requestedVariantId);
-            if (requested.CompositionId == CompositionId)
+            var requested = await DesignedPages.ReadVariantAsync(ProjectId, requestedVariantId);
+            if (requested.ContentId == _composition!.Id)
                 return requested;
         }
 
         return ContentTarget.EditionId is Guid targetEditionId
             ? _composition!.EditionId is null
-                ? await Compositions.PreviewEditionVariantAsync(ProjectId, CompositionId, targetEditionId)
-                : await Compositions.GetOrCreateVariantAsync(ProjectId, CompositionId, targetEditionId)
-            : await Compositions.GetOrCreateAuthoringVariantAsync(ProjectId, CompositionId);
+                ? await DesignedPages.PreviewEditionVariantAsync(ProjectId, _composition!.Id, targetEditionId)
+                : await DesignedPages.GetOrCreateVariantAsync(ProjectId, _composition!.Id, targetEditionId)
+            : await DesignedPages.GetOrCreateAuthoringVariantAsync(ProjectId, _composition!.Id);
     }
 
-    private static string VariantLabel(PageCompositionVariant variant)
+    private static string VariantLabel(DesignedPageVariant variant)
     {
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
         return scene is null ? "Saved layout" : $"{scene.Surface.Kind} {scene.Surface.WidthPoints / 72:0.##} x {scene.Surface.HeightPoints / 72:0.##} in";
@@ -799,12 +803,13 @@
     private async Task LoadProtectedBoundFieldsAsync()
     {
         _protectedBoundFields.Clear();
-        if (_composition?.PublicationSectionId is not Guid sectionId)
+        var placement = _page?.PlacementReferences.FirstOrDefault(item => item.Id == PlacementBlockId);
+        if (placement is null || placement.ContainerKind != DesignedPageContainerKind.PublicationSection)
             return;
 
         var section = await PublicationSections.GetAsync(
             new PublicationSectionTarget(ProjectId, ContentTarget.EditionId),
-            sectionId);
+            placement.ContainerId);
         _protectedBoundFields.UnionWith(section.SystemRole switch
         {
             PublicationSectionSystemRole.Title =>
@@ -871,7 +876,7 @@
         if (UnplacedIds.Contains(sourceBlockId))
             throw new InvalidDataException("This older layout contains preserved text outside its frames. Place that text before editing this frame.");
 
-        var sourceDocument = new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks };
+        var sourceDocument = new ManuscriptDocument { ManuscriptId = _composition!.Id, Content = _semanticBlocks };
         var sourceFrames = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text
             && candidate.ContentReferences.Any(reference => reference.BlockId == sourceBlockId))
             .OrderBy(candidate => candidate.ReadingOrder ?? int.MaxValue)
@@ -918,7 +923,7 @@
                 "This text frame shares legacy content with another frame and cannot be edited safely.");
         }
 
-        var sourceDocument = new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks };
+        var sourceDocument = new ManuscriptDocument { ManuscriptId = _composition!.Id, Content = _semanticBlocks };
         var slices = ManuscriptRangeResolver.ResolveBlocks(sourceDocument, item.ContentReferences);
         var template = slices.FirstOrDefault()
             ?? throw new InvalidDataException("This text frame has no readable legacy content.");
@@ -1007,7 +1012,7 @@
             var enabled = !SelectionHasMark(block.Content, state.Start, state.End, mark);
             var source = new ManuscriptDocument
             {
-                ManuscriptId = CompositionId,
+                ManuscriptId = _composition?.Id ?? PageId,
                 Revision = _composition?.Revision ?? 0,
                 Content = _semanticBlocks,
             };
@@ -1263,9 +1268,9 @@
         try
         {
             var result = redo
-                ? await Compositions.RedoAsync(ContentTarget, ProjectId, CompositionId)
-                : await Compositions.UndoAsync(ContentTarget, ProjectId, CompositionId);
-            _composition = result.Composition;
+                ? await DesignedPages.RedoAsync(ContentTarget, ProjectId, _composition!.Id)
+                : await DesignedPages.UndoAsync(ContentTarget, ProjectId, _composition!.Id);
+            _composition = result.Content;
             _history = result.History;
             _semanticBlocks = ManuscriptCodec.Deserialize(
                 _composition.SemanticManuscriptJson, _composition.Id, _composition.Revision).Content.ToList();
@@ -1316,25 +1321,11 @@
         {
             if (!_dirty || _scene is null || _variant is null)
                 return;
+            await EnsureWritableReleaseContentAsync();
             var changeVersion = _changeVersion;
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
             var semanticBlocks = _semanticBlocks.ToList();
-            Guid? forkedCompositionId = null;
-            if (ContentTarget.EditionId is not null && _composition!.EditionId is null)
-            {
-                CompositionId = await Manuscripts.EnsureEditionCompositionAsync(
-                    ContentTarget,
-                    _composition.ChapterId ?? throw new InvalidOperationException("This Designed Page belongs to a publication section."),
-                    _composition.Id);
-                _composition = await Compositions.GetAsync(ProjectId, CompositionId)
-                    ?? throw new InvalidOperationException("The release Designed Page could not be loaded.");
-                _variant = await Compositions.GetOrCreateVariantAsync(
-                    ProjectId,
-                    CompositionId,
-                    ContentTarget.EditionId.Value);
-                forkedCompositionId = CompositionId;
-            }
-            var saved = await Compositions.SaveWorkspaceAsync(
+            var saved = await DesignedPages.SaveWorkspaceAsync(
                 ContentTarget,
                 ProjectId,
                 _composition!.Id,
@@ -1343,10 +1334,10 @@
                 _variant.Id,
                 _variant.Revision,
                 scene);
-            _composition = saved.Composition;
+            _composition = saved.Content;
             _variant = saved.Variant;
-            _variants = await Compositions.ListVariantsAsync(ProjectId, _composition.Id);
-            _history = await Compositions.GetHistoryStateAsync(ProjectId, _composition.Id);
+            _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
+            _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
             if (!saved.Applied)
             {
                 _semanticBlocks = ManuscriptCodec.Deserialize(
@@ -1369,7 +1360,7 @@
             await AuthoringHistory.UpdateSelectionAsync(
                 new AuthoringHistoryTarget(
                     ProjectId,
-                    AuthoringHistoryDocumentKind.PageComposition,
+                    AuthoringHistoryDocumentKind.DesignedPageContent,
                     _composition.Id,
                     ContentTarget.EditionId),
                 SerializeHistorySelection());
@@ -1379,13 +1370,26 @@
                 _dirty = false;
             }
             _error = null;
-            if (forkedCompositionId is Guid forkedId)
-                await CompositionForked.InvokeAsync(forkedId);
             await NotifyWorkspaceChangedAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _saveGate.Release(); }
+    }
+
+    private bool IsInheritedReleasePage => ContentTarget.EditionId is not null && _composition?.EditionId is null;
+
+    private async Task EnsureWritableReleaseContentAsync()
+    {
+        if (!IsInheritedReleasePage || ContentTarget.EditionId is not { } editionId)
+            return;
+
+        var overrideView = await DesignedPages.EnsureReleaseOverrideAsync(ProjectId, PageId, editionId);
+        _page = overrideView.Page;
+        _composition = overrideView.Content;
+        _variant = await DesignedPages.GetOrCreateVariantAsync(ProjectId, _composition.Id, editionId);
+        _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
+        _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
     }
 
     public async Task<bool> FlushAsync()
@@ -1448,7 +1452,7 @@
         try
         {
             var blocks = ManuscriptRangeResolver.ResolveBlocks(
-                new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks },
+                new ManuscriptDocument { ManuscriptId = _composition?.Id ?? PageId, Content = _semanticBlocks },
                 item.ContentReferences);
             return string.Join(" ", blocks.Select(block => string.Concat(block.Content.Select(InlineHtml))));
         }
@@ -1637,8 +1641,8 @@
             _selectedId));
 
     public sealed record WorkspaceState(
-        Guid CompositionId,
-        long CompositionRevision,
+        Guid PageContentId,
+        long ContentRevision,
         Guid VariantId,
         long VariantRevision,
         CompositionSurfaceKind SurfaceKind,

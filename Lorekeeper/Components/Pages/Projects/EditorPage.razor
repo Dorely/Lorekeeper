@@ -8,7 +8,8 @@
     <EditorContent ChapterId="@ChapterId"
                    EditionId="@EditionId"
                    RequestedMode="@Mode"
-                   RequestedCompositionId="@CompositionId"
+                   RequestedPageId="@PageId"
+                   RequestedPlacementBlockId="@PlacementBlockId"
                    RequestedObjectId="@ObjectId"
                    SynchronizeChapter="SetChapterId" />
 </ProjectLayout>
@@ -18,7 +19,8 @@
     [Parameter] public Guid? ChapterId { get; set; }
     [SupplyParameterFromQuery(Name = "edition")] public Guid? EditionId { get; set; }
     [SupplyParameterFromQuery(Name = "mode")] public string? Mode { get; set; }
-    [SupplyParameterFromQuery(Name = "composition")] public Guid? CompositionId { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] public Guid? PageId { get; set; }
+    [SupplyParameterFromQuery(Name = "placement")] public string? PlacementBlockId { get; set; }
     [SupplyParameterFromQuery(Name = "object")] public Guid? ObjectId { get; set; }
 
     private void SetChapterId(Guid chapterId) => ChapterId = chapterId;

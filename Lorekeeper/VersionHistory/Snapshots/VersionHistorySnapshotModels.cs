@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 
@@ -7,9 +8,10 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
     public const int ImageUpscaleSchemaVersion = 5;
     public const int CoverDescriptionSchemaVersion = 6;
+    public const int DesignedPagesSchemaVersion = 7;
     public const string ManifestFileName = "manifest.json";
 
     public static readonly IReadOnlyList<string> IncludedAreas =
@@ -165,7 +167,24 @@ public sealed record VersionHistorySnapshotManuscriptArea(
     IReadOnlyList<ProjectExportManuscriptStyle> Styles);
 
 public sealed record VersionHistorySnapshotCompositionArea(
-    IReadOnlyList<ProjectExportPageComposition> PageCompositions);
+    IReadOnlyList<ProjectExportDesignedPage> DesignedPages)
+{
+    /// <summary>
+    /// Read-only schema-v1-v6 input. Schema v7 writers retain only project
+    /// owned Designed Pages; placement remains in manuscript block identity.
+    /// </summary>
+    [JsonPropertyName("pageCompositions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ProjectExportPageComposition>? LegacyPageCompositions { get; init; }
+
+    /// <summary>
+    /// Isolated v1-v6 compatibility accessor for the old review/restore
+    /// adapter. New snapshot writers and all v7 full restores use
+    /// <see cref="DesignedPages"/> directly.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPageComposition> PageCompositions => LegacyPageCompositions ?? [];
+}
 
 public sealed record VersionHistorySnapshotPublicationArea(
     ProjectExportPublicationBook? PublicationBook,
@@ -276,7 +295,8 @@ public sealed record VersionHistorySnapshotPayload(
         EntityVisualExamples = Assets.EntityVisualExamples.ToList(),
         PublicationBook = Publication.PublicationBook,
         PublicationEditions = Publication.PublicationEditions.ToList(),
-        PageCompositions = Composition.PageCompositions.ToList(),
+        LegacyPageCompositions = Composition.LegacyPageCompositions?.ToList(),
+        DesignedPages = Composition.DesignedPages.ToList(),
         PublicationSections = Publication.PublicationSections.ToList(),
         ManuscriptStyles = Manuscript.Styles.ToList(),
         Acts = Narrative.Acts.ToList(),

@@ -235,6 +235,7 @@ builder.Services.AddScoped<IChapterService>(services => services.GetRequiredServ
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptAnnotationService, ManuscriptAnnotationService>();
 builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringHistoryRuntime, Lorekeeper.Authoring.AuthoringHistoryRuntime>();
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringCompoundManuscriptRestoreService, Lorekeeper.Authoring.AuthoringCompoundManuscriptRestoreService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
@@ -244,11 +245,12 @@ builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigratio
 builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
 builder.Services.AddScoped<IEditionContentMigrationService, EditionContentMigrationService>();
 builder.Services.AddScoped<IPublicationSectionMigrationService, PublicationSectionMigrationService>();
+builder.Services.AddScoped<IDesignedPageMigrationService, DesignedPageMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddSingleton<ITypographyDefaultsService, TypographyDefaultsService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
-builder.Services.AddScoped<Lorekeeper.Composition.ICompositionService, Lorekeeper.Composition.CompositionService>();
+builder.Services.AddScoped<Lorekeeper.Composition.IDesignedPageService, Lorekeeper.Composition.DesignedPageService>();
 builder.Services.AddScoped<Lorekeeper.Composition.IProjectPageSetupService, Lorekeeper.Composition.ProjectPageSetupService>();
 builder.Services.AddScoped<Lorekeeper.Composition.IChapterPreviewService, Lorekeeper.Composition.ChapterPreviewService>();
 builder.Services.AddScoped<Lorekeeper.Composition.ICompositionCanvasPreviewService, Lorekeeper.Composition.CompositionCanvasPreviewService>();

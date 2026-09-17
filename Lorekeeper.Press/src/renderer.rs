@@ -1237,7 +1237,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 12,
+        protocol_version: 13,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -1470,7 +1470,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
-                "protocolVersion": 12,
+                "protocolVersion": 13,
                 "rendererVersion": env!("CARGO_PKG_VERSION"),
                 "jobId": request.job_id,
                 "pageCount": layout.pages.len(),
@@ -1573,7 +1573,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 12,
+            "protocolVersion": 13,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1689,10 +1689,19 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    if request.protocol_version != 12 {
+    // Protocol v12 had the same request shape. Keep its reader at the
+    // boundary so historical saved jobs remain renderable; all responses use
+    // the current v13 contract.
+    if !matches!(request.protocol_version, 12 | 13) {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 12.",
+            "Lorekeeper Press requires protocol version 12 or 13.",
+        );
+    }
+    if request.protocol_version == 13 && contains_legacy_designed_page_contract(&request.document) {
+        return reject(
+            "PRESS_LEGACY_DESIGNED_PAGE_CONTRACT",
+            "Protocol 13 requires designedPages and designedPageId; legacy composition fields are accepted only by the v12 adapter.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -2411,6 +2420,7 @@ fn paginate_with_cancellation(
         None,
         trim,
         request.profile == "generic-digital-pdf-v1",
+        request.protocol_version,
         tolerance,
         &mut diagnostics,
         &mut page_map,
@@ -2441,6 +2451,7 @@ fn paginate_with_cancellation(
                 Some(&string(section, "id")),
                 trim,
                 request.profile == "generic-digital-pdf-v1",
+                request.protocol_version,
                 tolerance,
                 &mut diagnostics,
                 &mut page_map,
@@ -2513,13 +2524,14 @@ fn paginate_with_cancellation(
                     Some(&string(chapter, "id")),
                     trim,
                     request.profile == "generic-digital-pdf-v1",
+                    request.protocol_version,
                     tolerance,
                     &mut diagnostics,
                     &mut page_map,
                     &mut semantic_order,
                 )?;
                 if request.profile != "generic-digital-pdf-v1"
-                    && chapter_begins_with_facing_spread(chapter)
+                    && chapter_begins_with_facing_spread(chapter, request.protocol_version)
                 {
                     ensure_next_leaf(&mut pages, LeafSide::Verso);
                 } else if !is_designed_page_only_chapter(chapter) {
@@ -2618,9 +2630,10 @@ fn paginate_with_cancellation(
                         block_type.to_ascii_lowercase()
                     ));
                     if block_type.eq_ignore_ascii_case("DesignedPage") {
-                        let composition_id = string(&block, "pageCompositionId");
+                        let composition_id = designed_page_id(&block, request.protocol_version);
                         let composition = chapter
-                            .get("pageCompositions")
+                            .get("designedPages")
+                            .or_else(|| (request.protocol_version == 12).then(|| chapter.get("pageCompositions")).flatten())
                             .and_then(Value::as_array)
                             .into_iter()
                             .flatten()
@@ -2955,6 +2968,7 @@ fn paginate_with_cancellation(
                     Some(&string(chapter, "id")),
                     trim,
                     request.profile == "generic-digital-pdf-v1",
+                    request.protocol_version,
                     tolerance,
                     &mut diagnostics,
                     &mut page_map,
@@ -2968,6 +2982,7 @@ fn paginate_with_cancellation(
                 Some(&string(section, "id")),
                 trim,
                 request.profile == "generic-digital-pdf-v1",
+                request.protocol_version,
                 tolerance,
                 &mut diagnostics,
                 &mut page_map,
@@ -2982,6 +2997,7 @@ fn paginate_with_cancellation(
         None,
         trim,
         request.profile == "generic-digital-pdf-v1",
+        request.protocol_version,
         tolerance,
         &mut diagnostics,
         &mut page_map,
@@ -4726,7 +4742,7 @@ fn ensure_next_leaf(pages: &mut Vec<LayoutPage>, side: LeafSide) {
     }
 }
 
-fn chapter_begins_with_facing_spread(chapter: &Value) -> bool {
+fn chapter_begins_with_facing_spread(chapter: &Value, protocol_version: u32) -> bool {
     let Some(block) = chapter
         .get("blocks")
         .and_then(Value::as_array)
@@ -4743,9 +4759,14 @@ fn chapter_begins_with_facing_spread(chapter: &Value) -> bool {
     if !string(block, "type").eq_ignore_ascii_case("DesignedPage") {
         return false;
     }
-    let composition_id = string(block, "pageCompositionId");
+    let composition_id = designed_page_id(block, protocol_version);
     chapter
-        .get("pageCompositions")
+        .get("designedPages")
+        .or_else(|| {
+            (protocol_version == 12)
+                .then(|| chapter.get("pageCompositions"))
+                .flatten()
+        })
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -4865,6 +4886,7 @@ fn append_publication_sections(
     target_id: Option<&str>,
     trim: &crate::model::Trim,
     is_digital_pdf: bool,
+    protocol_version: u32,
     tolerance: LayoutTolerance,
     diagnostics: &mut Vec<Diagnostic>,
     page_map: &mut Vec<PageMapEntry>,
@@ -4920,9 +4942,10 @@ fn append_publication_sections(
                 previous_space_after = 0.0;
             }
             if block_type.eq_ignore_ascii_case("DesignedPage") {
-                let composition_id = string(block, "pageCompositionId");
+                let composition_id = designed_page_id(block, protocol_version);
                 let composition = section
-                    .get("pageCompositions")
+                    .get("designedPages")
+                    .or_else(|| (protocol_version == 12).then(|| section.get("pageCompositions")).flatten())
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
@@ -7989,6 +8012,27 @@ fn string(value: &Value, key: &str) -> String {
         .to_owned()
 }
 
+fn designed_page_id(value: &Value, protocol_version: u32) -> String {
+    let current = string(value, "designedPageId");
+    if current.is_empty() && protocol_version == 12 {
+        string(value, "pageCompositionId")
+    } else {
+        current
+    }
+}
+
+fn contains_legacy_designed_page_contract(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key("pageCompositions")
+                || object.contains_key("pageCompositionId")
+                || object.values().any(contains_legacy_designed_page_contract)
+        }
+        Value::Array(items) => items.iter().any(contains_legacy_designed_page_contract),
+        _ => false,
+    }
+}
+
 fn numbered_title(title: &str, ordinal: usize, numbered: bool, label: &str) -> String {
     if !numbered {
         return title.to_owned();
@@ -8281,7 +8325,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 12,
+            protocol_version: 13,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,
@@ -9447,7 +9491,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 12,
+            protocol_version: 13,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,

@@ -44,7 +44,6 @@ public class Chapter
 
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
-    public ICollection<PageComposition> PageCompositions { get; set; } = [];
     public ICollection<ManuscriptAnnotation> ManuscriptAnnotations { get; set; } = [];
     public ICollection<PublicationEditionChapterOverride> PublicationEditionChapterOverrides { get; set; } = [];
 

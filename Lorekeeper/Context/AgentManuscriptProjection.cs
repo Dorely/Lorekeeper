@@ -12,7 +12,7 @@ namespace Lorekeeper.Context;
 /// </summary>
 internal static class AgentManuscriptProjection
 {
-    public const string Schema = "agent-manuscript-v1";
+    public const string Schema = "agent-manuscript-v2";
     public const string StylesSchema = "agent-manuscript-styles-v1";
 
     public static string SerializeCurrentChapter(Chapter chapter, ManuscriptSnapshot? snapshot)
@@ -360,9 +360,12 @@ internal static class AgentManuscriptProjection
         var pages = new JsonArray();
         foreach (var (block, index) in blocks.Where(item => item.block.Type == ManuscriptBlockType.DesignedPage))
         {
-            var row = new JsonArray { index };
-            if (block.PageCompositionId is Guid compositionId)
-                row.Add(compositionId);
+            // The manuscript block is the placement identity.  A Designed Page may
+            // occur more than once, so callers must never use the page ID to locate
+            // a particular occurrence.
+            var row = new JsonArray { index, block.Id };
+            if (block.DesignedPageId is Guid pageId)
+                row.Add(pageId);
             pages.Add(row);
         }
 

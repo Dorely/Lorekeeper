@@ -72,12 +72,12 @@ public static class AssistantWorkflowInstructions
 
     public const string AgentManuscriptProjection = """
         Compact manuscript projection:
-        - agent-manuscript-v1 is the complete model-facing semantic representation; canonical manuscript JSON remains an internal persistence format.
+        - agent-manuscript-v2 is the complete model-facing semantic representation; canonical manuscript JSON remains an internal persistence format.
         - Each blocks row is [absoluteIndex, stableBlockId, exactText]. Absolute indexes locate projected blocks but are never mutation identities; use stable block IDs, secondBlockId where required, and the exact revision for mutations.
         - A block absent from structure has the defaults paragraph, body, and no heading level. Each structure row is [absoluteIndex, blockType, styleRole, optionalHeadingLevel].
         - Each marksUtf16 row is [absoluteIndex, startOffset, endOffset, markType, optionalValue]. Offsets are zero-based UTF-16 code-unit boundaries in exactText; rows can overlap.
         - paragraphFormats is a deduplicated array of sparse direct-format definitions. Each paragraphFormatting row is [absoluteIndex, paragraphFormatsIndex]. Missing formatting means no direct override; meaningful false and 0 values are explicit.
-        - figures entries use block as the absolute-index reference and carry complete asset, accessibility, and presentation meaning; exactText in the referenced block row is the caption. Each designedPages row is [absoluteIndex, optionalPageCompositionId]. Each publicationFields row is [absoluteIndex, boundField].
+        - figures entries use block as the absolute-index reference and carry complete asset, accessibility, and presentation meaning; exactText in the referenced block row is the caption. Each designedPages row is [absoluteIndex, placementBlockId, optionalDesignedPageId]. The placementBlockId identifies that occurrence; a Designed Page ID can occur in multiple placements. Each publicationFields row is [absoluteIndex, boundField].
         - Missing overlays are empty, not unknown. Honor source, complete, and pagination before assuming the projection contains the whole manuscript, and preserve absolute indexes across paged or filtered reads.
         - Typography precedence is direct paragraph formatting over the block's named style, then named style over built-in defaults.
         """;
@@ -87,7 +87,7 @@ public static class AssistantWorkflowInstructions
         - Classify the requested prose change before building operations: additive work creates genuinely new content; revision work supersedes existing content. InsertBlock is additive only. It never replaces, edits, or removes an existing block, even when its text is a rewritten version of that block.
         - Use ReplaceBlockText as the default for revising one existing text block because it preserves the exact stable block ID. Do not append rewritten prose elsewhere in the manuscript as a shortcut.
         - Before a multi-block rewrite, map every source block in the intended range to one explicit disposition: retain unchanged, replace in place, or delete. Include every replacement and deletion in the same atomic batch, then use InsertBlock only for additional replacement blocks that have no source block to preserve.
-        - Audit the proposed final sequence against the current agent-manuscript-v1 snapshot before submitting it. The rewritten passage must appear once, every intentionally superseded source block must be replaced or deleted, and unrelated blocks, semantic types, styles, marks, Figures, and Designed Pages must remain intact.
+        - Audit the proposed final sequence against the current agent-manuscript-v2 snapshot before submitting it. The rewritten passage must appear once, every intentionally superseded source block must be replaced or deleted, and unrelated blocks, semantic types, styles, marks, Figures, and Designed Pages must remain intact.
         - A terminal Contest proposal or revision-worker mutation cannot inspect its result afterward. Perform this source-block disposition and duplicate-prose audit before returning the proposal or calling the terminal mutation tool.
         """;
 
@@ -299,7 +299,7 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + AgentManuscriptProjection;
 
     public const string CompositionDesign = """
-        Illustration and page-composition rules:
+        Illustration and Designed Page rules:
         - Chapters are format-neutral containers of semantic text, Figures, and Designed Pages. Use a Figure for artwork that flows with nearby prose. Use a Designed Page or facing spread when the spatial relationship among editable text, images, and shapes is intrinsic.
         - When creating a Designed Page from known artwork, create the page with its page/spread mode, then place the existing project-image ID in a separate focused call with explicit Contain, Cover, or Stretch behavior and accessibility fields. Prefer proportional Contain or Cover placement unless the user explicitly wants the raster stretched. Image generation always finishes as an unattached project image; inspect it and complete the separate page placement in the same turn. The project page setup supplies authoring geometry.
         - "Fill canvas" means an image frame at 0,0,100,100. With aspect-ratio retention it uses Cover (crop-to-fill); Contain shows the complete raster and can leave unpainted bands. Verify the resulting composition read reports imageCoversCanvas=true.

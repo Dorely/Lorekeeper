@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence.Legacy;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -102,8 +103,12 @@ public class AppDbContext(
     public DbSet<ProjectFontFace> ProjectFontFaces => Set<ProjectFontFace>();
     public DbSet<ManuscriptStyleDefinition> ManuscriptStyleDefinitions => Set<ManuscriptStyleDefinition>();
     public DbSet<ProjectPageSetup> ProjectPageSetups => Set<ProjectPageSetup>();
-    public DbSet<PageComposition> PageCompositions => Set<PageComposition>();
-    public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
+    public DbSet<DesignedPage> DesignedPages => Set<DesignedPage>();
+    public DbSet<DesignedPageContent> DesignedPageContents => Set<DesignedPageContent>();
+    public DbSet<DesignedPageVariant> DesignedPageVariants => Set<DesignedPageVariant>();
+    public DbSet<DesignedPagePlacementReference> DesignedPagePlacementReferences => Set<DesignedPagePlacementReference>();
+    internal DbSet<LegacyPageComposition> LegacyPageCompositions => Set<LegacyPageComposition>();
+    internal DbSet<LegacyPageCompositionVariant> LegacyPageCompositionVariants => Set<LegacyPageCompositionVariant>();
     public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
@@ -450,37 +455,95 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PageComposition>(entity =>
+        modelBuilder.Entity<DesignedPage>(entity =>
         {
-            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.EditionId, e.UpdatedAt });
-            entity.HasIndex(e => new { e.EditionId, e.SourceCompositionId });
-            entity.HasIndex(e => e.ActiveAuthoringVariantId);
-            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasIndex(e => new { e.ProjectId, e.ScopeEditionId, e.UpdatedAt });
             entity.HasOne(e => e.Project)
-                .WithMany(e => e.PageCompositions)
+                .WithMany(e => e.DesignedPages)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.Chapter)
-                .WithMany(e => e.PageCompositions)
-                .HasForeignKey(e => e.ChapterId)
+            entity.HasOne(e => e.ScopeEdition)
+                .WithMany(e => e.ScopedDesignedPages)
+                .HasForeignKey(e => e.ScopeEditionId)
                 .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.PublicationSection)
-                .WithMany(e => e.PageCompositions)
-                .HasForeignKey(e => e.PublicationSectionId)
+        });
+
+        modelBuilder.Entity<DesignedPageContent>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.EditionId, e.UpdatedAt });
+            entity.HasIndex(e => e.ActiveVariantId);
+            entity.HasIndex(e => e.DesignedPageId)
+                .IsUnique()
+                .HasFilter("\"EditionId\" IS NULL");
+            entity.HasIndex(e => new { e.DesignedPageId, e.EditionId })
+                .IsUnique()
+                .HasFilter("\"EditionId\" IS NOT NULL");
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.DesignedPageContents)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Page)
+                .WithMany(e => e.Contents)
+                .HasForeignKey(e => e.DesignedPageId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Edition)
-                .WithMany(e => e.PageCompositions)
+                .WithMany(e => e.DesignedPageContents)
                 .HasForeignKey(e => e.EditionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<PageCompositionVariant>(entity =>
+        modelBuilder.Entity<DesignedPageVariant>(entity =>
         {
-            entity.HasIndex(e => new { e.CompositionId, e.GeometryKey }).IsUnique();
+            entity.HasIndex(e => new { e.ContentId, e.GeometryKey }).IsUnique();
             entity.Property(e => e.Revision).IsConcurrencyToken();
-            entity.HasOne(e => e.Composition)
+            entity.HasOne(e => e.Content)
                 .WithMany(e => e.Variants)
-                .HasForeignKey(e => e.CompositionId)
+                .HasForeignKey(e => e.ContentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DesignedPagePlacementReference>(entity =>
+        {
+            entity.HasKey(e => e.ReferenceId);
+            entity.Property(e => e.Id).HasMaxLength(64);
+            entity.Property(e => e.ContainerKind).HasConversion<string>();
+            entity.HasIndex(e => new { e.ProjectId, e.DesignedPageId });
+            entity.HasIndex(e => new { e.ProjectId, e.ContainerKind, e.ContainerId, e.EditionId });
+            entity.HasIndex(e => new { e.ProjectId, e.ContainerKind, e.ContainerId, e.Id })
+                .IsUnique()
+                .HasFilter("\"EditionId\" IS NULL");
+            entity.HasIndex(e => new { e.ProjectId, e.ContainerKind, e.ContainerId, e.EditionId, e.Id })
+                .IsUnique()
+                .HasFilter("\"EditionId\" IS NOT NULL");
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.DesignedPagePlacementReferences)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Page)
+                .WithMany(e => e.PlacementReferences)
+                .HasForeignKey(e => e.DesignedPageId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.DesignedPagePlacementReferences)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LegacyPageComposition>(entity =>
+        {
+            entity.ToTable("PageCompositions", table => table.ExcludeFromMigrations());
+            entity.HasKey(item => item.Id);
+        });
+
+        modelBuilder.Entity<LegacyPageCompositionVariant>(entity =>
+        {
+            entity.ToTable("PageCompositionVariants", table => table.ExcludeFromMigrations());
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.CompositionId, item.GeometryKey }).IsUnique();
+            entity.HasOne(item => item.Composition)
+                .WithMany(item => item.Variants)
+                .HasForeignKey(item => item.CompositionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

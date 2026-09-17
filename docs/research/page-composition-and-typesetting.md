@@ -24,7 +24,7 @@ BookTrust's picture-book guidance recommends pacing with a dummy book and preser
 
 ### Implementation decisions
 
-- Use edition geometry plus exact `PageCompositionVariant` fingerprints as the shared source for page and spread calculations; chapters remain format-neutral.
+- Use edition geometry plus exact `DesignedPageVariant` fingerprints as the shared source for page and spread calculations; chapters remain format-neutral.
 - Renderer requests, composition/cover workspaces, image targets, guides, diagnostics, EPUB, and other exports consume that geometry.
 - Full-spread art protects focal faces, actions, and text from the center gutter and trim-risk bands.
 - When page art carries story copy, Lorekeeper plans text-box geometry before generation and sends corresponding buffered rectangles as hard reserved regions. The illustration should turn those regions into natural, low-detail, tonally stable negative space rather than visible placeholder panels.
@@ -141,7 +141,7 @@ The W3C Group Note recognizes that fixed-layout books preserve artistically or s
 
 | Concern | Geometry/rendering change | Diagnostic/UI change |
 |---|---|---|
-| One source of page truth | `ICompositionService` keys variants to `PublicationEdition` geometry fingerprints | Workspaces expose active edition and exact variant |
+| One source of page truth | `IDesignedPageService` keys authored variants to exact Designed Page content and `PublicationEdition` geometry fingerprints | Workspaces expose active edition and exact variant |
 | Page/spread image targeting | `LayoutGenerationTargetDescriptor` and `IImagePromptComposer` carry exact geometry, DPI, and named regions | UI/agents identify a stable target and cannot override size/aspect |
 | Semantic typography | `CompositionSemanticRole`, block/range bindings, and object styles persist in scenes | Role, binding, style, and reading-order controls |
 | Actual fit | Lorekeeper Press shapes/wraps structured text and rejects overflow | Compact blocking diagnostic names the object |

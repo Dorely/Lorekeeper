@@ -21,7 +21,7 @@
 @inject IManuscriptService Manuscripts
 @inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
-@inject ICompositionService Compositions
+@inject IDesignedPageService DesignedPages
 @inject IEditionContentService EditionContent
 @inject IEditorContextService EditorContext
 @inject IActService Acts
@@ -70,7 +70,7 @@ else
             <EditorChatPanel @key="Project.Id"
                              ProjectId="Project.Id"
                              CurrentChapterId="_activeChapterId"
-                             CurrentCompositionId="@(_mode == EditorMode.Pages ? _openCompositionId : null)"
+                             CurrentDesignedPageId="@(_mode == EditorMode.Pages ? _openPageId : null)"
                              ContentTarget="_contentTarget"
                              ContextRefreshSignal="_contextRefreshSignal"
                              ReviewRefreshSignal="_reviewRefreshSignal"
@@ -211,9 +211,9 @@ else
                         @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Pages)"
-                        disabled="@(DesignedPageIds.Count == 0)"
+                        disabled="@(DesignedPagePlacements.Count == 0)"
                         aria-pressed="@(_mode == EditorMode.Pages)"
-                        title="@(DesignedPageIds.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
+                        title="@(DesignedPagePlacements.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
                         @onclick="() => SetModeAsync(EditorMode.Pages)">Pages</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Review)"
@@ -272,30 +272,30 @@ else
                 @if (_mode == EditorMode.Pages)
                 {
                     <div class="chapter-pages-mode">
-                        @if (DesignedPageIds.Count > 1)
+                        @if (DesignedPagePlacements.Count > 1)
                         {
                             <nav class="chapter-pages-selector" aria-label="Designed Page selection">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveDesignedPage(-1)">Previous</button>
-                                <select class="form-select form-select-sm" value="@_openCompositionId" @onchange="SelectDesignedPageAsync">
-                                    @for (var index = 0; index < DesignedPageIds.Count; index++)
+                                <select class="form-select form-select-sm" value="@_openPlacementBlockId" @onchange="SelectDesignedPageAsync">
+                                    @for (var index = 0; index < DesignedPagePlacements.Count; index++)
                                     {
-                                        <option value="@DesignedPageIds[index]">Page @(index + 1)</option>
+                                        <option value="@DesignedPagePlacements[index].BlockId">Page @(index + 1)</option>
                                     }
                                 </select>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveDesignedPage(1)">Next</button>
                             </nav>
                         }
-                        @if (_openCompositionId is { } selectedCompositionId)
+                        @if (OpenDesignedPagePlacement is { } selectedPlacement)
                         {
-                            <DesignedPageWorkspace @key="selectedCompositionId"
+                            <DesignedPageWorkspace @key="selectedPlacement.BlockId"
                                                    @ref="_designedPageWorkspace"
                                                    ProjectId="Project.Id"
                                                    ContentTarget="_contentTarget"
-                                                   CompositionId="selectedCompositionId"
+                                                   PageId="selectedPlacement.PageId"
+                                                   PlacementBlockId="selectedPlacement.BlockId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
                                                    RequestedSelectionId="_pageWorkspaceSelectionId"
-                                                   InteractionLocked="@EditorMutationLocked"
-                                                   CompositionForked="HandleCompositionForkedAsync" />
+                                                   InteractionLocked="@EditorMutationLocked" />
                         }
                     </div>
                 }
@@ -634,16 +634,16 @@ else
                                 {
                                     <div class="chapter-review-notice">There are no pending manuscript changes.</div>
                                 }
-                                @if (_reviewCompositionPreviews.Count > 0)
+                                @if (_reviewDesignedPagePreviews.Count > 0)
                                 {
                                     <section class="chapter-review-composition-previews" aria-label="Designed Page before and after previews">
                                         <h3>Designed Page previews</h3>
-                                        @foreach (var preview in _reviewCompositionPreviews)
+                                        @foreach (var preview in _reviewDesignedPagePreviews)
                                         {
                                             <article class="chapter-review-composition-preview">
                                                 <header>
-                                                    <strong>@CompositionLabel(preview.Composition)</strong>
-                                                    <span>@(preview.Composition.EditionId is Guid editionId ? $"Edition {editionId:N}" : "Core Book")</span>
+                                                    <strong>@DesignedPageLabel(preview.DesignedPage)</strong>
+                                                    <span>@($"{preview.DesignedPage.PlacementLinks.Count} placement link(s)")</span>
                                                 </header>
                                                 @if (preview.Error is not null)
                                                 {
@@ -656,7 +656,7 @@ else
                                                             <small>Before</small>
                                                             @if (preview.Before is { } before)
                                                             {
-                                                                <img src="@PreviewDataUrl(before)" alt="Before preview of @CompositionLabel(preview.Composition)" />
+                                                                <img src="@PreviewDataUrl(before)" alt="Before preview of @DesignedPageLabel(preview.DesignedPage)" />
                                                             }
                                                             else
                                                             {
@@ -667,7 +667,7 @@ else
                                                             <small>After</small>
                                                             @if (preview.After is { } after)
                                                             {
-                                                                <img src="@PreviewDataUrl(after)" alt="After preview of @CompositionLabel(preview.Composition)" />
+                                                                <img src="@PreviewDataUrl(after)" alt="After preview of @DesignedPageLabel(preview.DesignedPage)" />
                                                             }
                                                             else
                                                             {
@@ -679,14 +679,14 @@ else
                                                 <div class="chapter-review-composition-preview-actions">
                                                     <button type="button"
                                                             class="btn btn-sm btn-outline-primary"
-                                                            disabled="@(!CanApproveReviewComposition(preview.Composition))"
-                                                            @onclick="() => ApproveReviewCompositionAsync(preview.Composition)">
+                                                            disabled="@(!CanApproveReviewDesignedPage(preview.DesignedPage))"
+                                                            @onclick="() => ApproveReviewDesignedPageAsync(preview.DesignedPage)">
                                                         Approve Designed Page
                                                     </button>
                                                     <button type="button"
                                                             class="btn btn-sm btn-outline-danger"
-                                                            disabled="@(!CanUndoReviewComposition(preview.Composition))"
-                                                            @onclick="() => UndoReviewCompositionAsync(preview.Composition)">
+                                                            disabled="@(!CanUndoReviewDesignedPage(preview.DesignedPage))"
+                                                            @onclick="() => UndoReviewDesignedPageAsync(preview.DesignedPage)">
                                                         Undo Designed Page
                                                     </button>
                                                 </div>
@@ -1086,7 +1086,8 @@ else
     [Parameter] public Guid? ChapterId { get; set; }
     [Parameter] public Guid? EditionId { get; set; }
     [Parameter] public string? RequestedMode { get; set; }
-    [Parameter] public Guid? RequestedCompositionId { get; set; }
+    [Parameter] public Guid? RequestedPageId { get; set; }
+    [Parameter] public string? RequestedPlacementBlockId { get; set; }
     [Parameter] public Guid? RequestedObjectId { get; set; }
     [Parameter] public Action<Guid>? SynchronizeChapter { get; set; }
 
@@ -1136,7 +1137,8 @@ else
     private EditorDocumentState? _editorDocument;
     private long _styleCatalogVersion;
     private long _stylePanelVersion;
-    private Guid? _openCompositionId;
+    private Guid? _openPageId;
+    private string? _openPlacementBlockId;
     private long _previewRefreshSignal;
     private int _annotationRefreshSignal;
 
@@ -1163,7 +1165,7 @@ else
     private bool _chapterTokenIsExact = true;
     private bool _reviewLoading;
     private ReviewProjection? _reviewProjection;
-    private IReadOnlyList<ReviewCompositionPreview> _reviewCompositionPreviews = [];
+    private IReadOnlyList<ReviewDesignedPagePreview> _reviewDesignedPagePreviews = [];
     private ProjectVersionReviewView? _reviewView;
     private ProjectVersionHistoricalChapterReview? _historicalReview;
     private ContestReviewProjection? _contestReviewProjection;
@@ -1248,7 +1250,9 @@ else
         ContestBatchStatus.Completed => "Review Contest Mode candidates",
         _ => "Review manuscript changes",
     };
-    private IReadOnlyList<Guid> DesignedPageIds
+    private sealed record DesignedPagePlacement(string BlockId, Guid PageId);
+
+    private IReadOnlyList<DesignedPagePlacement> DesignedPagePlacements
     {
         get
         {
@@ -1256,29 +1260,32 @@ else
             try
             {
                 return ManuscriptCodec.Deserialize(document.ManuscriptJson, document.ChapterId, document.ManuscriptRevision)
-                    .Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
-                    .Select(block => block.PageCompositionId!.Value).ToArray();
+                    .Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
+                    .Select(block => new DesignedPagePlacement(block.Id, block.DesignedPageId!.Value)).ToArray();
             }
             catch (InvalidDataException) { return []; }
         }
     }
+
+    private DesignedPagePlacement? OpenDesignedPagePlacement => _openPlacementBlockId is null
+        ? null
+        : DesignedPagePlacements.FirstOrDefault(item => item.BlockId == _openPlacementBlockId);
+
     private DesignedPageWorkspace? _designedPageWorkspace;
     private int _pageWorkspaceRefreshSignal;
     private Guid? _pageWorkspaceSelectionId;
-    private async Task OpenDesignedPage(Guid compositionId)
+    private async Task OpenDesignedPage(Guid pageId)
     {
-        if (!DesignedPageIds.Contains(compositionId)
+        var placement = DesignedPagePlacements.FirstOrDefault(item => item.PageId == pageId);
+        if (placement is null
             && !await ReconcileCurrentChapterAsync(refreshContextSurfaces: false))
             return;
-        _openCompositionId = compositionId;
+        placement ??= DesignedPagePlacements.FirstOrDefault(item => item.PageId == pageId);
+        if (placement is null)
+            return;
+        _openPageId = placement.PageId;
+        _openPlacementBlockId = placement.BlockId;
         await SetModeAsync(EditorMode.Pages);
-    }
-    private async Task HandleCompositionForkedAsync(Guid compositionId)
-    {
-        _openCompositionId = compositionId;
-        await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
-        _openCompositionId = compositionId;
-        StateHasChanged();
     }
     private bool EffectiveChatPaneCollapsed => _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => _rightPaneCollapsed;
@@ -1472,10 +1479,21 @@ else
         }
         if (applyRequestedRouteState
             && _mode == EditorMode.Pages
-            && RequestedCompositionId is Guid requestedCompositionId
-            && effective.Document.Content.Any(block => block.PageCompositionId == requestedCompositionId))
+            && !string.IsNullOrWhiteSpace(RequestedPlacementBlockId)
+            && effective.Document.Content.FirstOrDefault(block => block.Id == RequestedPlacementBlockId) is { DesignedPageId: { } requestedPlacementPageId } requestedPlacement)
         {
-            _openCompositionId = requestedCompositionId;
+            _openPageId = requestedPlacementPageId;
+            _openPlacementBlockId = requestedPlacement.Id;
+            _pageWorkspaceSelectionId = RequestedObjectId;
+        }
+        else if (applyRequestedRouteState
+            && _mode == EditorMode.Pages
+            && RequestedPageId is Guid requestedPageId
+            && effective.Document.Content.Any(block => block.DesignedPageId == requestedPageId))
+        {
+            var placement = effective.Document.Content.First(block => block.DesignedPageId == requestedPageId);
+            _openPageId = requestedPageId;
+            _openPlacementBlockId = placement.Id;
             _pageWorkspaceSelectionId = RequestedObjectId;
         }
         if (_mode == EditorMode.Review)
@@ -1569,9 +1587,7 @@ else
                 ?? throw new InvalidOperationException("The Core chapter manuscript was not found after reset.");
             SynchronizeExternalEditorDocument(effective);
             UpdateChapterMetrics(effective.PlainText);
-            var designedPages = DesignedPageIds;
-            if (_openCompositionId is Guid openCompositionId && !designedPages.Contains(openCompositionId))
-                _openCompositionId = designedPages.Count > 0 ? designedPages[0] : null;
+            SelectOpenDesignedPagePlacement();
             _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, chapterId);
             _previewRefreshSignal++;
             _pageWorkspaceRefreshSignal++;
@@ -2305,7 +2321,7 @@ else
     private async Task SetModeAsync(EditorMode mode)
     {
         if (_mode == mode) return;
-        if (mode == EditorMode.Pages && DesignedPageIds.Count == 0) return;
+        if (mode == EditorMode.Pages && DesignedPagePlacements.Count == 0) return;
 
         var locationIdentity = CurrentManuscriptLocationIdentity();
         ManuscriptViewLocation? capturedLocation = null;
@@ -2330,9 +2346,7 @@ else
         }
         if (mode == EditorMode.Pages)
         {
-            var pages = DesignedPageIds;
-            if (_openCompositionId is null || !pages.Contains(_openCompositionId.Value))
-                _openCompositionId = pages[0];
+            SelectOpenDesignedPagePlacement();
         }
         await ApplyEditorReadOnlyAsync(EditorReadOnly);
 
@@ -2437,7 +2451,7 @@ else
 
         var selectedMode = _rememberedChapterModes.GetValueOrDefault(_current.Id,
             CurrentChapterContainsOnlyDesignedPages ? EditorMode.Pages : EditorMode.Edit);
-        if (selectedMode == EditorMode.Pages && DesignedPageIds.Count == 0)
+        if (selectedMode == EditorMode.Pages && DesignedPagePlacements.Count == 0)
             selectedMode = EditorMode.Edit;
 
         _mode = selectedMode;
@@ -2448,10 +2462,25 @@ else
     {
         if (_mode == EditorMode.Pages)
         {
-            var pages = DesignedPageIds;
-            if (_openCompositionId is null || !pages.Contains(_openCompositionId.Value))
-                _openCompositionId = pages[0];
+            SelectOpenDesignedPagePlacement();
         }
+    }
+
+    private void SelectOpenDesignedPagePlacement()
+    {
+        var placements = DesignedPagePlacements;
+        if (placements.Count == 0)
+        {
+            _openPageId = null;
+            _openPlacementBlockId = null;
+            return;
+        }
+
+        var selected = placements.FirstOrDefault(item => item.BlockId == _openPlacementBlockId);
+        if (selected is null)
+            selected = placements[0];
+        _openPageId = selected.PageId;
+        _openPlacementBlockId = selected.BlockId;
     }
 
     private EditorMode ResolveCarriedMode(EditorMode previousMode) => previousMode switch
@@ -2459,7 +2488,7 @@ else
         EditorMode.Review => EditorMode.Review,
         EditorMode.Read => EditorMode.Read,
         EditorMode.Edit => CurrentChapterContainsOnlyDesignedPages ? EditorMode.Pages : EditorMode.Edit,
-        EditorMode.Pages => DesignedPageIds.Count > 0 ? EditorMode.Pages : EditorMode.Edit,
+        EditorMode.Pages => DesignedPagePlacements.Count > 0 ? EditorMode.Pages : EditorMode.Edit,
         _ => EditorMode.Edit,
     };
 
@@ -2476,7 +2505,7 @@ else
                     document.ManuscriptRevision).Content;
                 return content.Count > 0
                     && content.All(block => block.Type == ManuscriptBlockType.DesignedPage
-                        && block.PageCompositionId is not null);
+                        && block.DesignedPageId is not null);
             }
             catch (InvalidDataException)
             {
@@ -2582,7 +2611,7 @@ else
             _reviewProjection = null;
             _reviewView = null;
             _historicalReview = null;
-            _reviewCompositionPreviews = [];
+            _reviewDesignedPagePreviews = [];
             _reviewLoading = false;
             ResetInlineReviewState();
             return;
@@ -2623,7 +2652,7 @@ else
                 _reviewView = null;
                 _historicalReview = null;
                 _reviewProjection = null;
-                _reviewCompositionPreviews = [];
+                _reviewDesignedPagePreviews = [];
                 ActivateContestReview(result.ActiveContest);
                 return;
             }
@@ -2632,7 +2661,7 @@ else
             _reviewView = result.Review;
             _historicalReview = result.HistoricalReview;
             _reviewProjection = result.Projection;
-            _reviewCompositionPreviews = result.CompositionPreviews;
+            _reviewDesignedPagePreviews = result.DesignedPagePreviews;
             _reviewError = null;
             PruneInlineReviewState();
         }
@@ -2698,16 +2727,18 @@ else
             cancellationToken);
         ReviewProjection? reviewProjection = null;
         ProjectVersionHistoricalChapterReview? historicalReview = null;
-        IReadOnlyList<ReviewCompositionPreview> reviewCompositionPreviews;
+        IReadOnlyList<ReviewDesignedPagePreview> reviewDesignedPagePreviews;
         var reviewChapter = review?.Chapters.SingleOrDefault();
-        if (reviewChapter is { HasChanges: true })
+        if (reviewChapter is { HasChanges: true } || review is { DesignedPageChanges.Count: > 0 })
         {
-            reviewProjection = BuildVersionHistoryReviewProjection(
-                chapter,
-                reviewChapter,
-                isReadOnly: true);
-            reviewCompositionPreviews = await LoadReviewCompositionPreviewsAsync(
-                reviewChapter,
+            reviewProjection = reviewChapter is null
+                ? BuildReviewProjection(chapter, isReadOnly: true)
+                : BuildVersionHistoryReviewProjection(
+                    chapter,
+                    reviewChapter,
+                    isReadOnly: true);
+            reviewDesignedPagePreviews = await LoadReviewDesignedPagePreviewsAsync(
+                review?.DesignedPageChanges ?? [],
                 projectId,
                 compositionPreviews,
                 cancellationToken);
@@ -2726,9 +2757,9 @@ else
                     ? BuildVersionHistoryReviewProjection(chapter, reviewChapter, isReadOnly: true)
                         ?? BuildReviewProjection(chapter, isReadOnly: true)
                     : BuildReviewProjection(chapter, isReadOnly: true);
-            reviewCompositionPreviews = historicalReview is { } historical
-                ? await LoadReviewCompositionPreviewsAsync(
-                    historical,
+            reviewDesignedPagePreviews = historicalReview is { } historical
+                ? await LoadReviewDesignedPagePreviewsAsync(
+                    historical.DesignedPageChanges,
                     projectId,
                     compositionPreviews,
                     cancellationToken)
@@ -2742,7 +2773,7 @@ else
             review,
             historicalReview,
             reviewProjection,
-            reviewCompositionPreviews);
+            reviewDesignedPagePreviews);
     }
 
     private bool IsCurrentReviewRefresh(
@@ -2825,22 +2856,29 @@ else
 
     private async Task SelectDesignedPageAsync(ChangeEventArgs e)
     {
-        if (!Guid.TryParse(e.Value?.ToString(), out var compositionId))
+        var placementBlockId = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(placementBlockId))
             return;
         if (_designedPageWorkspace is not null && !await _designedPageWorkspace.FlushAsync())
             return;
-        _openCompositionId = compositionId;
+        var placement = DesignedPagePlacements.FirstOrDefault(item => item.BlockId == placementBlockId);
+        if (placement is null)
+            return;
+        _openPlacementBlockId = placement.BlockId;
+        _openPageId = placement.PageId;
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task MoveDesignedPage(int delta)
     {
-        var pages = DesignedPageIds;
+        var pages = DesignedPagePlacements;
         if (pages.Count == 0) return;
         if (_designedPageWorkspace is not null && !await _designedPageWorkspace.FlushAsync())
             return;
-        var current = _openCompositionId is Guid id ? pages.ToList().IndexOf(id) : 0;
-        _openCompositionId = pages[(Math.Max(0, current) + delta + pages.Count) % pages.Count];
+        var current = _openPlacementBlockId is { } id ? pages.ToList().FindIndex(item => item.BlockId == id) : 0;
+        var selected = pages[(Math.Max(0, current) + delta + pages.Count) % pages.Count];
+        _openPlacementBlockId = selected.BlockId;
+        _openPageId = selected.PageId;
     }
 
     private void ActivateContestReview(ContestBatch contest)
@@ -3158,7 +3196,7 @@ else
 
             var chapter = _reviewView.Chapters.SingleOrDefault(item =>
                 item.ChapterId == _current.Id && item.ContentTarget == _contentTarget);
-            return chapter is { Before: not null, After: not null, HasVisualChanges: false }
+            return chapter is { Before: not null, After: not null }
                 && CurrentTargetReviewBlockIds().Count > 0;
         }
     }
@@ -3837,14 +3875,6 @@ else
         var sections = hasManuscriptDiff
             ? diff.Sections.ToList()
             : new List<DiffSection>();
-        foreach (var composition in reviewChapter.CompositionChanges)
-        {
-            sections.Add(ManuscriptReviewDiffBuilder.CreateSection(
-                "Visuals",
-                $"Designed Page: {CompositionLabel(composition)}",
-                FormatCompositionReview(composition.Before),
-                FormatCompositionReview(composition.After)));
-        }
         diff = new ReviewDiff(
             string.IsNullOrWhiteSpace(afterPayload.Title) ? "Chapter body" : afterPayload.Title,
             null,
@@ -3865,54 +3895,46 @@ else
             comparisonCurrentDocument: after);
     }
 
-    private static string CompositionLabel(ProjectVersionReviewComposition composition) =>
-        composition.After?.Name
-        ?? composition.Before?.Name
-        ?? composition.CompositionId.ToString("N");
+    private static string DesignedPageLabel(ProjectVersionReviewDesignedPage designedPage) =>
+        designedPage.After?.Name
+        ?? designedPage.Before?.Name
+        ?? designedPage.DesignedPageId.ToString("N");
 
-    private static string FormatCompositionReview(ProjectExportPageComposition? composition)
+    private static string FormatDesignedPageReview(ProjectExportDesignedPage? designedPage)
     {
-        if (composition is null)
+        if (designedPage is null)
             return "(not present)";
 
-        var variants = composition.Variants
-            .OrderBy(variant => variant.Id)
-            .Select(variant => $"{variant.Id:N} · {variant.GeometryKey} · revision {variant.Revision}");
+        var contents = designedPage.Contents
+            .OrderBy(content => content.EditionId)
+            .ThenBy(content => content.Id)
+            .Select(content => $"content {content.Id:N} · target {(content.EditionId?.ToString("N") ?? "Core")} · revision {content.Revision} · active variant {content.ActiveVariantId?.ToString("N") ?? "none"}");
         return string.Join(
             "\n",
-            $"Name: {composition.Name}",
-            $"Composition revision: {composition.Revision}",
-            $"Active variant: {composition.ActiveAuthoringVariantId?.ToString("N") ?? "none"}",
-            "Variants:",
-            string.Join("\n", variants));
+            $"Name: {designedPage.Name}",
+            $"Release-only scope: {designedPage.ScopeEditionId?.ToString("N") ?? "shared"}",
+            "Contents:",
+            string.Join("\n", contents));
     }
 
-    private bool CanApproveReviewComposition(ProjectVersionReviewComposition composition)
+    private bool CanApproveReviewDesignedPage(ProjectVersionReviewDesignedPage designedPage)
     {
         if (_reviewBusy
             || _historicalReview is not null
             || Project is null
             || _current is null
-            || composition.After is null
+            || designedPage.After is null
             || _reviewView is not { Comparison.IsIdentical: false, Token: not null })
         {
             return false;
         }
 
-        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
-        return composition.ChapterId == target.ChapterId
-            && (target.ContentTarget.IsCore
-                ? composition.EditionId is null
-                : composition.EditionId == target.ContentTarget.EditionId)
-            && _reviewView.Chapters.Any(chapter =>
-                chapter.ChapterId == target.ChapterId
-                && chapter.ContentTarget == target.ContentTarget
-                && chapter.CompositionChanges.Any(item => item.CompositionId == composition.CompositionId));
+        return _reviewView.DesignedPageChanges.Any(item => item.DesignedPageId == designedPage.DesignedPageId);
     }
 
-    private async Task ApproveReviewCompositionAsync(ProjectVersionReviewComposition composition)
+    private async Task ApproveReviewDesignedPageAsync(ProjectVersionReviewDesignedPage designedPage)
     {
-        if (!CanApproveReviewComposition(composition)
+        if (!CanApproveReviewDesignedPage(designedPage)
             || Project is not { } project
             || _current is not { } chapter
             || _reviewView is not { Token: { } token })
@@ -3920,66 +3942,54 @@ else
             return;
         }
 
-        var target = new ProjectVersionReviewTarget(chapter.Id, _contentTarget);
         await RunReviewActionAsync(
-            () => VersionHistory.ApproveReviewCompositionAsync(
+            () => VersionHistory.ApproveReviewDesignedPageAsync(
                 project.Id,
-                target,
-                composition.CompositionId,
+                designedPage.DesignedPageId,
                 token,
-                semanticMessage: $"Approved Designed Page: {CompositionLabel(composition)}",
-                requestKey: $"review-composition-approval:{token.CurrentContentHash}:{target.ContentTarget.StorageKey}:{composition.CompositionId:N}"),
+                semanticMessage: $"Approved Designed Page: {DesignedPageLabel(designedPage)}",
+                requestKey: $"review-designed-page-approval:{token.CurrentContentHash}:{designedPage.DesignedPageId:N}"),
             clearExpandedBlocks: true,
             reconcileCurrentChapter: false,
             publishReviewStateChanged: false);
     }
 
-    private bool CanUndoReviewComposition(ProjectVersionReviewComposition composition)
+    private bool CanUndoReviewDesignedPage(ProjectVersionReviewDesignedPage designedPage)
     {
         if (_historicalReview is not null)
-            return CanUndoHistoricalReviewComposition(composition);
+            return CanUndoHistoricalReviewDesignedPage(designedPage);
 
         if (_reviewBusy
             || Project is null
             || _current is null
-            || !composition.HasChanges
+            || !designedPage.HasChanges
             || _reviewView is not { Comparison.IsIdentical: false, Token: not null })
         {
             return false;
         }
 
-        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
-        return (composition.After is null || CompositionMatchesReviewTarget(composition.After, target))
-            && (composition.Before is null || CompositionMatchesReviewTarget(composition.Before, target))
-            && _reviewView.Chapters.Any(chapter =>
-                chapter.ChapterId == target.ChapterId
-                && chapter.ContentTarget == target.ContentTarget
-                && chapter.CompositionChanges.Any(item => item.CompositionId == composition.CompositionId));
+        return _reviewView.DesignedPageChanges.Any(item => item.DesignedPageId == designedPage.DesignedPageId);
     }
 
-    private bool CanUndoHistoricalReviewComposition(ProjectVersionReviewComposition composition)
+    private bool CanUndoHistoricalReviewDesignedPage(ProjectVersionReviewDesignedPage designedPage)
     {
         if (_reviewBusy
             || _historicalReview is not { } historicalReview
             || HistoricalUndoParentSha is null
             || Project is null
             || _current is null
-            || !composition.HasChanges
+            || !designedPage.HasChanges
             || _reviewView?.Token is null)
         {
             return false;
         }
 
-        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
-        return (composition.After is null || CompositionMatchesReviewTarget(composition.After, target))
-            && (composition.Before is null || CompositionMatchesReviewTarget(composition.Before, target))
-            && historicalReview.Compositions is not null
-            && historicalReview.Compositions.Any(item => item.CompositionId == composition.CompositionId);
+        return historicalReview.DesignedPageChanges.Any(item => item.DesignedPageId == designedPage.DesignedPageId);
     }
 
-    private async Task UndoReviewCompositionAsync(ProjectVersionReviewComposition composition)
+    private async Task UndoReviewDesignedPageAsync(ProjectVersionReviewDesignedPage designedPage)
     {
-        if (!CanUndoReviewComposition(composition)
+        if (!CanUndoReviewDesignedPage(designedPage)
             || Project is not { } project
             || _current is not { } chapter
             || _reviewView is not { Token: { } token })
@@ -3987,17 +3997,15 @@ else
             return;
         }
 
-        var target = new ProjectVersionReviewTarget(chapter.Id, _contentTarget);
         if (_historicalReview is { } historicalReview)
         {
             if (HistoricalUndoParentSha is not { } parentCommitSha)
                 return;
 
             await RunReviewActionAsync(
-                () => VersionRestore.RestoreHistoricalCompositionAsync(
+                () => VersionRestore.RestoreHistoricalDesignedPageAsync(
                     project.Id,
-                    target,
-                    composition.CompositionId,
+                    designedPage.DesignedPageId,
                     parentCommitSha,
                     token),
                 clearExpandedBlocks: true,
@@ -4006,107 +4014,79 @@ else
         }
 
         await RunReviewActionAsync(
-            () => VersionRestore.RestoreReviewCompositionAsync(
+            () => VersionRestore.RestoreReviewDesignedPageAsync(
                 project.Id,
-                target,
-                composition.CompositionId,
+                designedPage.DesignedPageId,
                 token),
             clearExpandedBlocks: true,
             publishReviewStateChanged: false);
     }
 
-    private static bool CompositionMatchesReviewTarget(
-        ProjectExportPageComposition composition,
-        ProjectVersionReviewTarget target) =>
-        composition.ChapterId == target.ChapterId
-        && (target.ContentTarget.IsCore
-            ? composition.EditionId is null
-            : composition.EditionId == target.ContentTarget.EditionId);
-
-    private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
-        ProjectVersionReviewChapter reviewChapter,
+    private async Task<IReadOnlyList<ReviewDesignedPagePreview>> LoadReviewDesignedPagePreviewsAsync(
+        IReadOnlyList<ProjectVersionReviewDesignedPage> designedPages,
         Guid projectId,
         ICompositionCanvasPreviewService compositionPreviews,
         CancellationToken cancellationToken = default)
     {
-        if (reviewChapter.CompositionChanges.Count == 0)
+        if (designedPages.Count == 0)
             return [];
 
-        var previews = new List<ReviewCompositionPreview>(reviewChapter.CompositionChanges.Count);
-        foreach (var composition in reviewChapter.CompositionChanges)
+        var previews = new List<ReviewDesignedPagePreview>(designedPages.Count);
+        foreach (var designedPage in designedPages)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var before = await RenderReviewCompositionPreviewAsync(
-                    composition.Before,
+                var before = await RenderReviewDesignedPagePreviewAsync(
+                    designedPage.Before,
                     projectId,
                     compositionPreviews,
                     cancellationToken);
-                var after = await RenderReviewCompositionPreviewAsync(
-                    composition.After,
+                var after = await RenderReviewDesignedPagePreviewAsync(
+                    designedPage.After,
                     projectId,
                     compositionPreviews,
                     cancellationToken);
-                previews.Add(new ReviewCompositionPreview(composition, before, after, null));
+                previews.Add(new ReviewDesignedPagePreview(designedPage, before, after, null));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                previews.Add(new ReviewCompositionPreview(composition, null, null, exception.Message));
+                previews.Add(new ReviewDesignedPagePreview(designedPage, null, null, exception.Message));
             }
         }
 
         return previews;
     }
 
-    private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
-        ProjectVersionHistoricalChapterReview historicalReview,
+    private async Task<CompositionCanvasPreviewResult?> RenderReviewDesignedPagePreviewAsync(
+        ProjectExportDesignedPage? designedPage,
         Guid projectId,
         ICompositionCanvasPreviewService compositionPreviews,
         CancellationToken cancellationToken = default)
     {
-        var reviewChapter = new ProjectVersionReviewChapter(
-            historicalReview.ChapterId,
-            historicalReview.ContentTarget,
-            historicalReview.Before,
-            historicalReview.After,
-            new ProjectVersionReviewConcurrencyToken(
-                Guid.Empty,
-                historicalReview.Commit.Sha,
-                null,
-                string.Empty),
-            historicalReview.Compositions);
-        return await LoadReviewCompositionPreviewsAsync(
-            reviewChapter,
-            projectId,
-            compositionPreviews,
-            cancellationToken);
-    }
-
-    private async Task<CompositionCanvasPreviewResult?> RenderReviewCompositionPreviewAsync(
-        ProjectExportPageComposition? composition,
-        Guid projectId,
-        ICompositionCanvasPreviewService compositionPreviews,
-        CancellationToken cancellationToken = default)
-    {
-        if (composition is null)
+        if (designedPage is null)
             return null;
 
-        var variant = composition.Variants
-            .FirstOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
-            ?? composition.Variants.OrderBy(item => item.Id).FirstOrDefault();
+        var content = designedPage.Contents
+            .SingleOrDefault(item => item.EditionId == _contentTarget.EditionId)
+            ?? designedPage.Contents.SingleOrDefault(item => item.EditionId is null);
+        if (content is null)
+            return null;
+        var variant = content.Variants
+            .FirstOrDefault(item => item.Id == content.ActiveVariantId)
+            ?? content.Variants.OrderBy(item => item.Id).FirstOrDefault();
         if (variant is null)
             return null;
 
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Designed Page review scene is empty.");
         var semantic = ManuscriptCodec.Deserialize(
-            composition.SemanticManuscriptJson,
-            composition.Id,
-            composition.Revision);
+            content.SemanticManuscriptJson,
+            content.Id,
+            content.Revision);
         return await compositionPreviews.RenderSceneAsync(
             projectId,
-            composition.Id,
+            content.Id,
             variant.Revision,
             scene,
             semantic,
@@ -4131,8 +4111,7 @@ else
                     Guid.Empty,
                     historicalReview.Commit.Sha,
                     null,
-                    string.Empty),
-                historicalReview.Compositions),
+                    string.Empty)),
             isReadOnly: true);
 
     private static ContestReviewProjection BuildContestReviewProjection(ContestBatch batch)
@@ -5262,29 +5241,20 @@ else
     private async Task OnAiWorkspaceMutatedAsync(EditorWorkspaceMutated mutation)
     {
         await OnWorkspaceChangedAsync();
-        if (mutation.Kind != EditorWorkspaceMutationKind.PageComposition || Project is null)
+        if (mutation.Kind != EditorWorkspaceMutationKind.DesignedPage || Project is null)
             return;
 
-        var compositionId = mutation.CompositionId;
-        if (compositionId is null && mutation.VariantId is Guid variantId)
-        {
-            try
-            {
-                compositionId = (await Compositions.ReadVariantAsync(Project.Id, variantId)).CompositionId;
-            }
-            catch (KeyNotFoundException)
-            {
-                compositionId = null;
-            }
-        }
-        if (compositionId is null || !DesignedPageIds.Contains(compositionId.Value))
+        var pageId = mutation.DesignedPageId;
+        if (pageId is null || !DesignedPagePlacements.Any(item => item.PageId == pageId.Value))
         {
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
-            if (compositionId is null || !DesignedPageIds.Contains(compositionId.Value))
+            if (pageId is null || !DesignedPagePlacements.Any(item => item.PageId == pageId.Value))
                 return;
         }
 
-        _openCompositionId = compositionId;
+        var placement = DesignedPagePlacements.First(item => item.PageId == pageId.Value);
+        _openPageId = placement.PageId;
+        _openPlacementBlockId = placement.BlockId;
         _mode = EditorMode.Pages;
         await RememberEditorModeAsync(_mode);
         _pageWorkspaceSelectionId = mutation.SelectedObjectId;
@@ -5498,10 +5468,10 @@ else
         ProjectVersionReviewView? Review,
         ProjectVersionHistoricalChapterReview? HistoricalReview,
         ReviewProjection? Projection,
-        IReadOnlyList<ReviewCompositionPreview> CompositionPreviews);
+        IReadOnlyList<ReviewDesignedPagePreview> DesignedPagePreviews);
 
-    private sealed record ReviewCompositionPreview(
-        ProjectVersionReviewComposition Composition,
+    private sealed record ReviewDesignedPagePreview(
+        ProjectVersionReviewDesignedPage DesignedPage,
         CompositionCanvasPreviewResult? Before,
         CompositionCanvasPreviewResult? After,
         string? Error);

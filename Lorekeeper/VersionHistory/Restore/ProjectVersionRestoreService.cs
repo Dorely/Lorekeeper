@@ -82,61 +82,52 @@ public sealed class ProjectVersionRestoreService(
         (historyEvents ?? throw new InvalidOperationException("Scoped review restore requires the review event publisher.")).PublishReviewStateChanged(projectId);
     }
 
-    public Task RestoreReviewCompositionAsync(
+    public Task RestoreReviewDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default)
     {
         if (projectId == Guid.Empty)
             throw new ArgumentException("A project ID is required.", nameof(projectId));
-        ArgumentNullException.ThrowIfNull(target);
-        ValidateReviewTarget(target);
-        if (compositionId == Guid.Empty)
-            throw new ArgumentException("A composition ID is required.", nameof(compositionId));
+        if (designedPageId == Guid.Empty)
+            throw new ArgumentException("A Designed Page ID is required.", nameof(designedPageId));
         ArgumentNullException.ThrowIfNull(expectedToken);
 
-        return RestoreCompositionAsync(
+        return RestoreDesignedPageAsync(
             projectId,
-            target,
-            compositionId,
+            designedPageId,
             expectedToken,
             historicalCommitSha: null,
             cancellationToken);
     }
 
-    public Task RestoreHistoricalCompositionAsync(
+    public Task RestoreHistoricalDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         string historicalCommitSha,
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default)
     {
         if (projectId == Guid.Empty)
             throw new ArgumentException("A project ID is required.", nameof(projectId));
-        ArgumentNullException.ThrowIfNull(target);
-        ValidateReviewTarget(target);
-        if (compositionId == Guid.Empty)
-            throw new ArgumentException("A composition ID is required.", nameof(compositionId));
+        if (designedPageId == Guid.Empty)
+            throw new ArgumentException("A Designed Page ID is required.", nameof(designedPageId));
         if (string.IsNullOrWhiteSpace(historicalCommitSha))
             throw new ArgumentException("A historical parent commit SHA is required.", nameof(historicalCommitSha));
         ArgumentNullException.ThrowIfNull(expectedToken);
 
-        return RestoreCompositionAsync(
+        return RestoreDesignedPageAsync(
             projectId,
-            target,
-            compositionId,
+            designedPageId,
             expectedToken,
             historicalCommitSha,
             cancellationToken);
     }
 
-    private async Task RestoreCompositionAsync(
+    private async Task RestoreDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         string? historicalCommitSha,
         CancellationToken cancellationToken)
@@ -176,11 +167,10 @@ public sealed class ProjectVersionRestoreService(
             ValidateManuscriptCompositionReferences(approved.Payload);
             ValidateManuscriptCompositionReferences(current.Payload);
             ValidateManuscriptCompositionReferences(sourcePayload);
-            restorePayload = SynthesizeCompositionRestore(
+            restorePayload = SynthesizeDesignedPageRestore(
                 sourcePayload,
                 current.Payload,
-                target,
-                compositionId);
+                designedPageId);
             ValidateWholePayload(restorePayload);
             ValidateManuscriptCompositionReferences(restorePayload);
 
@@ -691,6 +681,9 @@ public sealed class ProjectVersionRestoreService(
 
         return approved with
         {
+            // Designed Pages have their own review dependency group. An
+            // Other-only restore cannot replace shared page content.
+            Composition = current.Composition,
             Narrative = approved.Narrative with
             {
                 Chapters = current.Narrative.Chapters.ToList(),
@@ -702,89 +695,78 @@ public sealed class ProjectVersionRestoreService(
         };
     }
 
-    private static VersionHistorySnapshotPayload SynthesizeCompositionRestore(
+    private static VersionHistorySnapshotPayload SynthesizeDesignedPageRestore(
         VersionHistorySnapshotPayload source,
         VersionHistorySnapshotPayload current,
-        ProjectVersionReviewTarget target,
-        Guid compositionId)
+        Guid designedPageId)
     {
         if (source.RepositoryId != current.RepositoryId || source.ProjectId != current.ProjectId)
             throw new VersionHistoryRestoreException(
                 "ProjectIdentityMismatch",
-                "The composition restore source and live snapshot do not share project identity.");
+                "The Designed Page restore source and live snapshot do not share project identity.");
 
-        var currentComposition = FindUniqueComposition(current, compositionId, "live");
-        var sourceComposition = FindUniqueComposition(source, compositionId, "source");
-        if (currentComposition is null && sourceComposition is null)
+        var currentDesignedPage = FindUniqueDesignedPage(current, designedPageId, "live");
+        var sourceDesignedPage = FindUniqueDesignedPage(source, designedPageId, "source");
+        if (currentDesignedPage is null && sourceDesignedPage is null)
             throw new InvalidOperationException("The Designed Page no longer exists in either the live project or restore source.");
-        if (currentComposition is not null && !CompositionMatchesReviewTarget(currentComposition, target)
-            || sourceComposition is not null && !CompositionMatchesReviewTarget(sourceComposition, target))
-        {
-            throw new InvalidOperationException(
-                "The Designed Page does not belong to the reviewed chapter and content target.");
-        }
-        if (ProjectVersionReviewComposition.SemanticallyEquals(sourceComposition, currentComposition))
+        if (ProjectVersionReviewDesignedPage.SemanticallyEquals(sourceDesignedPage, currentDesignedPage))
             throw new InvalidOperationException("The Designed Page is already at the requested restore state.");
 
-        var liveCompositions = current.Composition.PageCompositions
-            .Where(item => item.Id != compositionId)
+        var liveDesignedPages = current.Composition.DesignedPages
+            .Where(item => item.Id != designedPageId)
             .ToList();
-        if (sourceComposition is not null)
+        if (sourceDesignedPage is not null)
         {
             var liveIndex = -1;
-            for (var index = 0; index < current.Composition.PageCompositions.Count; index++)
+            for (var index = 0; index < current.Composition.DesignedPages.Count; index++)
             {
-                if (current.Composition.PageCompositions[index].Id == compositionId)
+                if (current.Composition.DesignedPages[index].Id == designedPageId)
                 {
                     liveIndex = index;
                     break;
                 }
             }
 
-            if (currentComposition is null || liveIndex < 0 || liveIndex > liveCompositions.Count)
-                liveCompositions.Add(sourceComposition);
+            if (currentDesignedPage is null || liveIndex < 0 || liveIndex > liveDesignedPages.Count)
+                liveDesignedPages.Add(sourceDesignedPage);
             else
-                liveCompositions.Insert(liveIndex, sourceComposition);
+                liveDesignedPages.Insert(liveIndex, sourceDesignedPage);
         }
 
         var restored = current with
         {
             Composition = current.Composition with
             {
-                PageCompositions = liveCompositions,
+                DesignedPages = liveDesignedPages,
             },
         };
-        if (sourceComposition is null)
+        if (sourceDesignedPage is null)
         {
-            var references = FindCompositionReferences(current, compositionId);
-            if (references.Any(reference => reference.Target != target))
+            // Deleting a page requires every live placement to be accounted
+            // for by the source snapshot. An absent or still-referencing
+            // source block is ambiguous current shared state, never a cue to
+            // overwrite unrelated manuscript content.
+            foreach (var reference in FindDesignedPageReferences(current, designedPageId))
             {
-                throw new VersionHistoryRestoreException(
-                    "CompositionDependencyOutsideTarget",
-                    "The Designed Page is referenced by another manuscript target; restore was refused to preserve target isolation.");
-            }
-
-            if (references.SingleOrDefault() is { } reference)
-            {
-                var sourceDocument = FindSnapshotManuscriptDocument(source, target)
+                var sourceDocument = FindSnapshotManuscriptDocument(source, reference.Target)
                     ?? throw new VersionHistoryRestoreException(
-                        "CompositionDependencyTargetUnavailable",
-                        "The restore source does not contain the reviewed manuscript target needed to remove the Designed Page reference.");
+                        "DesignedPageDependencyTargetUnavailable",
+                        "The restore source does not contain every manuscript target required to remove the Designed Page.");
                 var sourceBlocks = sourceDocument.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
                 var restoredBlocks = new List<ManuscriptBlock>(reference.Document.Content.Count);
                 foreach (var block in reference.Document.Content)
                 {
                     if (block.Type == ManuscriptBlockType.DesignedPage
-                        && block.PageCompositionId == compositionId)
+                        && block.DesignedPageId == designedPageId)
                     {
                         if (sourceBlocks.TryGetValue(block.Id, out var sourceBlock))
                         {
                             if (sourceBlock.Type == ManuscriptBlockType.DesignedPage
-                                && sourceBlock.PageCompositionId == compositionId)
+                                && sourceBlock.DesignedPageId == designedPageId)
                             {
                                 throw new VersionHistoryRestoreException(
-                                    "AmbiguousCompositionDependency",
-                                    "The restore source still contains the selected Designed Page reference, so the coupled manuscript change is ambiguous.");
+                                    "AmbiguousDesignedPageDependency",
+                                    "The restore source still contains a selected Designed Page placement, so current shared page state is ambiguous.");
                             }
 
                             restoredBlocks.Add(sourceBlock);
@@ -803,7 +785,7 @@ public sealed class ProjectVersionRestoreService(
                 };
                 restored = ReplaceSnapshotManuscriptDocument(
                     restored,
-                    target,
+                    reference.Target,
                     restoredDocument);
             }
         }
@@ -811,31 +793,31 @@ public sealed class ProjectVersionRestoreService(
         return restored;
     }
 
-    private static ProjectExportPageComposition? FindUniqueComposition(
+    private static ProjectExportDesignedPage? FindUniqueDesignedPage(
         VersionHistorySnapshotPayload payload,
-        Guid compositionId,
+        Guid designedPageId,
         string snapshotLabel)
     {
-        var matches = payload.Composition.PageCompositions
-            .Where(item => item.Id == compositionId)
+        var matches = payload.Composition.DesignedPages
+            .Where(item => item.Id == designedPageId)
             .ToList();
         if (matches.Count > 1)
         {
             throw new VersionHistoryRestoreException(
-                "DuplicateCompositionIdentity",
+                "DuplicateDesignedPageIdentity",
                 $"The {snapshotLabel} snapshot contains duplicate identity for the selected Designed Page.");
         }
 
         return matches.SingleOrDefault();
     }
 
-    private static IReadOnlyList<SnapshotManuscriptDocument> FindCompositionReferences(
+    private static IReadOnlyList<SnapshotManuscriptDocument> FindDesignedPageReferences(
         VersionHistorySnapshotPayload payload,
-        Guid compositionId) =>
+        Guid designedPageId) =>
         EnumerateSnapshotManuscriptDocuments(payload)
             .Where(item => item.Document.Content.Any(block =>
                 block.Type == ManuscriptBlockType.DesignedPage
-                && block.PageCompositionId == compositionId))
+                && block.DesignedPageId == designedPageId))
             .ToList();
 
     private static ManuscriptDocument? FindSnapshotManuscriptDocument(
@@ -918,7 +900,7 @@ public sealed class ProjectVersionRestoreService(
 
     private static void ValidateManuscriptCompositionReferences(VersionHistorySnapshotPayload payload)
     {
-        var compositionIds = payload.Composition.PageCompositions
+        var compositionIds = payload.Composition.DesignedPages
             .Select(item => item.Id)
             .ToHashSet();
         foreach (var manuscript in EnumerateSnapshotManuscriptDocuments(payload))
@@ -926,7 +908,7 @@ public sealed class ProjectVersionRestoreService(
             foreach (var block in manuscript.Document.Content)
             {
                 if (block.Type == ManuscriptBlockType.DesignedPage
-                    && block.PageCompositionId is Guid compositionId
+                    && block.DesignedPageId is Guid compositionId
                     && !compositionIds.Contains(compositionId))
                 {
                     throw new VersionHistoryRestoreException(
@@ -998,14 +980,6 @@ public sealed class ProjectVersionRestoreService(
             throw new ArgumentException("An edition review target requires an edition ID.", nameof(target));
     }
 
-    private static bool CompositionMatchesReviewTarget(
-        ProjectExportPageComposition composition,
-        ProjectVersionReviewTarget target) =>
-        composition.ChapterId == target.ChapterId
-        && (target.ContentTarget.IsCore
-            ? composition.EditionId is null
-            : composition.EditionId == target.ContentTarget.EditionId);
-
     private static VersionHistorySnapshotNarrativeArea MergeSelectedChapters(
         VersionHistorySnapshotNarrativeArea current,
         VersionHistorySnapshotNarrativeArea target,
@@ -1074,7 +1048,7 @@ public sealed class ProjectVersionRestoreService(
         var sourceIds = payload.Sources.Sources.Select(item => item.Id).ToHashSet();
         var editionIds = payload.Publication.PublicationEditions.Select(item => item.Id).ToHashSet();
         var sectionIds = payload.Publication.PublicationSections.Select(item => item.Id).ToHashSet();
-        var compositionIds = payload.Composition.PageCompositions.Select(item => item.Id).ToHashSet();
+        var compositionIds = payload.Composition.DesignedPages.Select(item => item.Id).ToHashSet();
         var fontFaceIds = payload.Assets.FontFamilies.SelectMany(item => item.Faces).Select(item => item.Id).ToHashSet();
         if (payload.Project.References.Any(reference => reference.ReferenceId == Guid.Empty))
             throw new VersionHistoryRestoreException("InvalidReferenceIdentity", "The target snapshot contains a project reference without a stable identity.");
@@ -1153,13 +1127,13 @@ public sealed class ProjectVersionRestoreService(
             || payload.Assets.FontFamilies.GroupBy(family => family.Id).Any(group => group.Count() != 1)
             || fontFaceIds.Count != payload.Assets.FontFamilies.SelectMany(family => family.Faces).Count())
             throw new VersionHistoryRestoreException("DuplicateCreativeIdentity", "The target snapshot contains duplicate style or font identities.");
-        if (payload.Composition.PageCompositions.SelectMany(item => item.Variants).GroupBy(item => item.Id).Any(group => group.Count() != 1))
+        if (payload.Composition.DesignedPages.SelectMany(item => item.Contents).SelectMany(item => item.Variants).GroupBy(item => item.Id).Any(group => group.Count() != 1))
             throw new VersionHistoryRestoreException("DuplicateCompositionIdentity", "The target snapshot contains duplicate composition variant IDs.");
-        if (payload.Composition.PageCompositions.Any(item => item.ChapterId is Guid chapterId && !chapterIds.Contains(chapterId)
-            || item.EditionId is Guid editionId && !editionIds.Contains(editionId)
-            || item.PublicationSectionId is Guid sectionId && !sectionIds.Contains(sectionId)
-            || item.SourceCompositionId is Guid sourceId && !compositionIds.Contains(sourceId)
-            || item.ActiveAuthoringVariantId is Guid variantId && !item.Variants.Any(variant => variant.Id == variantId)))
+        if (payload.Composition.DesignedPages.GroupBy(item => item.Id).Any(group => group.Count() != 1)
+            || payload.Composition.DesignedPages.Any(item => item.ScopeEditionId is Guid editionId && !editionIds.Contains(editionId)
+                || item.Contents.Any(content => content.DesignedPageId != item.Id
+                    || content.EditionId is Guid contentEditionId && !editionIds.Contains(contentEditionId)
+                    || content.ActiveVariantId is Guid variantId && !content.Variants.Any(variant => variant.Id == variantId))))
             throw new VersionHistoryRestoreException("MissingCompositionDependency", "A target composition references a missing creative row.");
         ValidateBlobRecords(payload);
         if (payload.Publication.PublicationEditions.Any(edition => edition.StyleMappings is { Count: > 0 }))
@@ -1337,8 +1311,10 @@ public sealed class ProjectVersionRestoreService(
         await db.GraphEdges.Where(item => item.FromNode.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.GraphNodes.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.GraphEntityTypes.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
-        await db.PageCompositionVariants.Where(item => item.Composition.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
-        await db.PageCompositions.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.DesignedPagePlacementReferences.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.DesignedPageVariants.Where(item => item.Content.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.DesignedPageContents.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.DesignedPages.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.PublicationEditionChapterOverrides.Where(item => item.Edition.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.PublicationMatter.Where(item => item.Edition.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.PublicationImagePlacements.Where(item => item.Edition.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
@@ -1462,8 +1438,12 @@ public sealed class ProjectVersionRestoreService(
                 DefinitionJson = JsonSerializer.Serialize(style.Definition, ManuscriptCodec.JsonOptions),
                 Revision = style.Revision,
             });
-        AddCompositions(db, projectId, payload.Composition.PageCompositions);
+        var activeDesignedPageVariants = AddDesignedPages(db, projectId, payload.Composition.DesignedPages);
         AddPublication(db, projectId, payload.Publication);
+        AddDesignedPagePlacements(db, projectId, payload);
+        await db.SaveChangesAsync(cancellationToken);
+        foreach (var (content, activeVariantId) in activeDesignedPageVariants)
+            content.ActiveVariantId = activeVariantId;
         await db.SaveChangesAsync(cancellationToken);
         await AddGraphAsync(db, projectId, payload.Graph, cancellationToken);
         await AddVisualExamplesAsync(db, projectId, payload.Assets.EntityVisualExamples, cancellationToken);
@@ -1638,33 +1618,86 @@ public sealed class ProjectVersionRestoreService(
         }
     }
 
-    private static void AddCompositions(AppDbContext db, Guid projectId, IReadOnlyList<ProjectExportPageComposition> compositions)
+    private static IReadOnlyList<(DesignedPageContent Content, Guid? ActiveVariantId)> AddDesignedPages(
+        AppDbContext db,
+        Guid projectId,
+        IReadOnlyList<ProjectExportDesignedPage> pages)
     {
-        foreach (var composition in compositions)
+        var activeVariants = new List<(DesignedPageContent Content, Guid? ActiveVariantId)>();
+        foreach (var page in pages)
         {
-            var entity = new PageComposition
+            var entity = new DesignedPage
             {
-                Id = composition.Id,
+                Id = page.Id,
                 ProjectId = projectId,
-                ChapterId = composition.ChapterId,
-                PublicationSectionId = composition.PublicationSectionId,
-                EditionId = composition.EditionId,
-                SourceCompositionId = composition.SourceCompositionId,
-                Name = composition.Name,
-                SemanticManuscriptJson = composition.SemanticManuscriptJson,
-                Revision = composition.Revision,
-                ActiveAuthoringVariantId = composition.ActiveAuthoringVariantId,
+                Name = page.Name,
+                ScopeEditionId = page.ScopeEditionId,
             };
-            entity.Variants = composition.Variants.Select(variant => new PageCompositionVariant
+            entity.Contents = page.Contents.Select(content =>
             {
-                Id = variant.Id,
-                Composition = entity,
-                GeometryKey = variant.GeometryKey,
-                SceneJson = variant.SceneJson,
-                Revision = variant.Revision,
+                var restored = new DesignedPageContent
+                {
+                    Id = content.Id,
+                    ProjectId = projectId,
+                    Page = entity,
+                    DesignedPageId = entity.Id,
+                    EditionId = content.EditionId,
+                    SemanticManuscriptJson = content.SemanticManuscriptJson,
+                    AccessibilityDescription = content.AccessibilityDescription,
+                    Revision = content.Revision,
+                    Variants = content.Variants.Select(variant => new DesignedPageVariant
+                    {
+                        Id = variant.Id,
+                        ContentId = content.Id,
+                        GeometryKey = variant.GeometryKey,
+                        SceneJson = variant.SceneJson,
+                        Revision = variant.Revision,
+                    }).ToList(),
+                };
+                activeVariants.Add((restored, content.ActiveVariantId));
+                return restored;
             }).ToList();
-            db.PageCompositions.Add(entity);
+            db.DesignedPages.Add(entity);
         }
+        return activeVariants;
+    }
+
+    internal static void AddDesignedPagePlacements(AppDbContext db, Guid projectId, VersionHistorySnapshotPayload payload)
+    {
+        var pageIds = payload.Composition.DesignedPages.Select(page => page.Id).ToHashSet();
+        var seen = new HashSet<(DesignedPageContainerKind Kind, Guid ContainerId, Guid? EditionId, string BlockId)>();
+        void Add(ManuscriptDocument document, DesignedPageContainerKind kind, Guid containerId, Guid? editionId)
+        {
+            foreach (var block in document.Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage))
+            {
+                if (block.DesignedPageId is not Guid pageId || !pageIds.Contains(pageId))
+                    throw new VersionHistoryRestoreException("MissingDesignedPageDependency", $"Block {block.Id} references a missing Designed Page.");
+                if (!seen.Add((kind, containerId, editionId, block.Id)))
+                    throw new VersionHistoryRestoreException("DuplicateDesignedPagePlacement", $"Designed Page placement block {block.Id} is duplicated within its manuscript container.");
+                db.DesignedPagePlacementReferences.Add(new DesignedPagePlacementReference
+                {
+                    Id = block.Id, ProjectId = projectId, DesignedPageId = pageId,
+                    ContainerKind = kind, ContainerId = containerId, EditionId = editionId,
+                    ManuscriptRevision = document.Revision,
+                });
+            }
+        }
+
+        foreach (var chapter in payload.Narrative.Chapters)
+            Add(ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision), DesignedPageContainerKind.Chapter, chapter.Id, null);
+        foreach (var edition in payload.Publication.PublicationEditions)
+        {
+            foreach (var chapterOverride in edition.ChapterOverrides)
+            {
+                Add(
+                    ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapterOverride.ChapterId, chapterOverride.Revision),
+                    DesignedPageContainerKind.Chapter,
+                    chapterOverride.ChapterId,
+                    edition.Id);
+            }
+        }
+        foreach (var section in payload.Publication.PublicationSections)
+            Add(ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision), DesignedPageContainerKind.PublicationSection, section.Id, section.EditionId);
     }
 
     private static void AddPublication(AppDbContext db, Guid projectId, VersionHistorySnapshotPublicationArea publication)

@@ -7,7 +7,7 @@ namespace Lorekeeper.EditorChat;
 
 public interface IEditorChatTurnRunner
 {
-    bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model);
+    bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentDesignedPageId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
     IChatTurnSubscription<EditorChatTurnUpdate>? Subscribe(Guid projectId);
     void Cancel(Guid projectId);
@@ -19,11 +19,11 @@ public sealed class EditorChatTurnRunner(
 {
     private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.Editor);
 
-    public bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model) =>
+    public bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentDesignedPageId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model) =>
         runtime.TryStart(
             Key(projectId),
             userText,
-            cancellationToken => RunAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, images.Select(image => image.ImageId).ToList(), model.ProviderId, cancellationToken),
+            cancellationToken => RunAsync(projectId, currentChapterId, currentDesignedPageId, contentTarget, userText, images.Select(image => image.ImageId).ToList(), model.ProviderId, cancellationToken),
             static (ex, cancelled) => new EditorChatTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
             static update => update is EditorChatAssistantMessageCompleted or EditorChatTurnError,
             images,
@@ -38,7 +38,7 @@ public sealed class EditorChatTurnRunner(
     private async IAsyncEnumerable<EditorChatTurnUpdate> RunAsync(
         Guid projectId,
         Guid? currentChapterId,
-        Guid? currentCompositionId,
+        Guid? currentDesignedPageId,
         EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
@@ -49,7 +49,7 @@ public sealed class EditorChatTurnRunner(
         var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
         var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         var mutated = false;
-        await foreach (var update in chat.SendAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, imageIds, providerId, cancellationToken))
+        await foreach (var update in chat.SendAsync(projectId, currentChapterId, currentDesignedPageId, contentTarget, userText, imageIds, providerId, cancellationToken))
         {
             if (update is EditorChatMutated or EditorWorkspaceMutated)
                 mutated = true;

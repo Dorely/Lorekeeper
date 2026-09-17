@@ -20,7 +20,7 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, IDesignedPageService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -604,16 +604,18 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         {
             manifest.Append("- ").Append(block.Type).Append(" block ").Append(block.Id);
             if (block.ImageId is { } imageId) manifest.Append(" image=").Append(imageId);
-            if (block.PageCompositionId is { } compositionId)
+            if (block.DesignedPageId is { } pageId)
             {
-                var composition = await compositions.GetAsync(projectId, compositionId, cancellationToken);
-                manifest.Append(" composition=").Append(compositionId)
-                    .Append(" variants=").Append(composition?.Variants.Count ?? 0);
-                if (composition is not null)
+                var page = await compositions.GetAsync(projectId, pageId, EditorContentTarget.Core, cancellationToken);
+                var content = page?.Content;
+                manifest.Append(" designedPage=").Append(pageId)
+                    .Append(" variants=").Append(content?.Variants.Count ?? 0);
+                if (content is not null)
                 {
-                    manifest.Append(" compositionRevision=").Append(composition.Revision)
-                        .Append(" activeAuthoringVariant=").Append(composition.ActiveAuthoringVariantId?.ToString() ?? "none");
-                    if (composition.ActiveAuthoringVariantId is Guid activeVariantId)
+                    manifest.Append(" pageContent=").Append(content.Id)
+                        .Append(" contentRevision=").Append(content.Revision)
+                        .Append(" activeVariant=").Append(content.ActiveVariantId?.ToString() ?? "none");
+                    if (content.ActiveVariantId is Guid activeVariantId)
                     {
                         var activeVariant = await compositions.ReadVariantAsync(projectId, activeVariantId, cancellationToken);
                         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(
@@ -632,7 +634,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                         }
                     }
                     var semanticText = ManuscriptCodec.ProjectPlainText(
-                        ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision));
+                        ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision));
                     if (!string.IsNullOrWhiteSpace(semanticText))
                         manifest.AppendLine().Append("  semantic reading order: ")
                             .Append(semanticText.Length <= 2_000 ? semanticText : semanticText[..2_000] + "…");

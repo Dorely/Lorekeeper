@@ -123,7 +123,7 @@ from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph
 relationships, project-search results, named manuscript styles, page setup,
 annotations, and canonical entity visuals. The active chapter is loaded once as
-a complete `agent-manuscript-v1` snapshot with source/completeness metadata,
+a complete `agent-manuscript-v2` snapshot with source/completeness metadata,
 revision, source hash, stable block IDs, exact text, sparse UTF-16 marks,
 structure, interned direct paragraph formatting, Figures, Designed Pages, and
 publication bindings. Block rows use absolute indexes as compact overlay
@@ -285,7 +285,7 @@ assistant-transcript, and job usage before an explicit resolution.
 - [assistants-chat.md](assistants-chat.md) owns the shared conversation runtime,
   system-prompt composition, surface charters, tools, review changes, contests,
   and revision workers.
-- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v4, chapter
+- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v5, chapter
   body mutations, editor behavior, annotations, styles, and authoring history.
 - [providers-background.md](providers-background.md) owns LLM/search provider
   configuration and the shared rules for provider-backed background execution.

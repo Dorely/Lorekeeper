@@ -59,8 +59,8 @@ reflows the reusable Core cover and every active Designed Page layout in one
 project-scoped transaction while preserving objects and bindings and advancing
 affected revisions.
 
-`ICompositionService` owns Designed Page semantic fragments exactly once and
-revisioned `PageCompositionVariant` scenes by exact geometry fingerprint. The
+`IDesignedPageService` owns Designed Page semantic fragments exactly once and
+revisioned `DesignedPageVariant` scenes by exact geometry fingerprint. The
 canvas is an authoring surface over those contracts. It must not persist HTML,
 DOM coordinates, or a second manuscript body. `ICompositionCanvasPreviewService`
 owns transient complete-scene inspection for Pages and covers; previews are
@@ -71,10 +71,9 @@ publication sections, release covers, package readiness, and production
 artifacts. This chapter supplies their shared media, canvas, geometry, and
 preview primitives; it does not own publication claims or vendor validation.
 
-### Accepted M2 implementation contract
+### Independent Designed Page contract
 
-This accepted next-contract guidance does not claim that the replacement is
-already implemented. `IDesignedPageService` becomes the sole Designed Page
+`IDesignedPageService` is the sole Designed Page
 mutation boundary. `DesignedPage` owns project/name/release-only scope;
 `DesignedPageContent` owns Core or release semantic content, accessibility,
 revision, and active variant; and `DesignedPageVariant` owns authored geometry
@@ -535,7 +534,7 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
 | `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
-| `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
+| `Lorekeeper/Composition/CompositionService.cs` | `IDesignedPageService`, revision-aware Designed Page aggregates, placement lifecycle, release overrides, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
 | `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `PublicationTextBindings.cs` / `LegacyCoverTextBindingMigration.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, shared publication text-binding catalog and cover token resolution, and boundary-only retired-token adaptation. |
@@ -595,7 +594,7 @@ adherence by the provider.
 When image, Figure, composition, font, or history ownership changes, inspect
 the complete diff and search for every old field/name and every deletion path.
 The minimum static review should cover `IProjectImageService`,
-`IManuscriptService`, `ICompositionService`, `IProjectFontService`, image
+`IManuscriptService`, `IDesignedPageService`, `IProjectFontService`, image
 endpoints, EPUB/Press request assembly, in-process history dependency
 retention, version-history blob validation, and the owning persistence
 migration. Confirm that no image bytes or font secrets are

@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 12);
+    assert_eq!(value["protocolVersion"], 13);
     assert_eq!(value["rendererVersion"], "2.1.10");
     assert_eq!(
         value["profiles"],
@@ -51,6 +51,43 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     assert_eq!(value["capabilities"]["mixedPageGeometry"], true);
     assert_eq!(value["capabilities"]["publicationSections"], true);
     assert_eq!(value["capabilities"]["dedicatedFullWrapCover"], true);
+}
+
+#[test]
+fn v12_fixture_is_read_at_the_boundary_and_returns_the_current_protocol() {
+    let job = PreparedJob::from_fixture("full-model-v12.json");
+    job.write_request();
+
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    assert_eq!(response(&output)["protocolVersion"], 13);
+}
+
+#[test]
+fn v13_fixture_uses_current_designed_page_names() {
+    let job = PreparedJob::from_fixture("full-model-v13.json");
+    assert!(
+        job.request["document"]["sections"][0]["chapters"][1]
+            .get("designedPages")
+            .is_some()
+    );
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    assert_eq!(response(&output)["protocolVersion"], 13);
+}
+
+#[test]
+fn v13_rejects_legacy_designed_page_names() {
+    let mut job = PreparedJob::from_fixture("full-model-v13.json");
+    job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"] = json!([]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_LEGACY_DESIGNED_PAGE_CONTRACT"
+    ));
 }
 
 #[test]
@@ -130,7 +167,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 12);
+    assert_eq!(response["protocolVersion"], 13);
     assert_eq!(response["rendererVersion"], "2.1.10");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -4695,13 +4732,24 @@ struct PreparedJob {
 
 impl PreparedJob {
     fn new(profile: &str) -> Self {
+        // The broad compatibility matrix intentionally exercises the v12
+        // boundary adapter. Current-contract coverage loads v13 explicitly.
+        Self::from_fixture_with_profile("full-model-v12.json", profile)
+    }
+
+    fn from_fixture(fixture: &str) -> Self {
+        Self::from_fixture_with_profile(fixture, "kdp-paperback-v1")
+    }
+
+    fn from_fixture_with_profile(fixture: &str, profile: &str) -> Self {
         let root = TempDir::new().expect("job root");
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
-        let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v12.json"))
-                .expect("canonical request");
-        request["protocolVersion"] = json!(12);
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join(fixture);
+        let mut request: Value = serde_json::from_slice(&fs::read(fixture_path).expect("fixture"))
+            .expect("canonical request");
         let profile = match profile {
             "generic-paperback-v1" => "generic-print-v2",
             "kdp-paperback-v1" => "kdp-paperback-v2",

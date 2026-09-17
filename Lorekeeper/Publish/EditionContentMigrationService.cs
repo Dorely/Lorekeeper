@@ -3,6 +3,7 @@ using System.Text.Json;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Legacy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -156,7 +157,7 @@ public sealed class EditionContentMigrationService(
                         transformed,
                         cancellationToken);
                 }
-                var editionCompositions = await db.PageCompositions
+                var editionCompositions = await db.LegacyPageCompositions
                     .Where(item => item.EditionId == edition.Id)
                     .ToListAsync(cancellationToken);
                 foreach (var composition in editionCompositions)

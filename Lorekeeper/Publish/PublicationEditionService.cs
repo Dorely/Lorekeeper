@@ -112,37 +112,20 @@ public sealed class PublicationEditionService(
         var clone = CopyEdition(source, cleanName);
         clone.Isbn = string.Empty;
         clone.OutlineItems = source.OutlineItems.Select(CopyOutlineItem).ToList();
-        var sourceCompositions = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => item.EditionId == source.Id && item.DetachedAt == null)
-            .ToListAsync(cancellationToken);
-        var compositionMap = sourceCompositions.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         var sectionMap = source.PublicationSections.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         clone.PublicationSectionOrderJson = PublicationSectionOrderCodec.Serialize(
             PublicationSectionOrderCodec.Deserialize(source.PublicationSectionOrderJson)
                 .ToDictionary(item => sectionMap.GetValueOrDefault(item.Key, item.Key), item => item.Value));
-        clone.PageCompositions = sourceCompositions.Select(item => CopyEditionComposition(
-            item,
-            clone.Id,
-            compositionMap[item.Id],
-            item.PublicationSectionId is Guid sectionId ? sectionMap.GetValueOrDefault(sectionId) : null)).ToList();
         clone.PublicationSections = source.PublicationSections.Select(item =>
-            CopyPublicationSection(item, clone.Id, sectionMap[item.Id], compositionMap)).ToList();
+            CopyPublicationSection(item, clone.Id, sectionMap[item.Id])).ToList();
         clone.ChapterOverrides = source.ChapterOverrides.Select(item =>
         {
             var document = ManuscriptCodec.Deserialize(item.ManuscriptJson, item.ChapterId, item.Revision);
-            var remapped = document with
-            {
-                Content = document.Content.Select(block =>
-                    block.PageCompositionId is Guid compositionId && compositionMap.TryGetValue(compositionId, out var cloneCompositionId)
-                        ? block with { PageCompositionId = cloneCompositionId }
-                        : block).ToList(),
-            };
             return new PublicationEditionChapterOverride
             {
                 EditionId = clone.Id,
                 ChapterId = item.ChapterId,
-                ManuscriptJson = ManuscriptCodec.Serialize(remapped),
+                ManuscriptJson = ManuscriptCodec.Serialize(document),
                 Revision = item.Revision,
                 BaseCoreRevision = item.BaseCoreRevision,
                 BaseCoreHash = item.BaseCoreHash,
@@ -150,6 +133,56 @@ public sealed class PublicationEditionService(
                 UpdatedAt = DateTime.UtcNow,
             };
         }).ToList();
+        // Preserve the release's independent Designed Page layer. Shared-page
+        // content overrides keep the page identity; release-only pages receive
+        // new identities and every cloned manuscript placement is remapped.
+        var sourcePageContents = await db.DesignedPageContents.AsNoTracking()
+            .Include(content => content.Page)
+            .Include(content => content.Variants)
+            .Where(content => content.ProjectId == projectId
+                && (content.EditionId == source.Id || content.Page.ScopeEditionId == source.Id))
+            .ToListAsync(cancellationToken);
+        var releaseOnlyPages = sourcePageContents
+            .Where(content => content.Page.ScopeEditionId == source.Id)
+            .GroupBy(content => content.DesignedPageId)
+            .ToList();
+        var releasePageMap = releaseOnlyPages.ToDictionary(group => group.Key, _ => Guid.NewGuid());
+        var activeVariants = new List<(DesignedPageContent Content, Guid? ActiveVariantId)>();
+        foreach (var content in sourcePageContents.Where(content => content.Page.ScopeEditionId != source.Id))
+        {
+            var clonedContent = CloneDesignedPageContent(content, content.DesignedPageId, clone.Id);
+            activeVariants.Add((clonedContent, clonedContent.ActiveVariantId));
+            clonedContent.ActiveVariantId = null;
+            db.DesignedPageContents.Add(clonedContent);
+        }
+        foreach (var pageGroup in releaseOnlyPages)
+        {
+            var sourcePage = pageGroup.First().Page;
+            var page = new DesignedPage
+            {
+                Id = releasePageMap[sourcePage.Id],
+                ProjectId = projectId,
+                Name = sourcePage.Name,
+                ScopeEditionId = clone.Id,
+            };
+            foreach (var content in pageGroup)
+            {
+                var clonedContent = CloneDesignedPageContent(content, page.Id, clone.Id);
+                activeVariants.Add((clonedContent, clonedContent.ActiveVariantId));
+                clonedContent.ActiveVariantId = null;
+                page.Contents.Add(clonedContent);
+            }
+            db.DesignedPages.Add(page);
+        }
+        if (releasePageMap.Count > 0)
+        {
+            foreach (var overrideItem in clone.ChapterOverrides)
+                overrideItem.ManuscriptJson = RemapDesignedPagePlacements(
+                    overrideItem.ManuscriptJson, overrideItem.ChapterId, overrideItem.Revision, releasePageMap);
+            foreach (var section in clone.PublicationSections)
+                section.ManuscriptJson = RemapDesignedPagePlacements(
+                    section.ManuscriptJson, section.Id, section.Revision, releasePageMap);
+        }
         if (source.CoverDesign is not null)
             clone.CoverDesign = new PublicationCoverDesign
             {
@@ -167,7 +200,14 @@ public sealed class PublicationEditionService(
                 SurfaceScenesJson = source.CoverDesign.SurfaceScenesJson,
             };
         db.PublicationEditions.Add(clone);
-        await SaveWithAuditAsync(clone, "clone", string.Empty, new { sourceEditionId = source.Id }, cancellationToken);
+        AddClonedDesignedPagePlacements(db, projectId, clone, releasePageMap);
+        await SaveWithAuditAsync(
+            clone,
+            "clone",
+            string.Empty,
+            new { sourceEditionId = source.Id },
+            activeVariants,
+            cancellationToken);
         return View(project, clone);
     }
 
@@ -623,6 +663,17 @@ public sealed class PublicationEditionService(
         object detail,
         CancellationToken cancellationToken)
     {
+        await SaveWithAuditAsync(edition, action, beforeHash, detail, [], cancellationToken);
+    }
+
+    private async Task SaveWithAuditAsync(
+        PublicationEdition edition,
+        string action,
+        string beforeHash,
+        object detail,
+        IReadOnlyList<(DesignedPageContent Content, Guid? ActiveVariantId)> activeVariants,
+        CancellationToken cancellationToken)
+    {
         await using var databaseOperation = await database.OpenWriteAsync(edition.ProjectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -632,6 +683,10 @@ public sealed class PublicationEditionService(
         var project = await db.Projects.FirstAsync(project => project.Id == edition.ProjectId, cancellationToken);
         project.UpdatedAt = edition.UpdatedAt;
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var (content, activeVariantId) in activeVariants)
+            content.ActiveVariantId = activeVariantId;
+        if (activeVariants.Count > 0)
+            await db.SaveChangesAsync(cancellationToken);
         var afterHash = await FingerprintAsync(edition.ProjectId, edition.Id, cancellationToken);
         db.PublicationEditionAuditEntries.Add(new PublicationEditionAuditEntry
         {
@@ -718,8 +773,8 @@ public sealed class PublicationEditionService(
                 chapter.Id,
                 chapter.ManuscriptRevision).Content)
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage
-                && block.PageCompositionId is not null)
-            .Select(block => block.PageCompositionId!.Value)
+                && block.DesignedPageId is not null)
+            .Select(block => block.DesignedPageId!.Value)
             .Distinct()
             .OrderBy(id => id)
             .ToList();
@@ -747,34 +802,42 @@ public sealed class PublicationEditionService(
             .ToList();
         compositionIds.AddRange(publicationSections
             .SelectMany(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision).Content)
-            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId.HasValue)
-            .Select(block => block.PageCompositionId!.Value));
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId.HasValue)
+            .Select(block => block.DesignedPageId!.Value));
         compositionIds = compositionIds.Distinct().OrderBy(id => id).ToList();
-        var compositions = await db.PageCompositions.AsNoTracking()
-            .Where(composition => compositionIds.Contains(composition.Id) && composition.DetachedAt == null)
-            .OrderBy(composition => composition.Id)
-            .Select(composition => new
+        var compositions = await db.DesignedPages.AsNoTracking()
+            .Where(page => compositionIds.Contains(page.Id)
+                && (page.ScopeEditionId == null || page.ScopeEditionId == editionId))
+            .OrderBy(page => page.Id)
+            .Select(page => new
             {
-                composition.Id,
-                composition.ChapterId,
-                composition.Name,
-                composition.SemanticManuscriptJson,
-                composition.Revision,
-                Variants = composition.Variants.Where(variant => variant.DetachedAt == null)
-                    .Select(variant => new
+                page.Id,
+                page.Name,
+                // A publication target hashes only the exact effective
+                // content layer: the release override when present, otherwise
+                // Core. A release-only page never falls back to Core content.
+                Contents = page.Contents
+                    .Where(content => page.ScopeEditionId == editionId
+                        ? content.EditionId == editionId
+                        : content.EditionId == editionId || content.EditionId == null)
+                    .OrderByDescending(content => content.EditionId == editionId)
+                    .ThenBy(content => content.Id)
+                    .Take(1)
+                    .Select(content => new
+                {
+                    content.Id, content.EditionId, content.SemanticManuscriptJson, content.Revision,
+                    Variants = content.Variants.Select(variant => new
                     {
-                        variant.Id,
-                        variant.GeometryKey,
-                        variant.SceneJson,
-                        variant.Revision,
-                        variant.UpdatedAt,
+                        variant.Id, variant.GeometryKey, variant.SceneJson, variant.Revision, variant.UpdatedAt,
                     }),
+                }),
             })
             .ToListAsync(cancellationToken);
         var referencedStyleRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var referencedBoundFields = new HashSet<PublicationBoundField>();
         foreach (var document in chapters.Select(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
-            .Concat(compositions.Select(composition => ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision)))
+            .Concat(compositions.SelectMany(page => page.Contents.Select(content =>
+                ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision))))
             .Concat(publicationSections.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
         {
             foreach (var block in document.Content)
@@ -807,7 +870,7 @@ public sealed class PublicationEditionService(
             CollectReferencedFontFamilyIds(chapter.ManuscriptJson, referencedFontFamilyIds);
         foreach (var item in publicationSections)
             CollectReferencedFontFamilyIds(item.ManuscriptJson, referencedFontFamilyIds);
-        foreach (var composition in compositions)
+        foreach (var composition in compositions.SelectMany(page => page.Contents))
         {
             CollectReferencedFontFamilyIds(composition.SemanticManuscriptJson, referencedFontFamilyIds);
             foreach (var variant in composition.Variants)
@@ -924,7 +987,7 @@ public sealed class PublicationEditionService(
             CollectReferencedImageIds(chapter.ManuscriptJson, referencedAssetIds);
         foreach (var item in publicationSections)
             CollectReferencedImageIds(item.ManuscriptJson, referencedAssetIds);
-        foreach (var composition in compositions)
+        foreach (var composition in compositions.SelectMany(page => page.Contents))
         {
             CollectReferencedImageIds(composition.SemanticManuscriptJson, referencedAssetIds);
             foreach (var variant in composition.Variants)
@@ -1428,20 +1491,106 @@ public sealed class PublicationEditionService(
         return copy;
     }
 
+    internal static DesignedPageContent CloneDesignedPageContent(
+        DesignedPageContent source,
+        Guid designedPageId,
+        Guid editionId)
+    {
+        var content = new DesignedPageContent
+        {
+            ProjectId = source.ProjectId,
+            DesignedPageId = designedPageId,
+            EditionId = editionId,
+            SemanticManuscriptJson = source.SemanticManuscriptJson,
+            AccessibilityDescription = source.AccessibilityDescription,
+            Revision = source.Revision,
+        };
+        var variantIds = new Dictionary<Guid, Guid>();
+        foreach (var variant in source.Variants)
+        {
+            var clone = new DesignedPageVariant
+            {
+                Id = Guid.NewGuid(),
+                ContentId = content.Id,
+                GeometryKey = variant.GeometryKey,
+                SceneJson = variant.SceneJson,
+                Revision = variant.Revision,
+            };
+            variantIds[variant.Id] = clone.Id;
+            content.Variants.Add(clone);
+        }
+        content.ActiveVariantId = source.ActiveVariantId is Guid activeId
+            && variantIds.TryGetValue(activeId, out var clonedActiveId)
+                ? clonedActiveId
+                : content.Variants.OrderBy(variant => variant.Id).Select(variant => (Guid?)variant.Id).FirstOrDefault();
+        return content;
+    }
+
+    internal static string RemapDesignedPagePlacements(
+        string manuscriptJson,
+        Guid manuscriptId,
+        long revision,
+        IReadOnlyDictionary<Guid, Guid> pageMap)
+    {
+        var document = ManuscriptCodec.Deserialize(manuscriptJson, manuscriptId, revision);
+        return ManuscriptCodec.Serialize(document with
+        {
+            Content = document.Content.Select(block =>
+                block.Type == ManuscriptBlockType.DesignedPage
+                && block.DesignedPageId is Guid pageId
+                && pageMap.TryGetValue(pageId, out var mappedPageId)
+                    ? block with { DesignedPageId = mappedPageId }
+                    : block).ToList(),
+        });
+    }
+
+    private static void AddClonedDesignedPagePlacements(
+        AppDbContext db,
+        Guid projectId,
+        PublicationEdition edition,
+        IReadOnlyDictionary<Guid, Guid> pageMap)
+    {
+        foreach (var overrideItem in edition.ChapterOverrides)
+            AddPlacements(DesignedPageContainerKind.Chapter, overrideItem.ChapterId, overrideItem.Revision,
+                ManuscriptCodec.Deserialize(overrideItem.ManuscriptJson, overrideItem.ChapterId, overrideItem.Revision));
+        foreach (var section in edition.PublicationSections)
+            AddPlacements(DesignedPageContainerKind.PublicationSection, section.Id, section.Revision,
+                ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision));
+
+        void AddPlacements(
+            DesignedPageContainerKind kind,
+            Guid containerId,
+            long revision,
+            ManuscriptDocument document)
+        {
+            foreach (var block in document.Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage))
+            {
+                if (block.DesignedPageId is not Guid pageId)
+                    continue;
+                db.DesignedPagePlacementReferences.Add(new DesignedPagePlacementReference
+                {
+                    Id = block.Id,
+                    ProjectId = projectId,
+                    DesignedPageId = pageId,
+                    ContainerKind = kind,
+                    ContainerId = containerId,
+                    EditionId = edition.Id,
+                    ManuscriptRevision = revision,
+                });
+            }
+        }
+    }
+
     private static PublicationSection CopyPublicationSection(
         PublicationSection source,
         Guid editionId,
-        Guid id,
-        IReadOnlyDictionary<Guid, Guid> compositionMap)
+        Guid id)
     {
         var document = ManuscriptCodec.Deserialize(source.ManuscriptJson, source.Id, source.Revision);
         document = document with
         {
             ManuscriptId = id,
-            Content = document.Content.Select(block =>
-                block.PageCompositionId is Guid compositionId && compositionMap.TryGetValue(compositionId, out var cloneCompositionId)
-                    ? block with { PageCompositionId = cloneCompositionId }
-                    : block).ToList(),
+            Content = document.Content,
         };
         return new PublicationSection
         {
@@ -1466,43 +1615,6 @@ public sealed class PublicationEditionService(
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
-    }
-
-    private static PageComposition CopyEditionComposition(
-        PageComposition source,
-        Guid editionId,
-        Guid id,
-        Guid? publicationSectionId)
-    {
-        var clone = new PageComposition
-        {
-            Id = id,
-            ProjectId = source.ProjectId,
-            ChapterId = source.ChapterId,
-            PublicationSectionId = publicationSectionId,
-            EditionId = editionId,
-            SourceCompositionId = source.SourceCompositionId,
-            Name = source.Name,
-            SemanticManuscriptJson = source.SemanticManuscriptJson,
-            Revision = source.Revision,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
-        var variantMap = source.Variants.ToDictionary(item => item.Id, _ => Guid.NewGuid());
-        clone.Variants = source.Variants.Select(item => new PageCompositionVariant
-        {
-            Id = variantMap[item.Id],
-            CompositionId = id,
-            Composition = clone,
-            GeometryKey = item.GeometryKey,
-            SceneJson = item.SceneJson,
-            Revision = item.Revision,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        }).ToList();
-        if (source.ActiveAuthoringVariantId is Guid activeId && variantMap.TryGetValue(activeId, out var cloneActiveId))
-            clone.ActiveAuthoringVariantId = cloneActiveId;
-        return clone;
     }
 
     private static PublicationEdition CopyEdition(PublicationEdition source, string name) =>

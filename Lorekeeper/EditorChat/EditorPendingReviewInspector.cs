@@ -389,10 +389,8 @@ public sealed class EditorPendingReviewInspector(
             result["chapterId"] = chapter.ChapterId;
             result["contentTarget"] = chapter.ContentTarget.StorageKey;
             result["manuscriptChanged"] = chapter.HasManuscriptChanges;
-            result["visualChanged"] = chapter.HasVisualChanges;
             result["metadataReviewedSeparately"] = true;
-            result["compositionCount"] = chapter.CompositionChanges.Count;
-            result["entryCount"] = (chapter.HasManuscriptChanges ? 1 : 0) + chapter.CompositionChanges.Count;
+            result["entryCount"] = chapter.HasManuscriptChanges ? 1 : 0;
         }
         else if (target.DependencyGroup is { } group && target.Entry is { } entry)
         {
@@ -500,11 +498,10 @@ public sealed class EditorPendingReviewInspector(
         ProjectVersionReviewDependencyGroup group,
         VersionHistorySnapshotChangeEntry entry)
     {
-        if (group.Key.StartsWith("composition/compositions", StringComparison.Ordinal)
-            && Guid.TryParse(entry.Key, out var compositionId))
+        if (group.Key.StartsWith("composition/designed-pages", StringComparison.Ordinal)
+            && Guid.TryParse(entry.Key, out var designedPageId))
         {
-            return review.Chapters.Any(chapter => chapter.CompositionChanges.Any(composition =>
-                composition.CompositionId == compositionId));
+            return review.DesignedPageChanges.Any(page => page.DesignedPageId == designedPageId);
         }
 
         if (group.Key.StartsWith("publication/editions", StringComparison.Ordinal)

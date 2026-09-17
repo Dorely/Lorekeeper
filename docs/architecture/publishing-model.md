@@ -305,7 +305,7 @@ from the inherited or overridden Description visible in Book details. A cover
 does not own a second back-copy field or editor control.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
-shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or
+shared `agent-manuscript-v2` projection for its bounded prose blocks. Core or
 customized section reads retain the persisted source label; live release
 inheritance is labeled inherited. Absolute block indexes, source hash,
 revision, completeness, pagination, Figure semantics, Designed Page references,

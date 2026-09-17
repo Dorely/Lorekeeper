@@ -38,13 +38,13 @@ public sealed record EditionChapterDifference(
     int DirectFormatting,
     int DesignedPages,
     IReadOnlyList<string> ChangedBlockIds,
-    IReadOnlyList<Guid> ChangedCompositionIds,
+    IReadOnlyList<Guid> ChangedDesignedPageIds,
     IReadOnlyList<EditionLayoutIssue> LayoutIssues);
 
 public sealed record EditionLayoutIssue(
     string Code,
     string Message,
-    Guid CompositionId,
+    Guid DesignedPageId,
     Guid? ObjectId = null);
 
 public interface IEditionContentService
@@ -112,7 +112,7 @@ public sealed class EditionContentService(
         if (edition.EditionSpecificContentEnabled == enabled)
             return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, edition.ChapterOverrides.Count);
         if (!enabled && edition.ChapterOverrides.Count > 0 && !confirmDiscard)
-            throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter and its edition layouts. Confirmation is required.");
+            throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter. Confirmation is required.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var discardedHistoryTargets = new List<AuthoringHistoryTarget>();
         if (!enabled)
@@ -134,9 +134,6 @@ public sealed class EditionContentService(
                 cancellationToken);
             if (activeContest || activeRevision || activeTurn)
                 throw new InvalidOperationException("Resolve or cancel active edition assistant, review, contest, and revision work before discarding edition content.");
-            var compositions = await db.PageCompositions
-                .Where(item => item.ProjectId == projectId && item.EditionId == editionId)
-                .ToListAsync(cancellationToken);
             var scopeKey = Project.ScopeKey(projectId);
             foreach (var chapterOverride in edition.ChapterOverrides)
             {
@@ -149,11 +146,12 @@ public sealed class EditionContentService(
                     chapterOverride.ChapterId,
                     editionId));
             }
-            discardedHistoryTargets.AddRange(compositions.Select(composition => new AuthoringHistoryTarget(
-                projectId,
-                AuthoringHistoryDocumentKind.PageComposition,
-                composition.Id)));
-            db.PageCompositions.RemoveRange(compositions);
+            var placementReferences = await db.DesignedPagePlacementReferences
+                .Where(item => item.ProjectId == projectId
+                    && item.ContainerKind == DesignedPageContainerKind.Chapter
+                    && item.EditionId == editionId)
+                .ToListAsync(cancellationToken);
+            db.DesignedPagePlacementReferences.RemoveRange(placementReferences);
             db.PublicationEditionChapterOverrides.RemoveRange(edition.ChapterOverrides);
             var editionAnnotations = await db.ManuscriptAnnotations
                 .Where(item => item.ProjectId == projectId && item.EditionId == editionId)
@@ -210,7 +208,7 @@ public sealed class EditionContentService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         if (!confirmed)
-            throw new InvalidOperationException("Resetting this chapter permanently discards its edition manuscript and layouts. Confirmation is required.");
+            throw new InvalidOperationException("Resetting this chapter permanently discards its edition manuscript. Confirmation is required.");
         var edition = await db.PublicationEditions.SingleOrDefaultAsync(
             item => item.Id == editionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
             cancellationToken) ?? throw new KeyNotFoundException("The enabled publication release was not found.");
@@ -220,9 +218,6 @@ public sealed class EditionContentService(
         if (chapterOverride is null)
             return;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var compositions = await db.PageCompositions
-            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.EditionId == editionId)
-            .ToListAsync(cancellationToken);
         var scopeKey = Project.ScopeKey(projectId);
         var sourceId = chapterOverride.Id.ToString("N");
         await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
@@ -231,11 +226,13 @@ public sealed class EditionContentService(
         {
             new(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterId, editionId),
         };
-        discardedHistoryTargets.AddRange(compositions.Select(composition => new AuthoringHistoryTarget(
-            projectId,
-            AuthoringHistoryDocumentKind.PageComposition,
-            composition.Id)));
-        db.PageCompositions.RemoveRange(compositions);
+        var placementReferences = await db.DesignedPagePlacementReferences
+            .Where(item => item.ProjectId == projectId
+                && item.ContainerKind == DesignedPageContainerKind.Chapter
+                && item.ContainerId == chapterId
+                && item.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        db.DesignedPagePlacementReferences.RemoveRange(placementReferences);
         db.PublicationEditionChapterOverrides.Remove(chapterOverride);
         var chapter = await db.Chapters.AsNoTracking().SingleAsync(
             item => item.Id == chapterId && item.ProjectId == projectId,
@@ -277,37 +274,24 @@ public sealed class EditionContentService(
         {
             var core = row.Chapter.Manuscript;
             var edition = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.ChapterId, row.Revision);
-            var editionCompositionIds = edition.Content
-                .Where(block => block.PageCompositionId.HasValue)
-                .Select(block => block.PageCompositionId!.Value)
+            var editionPageIds = edition.Content
+                .Where(block => block.DesignedPageId.HasValue)
+                .Select(block => block.DesignedPageId!.Value)
                 .Distinct()
                 .ToList();
-            var editionCompositions = await db.PageCompositions.AsNoTracking()
-                .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-                .Where(item => item.ProjectId == projectId
-                    && item.EditionId == editionId
-                    && item.DetachedAt == null
-                    && editionCompositionIds.Contains(item.Id))
+            var pages = await db.DesignedPages.AsNoTracking()
+                .Include(item => item.Contents)
+                    .ThenInclude(item => item.Variants)
+                .Where(item => item.ProjectId == projectId && editionPageIds.Contains(item.Id))
                 .ToListAsync(cancellationToken);
-            var sourceCompositionIds = editionCompositions
-                .Where(item => item.SourceCompositionId.HasValue)
-                .Select(item => item.SourceCompositionId!.Value)
-                .Distinct()
-                .ToList();
-            var sourceCompositions = await db.PageCompositions.AsNoTracking()
-                .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-                .Where(item => item.ProjectId == projectId
-                    && item.EditionId == null
-                    && item.DetachedAt == null
-                    && sourceCompositionIds.Contains(item.Id))
-                .ToDictionaryAsync(item => item.Id, cancellationToken);
-            var sourceByEditionComposition = editionCompositions
-                .Where(item => item.SourceCompositionId.HasValue)
-                .ToDictionary(item => item.Id, item => item.SourceCompositionId!.Value);
-            var changedCompositionIds = editionCompositions
-                .Where(item => item.SourceCompositionId is not Guid sourceId
-                    || !sourceCompositions.TryGetValue(sourceId, out var source)
-                    || !EquivalentComposition(source, item))
+            var changedPageIds = pages
+                .Where(page =>
+                {
+                    var releaseContent = page.Contents.SingleOrDefault(content => content.EditionId == editionId);
+                    var coreContent = page.Contents.SingleOrDefault(content => content.EditionId == null);
+                    return releaseContent is not null
+                        && (coreContent is null || !EquivalentContent(coreContent, releaseContent));
+                })
                 .Select(item => item.Id)
                 .ToHashSet();
             var coreById = core.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
@@ -324,27 +308,23 @@ public sealed class EditionContentService(
             var direct = commonIds.Count(id =>
                 coreById[id].ParagraphPresentation != editionById[id].ParagraphPresentation
                 || !coreById[id].Content.SequenceEqual(editionById[id].Content));
-            var designed = commonIds.Count(id => editionById[id].PageCompositionId is Guid compositionId
-                    && changedCompositionIds.Contains(compositionId))
+            var designed = commonIds.Count(id => editionById[id].DesignedPageId is Guid pageId
+                    && changedPageIds.Contains(pageId))
                 + addedIds.Count(id => editionById[id].Type == ManuscriptBlockType.DesignedPage)
                 + removedIds.Count(id => coreById[id].Type == ManuscriptBlockType.DesignedPage);
             var changed = addedIds.Concat(removedIds)
                 .Concat(commonIds.Where(id =>
                 {
                     var editionBlock = editionById[id];
-                    var comparableEditionBlock = editionBlock.PageCompositionId is Guid compositionId
-                        && sourceByEditionComposition.TryGetValue(compositionId, out var sourceId)
-                            ? editionBlock with { PageCompositionId = sourceId }
-                            : editionBlock;
-                    return !Equals(coreById[id], comparableEditionBlock)
-                        || editionBlock.PageCompositionId is Guid changedId && changedCompositionIds.Contains(changedId);
+                    return !Equals(coreById[id], editionBlock)
+                        || editionBlock.DesignedPageId is Guid changedId && changedPageIds.Contains(changedId);
                 }))
                 .Distinct(StringComparer.Ordinal)
                 .Take(12)
                 .ToList();
             var layoutIssues = await ReadLayoutIssuesAsync(projectId, release, edition, cancellationToken);
             results.Add(new EditionChapterDifference(row.ChapterId, row.Chapter.Title, addedIds.Count, removedIds.Count,
-                moved, textEdited, figures, styles, direct, designed, changed, changedCompositionIds.Order().ToList(), layoutIssues));
+                moved, textEdited, figures, styles, direct, designed, changed, changedPageIds.Order().ToList(), layoutIssues));
         }
         return results;
     }
@@ -357,30 +337,32 @@ public sealed class EditionContentService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        var compositionIds = document.Content
-            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId.HasValue)
-            .Select(block => block.PageCompositionId!.Value)
+        var pageIds = document.Content
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId.HasValue)
+            .Select(block => block.DesignedPageId!.Value)
             .Distinct()
             .ToList();
-        if (compositionIds.Count == 0)
+        if (pageIds.Count == 0)
             return [];
-        var compositions = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => item.ProjectId == projectId && item.EditionId == release.Id
-                && item.DetachedAt == null && compositionIds.Contains(item.Id))
+        var pages = await db.DesignedPages.AsNoTracking()
+            .Include(item => item.Contents)
+                .ThenInclude(item => item.Variants)
+            .Where(item => item.ProjectId == projectId && pageIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
         var issues = new List<EditionLayoutIssue>();
-        foreach (var compositionId in compositionIds)
+        foreach (var pageId in pageIds)
         {
-            var composition = compositions.SingleOrDefault(item => item.Id == compositionId);
-            if (composition is null)
+            var page = pages.SingleOrDefault(item => item.Id == pageId);
+            var content = page?.Contents.SingleOrDefault(item => item.EditionId == release.Id)
+                ?? page?.Contents.SingleOrDefault(item => item.EditionId == null);
+            if (content is null)
             {
-                issues.Add(new("LAYOUT_MISSING", "The edition Designed Page layout is missing.", compositionId));
+                issues.Add(new("LAYOUT_MISSING", "The release Designed Page layout is missing.", pageId));
                 continue;
             }
             var expectedLeafWidth = release.PageWidthInches * 72;
             var expectedHeight = release.PageHeightInches * 72;
-            var exact = composition.Variants.Select(item => new
+            var exact = content.Variants.Select(item => new
             {
                 Variant = item,
                 Scene = JsonSerializer.Deserialize<CompositionScene>(item.SceneJson, ManuscriptCodec.JsonOptions),
@@ -393,7 +375,7 @@ public sealed class EditionContentService(
                 issues.Add(new(
                     "LAYOUT_GEOMETRY_MISMATCH",
                     $"Create or adjust this Designed Page for the release's {release.PageWidthInches:0.##} × {release.PageHeightInches:0.##} in geometry in Editor.",
-                    compositionId));
+                    pageId));
                 continue;
             }
             foreach (var image in exact.Scene!.Objects.Where(item => item.Kind == CompositionObjectKind.Image && item.Visible))
@@ -402,28 +384,28 @@ public sealed class EditionContentService(
                     || image.Bounds.XPercent + image.Bounds.WidthPercent > 100.01
                     || image.Bounds.YPercent + image.Bounds.HeightPercent > 100.01)
                 {
-                    issues.Add(new("LAYOUT_IMAGE_CLIPPED", "Artwork extends beyond the page and will be clipped to the visible canvas.", compositionId, image.Id));
+                    issues.Add(new("LAYOUT_IMAGE_CLIPPED", "Artwork extends beyond the page and will be clipped to the visible canvas.", pageId, image.Id));
                 }
             }
         }
         return issues;
     }
 
-    private static bool EquivalentComposition(PageComposition core, PageComposition edition)
+    private static bool EquivalentContent(DesignedPageContent core, DesignedPageContent release)
     {
-        if (!string.Equals(core.SemanticManuscriptJson, edition.SemanticManuscriptJson, StringComparison.Ordinal))
+        if (!string.Equals(core.SemanticManuscriptJson, release.SemanticManuscriptJson, StringComparison.Ordinal))
             return false;
         var coreVariants = core.Variants
             .Select(item => (item.GeometryKey, item.SceneJson))
             .OrderBy(item => item.GeometryKey, StringComparer.Ordinal)
             .ThenBy(item => item.SceneJson, StringComparer.Ordinal)
             .ToList();
-        var editionVariants = edition.Variants
+        var releaseVariants = release.Variants
             .Select(item => (item.GeometryKey, item.SceneJson))
             .OrderBy(item => item.GeometryKey, StringComparer.Ordinal)
             .ThenBy(item => item.SceneJson, StringComparer.Ordinal)
             .ToList();
-        return coreVariants.SequenceEqual(editionVariants);
+        return coreVariants.SequenceEqual(releaseVariants);
     }
 }
 

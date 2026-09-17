@@ -99,7 +99,7 @@ public sealed record EditorChatMutated : EditorChatTurnUpdate;
 public enum EditorWorkspaceMutationKind
 {
     Manuscript,
-    PageComposition,
+    DesignedPage,
     ProjectPageSetup,
     ImageLibrary,
     Other,
@@ -108,7 +108,7 @@ public enum EditorWorkspaceMutationKind
 public sealed record EditorWorkspaceMutated(
     EditorWorkspaceMutationKind Kind,
     Guid? ChapterId = null,
-    Guid? CompositionId = null,
+    Guid? DesignedPageId = null,
     Guid? VariantId = null,
     long? Revision = null,
     IReadOnlyList<string>? ChangedIds = null,

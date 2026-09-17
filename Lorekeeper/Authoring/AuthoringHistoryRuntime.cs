@@ -9,7 +9,7 @@ public enum AuthoringHistoryDocumentKind
     CoreChapter,
     EditionChapter,
     PublicationSection,
-    PageComposition,
+    DesignedPageContent,
     CoreCover,
     ReleaseCover
 }
@@ -18,7 +18,7 @@ public enum AuthoringHistoryDependencyKind
 {
     ProjectImage,
     ProjectFont,
-    PageComposition
+    DesignedPage
 }
 
 public sealed record AuthoringHistoryTarget(
@@ -37,7 +37,7 @@ public sealed record AuthoringHistoryTarget(
         AuthoringHistoryDocumentKind.PublicationSection when EditionId is Guid editionId =>
             $"release:{editionId:D}:section:{DocumentId:D}",
         AuthoringHistoryDocumentKind.PublicationSection => $"publication-section:{DocumentId:D}",
-        AuthoringHistoryDocumentKind.PageComposition => $"page-composition:{DocumentId:D}",
+        AuthoringHistoryDocumentKind.DesignedPageContent => $"designed-page-content:{DocumentId:D}",
         AuthoringHistoryDocumentKind.CoreCover => $"core-cover:{DocumentId:D}",
         AuthoringHistoryDocumentKind.ReleaseCover when EditionId is Guid editionId =>
             $"release:{editionId:D}:cover:{DocumentId:D}",
@@ -59,7 +59,21 @@ public sealed record AuthoringHistoryMutation(
     AuthoringHistoryState State,
     string ActionLabel,
     string Snapshot,
-    string SelectionJson);
+    string SelectionJson)
+{
+    public IReadOnlyList<AuthoringHistoryTarget> AffectedTargets { get; init; } = [];
+}
+
+public sealed record AuthoringHistorySnapshotTransition(
+    AuthoringHistoryTarget Target,
+    string BeforeSnapshot,
+    string AfterSnapshot,
+    string SelectionJson = "");
+
+public sealed record AuthoringHistorySnapshotRestore(
+    AuthoringHistoryTarget Target,
+    string Snapshot,
+    string ExpectedCurrentSnapshot);
 
 /// <summary>
 /// The durable Review Edits implementation owns its own baseline. This DTO is
@@ -87,6 +101,11 @@ public interface IAuthoringHistoryRuntime
         string selectionJson = "",
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyDictionary<string, AuthoringHistoryState>> RecordCompoundManualActionAsync(
+        IReadOnlyList<AuthoringHistorySnapshotTransition> transitions,
+        string actionLabel,
+        CancellationToken cancellationToken = default);
+
     Task<AuthoringHistoryState> ResetToCurrentAsync(
         AuthoringHistoryTarget target,
         string currentSnapshot,
@@ -107,6 +126,18 @@ public interface IAuthoringHistoryRuntime
         AuthoringHistoryTarget target,
         string currentSnapshot,
         Func<string, CancellationToken, Task> applySnapshot,
+        CancellationToken cancellationToken = default);
+
+    Task<AuthoringHistoryMutation> UndoCompoundAwareAsync(
+        AuthoringHistoryTarget target,
+        string currentSnapshot,
+        Func<IReadOnlyList<AuthoringHistorySnapshotRestore>, CancellationToken, Task> applySnapshots,
+        CancellationToken cancellationToken = default);
+
+    Task<AuthoringHistoryMutation> RedoCompoundAwareAsync(
+        AuthoringHistoryTarget target,
+        string currentSnapshot,
+        Func<IReadOnlyList<AuthoringHistorySnapshotRestore>, CancellationToken, Task> applySnapshots,
         CancellationToken cancellationToken = default);
 
     Task ClearAsync(
@@ -231,6 +262,81 @@ public sealed class AuthoringHistoryRuntime : IAuthoringHistoryRuntime
         return BuildState(stream);
     }
 
+    public async Task<IReadOnlyDictionary<string, AuthoringHistoryState>> RecordCompoundManualActionAsync(
+        IReadOnlyList<AuthoringHistorySnapshotTransition> transitions,
+        string actionLabel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transitions);
+        if (transitions.Count < 2)
+            throw new ArgumentException("A compound history action requires at least two targets.", nameof(transitions));
+        if (transitions.Select(item => item.Target.RegistryKey).Distinct(StringComparer.Ordinal).Count() != transitions.Count)
+            throw new ArgumentException("A compound history action cannot contain the same target twice.", nameof(transitions));
+        if (transitions.Select(item => item.Target.ProjectId).Distinct().Count() != 1)
+            throw new ArgumentException("A compound history action cannot span projects.", nameof(transitions));
+
+        var ordered = transitions.OrderBy(item => item.Target.RegistryKey, StringComparer.Ordinal).ToList();
+        var leases = new List<StreamLease>(ordered.Count);
+        try
+        {
+            foreach (var transition in ordered)
+            {
+                ArgumentNullException.ThrowIfNull(transition.BeforeSnapshot);
+                ArgumentNullException.ThrowIfNull(transition.AfterSnapshot);
+                var lease = await AcquireAsync(transition.Target, create: true, cancellationToken)
+                    ?? throw new InvalidOperationException("Could not acquire a compound history target.");
+                leases.Add(lease);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var compoundId = Guid.NewGuid();
+            var participantKeys = ordered.Select(item => item.Target.RegistryKey).ToArray();
+            var label = NormalizeLabel(actionLabel, "Move Designed Page placement");
+            var now = DateTime.UtcNow;
+            lock (_registryLock)
+            {
+                foreach (var (transition, lease) in ordered.Zip(leases))
+                {
+                    var stream = lease.Stream;
+                    if (!stream.HasBaseline
+                        || !string.Equals(Hash(transition.BeforeSnapshot), CurrentHash(stream), StringComparison.Ordinal))
+                    {
+                        ResetStreamLocked(stream, transition.BeforeSnapshot);
+                    }
+
+                    RemoveRedoBranchLocked(stream);
+                    var entry = new HistoryEntry(
+                        Compress(transition.AfterSnapshot),
+                        Hash(transition.AfterSnapshot),
+                        label,
+                        transition.SelectionJson,
+                        now,
+                        compoundId,
+                        participantKeys);
+                    stream.Entries.Add(entry);
+                    _compressedBytes += entry.Snapshot.Data.Length;
+                    stream.Cursor = stream.Entries.Count;
+                    stream.LastAccessUtc = now;
+                    stream.LastWasCursorMove = false;
+                    stream.Revision++;
+                    RebuildDependenciesLocked(stream);
+                    PruneLocked(stream);
+                }
+                EnforceBudgetLocked();
+
+                return ordered.ToDictionary(
+                    item => item.Target.RegistryKey,
+                    item => BuildState(_streams[item.Target.RegistryKey]),
+                    StringComparer.Ordinal);
+            }
+        }
+        finally
+        {
+            for (var index = leases.Count - 1; index >= 0; index--)
+                await leases[index].DisposeAsync();
+        }
+    }
+
     public Task<AuthoringHistoryState> ResetToCurrentAsync(
         AuthoringHistoryTarget target,
         string currentSnapshot,
@@ -277,6 +383,180 @@ public sealed class AuthoringHistoryRuntime : IAuthoringHistoryRuntime
         CancellationToken cancellationToken = default) =>
         MoveCursorAsync(target, currentSnapshot, moveForward: true, applySnapshot, cancellationToken);
 
+    public Task<AuthoringHistoryMutation> UndoCompoundAwareAsync(
+        AuthoringHistoryTarget target,
+        string currentSnapshot,
+        Func<IReadOnlyList<AuthoringHistorySnapshotRestore>, CancellationToken, Task> applySnapshots,
+        CancellationToken cancellationToken = default) =>
+        MoveCompoundAwareCursorAsync(target, currentSnapshot, moveForward: false, applySnapshots, cancellationToken);
+
+    public Task<AuthoringHistoryMutation> RedoCompoundAwareAsync(
+        AuthoringHistoryTarget target,
+        string currentSnapshot,
+        Func<IReadOnlyList<AuthoringHistorySnapshotRestore>, CancellationToken, Task> applySnapshots,
+        CancellationToken cancellationToken = default) =>
+        MoveCompoundAwareCursorAsync(target, currentSnapshot, moveForward: true, applySnapshots, cancellationToken);
+
+    private async Task<AuthoringHistoryMutation> MoveCompoundAwareCursorAsync(
+        AuthoringHistoryTarget target,
+        string currentSnapshot,
+        bool moveForward,
+        Func<IReadOnlyList<AuthoringHistorySnapshotRestore>, CancellationToken, Task> applySnapshots,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(currentSnapshot);
+        ArgumentNullException.ThrowIfNull(applySnapshots);
+        var initialLease = await AcquireAsync(target, create: false, cancellationToken);
+        if (initialLease is null)
+            throw new InvalidOperationException(moveForward ? "Nothing is available to redo." : "Nothing is available to undo.");
+        IReadOnlyList<string> participantKeys;
+        try
+        {
+            lock (_registryLock)
+            {
+                var requested = initialLease.Stream;
+                if (!requested.HasBaseline || !string.Equals(Hash(currentSnapshot), CurrentHash(requested), StringComparison.Ordinal))
+                {
+                    ResetStreamLocked(requested, currentSnapshot);
+                    requested.LastAccessUtc = DateTime.UtcNow;
+                    requested.Revision++;
+                    EnforceBudgetLocked(requested);
+                    return new AuthoringHistoryMutation(EmptyState, string.Empty, currentSnapshot, string.Empty);
+                }
+                if (moveForward && requested.Cursor >= requested.Entries.Count)
+                    throw new InvalidOperationException("Nothing is available to redo.");
+                if (!moveForward && requested.Cursor == 0)
+                    throw new InvalidOperationException("Nothing is available to undo.");
+                var entry = requested.Entries[moveForward ? requested.Cursor : requested.Cursor - 1];
+                participantKeys = entry.CompoundActionId is null
+                    ? [requested.RegistryKey]
+                    : entry.CompoundParticipantKeys;
+            }
+        }
+        finally
+        {
+            await initialLease.DisposeAsync();
+        }
+
+        var leases = new List<StreamLease>(participantKeys.Count);
+        try
+        {
+            foreach (var participantKey in participantKeys.Order(StringComparer.Ordinal))
+            {
+                AuthoringHistoryTarget participantTarget;
+                lock (_registryLock)
+                {
+                    if (!_streams.TryGetValue(participantKey, out var stream))
+                        throw new InvalidOperationException("This compound Undo action is no longer complete and cannot be applied.");
+                    participantTarget = stream.Target;
+                }
+                var acquired = await AcquireAsync(participantTarget, create: false, cancellationToken)
+                    ?? throw new InvalidOperationException("This compound Undo action is no longer complete and cannot be applied.");
+                leases.Add(acquired);
+            }
+
+            List<AuthoringHistorySnapshotRestore> restores;
+            List<HistoryStream> affectedStreams;
+            Guid? compoundId;
+            string label;
+            string selection;
+            HistoryStream requestedStream;
+            lock (_registryLock)
+            {
+                requestedStream = leases.Select(item => item.Stream)
+                    .Single(item => item.RegistryKey == target.RegistryKey);
+                if (!requestedStream.HasBaseline
+                    || !string.Equals(Hash(currentSnapshot), CurrentHash(requestedStream), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("The requested Undo target changed while its compound action was being acquired.");
+                }
+                if (moveForward && requestedStream.Cursor >= requestedStream.Entries.Count
+                    || !moveForward && requestedStream.Cursor == 0)
+                {
+                    throw new InvalidOperationException("The requested Undo cursor changed while its compound action was being acquired.");
+                }
+
+                var requestedEntry = requestedStream.Entries[
+                    moveForward ? requestedStream.Cursor : requestedStream.Cursor - 1];
+                compoundId = requestedEntry.CompoundActionId;
+                if (!participantKeys.SequenceEqual(
+                        compoundId is null ? [requestedStream.RegistryKey] : requestedEntry.CompoundParticipantKeys,
+                        StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException("The requested compound Undo action changed while its participants were being acquired.");
+                }
+
+                affectedStreams = [];
+                restores = [];
+                foreach (var participantKey in participantKeys)
+                {
+                    var stream = leases.Select(item => item.Stream)
+                        .Single(item => item.RegistryKey == participantKey);
+                    if (moveForward && stream.Cursor >= stream.Entries.Count
+                        || !moveForward && stream.Cursor == 0)
+                    {
+                        throw new InvalidOperationException("The manuscripts in this compound Undo action no longer share one cursor.");
+                    }
+                    var entry = stream.Entries[moveForward ? stream.Cursor : stream.Cursor - 1];
+                    if (entry.CompoundActionId != compoundId)
+                        throw new InvalidOperationException("The manuscripts in this compound Undo action no longer share one cursor.");
+                    var desired = moveForward
+                        ? Decompress(entry.Snapshot)
+                        : stream.Cursor == 1
+                            ? Decompress(stream.BaselineSnapshot!)
+                            : Decompress(stream.Entries[stream.Cursor - 2].Snapshot);
+                    var expectedCurrent = Decompress(stream.Cursor == 0
+                        ? stream.BaselineSnapshot!
+                        : stream.Entries[stream.Cursor - 1].Snapshot);
+                    affectedStreams.Add(stream);
+                    restores.Add(new AuthoringHistorySnapshotRestore(stream.Target, desired, expectedCurrent));
+                }
+                label = requestedEntry.ActionLabel;
+                selection = moveForward
+                    ? requestedEntry.SelectionJson
+                    : requestedStream.Cursor <= 1
+                        ? string.Empty
+                        : requestedStream.Entries[requestedStream.Cursor - 2].SelectionJson;
+            }
+
+            // Hold every participant gate while the owner revalidates and
+            // commits all snapshots, then advance every cursor together.
+            await applySnapshots(restores, cancellationToken);
+
+            lock (_registryLock)
+            {
+                foreach (var stream in affectedStreams)
+                {
+                    if (!_streams.TryGetValue(stream.RegistryKey, out var current) || !ReferenceEquals(current, stream))
+                        throw new InvalidOperationException("A compound Undo target changed while its mutation was committing.");
+                    var entry = stream.Entries[moveForward ? stream.Cursor : stream.Cursor - 1];
+                    if (entry.CompoundActionId != compoundId)
+                        throw new InvalidOperationException("A compound Undo cursor changed while its mutation was committing.");
+                }
+                foreach (var stream in affectedStreams)
+                {
+                    stream.Cursor += moveForward ? 1 : -1;
+                    stream.LastWasCursorMove = true;
+                    stream.LastAccessUtc = DateTime.UtcNow;
+                    stream.Revision++;
+                }
+                return new AuthoringHistoryMutation(
+                    BuildState(requestedStream),
+                    label,
+                    restores.Single(item => item.Target.RegistryKey == target.RegistryKey).Snapshot,
+                    selection)
+                {
+                    AffectedTargets = affectedStreams.Select(item => item.Target).ToList(),
+                };
+            }
+        }
+        finally
+        {
+            for (var index = leases.Count - 1; index >= 0; index--)
+                await leases[index].DisposeAsync();
+        }
+    }
+
     private async Task<AuthoringHistoryMutation> MoveCursorAsync(
         AuthoringHistoryTarget target,
         string currentSnapshot,
@@ -307,6 +587,9 @@ public sealed class AuthoringHistoryRuntime : IAuthoringHistoryRuntime
                 throw new InvalidOperationException("Nothing is available to redo.");
             if (!moveForward && stream.Cursor == 0)
                 throw new InvalidOperationException("Nothing is available to undo.");
+            var entry = stream.Entries[moveForward ? stream.Cursor : stream.Cursor - 1];
+            if (entry.CompoundActionId is not null)
+                throw new InvalidOperationException("This action spans multiple manuscripts and requires the compound-aware history boundary.");
         }
 
         string snapshot;
@@ -652,11 +935,11 @@ public sealed class AuthoringHistoryRuntime : IAuthoringHistoryRuntime
 
         foreach (var dependency in AuthoringDependencyScanner.FindDependencies([.. snapshots]))
             stream.Dependencies.Add(new DependencyKey(stream.Target.ProjectId, dependency.Kind, dependency.ResourceId));
-        if (stream.Target.Kind == AuthoringHistoryDocumentKind.PageComposition)
+        if (stream.Target.Kind == AuthoringHistoryDocumentKind.DesignedPageContent)
         {
             stream.Dependencies.Add(new DependencyKey(
                 stream.Target.ProjectId,
-                AuthoringHistoryDependencyKind.PageComposition,
+                AuthoringHistoryDependencyKind.DesignedPage,
                 stream.Target.DocumentId));
         }
 
@@ -746,13 +1029,17 @@ public sealed class AuthoringHistoryRuntime : IAuthoringHistoryRuntime
         string hash,
         string actionLabel,
         string selectionJson,
-        DateTime recordedAt)
+        DateTime recordedAt,
+        Guid? compoundActionId = null,
+        IReadOnlyList<string>? compoundParticipantKeys = null)
     {
         public SnapshotBlob Snapshot { get; set; } = snapshot;
         public string Hash { get; set; } = hash;
         public string ActionLabel { get; } = actionLabel;
         public string SelectionJson { get; set; } = selectionJson;
         public DateTime RecordedAt { get; set; } = recordedAt;
+        public Guid? CompoundActionId { get; } = compoundActionId;
+        public IReadOnlyList<string> CompoundParticipantKeys { get; } = compoundParticipantKeys ?? [];
     }
 
     private sealed record SnapshotBlob(byte[] Data);

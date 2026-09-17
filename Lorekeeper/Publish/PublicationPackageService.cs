@@ -75,7 +75,7 @@ public sealed class PublicationPackageService(
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
-    private const string EpubExporterVersion = "lorekeeper-epub-v3";
+    private const string EpubExporterVersion = "lorekeeper-epub-v4";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -1083,9 +1083,9 @@ public sealed class PublicationPackageService(
             if (edition.Format == PublicationEditionFormat.DigitalPdf && coverDesign is null)
                 items.Add(Error("DIGITAL_PDF_COVER_REQUIRED", "Create the front cover for this Digital PDF edition."));
             var semanticManuscripts = chapters.Select(chapter => chapter.Manuscript)
-                .Concat(chapters.SelectMany(chapter => chapter.PageCompositions).Select(composition => composition.SemanticManuscript))
+                .Concat(chapters.SelectMany(chapter => chapter.DesignedPages).Select(designedPage => designedPage.SemanticManuscript))
                 .Concat(document.PublicationSections.Select(item => item.Manuscript))
-                .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions).Select(composition => composition.SemanticManuscript));
+                .Concat(document.PublicationSections.SelectMany(item => item.DesignedPages).Select(designedPage => designedPage.SemanticManuscript));
             var missingFigureAlt = semanticManuscripts.Any(manuscript =>
                     manuscript.Content.Any(block =>
                         block.Type == ManuscriptBlockType.Figure
@@ -1093,8 +1093,8 @@ public sealed class PublicationPackageService(
                         && (string.IsNullOrWhiteSpace(block.AltText)
                             || block.ImageId is not Guid imageId
                             || document.Assets.All(asset => asset.Id != imageId))))
-                || chapters.SelectMany(chapter => chapter.PageCompositions)
-                    .Concat(document.PublicationSections.SelectMany(section => section.PageCompositions))
+            || chapters.SelectMany(chapter => chapter.DesignedPages)
+                    .Concat(document.PublicationSections.SelectMany(section => section.DesignedPages))
                     .SelectMany(composition => composition.Variants)
                     .Any(variant =>
                     {
@@ -1179,8 +1179,8 @@ public sealed class PublicationPackageService(
         chapter.Manuscript.Content.Any(block => block.Type switch
         {
             ManuscriptBlockType.Figure => block.ImageId is not null,
-            ManuscriptBlockType.DesignedPage => block.PageCompositionId is Guid compositionId
-                && chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId) is { } composition
+            ManuscriptBlockType.DesignedPage => block.DesignedPageId is Guid designedPageId
+                && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } composition
                 && composition.Variants.Any(variant => CompositionSceneResolver.Flatten(variant.Scene).Any(item => item.Visible)),
             ManuscriptBlockType.SceneBreak => true,
             _ => !string.IsNullOrWhiteSpace(ManuscriptCodec.Text(block)),
@@ -1240,7 +1240,7 @@ public sealed class PublicationPackageService(
                 ($"chapter {chapter.Id:N} synopsis", chapter.Synopsis),
             }));
         renderedText.AddRange(document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter =>
-            chapter.PageCompositions.SelectMany(composition => composition.Variants)
+            chapter.DesignedPages.SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects)
                 .SelectMany(item => new[]
                 {
@@ -1278,7 +1278,7 @@ public sealed class PublicationPackageService(
         foreach (var section in document.PublicationSections)
         {
             ValidateManuscriptLanguage($"Publication section '{section.Title}'", section.Manuscript, items);
-            foreach (var composition in section.PageCompositions)
+            foreach (var composition in section.DesignedPages)
                 ValidateManuscriptLanguage($"Publication section '{section.Title}' Designed Page '{composition.Name}'", composition.SemanticManuscript, items);
             if (section.Title.EnumerateRunes().Any(rune => !IsSupportedLatinRune(rune)))
                 items.Add(Error("SCRIPT_SCOPE_UNSUPPORTED", $"Publication section {section.Id:N} title is outside the tested Latin-script LTR scope."));

@@ -109,23 +109,19 @@ public sealed record ProjectVersionReviewChapter(
     EditorContentTarget ContentTarget,
     ProjectExportChapter? Before,
     ProjectExportChapter? After,
-    ProjectVersionReviewConcurrencyToken ConcurrencyToken,
-    IReadOnlyList<ProjectVersionReviewComposition>? Compositions = null)
+    ProjectVersionReviewConcurrencyToken ConcurrencyToken)
 {
-    public IReadOnlyList<ProjectVersionReviewComposition> CompositionChanges => Compositions ?? [];
     public string TargetKey => ContentTarget.StorageKey;
     /// <summary>
     /// Indicates that the target has a manuscript change that belongs in the
     /// chapter review surface. Chapter metadata is intentionally exposed via
     /// the non-manuscript dependency groups instead.
     /// </summary>
-    public bool HasChanges => HasManuscriptChanges || HasVisualChanges;
+    public bool HasChanges => HasManuscriptChanges;
 
     public bool HasManuscriptChanges => !ManuscriptSemanticallyEquals(Before, After);
 
     public bool HasMetadataChanges => !MetadataSemanticallyEquals(Before, After);
-
-    public bool HasVisualChanges => CompositionChanges.Any(composition => composition.HasChanges);
 
     /// <summary>
     /// Compares the canonical chapter values rather than relying on record
@@ -186,23 +182,22 @@ public sealed record ProjectVersionReviewChapter(
 }
 
 /// <summary>
-/// A changed Designed Page composition attached to its owning chapter target.
-/// The payload is read-only review data; target-scoped approval and restore
-/// contracts own mutation while the composition service remains the canonical
-/// authoring boundary.
+/// A changed project-owned Designed Page. Its stable identity is reviewed once;
+/// placement links only describe where that identity is currently used.
 /// </summary>
-public sealed record ProjectVersionReviewComposition(
-    Guid CompositionId,
-    Guid? ChapterId,
-    Guid? EditionId,
-    ProjectExportPageComposition? Before,
-    ProjectExportPageComposition? After)
+public sealed record ProjectVersionReviewDesignedPage(
+    Guid DesignedPageId,
+    ProjectExportDesignedPage? Before,
+    ProjectExportDesignedPage? After,
+    IReadOnlyList<ProjectVersionReviewDesignedPagePlacement>? Placements = null)
 {
+    public IReadOnlyList<ProjectVersionReviewDesignedPagePlacement> PlacementLinks => Placements ?? [];
+
     public bool HasChanges => !SemanticallyEquals(Before, After);
 
     public static bool SemanticallyEquals(
-        ProjectExportPageComposition? before,
-        ProjectExportPageComposition? after)
+        ProjectExportDesignedPage? before,
+        ProjectExportDesignedPage? after)
     {
         if (ReferenceEquals(before, after))
             return true;
@@ -210,19 +205,25 @@ public sealed record ProjectVersionReviewComposition(
             return false;
 
         return before.Id == after.Id
-            && before.ChapterId == after.ChapterId
-            && before.EditionId == after.EditionId
+            && before.ScopeEditionId == after.ScopeEditionId
             && string.Equals(before.Name, after.Name, StringComparison.Ordinal)
-            && string.Equals(before.SemanticManuscriptJson, after.SemanticManuscriptJson, StringComparison.Ordinal)
-            && before.Revision == after.Revision
-            && before.ActiveAuthoringVariantId == after.ActiveAuthoringVariantId
-            && before.SourceCompositionId == after.SourceCompositionId
-            && before.PublicationSectionId == after.PublicationSectionId
-            && before.Variants
-                .OrderBy(item => item.Id)
-                .SequenceEqual(after.Variants.OrderBy(item => item.Id));
+            && before.Contents.OrderBy(item => item.Id).Select(SerializeContent)
+                .SequenceEqual(after.Contents.OrderBy(item => item.Id).Select(SerializeContent), StringComparer.Ordinal);
+
+        static string SerializeContent(ProjectExportDesignedPageContent content) =>
+            Convert.ToBase64String(VersionHistoryCanonicalJson.Serialize(content));
     }
 }
+
+/// <summary>
+/// An occurrence-specific placement link for a changed Designed Page. The
+/// manuscript block ID is the placement identity; it is never a second page
+/// identity.
+/// </summary>
+public sealed record ProjectVersionReviewDesignedPagePlacement(
+    Guid ChapterId,
+    EditorContentTarget ContentTarget,
+    string BlockId);
 
 /// <summary>
 /// A review-owned grouping of changes that must be considered together by the
@@ -248,7 +249,11 @@ public sealed record ProjectVersionReviewView(
     ProjectVersionReviewConcurrencyToken Token,
     VersionHistorySnapshotComparison? Comparison,
     IReadOnlyList<ProjectVersionReviewChapter> Chapters,
-    IReadOnlyList<ProjectVersionReviewDependencyGroup> DependencyGroups);
+    IReadOnlyList<ProjectVersionReviewDependencyGroup> DependencyGroups,
+    IReadOnlyList<ProjectVersionReviewDesignedPage>? DesignedPages = null)
+{
+    public IReadOnlyList<ProjectVersionReviewDesignedPage> DesignedPageChanges => DesignedPages ?? [];
+}
 
 /// <summary>
 /// The newest immutable checkpoint that changed one chapter target. This is
@@ -263,7 +268,10 @@ public sealed record ProjectVersionHistoricalChapterReview(
     ProjectVersionCheckpointView? Checkpoint,
     ProjectExportChapter? Before,
     ProjectExportChapter? After,
-    IReadOnlyList<ProjectVersionReviewComposition>? Compositions = null);
+    IReadOnlyList<ProjectVersionReviewDesignedPage>? DesignedPages = null)
+{
+    public IReadOnlyList<ProjectVersionReviewDesignedPage> DesignedPageChanges => DesignedPages ?? [];
+}
 
 /// <summary>
 /// A historical undo restores the full rich manuscript document through the
@@ -451,15 +459,14 @@ public interface IProjectVersionHistoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Approves one changed Designed Page composition for the reviewed chapter
-    /// target by synthesizing only that current composition into approved HEAD.
+    /// Approves one changed project-owned Designed Page by synthesizing only
+    /// that current page into approved HEAD.
     /// SQLite remains unchanged; other manuscript and project changes stay
     /// pending against the new baseline.
     /// </summary>
-    Task<ProjectVersionCheckpointView> ApproveReviewCompositionAsync(
+    Task<ProjectVersionCheckpointView> ApproveReviewDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         string semanticMessage = "Approved Designed Page change",
         string? requestKey = null,

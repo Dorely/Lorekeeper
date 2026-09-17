@@ -313,6 +313,29 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             }
         }
 
+        if (Include(ProjectSearchSourceTypes.DesignedPage) && !scope.IsReferenced)
+        {
+            var pages = await databaseOperation.Db.DesignedPageContents
+                .AsNoTracking()
+                .Include(content => content.Page)
+                .Where(content => content.ProjectId == projectId)
+                .OrderBy(content => content.Page.Name)
+                .ThenBy(content => content.EditionId)
+                .ToListAsync(cancellationToken);
+            foreach (var content in pages)
+            {
+                var text = DesignedPageText(content);
+                if (!Matches(content.Page.Name, TargetLabel(content), text)) continue;
+                results.Add(new ProjectSearchSource(
+                    ProjectSearchSourceTypes.DesignedPage,
+                    content.Id,
+                    content.DesignedPageId,
+                    content.Page.Name,
+                    TargetLabel(content),
+                    Preview(text)));
+            }
+        }
+
         return results;
     }
 
@@ -357,6 +380,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
                     : (null, null, null),
             ProjectSearchSourceTypes.WritingSample
                 => await ReadWritingSampleAsync(scope.ProjectId, sourceId, cancellationToken),
+            ProjectSearchSourceTypes.DesignedPage
+                => await ReadDesignedPageAsync(scope.ProjectId, sourceId, cancellationToken),
             _ => (null, null, null),
         };
 
@@ -487,7 +512,7 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         var scopeKey = Project.ScopeKey(scope.ProjectId);
         if (!scope.IsReferenced)
         {
-            return (await index.SearchAsync(
+            var localResults = (await index.SearchAsync(
                 new ProjectLexicalSearchRequest(
                     scopeKey,
                     query,
@@ -496,6 +521,12 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
                     sourceIds,
                     containerSourceId?.ToString("N")),
                 cancellationToken)).ToList();
+            if (sourceTypes is null || sourceTypes.Contains(ProjectSearchSourceTypes.DesignedPage))
+            {
+                localResults.AddRange(await SearchDesignedPagesLexicallyAsync(
+                    scope.ProjectId, scopeKey, query, sourceIds, cancellationToken));
+            }
+            return localResults;
         }
 
         var requestedTypes = (sourceTypes?.ToList() ?? ProjectSearchSourceTypes.All.ToList())
@@ -658,6 +689,90 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         return (sample.Title, null, $"# {sample.Title}\n\n{(string.IsNullOrWhiteSpace(sample.Body) ? "(empty)" : sample.Body.Trim())}");
     }
 
+    private async Task<(string? Title, Guid? ContainerSourceId, string? Content)> ReadDesignedPageAsync(
+        Guid projectId,
+        Guid contentId,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var content = await operation.Db.DesignedPageContents
+            .AsNoTracking()
+            .Include(item => item.Page)
+            .SingleOrDefaultAsync(item => item.Id == contentId && item.ProjectId == projectId, cancellationToken);
+        if (content is null)
+            return (null, null, null);
+
+        var text = DesignedPageText(content);
+        var body = new StringBuilder();
+        body.Append("# ").AppendLine(content.Page.Name);
+        body.Append("Target: ").AppendLine(TargetLabel(content));
+        body.Append("Designed Page ID: ").AppendLine(content.DesignedPageId.ToString("D"));
+        body.Append("Content ID: ").AppendLine(content.Id.ToString("D"));
+        body.Append("Revision: ").AppendLine(content.Revision.ToString());
+        AppendOptional(body, "Accessibility description", content.AccessibilityDescription);
+        AppendOptional(body, "Semantic content", text);
+        return (content.Page.Name, content.DesignedPageId, body.ToString().TrimEnd());
+    }
+
+    private async Task<IReadOnlyList<ProjectLexicalSearchResult>> SearchDesignedPagesLexicallyAsync(
+        Guid projectId,
+        string scopeKey,
+        string query,
+        IReadOnlyCollection<string>? sourceIds,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var contents = await operation.Db.DesignedPageContents
+            .AsNoTracking()
+            .Include(content => content.Page)
+            .Where(content => content.ProjectId == projectId)
+            .OrderBy(content => content.Page.Name)
+            .ThenBy(content => content.EditionId)
+            .ToListAsync(cancellationToken);
+        var matches = new List<ProjectLexicalSearchResult>();
+        foreach (var content in contents)
+        {
+            if (sourceIds is not null && !sourceIds.Contains(content.Id.ToString("N"), StringComparer.OrdinalIgnoreCase))
+                continue;
+            var text = DesignedPageText(content);
+            var searchable = $"{content.Page.Name}\n{TargetLabel(content)}\n{text}";
+            if (!searchable.Contains(query, StringComparison.OrdinalIgnoreCase))
+                continue;
+            matches.Add(new ProjectLexicalSearchResult(
+                RowId: matches.Count + 1,
+                SourceType: ProjectSearchSourceTypes.DesignedPage,
+                SourceId: content.Id.ToString("N"),
+                ContainerSourceId: content.DesignedPageId.ToString("N"),
+                Title: content.Page.Name,
+                Content: text,
+                Snippet: Preview(text),
+                Metadata: $"{TargetLabel(content)}; pageId={content.DesignedPageId:N}; contentId={content.Id:N}",
+                ChunkIndex: null,
+                Rank: matches.Count,
+                ScopeKey: scopeKey));
+        }
+        return matches;
+    }
+
+    private static string TargetLabel(DesignedPageContent content) => content.EditionId is Guid editionId
+        ? $"Release content ({editionId:D})"
+        : "Core content";
+
+    private static string DesignedPageText(DesignedPageContent content)
+    {
+        try
+        {
+            return ManuscriptCodec.ProjectPlainText(
+                content.SemanticManuscriptJson,
+                content.Id,
+                content.Revision);
+        }
+        catch (InvalidDataException)
+        {
+            return string.Empty;
+        }
+    }
+
     private static bool IsIngestSourceType(string sourceType) =>
         sourceType is ProjectSearchSourceTypes.IngestSource
             or ProjectSearchSourceTypes.RawIngestSource
@@ -809,6 +924,7 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         ProjectSearchSourceTypes.IngestSourceChunk => 5,
         ProjectSearchSourceTypes.ProjectProfile => 6,
         ProjectSearchSourceTypes.WritingSample => 7,
+        ProjectSearchSourceTypes.DesignedPage => 8,
         _ => 20,
     };
 

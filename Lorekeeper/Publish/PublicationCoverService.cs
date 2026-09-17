@@ -345,7 +345,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover design changed.");
         var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The cover scene is empty.");
-        var patched = CompositionService.ApplyElementPatch(scene, targetKind, targetId, patch);
+        var patched = DesignedPageService.ApplyElementPatch(scene, targetKind, targetId, patch);
         return await UpdateSceneAsync(
             projectId,
             editionId,
@@ -369,7 +369,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover design changed.");
         var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The cover surface scene is empty.");
-        var patched = CompositionService.ApplyElementPatch(scene, targetKind, targetId, patch);
+        var patched = DesignedPageService.ApplyElementPatch(scene, targetKind, targetId, patch);
         return await SaveSurfaceWorkspaceAsync(
             projectId,
             editionId,

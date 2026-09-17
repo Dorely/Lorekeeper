@@ -125,7 +125,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             FontFaceData = readOptions.IncludeAssetData ? ReadFontData(assetFiles, assets) : new Dictionary<Guid, byte[]>(),
         };
 
-        ValidateReferences(payload);
+        ValidateReferences(payload, manifest.SchemaVersion);
         return new VersionHistorySnapshotArtifact(fullRoot, manifest, payload);
     }
 
@@ -491,7 +491,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 "Snapshot payload files do not exactly match the canonical area, chapter, style, and asset paths.");
     }
 
-    private static void ValidateReferences(VersionHistorySnapshotPayload payload)
+    private static void ValidateReferences(VersionHistorySnapshotPayload payload, int schemaVersion)
     {
         if (payload.Project.Project.Id != payload.ProjectId)
             throw new InvalidDataException("Snapshot project payload ID does not match its manifest.");
@@ -562,6 +562,51 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var sourceIds = payload.Sources.Sources.Select(source => source.Id).ToHashSet();
         if (payload.Narrative.BookBriefCanonSourceIds.Any(sourceId => !sourceIds.Contains(sourceId)))
             throw new InvalidDataException("Book Brief canonical-source selection references a missing source.");
+
+        if (schemaVersion >= VersionHistorySnapshotContract.DesignedPagesSchemaVersion)
+            ValidateDesignedPages(payload);
+    }
+
+    private static void ValidateDesignedPages(VersionHistorySnapshotPayload payload)
+    {
+        var pages = payload.Composition.DesignedPages;
+        if (pages.GroupBy(page => page.Id).Any(group => group.Count() != 1)
+            || pages.Any(page => page.Id == Guid.Empty || string.IsNullOrWhiteSpace(page.Name)))
+        {
+            throw new InvalidDataException("Snapshot contains invalid or duplicate Designed Pages.");
+        }
+
+        var pageIds = pages.Select(page => page.Id).ToHashSet();
+        var contentIds = new HashSet<Guid>();
+        foreach (var page in pages)
+        foreach (var content in page.Contents)
+        {
+            if (content.Id == Guid.Empty || content.DesignedPageId != page.Id || !contentIds.Add(content.Id))
+                throw new InvalidDataException($"Designed Page {page.Id:N} contains invalid content identity.");
+            if (content.Variants.GroupBy(variant => variant.GeometryKey, StringComparer.Ordinal)
+                .Any(group => group.Count() != 1))
+            {
+                throw new InvalidDataException($"Designed Page {page.Id:N} contains duplicate geometry variants.");
+            }
+            if (content.ActiveVariantId is Guid activeVariantId
+                && !content.Variants.Any(variant => variant.Id == activeVariantId))
+            {
+                throw new InvalidDataException($"Designed Page {page.Id:N} references a missing active variant.");
+            }
+        }
+
+        var manuscriptPayloads = payload.Narrative.Chapters
+            .Select(chapter => (chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
+            .Concat(payload.Publication.PublicationSections.Select(section => (section.ManuscriptJson, section.Id, section.Revision)));
+        foreach (var (manuscript, manuscriptId, revision) in manuscriptPayloads)
+        {
+            var document = ManuscriptCodec.Deserialize(manuscript, manuscriptId, revision);
+            foreach (var block in document.Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage))
+            {
+                if (block.DesignedPageId is not Guid pageId || !pageIds.Contains(pageId))
+                    throw new InvalidDataException($"Designed Page block {block.Id} references a missing page.");
+            }
+        }
     }
 
     private static void ValidateImageLineageAcyclic(IReadOnlyList<VersionHistoryImageAsset> images)

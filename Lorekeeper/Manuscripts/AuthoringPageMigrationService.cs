@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Lorekeeper.Composition;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Legacy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -25,7 +26,8 @@ public sealed class AuthoringPageMigrationService(
     public const string MigrationName = "authoring-page-setup-v1";
     public const string SeedRecoveryMigrationName = "authoring-page-seed-recovery-v1";
     public const string SchemaMigrationId = "20260802180000_AddAuthoringPageSetupV19";
-    private const string PicturePageSeedTargetKind = "page-composition-seed";
+    private const string LegacyPicturePageSeedTargetKind = "page-composition-seed";
+    private const string DesignedPageSeedTargetKind = "designed-page-seed";
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
@@ -33,7 +35,9 @@ public sealed class AuthoringPageMigrationService(
             item => item.MigrationName == MigrationName && item.Status == ManuscriptMigrationStatus.Completed,
             cancellationToken);
         var hasPicturePageSeeds = await db.CompositionMutationStages.AsNoTracking().AnyAsync(
-            item => item.TargetKind == PicturePageSeedTargetKind && item.ConversationId == Guid.Empty,
+            item => (item.TargetKind == LegacyPicturePageSeedTargetKind
+                    || item.TargetKind == DesignedPageSeedTargetKind)
+                && item.ConversationId == Guid.Empty,
             cancellationToken);
         if (authoringMigrationCompleted && !hasPicturePageSeeds)
             return;
@@ -62,10 +66,12 @@ public sealed class AuthoringPageMigrationService(
 
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var chapters = await db.Chapters.OrderBy(item => item.Id).ToListAsync(cancellationToken);
-            var compositions = await db.PageCompositions.OrderBy(item => item.Id).ToListAsync(cancellationToken);
-            var variants = await db.PageCompositionVariants.OrderBy(item => item.Id).ToListAsync(cancellationToken);
+            var compositions = await db.LegacyPageCompositions.OrderBy(item => item.Id).ToListAsync(cancellationToken);
+            var variants = await db.LegacyPageCompositionVariants.OrderBy(item => item.Id).ToListAsync(cancellationToken);
             var picturePageSeeds = await db.CompositionMutationStages
-                .Where(item => item.TargetKind == PicturePageSeedTargetKind && item.ConversationId == Guid.Empty)
+                .Where(item => (item.TargetKind == LegacyPicturePageSeedTargetKind
+                        || item.TargetKind == DesignedPageSeedTargetKind)
+                    && item.ConversationId == Guid.Empty)
                 .OrderBy(item => item.Id)
                 .ToListAsync(cancellationToken);
             var covers = await db.PublicationCoverDesigns.OrderBy(item => item.Id).ToListAsync(cancellationToken);
@@ -177,8 +183,8 @@ public sealed class AuthoringPageMigrationService(
 
     private static PicturePageSeedResult MaterializePicturePageSeeds(
         AppDbContext db,
-        IReadOnlyList<PageComposition> compositions,
-        List<PageCompositionVariant> variants,
+        IReadOnlyList<LegacyPageComposition> compositions,
+        List<LegacyPageCompositionVariant> variants,
         IReadOnlyList<CompositionMutationStage> seeds)
     {
         var compositionsById = compositions.ToDictionary(item => item.Id);
@@ -204,21 +210,21 @@ public sealed class AuthoringPageMigrationService(
                 composition.SemanticManuscriptJson,
                 composition.Id,
                 composition.Revision);
-            CompositionService.Validate(scene, semantic);
+            DesignedPageService.Validate(scene, semantic);
             var canonicalSceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
-            var geometryKey = CompositionService.SceneGeometryKey(scene);
+            var geometryKey = DesignedPageService.SceneGeometryKey(scene);
             var variant = variants.SingleOrDefault(item =>
                 item.CompositionId == composition.Id
                 && string.Equals(item.GeometryKey, geometryKey, StringComparison.Ordinal));
             if (variant is null)
             {
-                variant = new PageCompositionVariant
+                variant = new LegacyPageCompositionVariant
                 {
                     CompositionId = composition.Id,
                     GeometryKey = geometryKey,
                     SceneJson = canonicalSceneJson,
                 };
-                db.PageCompositionVariants.Add(variant);
+                db.LegacyPageCompositionVariants.Add(variant);
                 variants.Add(variant);
                 insertedVariantCount++;
             }
@@ -253,10 +259,10 @@ public sealed class AuthoringPageMigrationService(
     {
         foreach (var (compositionId, expectedHash) in expectedSceneHashes)
         {
-            var restored = await db.PageCompositions.AsNoTracking()
+            var restored = await db.LegacyPageCompositions.AsNoTracking()
                 .Where(item => item.Id == compositionId && item.ActiveAuthoringVariantId != null)
                 .Join(
-                    db.PageCompositionVariants.AsNoTracking(),
+                    db.LegacyPageCompositionVariants.AsNoTracking(),
                     composition => composition.ActiveAuthoringVariantId,
                     variant => variant.Id,
                     (_, variant) => variant.SceneJson)
@@ -278,6 +284,7 @@ public sealed class AuthoringPageMigrationService(
         return version switch
         {
             ManuscriptDocument.CurrentSchemaVersion => json,
+            4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, id, revision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, id, revision),
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, id, revision),
             1 => ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(json, id, revision),
@@ -424,7 +431,7 @@ public sealed class AuthoringPageMigrationService(
     private static async Task ValidateCompositionReferencesAsync(
         AppDbContext db,
         IReadOnlyList<Chapter> chapters,
-        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyList<LegacyPageComposition> compositions,
         CancellationToken cancellationToken)
     {
         var byId = compositions.ToDictionary(item => item.Id);
@@ -434,7 +441,7 @@ public sealed class AuthoringPageMigrationService(
             var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
             foreach (var compositionId in document.Content
                 .Where(item => item.Type == ManuscriptBlockType.DesignedPage)
-                .Select(item => item.PageCompositionId))
+                .Select(item => item.DesignedPageId))
             {
                 if (compositionId is not Guid id || !byId.TryGetValue(id, out var composition) || composition.ChapterId != chapter.Id)
                     throw new InvalidDataException($"Chapter {chapter.Id:N} contains an invalid Designed Page reference.");
@@ -446,7 +453,7 @@ public sealed class AuthoringPageMigrationService(
             var composition = byId[compositionId];
             if (composition.ActiveAuthoringVariantId is not Guid variantId)
                 throw new InvalidDataException($"Designed Page {composition.Id:N} has no active authoring layout.");
-            if (!await db.PageCompositionVariants.AsNoTracking().AnyAsync(
+            if (!await db.LegacyPageCompositionVariants.AsNoTracking().AnyAsync(
                     item => item.Id == variantId && item.CompositionId == composition.Id,
                     cancellationToken))
                 throw new InvalidDataException($"Designed Page {composition.Id:N} has an invalid active authoring layout.");
@@ -456,8 +463,8 @@ public sealed class AuthoringPageMigrationService(
     private static async Task ValidateImageOwnershipAsync(
         AppDbContext db,
         IReadOnlyList<Chapter> chapters,
-        IReadOnlyList<PageComposition> compositions,
-        IReadOnlyList<PageCompositionVariant> variants,
+        IReadOnlyList<LegacyPageComposition> compositions,
+        IReadOnlyList<LegacyPageCompositionVariant> variants,
         IReadOnlyList<PublicationCoverDesign> covers,
         IReadOnlyList<PublicationImagePlacement> placements,
         CancellationToken cancellationToken)
@@ -526,8 +533,8 @@ public sealed class AuthoringPageMigrationService(
     private static async Task<MigrationCounts> CountsAsync(AppDbContext db, CancellationToken cancellationToken) => new(
         await db.Projects.CountAsync(cancellationToken),
         await db.Chapters.CountAsync(cancellationToken),
-        await db.PageCompositions.CountAsync(cancellationToken),
-        await db.PageCompositionVariants.CountAsync(cancellationToken),
+        await db.LegacyPageCompositions.CountAsync(cancellationToken),
+        await db.LegacyPageCompositionVariants.CountAsync(cancellationToken),
         await db.CompositionMutationStages.CountAsync(cancellationToken),
         await db.PublicationEditions.CountAsync(cancellationToken),
         await db.PublicationCoverDesigns.CountAsync(cancellationToken),

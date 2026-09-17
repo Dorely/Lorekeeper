@@ -35,7 +35,9 @@ public static class ProjectExportWarningText
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 30;
+    // v31 is the final JSON writer. Newer portable archives use their own
+    // envelope; this value remains the legacy-import ceiling.
+    public const int CurrentFormatVersion = 31;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -51,7 +53,15 @@ public sealed record ProjectExportDocument
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
     public ProjectExportPublicationBook? PublicationBook { get; init; }
     public List<ProjectExportPublicationEdition> PublicationEditions { get; init; } = [];
-    public List<ProjectExportPageComposition> PageCompositions { get; init; } = [];
+    // v30 and earlier carried owner-bound composition records. The v31 writer
+    // omits this member and emits DesignedPages instead; keeping this readable
+    // is the explicit legacy-import boundary.
+    [JsonPropertyName("pageCompositions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportPageComposition>? LegacyPageCompositions { get; init; }
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPageComposition> PageCompositions => LegacyPageCompositions ?? [];
+    public List<ProjectExportDesignedPage> DesignedPages { get; init; } = [];
     public List<ProjectExportPublicationSection> PublicationSections { get; init; } = [];
     [JsonPropertyName("publishProfiles")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -635,6 +645,33 @@ public sealed record ProjectExportPageComposition(
 
 public sealed record ProjectExportPageCompositionVariant(
     Guid Id,
+    string GeometryKey,
+    string SceneJson,
+    long Revision);
+
+/// <summary>
+/// v31 portable Designed Page identity. A page is project-owned; placements
+/// remain in the manuscript blocks that reference its ID.
+/// </summary>
+public sealed record ProjectExportDesignedPage(
+    Guid Id,
+    string Name,
+    Guid? ScopeEditionId,
+    List<ProjectExportDesignedPageContent> Contents);
+
+public sealed record ProjectExportDesignedPageContent(
+    Guid Id,
+    Guid DesignedPageId,
+    Guid? EditionId,
+    string SemanticManuscriptJson,
+    string AccessibilityDescription,
+    long Revision,
+    List<ProjectExportDesignedPageVariant> Variants,
+    Guid? ActiveVariantId = null);
+
+public sealed record ProjectExportDesignedPageVariant(
+    Guid Id,
+    Guid ContentId,
     string GeometryKey,
     string SceneJson,
     long Revision);

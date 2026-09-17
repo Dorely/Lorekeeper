@@ -1118,8 +1118,8 @@ public sealed class PublicationRenderProcessor(
                 cancellationToken,
                 layoutTraceMode: "pagination");
             var response = await InvokePaginationAsync(jobId, request, cancellationToken);
-            if (response.ProtocolVersion != 12)
-                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 12 is required.");
+            if (response.ProtocolVersion != 13)
+                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 13 is required.");
             if (!string.Equals(response.RendererVersion, rendererVersion, StringComparison.Ordinal))
                 throw new InvalidOperationException("The press renderer returned a different renderer version while paginating the interior.");
             if (!string.Equals(response.JobId, jobId.ToString("N"), StringComparison.Ordinal))
@@ -1321,8 +1321,8 @@ public sealed class PublicationRenderProcessor(
                 _logger.LogDebug("Render job {JobId} progress {Percent}%: {Message}", job.Id, mapped, progress.Message);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 12)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 12 is required.");
+        if (result.ProtocolVersion != 13)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 13 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1732,13 +1732,13 @@ public sealed class PublicationRenderProcessor(
                 .SelectMany(chapter => chapter.Manuscript.Content)
                 .Select(block => block.ParagraphPresentation?.FontFamilyKey))
             .Concat(document.Sections.SelectMany(section => section.Chapters)
-                .SelectMany(chapter => chapter.PageCompositions)
+                .SelectMany(chapter => chapter.DesignedPages)
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)
                     .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
             .Concat(document.PublicationSections.SelectMany(section => section.Manuscript.Content)
                 .Select(block => block.ParagraphPresentation?.FontFamilyKey))
-            .Concat(document.PublicationSections.SelectMany(section => section.PageCompositions)
+            .Concat(document.PublicationSections.SelectMany(section => section.DesignedPages)
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)
                     .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
@@ -1822,7 +1822,7 @@ public sealed class PublicationRenderProcessor(
                 synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                 chapter.IncludeHeading,
                 blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
-                pageCompositions = chapter.PageCompositions.Select(composition => new
+                designedPages = chapter.DesignedPages.Select(composition => new
                 {
                     id = composition.Id,
                     composition.Name,
@@ -1833,7 +1833,7 @@ public sealed class PublicationRenderProcessor(
                         id = variant.Id,
                         variant.GeometryKey,
                         variant.Revision,
-                        scene = NormalizeSceneLanguages(CompositionService.WithDerivedTextSemanticRoles(
+                        scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
                             variant.Scene,
                             composition.SemanticManuscript)),
                     }).ToArray(),
@@ -1855,7 +1855,7 @@ public sealed class PublicationRenderProcessor(
                 item.LocalOrder,
                 startSide = item.StartSide.ToString(),
                 blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
-                pageCompositions = item.PageCompositions.Select(composition => new
+                designedPages = item.DesignedPages.Select(composition => new
                 {
                     id = composition.Id,
                     composition.Name,
@@ -1866,7 +1866,7 @@ public sealed class PublicationRenderProcessor(
                         id = variant.Id,
                         variant.GeometryKey,
                         variant.Revision,
-                        scene = NormalizeSceneLanguages(CompositionService.WithDerivedTextSemanticRoles(
+                        scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
                             variant.Scene,
                             composition.SemanticManuscript)),
                     }).ToArray(),
@@ -1875,13 +1875,13 @@ public sealed class PublicationRenderProcessor(
         if (sections.Sum(section => section.chapters.Length) == 0 && publicationSectionPayloads.Length == 0)
             throw new InvalidOperationException("Include at least one chapter or publication section before rendering.");
         var missingVariants = sections.SelectMany(section => section.chapters)
-            .SelectMany(chapter => chapter.pageCompositions)
+            .SelectMany(chapter => chapter.designedPages)
             .Where(composition => composition.variants.Length != 1)
             .Select(composition => composition.Name)
             .Distinct(StringComparer.Ordinal)
             .ToList();
         missingVariants.AddRange(publicationSectionPayloads
-            .SelectMany(section => section.pageCompositions)
+            .SelectMany(section => section.designedPages)
             .Where(composition => composition.variants.Length != 1)
             .Select(composition => composition.Name));
         if (missingVariants.Count > 0)
@@ -1892,7 +1892,7 @@ public sealed class PublicationRenderProcessor(
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 12,
+            protocolVersion = 13,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             renderScope = job.Scope.ToString().ToLowerInvariant(),
@@ -2350,7 +2350,7 @@ public sealed class PublicationRenderProcessor(
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
-        pageCompositionId = block.PageCompositionId,
+        designedPageId = block.DesignedPageId,
         content = block.Content.Select(inline => new
         {
             type = inline.Type.ToString(),

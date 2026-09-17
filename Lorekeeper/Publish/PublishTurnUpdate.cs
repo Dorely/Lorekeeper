@@ -59,7 +59,8 @@ public sealed record PublishAssistantWorkspaceContext(
     string TargetLabel,
     Guid? SectionId = null,
     string? SectionTitle = null,
-    Guid? CompositionId = null,
+    Guid? PageId = null,
+    string? PlacementBlockId = null,
     Guid? SelectedObjectId = null,
     Guid? VariantId = null,
     long? VariantRevision = null);
@@ -80,7 +81,8 @@ public sealed record PublishWorkspaceMutated(
     PublishWorkspaceMutationKind Kind = PublishWorkspaceMutationKind.Edition,
     Guid? SelectedObjectId = null,
     Guid? SelectedSectionId = null,
-    Guid? SelectedCompositionId = null,
+    Guid? SelectedPageId = null,
+    string? SelectedPlacementBlockId = null,
     Guid? SelectedVariantId = null) : PublishTurnUpdate;
 
 public sealed record PublishAssistantMessageCompleted(Guid MessageId) : PublishTurnUpdate;

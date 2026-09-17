@@ -340,7 +340,7 @@ geometry-free canonical appearance candidate and explicitly associates the
 inspected result with an entity.
 
 Editor is the complete Core/release authoring assistant. It receives the active
-chapter's full `agent-manuscript-v1` projection and versioned named-style
+chapter's full `agent-manuscript-v2` projection and versioned named-style
 definitions automatically and can read
 or mutate the outline, canon, manuscript, annotations, Figures, Designed Pages,
 styles, composition, page setup, and image workflows appropriate to the
@@ -526,7 +526,7 @@ coordinator's explicit task/target fence and its captured text/tool evidence.
 Candidate prompting omits the coordinator system prompt so its tool instructions
 cannot become contestant instructions; captured user, assistant, and tool
 material is quoted as evidence. Each candidate also receives the exact
-batch-source `agent-manuscript-v1` projection once, generated from the canonical
+batch-source `agent-manuscript-v2` projection once, generated from the canonical
 manuscript stored on the batch. Canonical `OriginalManuscriptJson` remains the
 durable validation/audit source. Legacy context snapshots remain inert audit data
 for already persisted contests and are not replayed through the new runner path.

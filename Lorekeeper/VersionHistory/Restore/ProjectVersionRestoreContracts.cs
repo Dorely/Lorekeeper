@@ -19,27 +19,26 @@ public interface IProjectVersionRestoreService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Restores one Designed Page composition from the approved Git head into
-    /// the live project. Only the selected composition is changed; all other
+    /// Restores one Designed Page from the approved Git head into the live
+    /// project. Only the selected page and dependencies required to retain a
+    /// valid manuscript are changed; all other
     /// live manuscript and project state remains intact, and no Git checkpoint
     /// is created so the restored state remains reviewable.
     /// </summary>
-    Task RestoreReviewCompositionAsync(
+    Task RestoreReviewDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Restores one Designed Page composition from a historical parent
+    /// Restores one Designed Page from a historical parent
     /// snapshot into live SQLite. The resulting state remains pending against
     /// the approved Git head and no Git checkpoint is created.
     /// </summary>
-    Task RestoreHistoricalCompositionAsync(
+    Task RestoreHistoricalDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         string historicalCommitSha,
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default);

@@ -293,17 +293,21 @@ public sealed class ChapterPreviewService(
                     ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
                     : ManuscriptCodec.Deserialize(editionOverride.ManuscriptJson, chapter.Id, editionOverride.Revision)),
         };
-        var compositionIds = documents.Values.SelectMany(document => document.Content)
-            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
-            .Select(block => block.PageCompositionId!.Value).Distinct().ToArray();
-        var compositions = await db.PageCompositions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && compositionIds.Contains(item.Id) && item.DetachedAt == null)
+        var pageIds = documents.Values.SelectMany(document => document.Content)
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
+            .Select(block => block.DesignedPageId!.Value).Distinct().ToArray();
+        var candidates = await db.DesignedPageContents.AsNoTracking()
+            .Include(item => item.Page)
+            .Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId
+                && pageIds.Contains(item.DesignedPageId)
+                && (item.EditionId == null || item.EditionId == target.EditionId))
             .ToListAsync(cancellationToken);
-        var variants = await db.PageCompositionVariants.AsNoTracking()
-            .Where(item => compositionIds.Contains(item.CompositionId) && item.DetachedAt == null
-                && item.Composition.DetachedAt == null)
-            .ToListAsync(cancellationToken);
-        var compositionPayloads = new Dictionary<Guid, object>();
+        var contents = candidates.GroupBy(item => item.DesignedPageId)
+            .Select(group => group.SingleOrDefault(item => item.EditionId == target.EditionId)
+                ?? group.Single(item => item.EditionId == null))
+            .ToList();
+        var pagePayloads = new Dictionary<Guid, object>();
         var usedFontKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var fontKey in documents.Values.SelectMany(document => document.Content)
             .Select(block => block.ParagraphPresentation?.FontFamilyKey)
@@ -311,14 +315,14 @@ public sealed class ChapterPreviewService(
             usedFontKeys.Add(fontKey!);
         var imageIds = documents.Values.SelectMany(document => document.Content)
             .Where(block => block.ImageId is not null).Select(block => block.ImageId!.Value).ToHashSet();
-        foreach (var composition in compositions)
+        foreach (var content in contents)
         {
-            var variant = variants.FirstOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
-                ?? variants.Where(item => item.CompositionId == composition.Id).OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+            var variant = content.Variants.FirstOrDefault(item => item.Id == content.ActiveVariantId)
+                ?? content.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
             if (variant is null)
-                throw new InvalidDataException($"Designed Page '{composition.Name}' has no authoring layout.");
+                throw new InvalidDataException($"Designed Page '{content.Page.Name}' has no authoring layout.");
             var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException($"Designed Page '{composition.Name}' has an empty authoring layout.");
+                ?? throw new InvalidDataException($"Designed Page '{content.Page.Name}' has an empty authoring layout.");
             scene = NormalizeSceneLanguages(scene);
             foreach (var fontKey in scene.Objects.Select(item => item.FontFamilyKey)
                 .Concat(scene.Styles.Select(item => item.FontFamilyKey))
@@ -326,12 +330,13 @@ public sealed class ChapterPreviewService(
                 usedFontKeys.Add(fontKey);
             foreach (var imageId in scene.Objects.Where(item => item.ImageId is not null).Select(item => item.ImageId!.Value))
                 imageIds.Add(imageId);
-            var semantic = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
-            compositionPayloads[composition.Id] = new
+            var semantic = ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision);
+            pagePayloads[content.DesignedPageId] = new
             {
-                id = composition.Id,
-                composition.Name,
-                revision = composition.Revision,
+                id = content.DesignedPageId,
+                contentId = content.Id,
+                content.Page.Name,
+                revision = content.Revision,
                 semanticBlocks = semantic.Content.Select(BlockPayload).ToArray(),
                 variants = new[] { new { id = variant.Id, variant.GeometryKey, variant.Revision, scene } },
             };
@@ -427,8 +432,8 @@ public sealed class ChapterPreviewService(
         {
             setup.Revision,
             Chapters = chapters.Select(item => new { item.Id, item.ManuscriptRevision, item.UpdatedAt }),
-            Compositions = compositions.Select(item => new { item.Id, item.Revision, item.UpdatedAt, item.ActiveAuthoringVariantId }),
-            Variants = variants.Select(item => new { item.Id, item.Revision, item.UpdatedAt }),
+            DesignedPageContents = contents.Select(item => new { item.Id, item.DesignedPageId, item.Revision, item.UpdatedAt, item.ActiveVariantId }),
+            DesignedPageVariants = contents.SelectMany(item => item.Variants).Select(item => new { item.Id, item.Revision, item.UpdatedAt }),
             Assets = assets.Select(item => new { item.Id, item.UpdatedAt }),
             Publication = new
             {
@@ -512,16 +517,16 @@ public sealed class ChapterPreviewService(
                             synopsis = profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                             includeHeading = profile.IncludeChapterHeadings,
                             blocks = documents[chapter.Id].Content.Select(BlockPayload).ToArray(),
-                            pageCompositions = documents[chapter.Id].Content
-                                .Where(block => block.PageCompositionId is not null)
-                                .Select(block => compositionPayloads[block.PageCompositionId!.Value])
-                                .Distinct().ToArray(),
+                            designedPages = documents[chapter.Id].Content
+                                .Where(block => block.DesignedPageId is not null)
+                                .Select(block => pagePayloads[block.DesignedPageId!.Value])
+                                .ToArray(),
                         }).ToArray(),
                     };
                 }).ToArray();
             var payload = new
             {
-                protocolVersion = 12,
+                protocolVersion = 13,
                 jobId = jobId.ToString("N"),
                 profile = "generic-digital-pdf-v1",
                 ink = "Color",
@@ -603,8 +608,8 @@ public sealed class ChapterPreviewService(
                 throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
-            if (response.ProtocolVersion != 12)
-                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 12 is required.");
+            if (response.ProtocolVersion != 13)
+                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 13 is required.");
             if (response.JobId != jobId.ToString("N"))
                 throw new InvalidDataException("Lorekeeper Press returned a preview response for a different job.");
             var firstPage = response.PageMap.Where(item => Guid.TryParse(item.ChapterId, out var mapped) && mapped == chapterId)
@@ -1015,7 +1020,7 @@ public sealed class ChapterPreviewService(
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
-        pageCompositionId = block.PageCompositionId,
+        designedPageId = block.DesignedPageId,
         content = block.Content.Select(inline => new
         {
             type = inline.Type.ToString(),

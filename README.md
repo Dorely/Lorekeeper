@@ -75,8 +75,11 @@ its planned features are not claims about current capabilities.
   Core/release chapters, publication prose sections, Designed Pages, and Core/release
   covers. Typing is grouped naturally, canvas gestures remain single actions, and
   successful assistant changes clear the affected document's manual history instead
-  of becoming Undo actions. Undo can restore a deleted Designed Page with its original semantic
-  content, scene, variants, IDs, and asset references. History is independent of
+  of becoming Undo actions. Designed Page content has an independent history stream;
+  chapter and publication-section history owns only placement changes, including
+  atomic cross-container moves. A page with live placements cannot be deleted, and
+  deleting an unplaced page requires confirmation before clearing any current-process
+  history that still depends on it. History is independent of
   the working database, intentionally clears when Lorekeeper exits, and is excluded from
   project exports. Review Edits is Git-backed: live changes remain local and
   dirty until approved, while the latest approved state is Git HEAD; the
@@ -167,7 +170,12 @@ its planned features are not claims about current capabilities.
   Book page aspect instead of an implicit square. Regional-guided edits preserve
   the source framing and treat the painted area as approximate model guidance,
   not a hard pixel boundary; the complete result still requires inspection. The
-  manual Generate panel can select existing library images or upload new images
+  project Pages workspace lists reusable and unplaced pages, switches between Core
+  and release content, shows placement counts, and supports repeated placement,
+  movement, duplication, release override reset, and guarded deletion. Chapter and
+  publication-section Pages entrances filter that same project-owned library rather
+  than owning private copies. The manual Generate panel can select existing library
+  images or upload new images
   as ordered visual references, with an explicit role for each reference carried
   into the saved generation request. It also accepts an optional Minimum DPI and
   resolves that effective placement density into provider-valid pixels. Publish
@@ -336,9 +344,9 @@ its planned features are not claims about current capabilities.
   The owned B&N profile emits inspected PDF 1.4 with PDF/A-1b identification,
   embedded fonts, output intent, flattened transparency, and exact imported
   template geometry.
-- Versioned project import/export (current v26 manuscript-v4/page-setup/
-  composition model, Core Book, sparse release overlays, edition chapter
-  snapshots/compositions, exact-target review annotations, selected canonical source bodies/evidence, covers, custom-font binaries,
+- Versioned project import/export (current v31 manuscript-v5/page-setup/
+  Designed Page model, Core Book, sparse release overlays, edition chapter
+  snapshots/page overrides, exact-target review annotations, selected canonical source bodies/evidence, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is

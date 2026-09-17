@@ -60,11 +60,4 @@ public interface IManuscriptService
         IReadOnlyList<ManuscriptStyleView>? styleCatalog = null,
         CancellationToken cancellationToken = default);
 
-    Task<Guid> EnsureEditionCompositionAsync(
-        EditorContentTarget target,
-        Guid chapterId,
-        Guid sourceCompositionId,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Edition composition forking is unavailable.");
-
 }

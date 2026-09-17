@@ -129,7 +129,8 @@ The captured canonical areas are:
   fetch/job timestamps and provider diagnostics removed;
 - `assets`: project images, entity visual examples, and imported font families;
 - `manuscript`: project Book Text Styles in `manuscript/styles.json`;
-- `composition`: page compositions, variants, and scene data; and
+- `composition`: Designed Pages, Core/release content, authored variants,
+  placement references, and scene data; and
 - `publication`: Core Book, editions, publication sections, print project use,
   identifier and cover-submission modes, and cover spine direction.
 
@@ -442,7 +443,7 @@ in deterministic checkpoints, comparisons, restore, and clone import.
   import/export.
 - [`narrative-context.md`](narrative-context.md) owns outline, graph, ingest,
   references, and retrieval projections that restore repairs.
-- [`manuscript-authoring.md`](manuscript-authoring.md) owns manuscript v4,
+- [`manuscript-authoring.md`](manuscript-authoring.md) owns manuscript v5,
   styles, annotations, and process-lifetime Undo/Redo.
 - [`composition-media.md`](composition-media.md) owns images, fonts,
   compositions, and scene semantics captured by snapshots.

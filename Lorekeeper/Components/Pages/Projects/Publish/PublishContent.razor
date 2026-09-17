@@ -247,7 +247,8 @@ else
     private DesignedPageWorkspace? _sectionPageWorkspace;
     private bool _sectionSettingsOpen;
     private bool _publicationSectionImageModalOpen;
-    private Guid? _selectedSectionCompositionId;
+    private Guid? _selectedSectionPageId;
+    private string? _selectedSectionPlacementBlockId;
     private Guid? _selectedSectionVariantId;
     private long? _selectedSectionVariantRevision;
     private int _sectionPageRefreshSignal;
@@ -633,7 +634,7 @@ else
                                 </a>
                                 @foreach (var issue in difference.LayoutIssues)
                                 {
-                                    <a class="edition-layout-issue" href="@EditionEditorHref(difference.ChapterId, "pages", issue.CompositionId, issue.ObjectId)">
+                                    <a class="edition-layout-issue" href="@EditionEditorHref(difference.ChapterId, "pages", issue.DesignedPageId, issue.ObjectId)">
                                         <span>@PublicationDiagnosticText.SanitizeUserFacing(issue.Message)</span><strong>Fix in Pages</strong>
                                     </a>
                                 }
@@ -904,9 +905,9 @@ else
                 <strong>@_editingSection!.Title</strong>
                 <small>@(IsDesignedPublicationSection(_editingSection) ? "Designed page" : "Prose section") &middot; @(_selectedReleaseId is null ? "Core Book" : _workspace?.Edition.Name ?? "Release")</small>
             </div>
-            @if (IsDesignedPublicationSection(_editingSection) && SectionCompositionIds().Count > 1)
+            @if (IsDesignedPublicationSection(_editingSection) && SectionPagePlacements().Count > 1)
             {
-                <label class="publication-section-page-picker"><span>Page</span><select class="form-select form-select-sm" disabled="@_assistantRunning" value="@_selectedSectionCompositionId" @onchange="SelectSectionCompositionAsync">@foreach (var compositionId in SectionCompositionIds()){<option value="@compositionId">@SectionCompositionLabel(compositionId)</option>}</select></label>
+                <label class="publication-section-page-picker"><span>Page</span><select class="form-select form-select-sm" disabled="@_assistantRunning" value="@_selectedSectionPlacementBlockId" @onchange="SelectSectionCompositionAsync">@foreach (var placement in SectionPagePlacements()){<option value="@placement.BlockId">@SectionCompositionLabel(placement.BlockId)</option>}</select></label>
             }
             <button type="button" class="btn btn-sm @(_sectionSettingsOpen ? "btn-primary" : "btn-outline-primary")" disabled="@_assistantRunning" aria-expanded="@_sectionSettingsOpen" @onclick="() => _sectionSettingsOpen = !_sectionSettingsOpen">Section settings</button>
         </header>
@@ -927,9 +928,9 @@ else
         <div class="publication-section-editor-body">
             @if (IsDesignedPublicationSection(_editingSection))
             {
-                @if (_selectedSectionCompositionId is Guid compositionId)
+                @if (_selectedSectionPageId is Guid pageId && _selectedSectionPlacementBlockId is { } placementBlockId)
                 {
-                    <DesignedPageWorkspace @key="compositionId" @ref="_sectionPageWorkspace" ProjectId="Project!.Id" CompositionId="compositionId" ContentTarget="@SectionEditorContentTarget()"
+                    <DesignedPageWorkspace @key="placementBlockId" @ref="_sectionPageWorkspace" ProjectId="Project!.Id" PageId="pageId" PlacementBlockId="placementBlockId" ContentTarget="@SectionEditorContentTarget()"
                                            RefreshSignal="_sectionPageRefreshSignal" RequestedSelectionId="_sectionPageSelectionId"
                                            RequestedVariantId="_selectedSectionVariantId" InteractionLocked="_assistantRunning"
                                            WorkspaceChanged="HandleSectionPageWorkspaceChangedAsync" />
@@ -1117,7 +1118,8 @@ else
                     CurrentPublicationSectionTarget(), saved.Id, 0, "Designed page",
                     DesignedPageLayoutMode.SinglePage, saved.Revision);
                 saved = created.Section;
-                _selectedSectionCompositionId = created.Composition.Id;
+                _selectedSectionPageId = created.Page.Page.Id;
+                _selectedSectionPlacementBlockId = created.PlacementId;
             }
             await RefreshPublicationSectionsAsync();
             BeginPublicationSectionEdit(saved);
@@ -1153,7 +1155,8 @@ else
     private void BeginPublicationSectionEdit(PublicationSectionView item)
     {
         var preserveWorkspace = _editingSection?.Id == item.Id;
-        var previousCompositionId = _selectedSectionCompositionId;
+        var previousPageId = _selectedSectionPageId;
+        var previousPlacementBlockId = _selectedSectionPlacementBlockId;
         var previousVariantId = _selectedSectionVariantId;
         var previousVariantRevision = _selectedSectionVariantRevision;
         var previousSelectionId = _sectionPageSelectionId;
@@ -1166,19 +1169,16 @@ else
         _sectionTargetId = item.TargetId;
         _sectionInclusion = item.InclusionMode;
         _sectionStartSide = item.StartSide;
-        var compositionIds = item.Manuscript.Content
-            .Where(block => block.PageCompositionId.HasValue)
-            .Select(block => block.PageCompositionId!.Value)
-            .Distinct()
-            .ToList();
-        _selectedSectionCompositionId = preserveWorkspace
-            && previousCompositionId is Guid selectedCompositionId
-            && compositionIds.Contains(selectedCompositionId)
-                ? selectedCompositionId
-                : compositionIds.FirstOrDefault() is var firstCompositionId && firstCompositionId != Guid.Empty
-                    ? firstCompositionId
-                    : null;
-        var retainedSameComposition = preserveWorkspace && _selectedSectionCompositionId == previousCompositionId;
+        var placements = SectionPagePlacements();
+        var selected = preserveWorkspace
+            ? placements.FirstOrDefault(item => item.BlockId == previousPlacementBlockId)
+            : null;
+        selected ??= placements.FirstOrDefault();
+        _selectedSectionPageId = selected?.PageId;
+        _selectedSectionPlacementBlockId = selected?.BlockId;
+        var retainedSameComposition = preserveWorkspace
+            && _selectedSectionPageId == previousPageId
+            && _selectedSectionPlacementBlockId == previousPlacementBlockId;
         _selectedSectionVariantId = retainedSameComposition ? previousVariantId : null;
         _selectedSectionVariantRevision = retainedSameComposition ? previousVariantRevision : null;
         _sectionPageSelectionId = retainedSameComposition ? previousSelectionId : null;
@@ -1192,7 +1192,8 @@ else
         _editingSection = null;
         _publicationSectionEditor = null;
         _sectionPageWorkspace = null;
-        _selectedSectionCompositionId = null;
+        _selectedSectionPageId = null;
+        _selectedSectionPlacementBlockId = null;
         _selectedSectionVariantId = null;
         _selectedSectionVariantRevision = null;
         _sectionPageSelectionId = null;
@@ -1201,30 +1202,38 @@ else
         await RefreshPublicationSectionsAsync();
     }
 
-    private IReadOnlyList<Guid> SectionCompositionIds() => _editingSection?.Manuscript.Content
-        .Where(block => block.PageCompositionId.HasValue)
-        .Select(block => block.PageCompositionId!.Value)
-        .Distinct()
+    private sealed record SectionPagePlacement(string BlockId, Guid PageId);
+
+    private IReadOnlyList<SectionPagePlacement> SectionPagePlacements() => _editingSection?.Manuscript.Content
+        .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId.HasValue)
+        .Select(block => new SectionPagePlacement(block.Id, block.DesignedPageId!.Value))
         .ToList() ?? [];
+
+    private IReadOnlyList<Guid> SectionDesignedPageIds() => SectionPagePlacements()
+        .Select(item => item.PageId)
+        .Distinct()
+        .ToList();
 
     private static bool IsDesignedPublicationSection(PublicationSectionView section) =>
         section.SystemRole is PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright
         || (section.Manuscript.Content.Count > 0
             && section.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage
-                && block.PageCompositionId.HasValue));
+                && block.DesignedPageId.HasValue));
 
-    private string SectionCompositionLabel(Guid compositionId)
+    private string SectionCompositionLabel(string placementBlockId)
     {
-        var index = SectionCompositionIds().ToList().IndexOf(compositionId);
+        var index = SectionPagePlacements().ToList().FindIndex(item => item.BlockId == placementBlockId);
         return index < 0 ? "Designed page" : $"Page {index + 1}";
     }
 
     private Task SelectSectionCompositionAsync(ChangeEventArgs args)
     {
-        if (Guid.TryParse(args.Value?.ToString(), out var compositionId)
-            && SectionCompositionIds().Contains(compositionId))
+        var placementBlockId = args.Value?.ToString();
+        var placement = SectionPagePlacements().FirstOrDefault(item => item.BlockId == placementBlockId);
+        if (placement is not null)
         {
-            _selectedSectionCompositionId = compositionId;
+            _selectedSectionPageId = placement.PageId;
+            _selectedSectionPlacementBlockId = placement.BlockId;
             _selectedSectionVariantId = null;
             _selectedSectionVariantRevision = null;
             _sectionPageSelectionId = null;
@@ -1892,7 +1901,7 @@ else
         }
     }
 
-    private string EditionEditorHref(Guid? chapterId, string? mode = null, Guid? compositionId = null, Guid? objectId = null)
+    private string EditionEditorHref(Guid? chapterId, string? mode = null, Guid? pageId = null, Guid? objectId = null)
     {
         if (Project is null || _selectedReleaseId is not Guid editionId)
             return string.Empty;
@@ -1902,7 +1911,7 @@ else
             : $"/projects/{Project.Slug}/editor";
         var query = new List<string> { $"edition={editionId:D}" };
         if (!string.IsNullOrWhiteSpace(mode)) query.Add($"mode={Uri.EscapeDataString(mode)}");
-        if (compositionId.HasValue) query.Add($"composition={compositionId:D}");
+        if (pageId.HasValue) query.Add($"page={pageId:D}");
         if (objectId.HasValue) query.Add($"object={objectId:D}");
         return $"{path}?{string.Join('&', query)}";
     }
@@ -1915,10 +1924,10 @@ else
         var query = new List<string>();
         if (diagnostic.EditionId is Guid editionId)
             query.Add($"edition={editionId:D}");
-        if (diagnostic.CompositionId is Guid compositionId)
+        if (diagnostic.DesignedPageId is Guid pageId)
         {
             query.Add("mode=pages");
-            query.Add($"composition={compositionId:D}");
+            query.Add($"page={pageId:D}");
         }
         if (diagnostic.ObjectId is Guid objectId)
             query.Add($"object={objectId:D}");
@@ -1949,8 +1958,8 @@ else
                 }
                 if (!await TryBeginPublicationSectionEditAsync(section))
                     return;
-                if (diagnostic.CompositionId is Guid compositionId && SectionCompositionIds().Contains(compositionId))
-                    _selectedSectionCompositionId = compositionId;
+                if (diagnostic.DesignedPageId is Guid pageId && SectionDesignedPageIds().Contains(pageId))
+                    _selectedSectionPageId = pageId;
                 _sectionPageSelectionId = diagnostic.ObjectId;
                 _sectionPageRefreshSignal++;
                 break;
@@ -2018,9 +2027,9 @@ else
 
     private string DifferenceEditorHref(EditionChapterDifference difference)
     {
-        var compositionId = difference.ChangedCompositionIds.FirstOrDefault();
-        return compositionId != Guid.Empty
-            ? EditionEditorHref(difference.ChapterId, "pages", compositionId)
+        var pageId = difference.ChangedDesignedPageIds.FirstOrDefault();
+        return pageId != Guid.Empty
+            ? EditionEditorHref(difference.ChapterId, "pages", pageId)
             : EditionEditorHref(difference.ChapterId);
     }
 
@@ -2362,7 +2371,7 @@ else
             return;
         }
         if (!_coverEditorOpen && Project is not null && mutation.EditionId == _selectedReleaseId
-            && (mutation.SelectedSectionId is not null || mutation.SelectedCompositionId is not null))
+            && (mutation.SelectedSectionId is not null || mutation.SelectedPageId is not null))
         {
             _publicationSections = await PublicationSections.ListAsync(new(Project.Id, _selectedReleaseId), _dispose.Token);
             var selectedSection = mutation.SelectedSectionId is Guid sectionId
@@ -2372,8 +2381,10 @@ else
                     : _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
             if (selectedSection is not null)
                 BeginPublicationSectionEdit(selectedSection);
-            if (mutation.SelectedCompositionId is Guid compositionId)
-                _selectedSectionCompositionId = compositionId;
+            if (mutation.SelectedPageId is Guid pageId)
+                _selectedSectionPageId = pageId;
+            if (!string.IsNullOrWhiteSpace(mutation.SelectedPlacementBlockId))
+                _selectedSectionPlacementBlockId = mutation.SelectedPlacementBlockId;
             if (mutation.SelectedVariantId is Guid variantId)
                 _selectedSectionVariantId = variantId;
             _sectionPageSelectionId = mutation.SelectedObjectId;
@@ -2470,7 +2481,8 @@ else
                 $"{target} · {_editingSection.Title}",
                 _editingSection.Id,
                 _editingSection.Title,
-                _selectedSectionCompositionId,
+                _selectedSectionPageId,
+                _selectedSectionPlacementBlockId,
                 _sectionPageSelectionId,
                 _selectedSectionVariantId,
                 _selectedSectionVariantRevision);
@@ -2482,7 +2494,7 @@ else
 
     private Task HandleSectionPageWorkspaceChangedAsync(DesignedPageWorkspace.WorkspaceState state)
     {
-        if (_selectedSectionCompositionId == state.CompositionId)
+        if (_selectedSectionPageId is not null)
         {
             _selectedSectionVariantId = state.VariantId;
             _selectedSectionVariantRevision = state.VariantRevision;

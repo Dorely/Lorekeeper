@@ -134,7 +134,9 @@ public class PublicationEdition
     public ICollection<PublicationRenderJob> RenderJobs { get; set; } = [];
     public ICollection<PublicationArtifact> Artifacts { get; set; } = [];
     public ICollection<PublicationEditionChapterOverride> ChapterOverrides { get; set; } = [];
-    public ICollection<PageComposition> PageCompositions { get; set; } = [];
+    public ICollection<DesignedPage> ScopedDesignedPages { get; set; } = [];
+    public ICollection<DesignedPageContent> DesignedPageContents { get; set; } = [];
+    public ICollection<DesignedPagePlacementReference> DesignedPagePlacementReferences { get; set; } = [];
     public ICollection<ManuscriptAnnotation> ManuscriptAnnotations { get; set; } = [];
     public ICollection<PublicationSection> PublicationSections { get; set; } = [];
     public PublicationCoverDesign? CoverDesign { get; set; }

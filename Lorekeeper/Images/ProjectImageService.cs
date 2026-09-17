@@ -570,11 +570,10 @@ public sealed class ProjectImageService(
                 + string.Join(", ", figureMatter)
                 + ". Remove or replace those figures before deleting the image.");
         }
-        var compositionUses = (await db.PageCompositionVariants
+        var compositionUses = (await db.DesignedPageVariants
             .AsNoTracking()
-            .Where(variant => variant.Composition.ProjectId == projectId
-                && variant.DetachedAt == null && variant.Composition.DetachedAt == null)
-            .Select(variant => new { variant.Composition.Name, variant.SceneJson })
+            .Where(variant => variant.Content.ProjectId == projectId)
+            .Select(variant => new { variant.Content.Page.Name, variant.SceneJson })
             .ToListAsync(cancellationToken))
             .Where(item => SceneUsesImage(item.SceneJson, imageId))
             .Select(item => item.Name)
@@ -909,51 +908,27 @@ public sealed class ProjectImageService(
         foreach (var chapter in chapters)
             AddChapterUses(usages, chapter.Id, chapter.Title, FigureImageIds(chapter.ManuscriptJson));
 
-        var compositions = await db.PageCompositions
+        var contents = await db.DesignedPageContents
             .AsNoTracking()
-            .Where(composition => composition.ProjectId == projectId
-                && composition.ChapterId != null
-                && composition.DetachedAt == null)
-            .Select(composition => new
-            {
-                composition.Id,
-                ChapterId = composition.ChapterId!.Value,
-                composition.SemanticManuscriptJson,
-            })
+            .Include(content => content.Page)
+                .ThenInclude(page => page.PlacementReferences)
+            .Include(content => content.Variants)
+            .Where(content => content.ProjectId == projectId)
             .ToListAsync(cancellationToken);
-        var compositionChapters = compositions.ToDictionary(
-            composition => composition.Id,
-            composition => new
+        foreach (var content in contents)
+        {
+            var chapterIds = content.Page.PlacementReferences
+                .Where(placement => placement.ContainerKind == DesignedPageContainerKind.Chapter)
+                .Select(placement => placement.ContainerId)
+                .Distinct()
+                .ToArray();
+            foreach (var chapterId in chapterIds)
             {
-                composition.ChapterId,
-                Title = chapterTitles.GetValueOrDefault(composition.ChapterId, "Untitled chapter"),
-            });
-
-        foreach (var composition in compositions)
-        {
-            AddChapterUses(
-                usages,
-                composition.ChapterId,
-                compositionChapters[composition.Id].Title,
-                FigureImageIds(composition.SemanticManuscriptJson));
-        }
-
-        var compositionIds = compositionChapters.Keys.ToList();
-        if (compositionIds.Count == 0)
-            return usages;
-
-        var variants = await db.PageCompositionVariants
-            .AsNoTracking()
-            .Where(variant => compositionIds.Contains(variant.CompositionId) && variant.DetachedAt == null)
-            .Select(variant => new { variant.CompositionId, variant.SceneJson })
-            .ToListAsync(cancellationToken);
-        foreach (var variant in variants)
-        {
-            AddChapterUses(
-                usages,
-                compositionChapters[variant.CompositionId].ChapterId,
-                compositionChapters[variant.CompositionId].Title,
-                SceneImageIds(variant.SceneJson));
+                var title = chapterTitles.GetValueOrDefault(chapterId, "Untitled chapter");
+                AddChapterUses(usages, chapterId, title, FigureImageIds(content.SemanticManuscriptJson));
+                foreach (var variant in content.Variants)
+                    AddChapterUses(usages, chapterId, title, SceneImageIds(variant.SceneJson));
+            }
         }
 
         return usages;

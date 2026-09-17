@@ -963,7 +963,7 @@ public sealed class ManuscriptMigrationService(
                 SELECT 1 FROM Chapters
                 WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                     THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                    ELSE 0 END NOT IN (1, 2, 3, 4)
+                    ELSE 0 END NOT IN (1, 2, 3, 4, 5)
                    OR COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '') COLLATE NOCASE != Id COLLATE NOCASE
                    OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
             """
@@ -976,7 +976,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3, 4)
+                            ELSE 0 END NOT IN (1, 2, 3, 4, 5)
                        )
                 """);
         }
@@ -992,7 +992,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(AcceptedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                         THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
                 """);
         }
 
@@ -1004,7 +1004,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(ProposedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
                 """);
             checks.Add("""
                 EXISTS (
@@ -1022,7 +1022,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(DraftManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(DraftManuscriptJson) = 1
                         THEN COALESCE(json_extract(DraftManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
                 """);
         }
 
@@ -1033,7 +1033,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
                 """);
         }
 

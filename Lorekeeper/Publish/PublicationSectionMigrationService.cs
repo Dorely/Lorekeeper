@@ -3,6 +3,7 @@ using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Legacy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -27,6 +28,8 @@ public sealed class PublicationSectionMigrationService(
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
         var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(DesignedPageMigrationService.CleanupMigrationId))
+            return;
         if (!applied.Contains(AdditiveMigrationId))
         {
             if (!applied.Contains(EditionContentMigrationService.CleanupMigrationId))
@@ -65,7 +68,7 @@ public sealed class PublicationSectionMigrationService(
                 BackupPath = backupPath,
             };
             db.ManuscriptMigrationJournals.Add(journal);
-            await db.SaveChangesAsync(cancellationToken);
+            await SavePhaseAsync(db, "journal", cancellationToken);
 
             var artifactState = await db.PublicationArtifacts.AsNoTracking().OrderBy(item => item.Id)
                 .Select(item => new { item.Id, item.Sha256, item.ByteLength }).ToListAsync(cancellationToken);
@@ -75,6 +78,9 @@ public sealed class PublicationSectionMigrationService(
             var releasePlacements = await db.PublicationImagePlacements.AsNoTracking().OrderBy(item => item.EditionId).ThenBy(item => item.SortOrder).ToListAsync(cancellationToken);
             var coreSectionMap = new Dictionary<Guid, Guid>();
             var corePlacementMap = new Dictionary<Guid, Guid>();
+            var activeVariantIds = new Dictionary<LegacyPageComposition, Guid?>();
+            var coreCompositions = new List<LegacyPageComposition>();
+            var releaseCompositions = new List<LegacyPageComposition>();
 
             foreach (var matter in coreMatter)
             {
@@ -87,7 +93,7 @@ public sealed class PublicationSectionMigrationService(
                 var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(item => item.Id == matter.EditionId, cancellationToken);
                 db.PublicationSections.Add(FromReleaseMatter(edition.ProjectId, matter, coreSectionMap));
             }
-            await db.SaveChangesAsync(cancellationToken);
+            await SavePhaseAsync(db, "matter sections", cancellationToken);
 
             foreach (var placement in corePlacements)
             {
@@ -95,21 +101,37 @@ public sealed class PublicationSectionMigrationService(
                 var converted = ConvertCorePlacement(placement, setup);
                 corePlacementMap[placement.Id] = converted.Section.Id;
                 db.PublicationSections.Add(converted.Section);
+                activeVariantIds.Add(converted.Composition!, converted.Composition!.ActiveAuthoringVariantId);
+                converted.Composition.ActiveAuthoringVariantId = null;
+                coreCompositions.Add(converted.Composition);
             }
             foreach (var placement in releasePlacements)
             {
                 var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(item => item.Id == placement.EditionId, cancellationToken);
                 var converted = ConvertReleasePlacement(placement, edition, corePlacementMap);
                 db.PublicationSections.Add(converted.Section);
+                if (converted.Composition is not null)
+                {
+                    activeVariantIds.Add(converted.Composition, converted.Composition.ActiveAuthoringVariantId);
+                    converted.Composition.ActiveAuthoringVariantId = null;
+                    releaseCompositions.Add(converted.Composition);
+                }
             }
-            await db.SaveChangesAsync(cancellationToken);
+            await SavePhaseAsync(db, "image-page sections", cancellationToken);
+            db.LegacyPageCompositions.AddRange(coreCompositions);
+            await SavePhaseAsync(db, "Core image-page rows", cancellationToken);
+            db.LegacyPageCompositions.AddRange(releaseCompositions);
+            await SavePhaseAsync(db, "release image-page rows", cancellationToken);
+            foreach (var (composition, activeVariantId) in activeVariantIds)
+                composition.ActiveAuthoringVariantId = activeVariantId;
+            await SavePhaseAsync(db, "image-page active layouts", cancellationToken);
 
             foreach (var projectId in await db.Projects.AsNoTracking().Select(item => item.Id).ToListAsync(cancellationToken))
                 await AddMissingSystemSectionsAsync(db, projectId, cancellationToken);
 
             await db.PublicationArtifacts.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsLegacy, true), cancellationToken);
             await db.PublicationRenderJobs.ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IsLegacy, true), cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
+            await SavePhaseAsync(db, "system sections", cancellationToken);
 
             var retainedArtifacts = await db.PublicationArtifacts.AsNoTracking().OrderBy(item => item.Id)
                 .Select(item => new { item.Id, item.Sha256, item.ByteLength }).ToListAsync(cancellationToken);
@@ -118,7 +140,7 @@ public sealed class PublicationSectionMigrationService(
             if (await db.PublicationSections.CountAsync(cancellationToken)
                 < coreMatter.Count + releaseMatter.Count + corePlacements.Count + releasePlacements.Count)
                 throw new InvalidDataException("Publication-section migration did not preserve every stored matter and image-placement row.");
-            var orphanedCompositions = await db.PageCompositions.CountAsync(
+            var orphanedCompositions = await db.LegacyPageCompositions.CountAsync(
                 item => (item.ChapterId == null) == (item.PublicationSectionId == null), cancellationToken);
             if (orphanedCompositions != 0)
                 throw new InvalidDataException("Publication-section migration produced a Designed Page with invalid ownership.");
@@ -135,7 +157,7 @@ public sealed class PublicationSectionMigrationService(
             journal.Phase = ManuscriptMigrationPhase.Complete;
             journal.Status = ManuscriptMigrationStatus.Completed;
             journal.CompletedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
+            await SavePhaseAsync(db, "completion journal", cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception exception)
@@ -146,10 +168,30 @@ public sealed class PublicationSectionMigrationService(
         }
     }
 
+    private static async Task SavePhaseAsync(
+        AppDbContext db,
+        string phase,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            throw new InvalidOperationException(
+                $"Publication-section migration failed while saving {phase}.",
+                exception);
+        }
+    }
+
     public async Task RepairSemanticRevisionDriftAsync(
         AppDbContext db,
         CancellationToken cancellationToken = default)
     {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(DesignedPageMigrationService.CleanupMigrationId))
+            return;
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
             item => item.MigrationName == SemanticRevisionRepairMigrationName
                 && item.Status == ManuscriptMigrationStatus.Completed,
@@ -158,7 +200,7 @@ public sealed class PublicationSectionMigrationService(
             return;
         }
 
-        var compositions = await db.PageCompositions
+        var compositions = await db.LegacyPageCompositions
             .Where(item => item.PublicationSectionId != null)
             .OrderBy(item => item.Id)
             .ToListAsync(cancellationToken);
@@ -326,17 +368,37 @@ public sealed class PublicationSectionMigrationService(
         var setup = await db.ProjectPageSetups.AsNoTracking()
             .SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var corePlacementMap = new Dictionary<Guid, Guid>();
+        var activeVariantIds = new Dictionary<LegacyPageComposition, Guid?>();
+        var coreCompositions = new List<LegacyPageComposition>();
+        var releaseCompositions = new List<LegacyPageComposition>();
         foreach (var placement in corePlacements)
         {
             var converted = ConvertCorePlacement(placement, setup);
             corePlacementMap[placement.Id] = converted.Section.Id;
             db.PublicationSections.Add(converted.Section);
+            activeVariantIds.Add(converted.Composition!, converted.Composition!.ActiveAuthoringVariantId);
+            converted.Composition.ActiveAuthoringVariantId = null;
+            coreCompositions.Add(converted.Composition);
         }
         foreach (var placement in releasePlacements)
         {
             var edition = releases[placement.EditionId];
-            db.PublicationSections.Add(ConvertReleasePlacement(placement, edition, corePlacementMap).Section);
+            var converted = ConvertReleasePlacement(placement, edition, corePlacementMap);
+            db.PublicationSections.Add(converted.Section);
+            if (converted.Composition is not null)
+            {
+                activeVariantIds.Add(converted.Composition, converted.Composition.ActiveAuthoringVariantId);
+                converted.Composition.ActiveAuthoringVariantId = null;
+                releaseCompositions.Add(converted.Composition);
+            }
         }
+        await db.SaveChangesAsync(cancellationToken);
+        db.LegacyPageCompositions.AddRange(coreCompositions);
+        await db.SaveChangesAsync(cancellationToken);
+        db.LegacyPageCompositions.AddRange(releaseCompositions);
+        await db.SaveChangesAsync(cancellationToken);
+        foreach (var (composition, activeVariantId) in activeVariantIds)
+            composition.ActiveAuthoringVariantId = activeVariantId;
         await db.SaveChangesAsync(cancellationToken);
         await AddMissingSystemSectionsAsync(db, projectId, cancellationToken);
     }
@@ -378,7 +440,7 @@ public sealed class PublicationSectionMigrationService(
     private static ConvertedPlacement ConvertCorePlacement(PublicationBookImagePlacement placement, ProjectPageSetup setup)
     {
         var sectionId = Guid.NewGuid();
-        var scene = CompositionService.CreatePageScene(setup);
+        var scene = DesignedPageService.CreatePageScene(setup);
         return ConvertPlacement(sectionId, placement.ProjectId, null, null, placement.AssetId, placement.Caption,
             placement.PresentationJson, placement.AltText, placement.Decorative, placement.Language,
             placement.AccessibilityRole, placement.TargetKind, placement.TargetId, placement.PlacementKind,
@@ -406,7 +468,7 @@ public sealed class PublicationSectionMigrationService(
             }, null);
         }
         var sectionId = Guid.NewGuid();
-        var scene = CompositionService.CreatePageScene(edition);
+        var scene = DesignedPageService.CreatePageScene(edition);
         return ConvertPlacement(sectionId, edition.ProjectId, edition.Id,
             placement.CorePlacementId is Guid coreId ? coreMap.GetValueOrDefault(coreId) : null,
             placement.AssetId, placement.Caption, placement.PresentationJson, placement.AltText, placement.Decorative,
@@ -481,17 +543,17 @@ public sealed class PublicationSectionMigrationService(
             });
         }
         scene = scene with { Objects = objects };
-        var composition = new PageComposition
+        var composition = new LegacyPageComposition
         {
             Id = compositionId, ProjectId = projectId, PublicationSectionId = sectionId, EditionId = editionId,
             Name = "Publication image page", SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic),
             ActiveAuthoringVariantId = variantId,
             Variants =
             [
-                new PageCompositionVariant
+                new LegacyPageCompositionVariant
                 {
                     Id = variantId, CompositionId = compositionId,
-                    GeometryKey = CompositionService.SceneGeometryKey(scene),
+                    GeometryKey = DesignedPageService.SceneGeometryKey(scene),
                     SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
                 },
             ],
@@ -505,7 +567,7 @@ public sealed class PublicationSectionMigrationService(
                 new ManuscriptBlock
                 {
                     Id = $"designed-page-{Guid.NewGuid():N}", Type = ManuscriptBlockType.DesignedPage,
-                    StyleRole = ManuscriptStyleRoles.DesignedPage, PageCompositionId = compositionId,
+                    StyleRole = ManuscriptStyleRoles.DesignedPage, DesignedPageId = compositionId,
                 },
             ],
         };
@@ -519,7 +581,7 @@ public sealed class PublicationSectionMigrationService(
             ChapterId = targetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
             InclusionMode = PublicationSectionInclusionMode.Included, LocalOrder = sortOrder,
             ManuscriptJson = ManuscriptCodec.Serialize(sectionDocument),
-            PageCompositions = [composition], CreatedAt = createdAt, UpdatedAt = updatedAt,
+            CreatedAt = createdAt, UpdatedAt = updatedAt,
         };
         return new ConvertedPlacement(section, composition);
     }
@@ -564,7 +626,7 @@ public sealed class PublicationSectionMigrationService(
                 LocalOrder = order, ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = id, Content = content }),
             });
         }
-        await db.SaveChangesAsync(cancellationToken);
+        await SavePhaseAsync(db, "missing system sections", cancellationToken);
     }
 
     private static ManuscriptBlock BoundBlock(PublicationBoundField field, string styleRole) => new()
@@ -626,11 +688,12 @@ public sealed class PublicationSectionMigrationService(
             1 => ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(json, storedId, storedRevision),
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, storedId, storedRevision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, storedId, storedRevision),
+            4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, storedId, storedRevision),
             ManuscriptDocument.CurrentSchemaVersion => json,
             _ => throw new InvalidDataException($"Unsupported publication-section manuscript schema version {schemaVersion}."),
         };
         var document = ManuscriptCodec.Deserialize(json);
         return ManuscriptCodec.Serialize(document with { ManuscriptId = id, Revision = revision });
     }
-    private sealed record ConvertedPlacement(PublicationSection Section, PageComposition? Composition);
+    private sealed record ConvertedPlacement(PublicationSection Section, LegacyPageComposition? Composition);
 }

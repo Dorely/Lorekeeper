@@ -74,7 +74,7 @@ public static class ManuscriptReviewDiffBuilder
                 .Append(block.Type).Append(" | style=").Append(block.StyleRole)
                 .Append(" | heading=").Append(block.HeadingLevel?.ToString() ?? "none")
                 .Append(" | publicationField=").Append(block.PublicationField?.ToString() ?? "none")
-                .Append(" | pageComposition=").Append(block.PageCompositionId?.ToString("N") ?? "none");
+                .Append(" | designedPage=").Append(block.DesignedPageId?.ToString("N") ?? "none");
             if (block.ParagraphPresentation is { } paragraph)
             {
                 builder.Append(" | paragraph=")
@@ -111,14 +111,15 @@ public static class ManuscriptReviewDiffBuilder
                      .Select((block, index) => (block, index))
                      .Where(item => item.block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage
                          || item.block.ImageId is not null
-                         || item.block.PageCompositionId is not null))
+                         || item.block.DesignedPageId is not null))
         {
             if (builder.Length > 0)
                 builder.Append('\n');
 
             builder.Append("Block ").Append(index + 1).Append(": ").Append(block.Type)
+                .Append(" | placementBlock=").Append(block.Id)
                 .Append(" | image=").Append(block.ImageId?.ToString("N") ?? "none")
-                .Append(" | page=").Append(block.PageCompositionId?.ToString("N") ?? "none")
+                .Append(" | page=").Append(block.DesignedPageId?.ToString("N") ?? "none")
                 .Append(" | alt=").Append(block.AltText ?? "none")
                 .Append(" | decorative=").Append(block.Decorative)
                 .Append(" | language=").Append(block.Language ?? "none")

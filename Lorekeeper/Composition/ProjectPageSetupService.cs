@@ -139,27 +139,28 @@ public sealed class ProjectPageSetupService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        var compositions = await db.PageCompositions
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => item.ProjectId == projectId && item.DetachedAt == null
-                && item.ActiveAuthoringVariantId != null)
+        var contents = await db.DesignedPageContents
+            .Include(item => item.Page)
+            .Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId && item.EditionId == null
+                && item.ActiveVariantId != null)
             .ToListAsync(cancellationToken);
-        foreach (var composition in compositions)
+        foreach (var content in contents)
         {
-            var source = composition.Variants.SingleOrDefault(item => item.Id == composition.ActiveAuthoringVariantId);
+            var source = content.Variants.SingleOrDefault(item => item.Id == content.ActiveVariantId);
             if (source is null)
                 continue;
 
             var scene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException($"Designed Page '{composition.Name}' has an empty composition scene.");
-            var adapted = CompositionService.AdaptAuthoringScene(
+                ?? throw new InvalidDataException($"Designed Page '{content.Page.Name}' has an empty composition scene.");
+            var adapted = DesignedPageService.AdaptAuthoringScene(
                 scene,
                 input.PageWidthInches,
                 input.PageHeightInches,
                 input.PageMarginInches);
-            CompositionService.Validate(adapted, ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson));
-            var geometryKey = CompositionService.SceneGeometryKey(adapted);
-            var target = composition.Variants.SingleOrDefault(item =>
+            DesignedPageService.Validate(adapted, ManuscriptCodec.Deserialize(content.SemanticManuscriptJson));
+            var geometryKey = DesignedPageService.SceneGeometryKey(adapted);
+            var target = content.Variants.SingleOrDefault(item =>
                 item.Id != source.Id && string.Equals(item.GeometryKey, geometryKey, StringComparison.Ordinal));
             if (target is null)
             {
@@ -170,8 +171,8 @@ public sealed class ProjectPageSetupService(
             target.SceneJson = JsonSerializer.Serialize(adapted, ManuscriptCodec.JsonOptions);
             target.Revision = checked(target.Revision + 1);
             target.UpdatedAt = DateTime.UtcNow;
-            composition.ActiveAuthoringVariantId = target.Id;
-            composition.UpdatedAt = DateTime.UtcNow;
+            content.ActiveVariantId = target.Id;
+            content.UpdatedAt = DateTime.UtcNow;
         }
     }
 

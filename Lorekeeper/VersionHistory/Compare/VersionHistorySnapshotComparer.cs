@@ -374,15 +374,15 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         var accumulator = new AreaAccumulator("composition");
         accumulator.Add(CompareItems(
             options,
-            "compositions",
-            baseline.Composition.PageCompositions,
-            candidate.Composition.PageCompositions,
-            composition => GuidKey(composition.Id),
-            composition => composition.Name,
+            "designed-pages",
+            baseline.Composition.DesignedPages,
+            candidate.Composition.DesignedPages,
+            page => GuidKey(page.Id),
+            page => page.Name,
             Hash,
-            manuscriptHash: CompositionManuscriptHash,
-            metadataHash: CompositionMetadataHash,
-            readableText: CompositionReadableText));
+            manuscriptHash: DesignedPageManuscriptHash,
+            metadataHash: DesignedPageMetadataHash,
+            readableText: DesignedPageReadableText));
         return accumulator.Build();
     }
 
@@ -641,8 +641,9 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
     private static string ChapterReadableText(ProjectExportChapter chapter) =>
         ManuscriptPlainText(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
 
-    private static string CompositionReadableText(ProjectExportPageComposition composition) =>
-        ManuscriptPlainText(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
+    private static string DesignedPageReadableText(ProjectExportDesignedPage page) =>
+        string.Join("\n\n", page.Contents.OrderBy(content => content.Id)
+            .Select(content => ManuscriptPlainText(content.SemanticManuscriptJson, content.Id, content.Revision)));
 
     private static string GraphNodeReadableText(ProjectExportNode node) =>
         string.Join(
@@ -797,31 +798,30 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             ImageIds = chapter.ExplicitImageContextImageIds.OrderBy(id => id).ToList(),
         });
 
-    private static string CompositionManuscriptHash(ProjectExportPageComposition composition) =>
+    private static string DesignedPageManuscriptHash(ProjectExportDesignedPage page) =>
         Hash(new
         {
-            composition.SemanticManuscriptJson,
-            Variants = composition.Variants
-                .OrderBy(variant => variant.Id)
-                .Select(variant => new { variant.Id, variant.SceneJson, variant.Revision })
+            Contents = page.Contents.OrderBy(content => content.Id).Select(content => new
+            {
+                content.Id, content.EditionId, content.SemanticManuscriptJson, content.AccessibilityDescription, content.Revision,
+                Variants = content.Variants.OrderBy(variant => variant.Id)
+                    .Select(variant => new { variant.Id, variant.SceneJson, variant.Revision })
                 .ToList(),
+            }).ToList(),
         });
 
-    private static string CompositionMetadataHash(ProjectExportPageComposition composition) =>
+    private static string DesignedPageMetadataHash(ProjectExportDesignedPage page) =>
         Hash(new
         {
-            composition.Id,
-            composition.ChapterId,
-            composition.Name,
-            composition.Revision,
-            composition.ActiveAuthoringVariantId,
-            composition.EditionId,
-            composition.SourceCompositionId,
-            composition.PublicationSectionId,
-            Variants = composition.Variants
-                .OrderBy(variant => variant.Id)
-                .Select(variant => new { variant.Id, variant.GeometryKey, variant.Revision })
-                .ToList(),
+            page.Id,
+            page.Name,
+            page.ScopeEditionId,
+            Contents = page.Contents.OrderBy(content => content.Id).Select(content => new
+            {
+                content.Id, content.EditionId, content.Revision, content.ActiveVariantId,
+                Variants = content.Variants.OrderBy(variant => variant.Id)
+                    .Select(variant => new { variant.Id, variant.GeometryKey, variant.Revision }).ToList(),
+            }).ToList(),
         });
 
     private static IReadOnlyList<FontFaceItem> FlattenFontFaces(IEnumerable<VersionHistoryFontFamily> families) =>

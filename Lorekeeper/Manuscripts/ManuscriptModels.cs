@@ -5,7 +5,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -35,7 +35,7 @@ public sealed record ManuscriptBlock
     public FigureAccessibilityRole? AccessibilityRole { get; init; }
     public FigurePresentation? FigurePresentation { get; init; }
     public ParagraphPresentation? ParagraphPresentation { get; init; }
-    public Guid? PageCompositionId { get; init; }
+    public Guid? DesignedPageId { get; init; }
     public PublicationBoundField? PublicationField { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
@@ -245,7 +245,7 @@ public sealed record InsertManuscriptBlock(
     int? HeadingLevel = null,
     bool Decorative = false,
     FigurePresentation? FigurePresentation = null,
-    Guid? PageCompositionId = null,
+    Guid? DesignedPageId = null,
     string? Language = null,
     FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
     string? BlockId = null) : ManuscriptOperation;
@@ -278,7 +278,7 @@ public sealed record SetManuscriptBlockType(
     int? HeadingLevel = null,
     bool Decorative = false,
     FigurePresentation? FigurePresentation = null,
-    Guid? PageCompositionId = null,
+    Guid? DesignedPageId = null,
     string? Language = null,
     FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure) : ManuscriptOperation;
 

@@ -506,7 +506,7 @@ public sealed class PublicationImagePreparationService(
                     dimensionsForFigure.HeightPoints,
                     presentation.Fit);
             }
-            foreach (var composition in chapter.PageCompositions)
+            foreach (var composition in chapter.DesignedPages)
                 foreach (var variant in composition.Variants)
                     AddSceneOccurrences(variant.Scene, "designed-page", null, AddOccurrence);
         }
@@ -526,7 +526,7 @@ public sealed class PublicationImagePreparationService(
                     dimensionsForFigure.HeightPoints,
                     presentation.Fit);
             }
-            foreach (var composition in section.PageCompositions)
+            foreach (var composition in section.DesignedPages)
                 foreach (var variant in composition.Variants)
                     AddSceneOccurrences(variant.Scene, "publication-section", null, AddOccurrence);
         }
@@ -842,16 +842,16 @@ public sealed class PublicationImagePreparationService(
         }
 
         var chapterVariantOwners = document.Sections.SelectMany(item => item.Chapters)
-            .SelectMany(chapter => chapter.PageCompositions
+            .SelectMany(chapter => chapter.DesignedPages
                 .SelectMany(composition => composition.Variants.Select(variant => (variant.Id, ChapterId: chapter.Id))))
             .ToDictionary(item => item.Id, item => item.ChapterId);
         var variants = renderScope == PublicationRenderScope.Cover
             ? []
-            : document.Sections.SelectMany(item => item.Chapters).SelectMany(item => item.PageCompositions)
-                .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions))
+            : document.Sections.SelectMany(item => item.Chapters).SelectMany(item => item.DesignedPages)
+                .Concat(document.PublicationSections.SelectMany(item => item.DesignedPages))
                 .SelectMany(item => item.Variants).Select(item => item.Id).Distinct().ToList();
-        var variantRows = await db.PageCompositionVariants
-            .Include(item => item.Composition)
+        var variantRows = await db.DesignedPageVariants
+            .Include(item => item.Content).ThenInclude(item => item.Page)
             .Where(item => variants.Contains(item.Id))
             .ToListAsync(cancellationToken);
         foreach (var variant in variantRows)
@@ -864,8 +864,8 @@ public sealed class PublicationImagePreparationService(
             variant.Revision++;
             variant.SceneJson = JsonSerializer.Serialize(updated, JsonOptions);
             variant.UpdatedAt = now;
-            historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.PageComposition, variant.CompositionId));
-            if (variant.Composition.EditionId is Guid variantEditionId)
+            historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.DesignedPageContent, variant.ContentId));
+            if (variant.Content.EditionId is Guid variantEditionId)
             {
                 releaseChanged = true;
                 if (chapterVariantOwners.TryGetValue(variant.Id, out var chapterId))

@@ -379,7 +379,8 @@ public sealed class ProjectVersionHistoryService(
                 uninitializedToken,
                 Comparison: null,
                 Chapters: [],
-                DependencyGroups: []);
+                DependencyGroups: [],
+                DesignedPages: []);
         }
 
         var current = await CaptureCurrentSnapshotUnderLeaseAsync(
@@ -416,6 +417,17 @@ public sealed class ProjectVersionHistoryService(
             .Where(chapter => chapter is not null)
             .Cast<ProjectVersionReviewChapter>()
             .ToList();
+        var designedPages = FindReviewDesignedPages(approved.Payload, current.Payload);
+        if (targets is not null)
+        {
+            var targetKeys = reviewTargets
+                .Select(target => (target.ChapterId, target.ContentTarget.StorageKey))
+                .ToHashSet();
+            designedPages = designedPages
+                .Where(page => page.PlacementLinks.Any(link =>
+                    targetKeys.Contains((link.ChapterId, link.ContentTarget.StorageKey))))
+                .ToList();
+        }
 
         return new ProjectVersionReviewView(
             reviewStatus.Repository,
@@ -423,7 +435,8 @@ public sealed class ProjectVersionHistoryService(
             token,
             comparison,
             chapters,
-            dependencyGroups);
+            dependencyGroups,
+            designedPages);
     }
 
     public async Task<ProjectVersionReviewChapter?> GetReviewChapterAsync(
@@ -516,14 +529,17 @@ public sealed class ProjectVersionHistoryService(
             var afterChapter = FindEffectiveChapter(
                 after.Payload,
                 new ProjectVersionReviewTarget(chapterId, contentTarget));
-            var compositionChanges = before is null
+            var designedPageChanges = before is null
                 ? []
-                : FindReviewCompositions(
+                : FindReviewDesignedPages(
                     before.Payload,
-                    after.Payload,
-                    new ProjectVersionReviewTarget(chapterId, contentTarget));
+                    after.Payload)
+                    .Where(page => page.PlacementLinks.Any(link =>
+                        link.ChapterId == chapterId
+                        && link.ContentTarget == contentTarget))
+                    .ToList();
             if (ProjectVersionReviewChapter.ManuscriptSemanticallyEquals(beforeChapter, afterChapter)
-                && compositionChanges.Count == 0)
+                && designedPageChanges.Count == 0)
                 continue;
 
             var checkpoint = await LoadRecordedCheckpointUnderLeaseAsync(
@@ -537,7 +553,7 @@ public sealed class ProjectVersionHistoryService(
                 checkpoint is null ? null : ToCheckpointView(checkpoint),
                 beforeChapter,
                 afterChapter,
-                compositionChanges);
+                designedPageChanges);
             break;
         }
 
@@ -859,26 +875,8 @@ public sealed class ProjectVersionHistoryService(
             UpdateSynthesizedEditionTargetReviewTree(files, approved.Payload, current.Payload, target);
         }
 
-        // Designed Pages are chapter-owned semantic records. Replace the
-        // target's complete set, including additions and deletions, while
-        // retaining every other chapter/edition's approved compositions.
-        var targetCompositionIds = approved.Payload.Composition.PageCompositions
-            .Where(item => CompositionMatchesReviewTarget(item, target))
-            .Select(item => item.Id)
-            .Concat(current.Payload.Composition.PageCompositions
-                .Where(item => CompositionMatchesReviewTarget(item, target))
-                .Select(item => item.Id))
-            .ToHashSet();
-        var currentTargetCompositions = current.Payload.Composition.PageCompositions
-            .Where(item => CompositionMatchesReviewTarget(item, target))
-            .ToList();
-        var synthesizedCompositions = approved.Payload.Composition.PageCompositions
-            .Where(item => !targetCompositionIds.Contains(item.Id))
-            .Concat(currentTargetCompositions)
-            .OrderBy(item => item.Id)
-            .ToList();
-        files["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(
-            new VersionHistorySnapshotCompositionArea(synthesizedCompositions));
+        // Designed Pages are independently reviewed project-owned content.
+        // Approving a placement/manuscript must never approve its page.
         RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
 
         var generatedRoot = CreateTemporaryDirectory();
@@ -994,7 +992,8 @@ public sealed class ProjectVersionHistoryService(
             files.Add(entry.Key, entry.Value);
         foreach (var entry in currentFiles)
         {
-            if (!IsManuscriptSnapshotPath(entry.Key))
+            if (!IsManuscriptSnapshotPath(entry.Key)
+                && !entry.Key.Equals("composition/composition.json", StringComparison.Ordinal))
                 files[entry.Key] = entry.Value;
         }
 
@@ -1190,21 +1189,17 @@ public sealed class ProjectVersionHistoryService(
         }
     }
 
-    public async Task<ProjectVersionCheckpointView> ApproveReviewCompositionAsync(
+    public async Task<ProjectVersionCheckpointView> ApproveReviewDesignedPageAsync(
         Guid projectId,
-        ProjectVersionReviewTarget target,
-        Guid compositionId,
+        Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         string semanticMessage = "Approved Designed Page change",
         string? requestKey = null,
         CancellationToken cancellationToken = default)
     {
         ValidateProjectId(projectId);
-        ValidateReviewTarget(target.ContentTarget);
-        if (target.ChapterId == Guid.Empty)
-            throw new ArgumentException("A review target must identify a chapter.", nameof(target));
-        if (compositionId == Guid.Empty)
-            throw new ArgumentException("A composition ID is required.", nameof(compositionId));
+        if (designedPageId == Guid.Empty)
+            throw new ArgumentException("A Designed Page ID is required.", nameof(designedPageId));
         ArgumentNullException.ThrowIfNull(expectedToken);
         if (string.IsNullOrWhiteSpace(semanticMessage) || semanticMessage.Contains('\0'))
             throw new ArgumentException("A semantic checkpoint message is required.", nameof(semanticMessage));
@@ -1229,30 +1224,24 @@ public sealed class ProjectVersionHistoryService(
             status.Repository.RepositoryId,
             projectId,
             cancellationToken);
-        var currentComposition = current.Payload.Composition.PageCompositions
-            .SingleOrDefault(item => item.Id == compositionId)
+        var currentDesignedPage = current.Payload.Composition.DesignedPages
+            .SingleOrDefault(item => item.Id == designedPageId)
             ?? throw new InvalidOperationException("The live Designed Page no longer exists.");
-        if (!CompositionMatchesReviewTarget(currentComposition, target))
-        {
-            throw new InvalidOperationException(
-                "The Designed Page does not belong to the reviewed chapter and content target.");
-        }
-
-        var approvedComposition = approved.Payload.Composition.PageCompositions
-            .SingleOrDefault(item => item.Id == compositionId);
-        if (ProjectVersionReviewComposition.SemanticallyEquals(approvedComposition, currentComposition))
+        var approvedDesignedPage = approved.Payload.Composition.DesignedPages
+            .SingleOrDefault(item => item.Id == designedPageId);
+        if (ProjectVersionReviewDesignedPage.SemanticallyEquals(approvedDesignedPage, currentDesignedPage))
             throw new InvalidOperationException("The Designed Page change is already approved.");
 
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var entry in git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha))
             files.Add(entry.Key, entry.Value);
-        var synthesizedCompositions = approved.Payload.Composition.PageCompositions
-            .Where(item => item.Id != compositionId)
-            .Append(currentComposition)
+        var synthesizedDesignedPages = approved.Payload.Composition.DesignedPages
+            .Where(item => item.Id != designedPageId)
+            .Append(currentDesignedPage)
             .OrderBy(item => item.Id)
             .ToList();
         files["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(
-            new VersionHistorySnapshotCompositionArea(synthesizedCompositions));
+            new VersionHistorySnapshotCompositionArea(synthesizedDesignedPages));
         RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
 
         var generatedRoot = CreateTemporaryDirectory();
@@ -2262,20 +2251,6 @@ public sealed class ProjectVersionHistoryService(
             }
         }
 
-        var existingTargets = targets
-            .Select(target => (target.ChapterId, target.ContentTarget.StorageKey))
-            .ToHashSet();
-        foreach (var composition in ChangedCompositions(baseline, candidate))
-        {
-            if (composition.ChapterId is not Guid chapterId)
-                continue;
-            var target = composition.EditionId is Guid editionId
-                ? new ProjectVersionReviewTarget(chapterId, EditorContentTarget.ForEdition(editionId))
-                : new ProjectVersionReviewTarget(chapterId, EditorContentTarget.Core);
-            if (existingTargets.Add((target.ChapterId, target.ContentTarget.StorageKey)))
-                targets.Add(target);
-        }
-
         return targets;
     }
 
@@ -2365,8 +2340,7 @@ public sealed class ProjectVersionHistoryService(
     {
         var before = FindEffectiveChapter(baseline, target);
         var after = FindEffectiveChapter(candidate, target);
-        var compositions = FindReviewCompositions(baseline, candidate, target);
-        if (before is null && after is null && compositions.Count == 0)
+        if (before is null && after is null)
             return null;
 
         return new ProjectVersionReviewChapter(
@@ -2374,53 +2348,61 @@ public sealed class ProjectVersionHistoryService(
             target.ContentTarget,
             before,
             after,
-            token,
-            compositions);
+            token);
     }
 
-    private static IReadOnlyList<ProjectVersionReviewComposition> FindReviewCompositions(
-        VersionHistorySnapshotPayload baseline,
-        VersionHistorySnapshotPayload candidate,
-        ProjectVersionReviewTarget target) =>
-        ChangedCompositions(baseline, candidate)
-            .Where(composition => composition.ChapterId == target.ChapterId
-                && (target.ContentTarget.IsCore
-                    ? composition.EditionId is null
-                    : composition.EditionId == target.ContentTarget.EditionId))
-            .Select(composition => new ProjectVersionReviewComposition(
-                composition.CompositionId,
-                composition.ChapterId,
-                composition.EditionId,
-                composition.Before,
-                composition.After))
-            .OrderBy(composition => composition.CompositionId)
-            .ToList();
-
-    private static bool CompositionMatchesReviewTarget(
-        ProjectExportPageComposition composition,
-        ProjectVersionReviewTarget target) =>
-        composition.ChapterId == target.ChapterId
-        && (target.ContentTarget.IsCore
-            ? composition.EditionId is null
-            : composition.EditionId == target.ContentTarget.EditionId);
-
-    private static IReadOnlyList<ProjectVersionReviewComposition> ChangedCompositions(
+    private static IReadOnlyList<ProjectVersionReviewDesignedPage> FindReviewDesignedPages(
         VersionHistorySnapshotPayload baseline,
         VersionHistorySnapshotPayload candidate)
     {
-        var before = baseline.Composition.PageCompositions.ToDictionary(item => item.Id);
-        var after = candidate.Composition.PageCompositions.ToDictionary(item => item.Id);
+        var before = baseline.Composition.DesignedPages.ToDictionary(item => item.Id);
+        var after = candidate.Composition.DesignedPages.ToDictionary(item => item.Id);
         return before.Keys
             .Concat(after.Keys)
             .Distinct()
             .OrderBy(id => id)
-            .Select(id => new ProjectVersionReviewComposition(
+            .Select(id => new ProjectVersionReviewDesignedPage(
                 id,
-                after.GetValueOrDefault(id)?.ChapterId ?? before.GetValueOrDefault(id)?.ChapterId,
-                after.GetValueOrDefault(id)?.EditionId ?? before.GetValueOrDefault(id)?.EditionId,
                 before.GetValueOrDefault(id),
-                after.GetValueOrDefault(id)))
-            .Where(composition => composition.HasChanges)
+                after.GetValueOrDefault(id),
+                FindDesignedPagePlacementLinks(baseline, candidate, id)))
+            .Where(page => page.HasChanges)
+            .ToList();
+    }
+
+    private static IReadOnlyList<ProjectVersionReviewDesignedPagePlacement> FindDesignedPagePlacementLinks(
+        VersionHistorySnapshotPayload baseline,
+        VersionHistorySnapshotPayload candidate,
+        Guid designedPageId)
+    {
+        var links = new Dictionary<(Guid ChapterId, string TargetKey, string BlockId), ProjectVersionReviewDesignedPagePlacement>();
+        foreach (var payload in new[] { baseline, candidate })
+        {
+            var chapterIds = payload.Narrative.Chapters.Select(chapter => chapter.Id)
+                .Concat(payload.Publication.PublicationEditions.SelectMany(edition => edition.ChapterOverrides.Select(overrideItem => overrideItem.ChapterId)))
+                .Distinct();
+            var targets = chapterIds.Select(chapterId => new ProjectVersionReviewTarget(chapterId, EditorContentTarget.Core))
+                .Concat(payload.Publication.PublicationEditions.SelectMany(edition => chapterIds.Select(chapterId =>
+                    new ProjectVersionReviewTarget(chapterId, EditorContentTarget.ForEdition(edition.Id)))));
+            foreach (var target in targets)
+            {
+                var chapter = FindEffectiveChapter(payload, target);
+                if (chapter is null)
+                    continue;
+                var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+                foreach (var block in document.Content.Where(block =>
+                    block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId == designedPageId))
+                {
+                    var placement = new ProjectVersionReviewDesignedPagePlacement(target.ChapterId, target.ContentTarget, block.Id);
+                    links[(placement.ChapterId, placement.ContentTarget.StorageKey, placement.BlockId)] = placement;
+                }
+            }
+        }
+
+        return links.Values
+            .OrderBy(link => link.ChapterId)
+            .ThenBy(link => link.ContentTarget.StorageKey, StringComparer.Ordinal)
+            .ThenBy(link => link.BlockId, StringComparer.Ordinal)
             .ToList();
     }
 

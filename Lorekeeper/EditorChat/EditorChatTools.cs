@@ -43,7 +43,7 @@ IActService acts,
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
     IAgentProjectImageWorkflow imageWorkflow,
-    ICompositionService compositions,
+    IDesignedPageService compositions,
     IProjectPageSetupService pageSetups,
     IChapterPreviewService chapterPreviews,
     ICompositionCanvasPreviewService canvasPreviews,
@@ -219,8 +219,8 @@ IActService acts,
                     "The image is attached to the turn and, when vision is available, supplied to the model on the next iteration."),
 
             AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid variantId, string mode = "annotated") =>
-                    PreviewPageCanvasAsync(context, compositionId, variantId, mode),
+                method: (Guid pageId, Guid variantId, string mode = "annotated") =>
+                    PreviewPageCanvasAsync(context, pageId, variantId, mode),
                 name: "preview_page_canvas",
                 description:
                     "Render one complete Designed Page authoring surface directly as a transient PNG, without chapter pagination or publication-edition context. " +
@@ -232,7 +232,7 @@ IActService acts,
                     ReadManuscriptAsync(context, chapterId, startBlock, blockCount),
                 name: "read_manuscript",
                 description:
-                    "Read bounded agent-manuscript-v1 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. " +
+                    "Read bounded agent-manuscript-v2 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. Designed Page rows carry both their page ID and placement block ID; use the latter to address one repeated occurrence. " +
                     "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient. In Contest Mode, use the returned stable IDs and revision to choose two boundary anchors anywhere in the chapter, or null for either document edge, then pass them to start_contest; both null anchors select the whole chapter. Empty spans between adjacent anchors and empty chapters are valid insertion targets. Do not attempt to mutate the manuscript from Contest Mode. The anchored interior may cross scene breaks and rich/atomic blocks; it is replaced wholesale while the anchors and all outside blocks remain unchanged. In normal Editor Mode, pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
@@ -241,7 +241,7 @@ IActService acts,
                 name: "inspect_manuscript",
                 description:
                     "Validate a manuscript and structurally search all blocks by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching agent-manuscript-v1 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore from the current persisted manuscript."),
+                    "Returns at most 40 matching agent-manuscript-v2 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore from the current persisted manuscript."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
@@ -291,10 +291,10 @@ IActService acts,
                 description: "List a bounded page of Figure and DesignedPage blocks in one format-neutral chapter. Returns stable block and target IDs, current manuscript revision, compact presentation/accessibility summaries, counts, diagnostics, and continuation metadata."),
 
             AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) =>
-                    ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
-                name: "read_page_composition",
-                description: "Read one selected page-composition variant losslessly in bounded object pages. Returns its complete surface, layers, styles, object fields, semantic excerpts, revisions, and continuation metadata; computed page overlays and image bytes are omitted."),
+                method: (Guid pageId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) =>
+                    ReadDesignedPageAsync(context, pageId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
+                name: "read_designed_page",
+                description: "Read one selected Designed Page variant losslessly in bounded object pages. Returns its complete surface, layers, styles, object fields, semantic excerpts, revisions, and continuation metadata; computed page overlays and image bytes are omitted."),
         ]);
 
         if (mode == EditorChatToolMode.ContestPreparation)
@@ -453,20 +453,20 @@ IActService acts,
                 name: "read_layout_generation_target",
                 description: "Read exact project-authoring geometry, the 300-DPI publication default, protected regions, provider constraints, and the resolved 300-DPI raster for a project page, Figure placement, or Designed Page frame/surface. Pass surfaceBounds only for a verified PageSurface or CoreCoverSurface subregion; it is exact percentage geometry and becomes the physical target. If the full surface is infeasible, use the returned exact panel bounds with the same surface target and inspect the complete preview; use deliberate panels/collage treatment and never claim seamless panorama continuity. Do not manually calculate inch×DPI overrides. Use the project ID for project-page; composition targets require the active variantId."),
             AIFunctionFactory.Create(
-                method: (Guid compositionId) =>
-                    GetOrCreateCompositionVariantAsync(context, compositionId),
-                name: "get_or_create_page_composition_variant",
+                method: (Guid pageId) =>
+                    GetOrCreateDesignedPageVariantAsync(context, pageId),
+                name: "get_or_create_designed_page_variant",
                 description: "Get or create the exact layout variant for the selected Editor target. Core uses project authoring geometry; release mode uses that release's geometry."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) =>
                     PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
-                name: "patch_page_composition_element",
+                name: "patch_designed_page_element",
                 description: "Revision-check patch one stable object, layer, or style without resending or replacing the scene. Page guides are computed overlays. Send only changed fields; use one-use staging only for large structural edits."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid targetId, bool retainAspectRatio = true) =>
                     FillPageImageCanvasAsync(context, variantId, expectedRevision, targetId, retainAspectRatio),
                 name: "fill_page_image_canvas",
-                description: "Make one Designed Page image cover the complete canvas. With retainAspectRatio=true, this uses proportional crop-to-fill (Cover) so no edge bands remain; false stretches the raster. Use read_page_composition afterward and verify imageCoversCanvas."),
+                description: "Make one Designed Page image cover the complete canvas. With retainAspectRatio=true, this uses proportional crop-to-fill (Cover) so no edge bands remain; false stretches the raster. Use read_designed_page afterward and verify imageCoversCanvas."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) =>
                     PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
@@ -479,31 +479,31 @@ IActService acts,
                 description: "Add a new image object to a Designed Page using an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. Bounds default to the safe full surface."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) =>
-                    StageCompositionVariantAsync(context, variantId, expectedRevision, scene),
-                name: "stage_page_composition",
-                description: "Validate and persist one complete composition scene once. Returns only an opaque one-use stageId and compact diagnostics; it never echoes the submitted scene."),
+                    StageDesignedPageVariantAsync(context, variantId, expectedRevision, scene),
+                name: "stage_designed_page_variant",
+                description: "Validate and persist one complete Designed Page scene once. Returns only an opaque one-use stageId and compact diagnostics; it never echoes the submitted scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) =>
-                    ApplyCompositionStageAsync(context, stageId, expectedRevision),
-                name: "apply_page_composition_stage",
-                description: "Apply an already validated page-composition stage using only its one-use stageId and expected revision. Never repeat the scene payload."),
+                    ApplyDesignedPageVariantStageAsync(context, stageId, expectedRevision),
+                name: "apply_designed_page_variant_stage",
+                description: "Apply an already validated Designed Page variant stage using only its one-use stageId and expected revision. Never repeat the scene payload."),
             AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) =>
-                    StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
-                name: "stage_page_composition_semantic",
+                method: (Guid pageId, long expectedRevision, ManuscriptOperationInput[] operations) =>
+                    StageDesignedPageSemanticAsync(context, pageId, expectedRevision, operations),
+                name: "stage_designed_page_semantic",
                 description: "Stage focused operations against the Designed Page's sole semantic manuscript without echoing its content. " + ManuscriptOperationInput.ToolOperationGuidance + " Returns a one-use stage ID."),
             AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedRevision) => ApplyCompositionSemanticStageAsync(context, stageId, expectedRevision),
-                name: "apply_page_composition_semantic_stage",
-                description: "Apply a staged semantic-manuscript edit using only its one-use stage ID and expected composition revision."),
+                method: (Guid stageId, long expectedRevision) => ApplyDesignedPageSemanticStageAsync(context, stageId, expectedRevision),
+                name: "apply_designed_page_semantic_stage",
+                description: "Apply a staged semantic-manuscript edit using only its one-use stage ID and expected content revision."),
             AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene) => StageCompositionWorkspaceAsync(context, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene),
-                name: "stage_page_composition_workspace",
+                method: (Guid contentId, long expectedContentRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene) => StageDesignedPageWorkspaceAsync(context, contentId, expectedContentRevision, variantId, expectedVariantRevision, semanticOperations, scene),
+                name: "stage_designed_page_workspace",
                 description: "Atomically stage coupled Designed Page content and layout changes. Semantic content accepts paragraph, heading, sceneBreak, blockQuote, or listItem blocks only; scene images represent Figures. Submit the scene and semantic operations once; the result does not echo them."),
             AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedCompositionRevision) => ApplyCompositionWorkspaceStageAsync(context, stageId, expectedCompositionRevision),
-                name: "apply_page_composition_workspace_stage",
-                description: "Apply a coupled content-and-layout stage by one-use stage ID and exact composition revision; the staged variant revision is checked automatically."),
+                method: (Guid stageId, long expectedContentRevision) => ApplyDesignedPageWorkspaceStageAsync(context, stageId, expectedContentRevision),
+                name: "apply_designed_page_workspace_stage",
+                description: "Apply a coupled content-and-layout stage by one-use stage ID and exact content revision; the staged variant revision is checked automatically."),
         ]);
 
         tools.Add(AIFunctionFactory.Create(
@@ -772,7 +772,7 @@ IActService acts,
 
     private async Task<string> PreviewPageCanvasAsync(
         EditorChatContext ctx,
-        Guid compositionId,
+        Guid pageId,
         Guid variantId,
         string mode)
     {
@@ -794,21 +794,21 @@ IActService acts,
 
         try
         {
-            var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
-                ?? throw new KeyNotFoundException("Page composition was not found.");
+            var content = (await compositions.GetAsync(ctx.ProjectId, pageId, ctx.ContentTarget, ctx.TurnCancellationToken))?.Content
+                ?? throw new KeyNotFoundException("Designed Page was not found.");
             CompositionCanvasPreviewResult preview;
-            if (ctx.ContentTarget.EditionId is Guid editionId && composition.EditionId is null)
+            if (ctx.ContentTarget.EditionId is Guid editionId && content.EditionId is null)
             {
-                await EnsureCompositionReadableAsync(ctx, composition);
+                await EnsureDesignedPageReadableAsync(ctx, content);
                 var sourceVariant = await compositions.ReadVariantAsync(
                     ctx.ProjectId,
                     variantId,
                     ctx.TurnCancellationToken);
-                if (sourceVariant.CompositionId != compositionId)
+                if (sourceVariant.Content.DesignedPageId != pageId)
                     throw new InvalidOperationException("The selected layout does not belong to this Designed Page.");
                 var effectiveVariant = await compositions.PreviewEditionVariantAsync(
                     ctx.ProjectId,
-                    compositionId,
+                    content.Id,
                     editionId,
                     ctx.TurnCancellationToken);
                 var scene = JsonSerializer.Deserialize<CompositionScene>(
@@ -816,13 +816,13 @@ IActService acts,
                     ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidDataException("The composition scene is empty.");
                 var semantic = ManuscriptCodec.Deserialize(
-                    composition.SemanticManuscriptJson,
-                    composition.Id,
-                    composition.Revision);
+                    content.SemanticManuscriptJson,
+                    content.Id,
+                    content.Revision);
                 preview = await canvasPreviews.RenderSceneAsync(
                     ctx.ProjectId,
-                    compositionId,
-                    composition.Revision,
+                    content.Id,
+                    content.Revision,
                     scene,
                     semantic,
                     previewMode.Value,
@@ -833,13 +833,13 @@ IActService acts,
                 await RequireVariantTargetAsync(ctx, variantId);
                 preview = await canvasPreviews.RenderAsync(
                     ctx.ProjectId,
-                    compositionId,
+                    content.Id,
                     variantId,
                     previewMode.Value,
                     ctx.TurnCancellationToken);
             }
             var visualId = Guid.NewGuid();
-            var fileName = $"composition-{compositionId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
+            var fileName = $"designed-page-{pageId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
             var contentUrl = $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content";
             ctx.AddVisual(new EditorChatVisualAttachment(
                 visualId,
@@ -852,8 +852,8 @@ IActService acts,
                 preview.PixelWidth,
                 preview.PixelHeight,
                 ctx.CurrentToolCallId,
-                SourceKind: "compositionCanvasPreview",
-                SourceRefId: compositionId,
+                SourceKind: "designedPageCanvasPreview",
+                SourceRefId: pageId,
                 ContentType: "image/png",
                 FileName: fileName,
                 Data: preview.Data));
@@ -864,11 +864,11 @@ IActService acts,
             return JsonSerializer.Serialize(new
             {
                 ok = true,
-                targetId = compositionId,
+                targetId = pageId,
                 currentRevision = preview.VariantRevision,
-                compositionId,
+                pageId,
                 variantId,
-                compositionRevision = preview.CompositionRevision,
+                contentRevision = preview.CompositionRevision,
                 variantRevision = preview.VariantRevision,
                 mode = preview.Mode.ToString().ToLowerInvariant(),
                 surface = new
@@ -901,9 +901,9 @@ IActService acts,
             {
                 ok = false,
                 code = "CANVAS_PREVIEW_FAILED",
-                targetId = compositionId,
+                targetId = pageId,
                 summary = exception.Message,
-                recovery = "Read the composition and exact authoring variant, correct missing image or font data, then retry the canvas preview.",
+                recovery = "Read the Designed Page and exact authoring variant, correct missing image or font data, then retry the canvas preview.",
             }, ManuscriptCodec.JsonOptions);
         }
     }
@@ -1921,7 +1921,7 @@ IActService acts,
             blockId = block.Id,
             type = block.Type.ToString(),
             imageId = block.ImageId,
-            compositionId = block.PageCompositionId,
+            designedPageId = block.DesignedPageId,
             caption = block.Type == ManuscriptBlockType.Figure
                 ? string.Concat(block.Content.Select(inline => inline.Text))
                 : null,
@@ -1943,15 +1943,15 @@ IActService acts,
         }, ManuscriptCodec.JsonOptions);
     }
 
-    private async Task<string> ReadPageCompositionAsync(EditorChatContext ctx, Guid compositionId, Guid variantId, int semanticStart, int semanticCount, int objectStart, int objectCount, int structureStart, int structureCount)
+    private async Task<string> ReadDesignedPageAsync(EditorChatContext ctx, Guid pageId, Guid variantId, int semanticStart, int semanticCount, int objectStart, int objectCount, int structureStart, int structureCount)
     {
-        var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
-            ?? throw new KeyNotFoundException("Page composition was not found.");
-        await EnsureCompositionReadableAsync(ctx, composition);
+        var content = (await compositions.GetAsync(ctx.ProjectId, pageId, ctx.ContentTarget, ctx.TurnCancellationToken))?.Content
+            ?? throw new KeyNotFoundException("Designed Page was not found.");
+        await EnsureDesignedPageReadableAsync(ctx, content);
         try
         {
             return await CompositionAgentPayloads.ReadVariantAsync(
-                compositions, ctx.ProjectId, compositionId, variantId,
+                compositions, ctx.ProjectId, content.Id, variantId,
                 semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount, ctx.TurnCancellationToken);
         }
         catch (Exception exception) when (exception is InvalidDataException or KeyNotFoundException)
@@ -2075,13 +2075,13 @@ IActService acts,
             return JsonSerializer.Serialize(new
             {
                 ok = true,
-                targetId = result.Composition.Id,
+                targetId = result.Page.Id,
                 revision = result.Manuscript.Revision,
-                changedIds = new[] { result.BlockId },
+                changedIds = new[] { result.PlacementId },
                 variantId = result.Variant?.Id,
                 layoutMode,
                 summary = "Designed Page inserted.",
-                mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id },
+                mutation = new { kind = "designedPage", id = result.Page.Id, contentId = result.Content.Id, placementId = result.PlacementId, selectId = result.Variant?.Id },
             });
         }
         catch (ManuscriptRevisionConflictException ex)
@@ -2172,7 +2172,7 @@ IActService acts,
         try
         {
             var variant = await compositions.ReadVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
-            EnsureCompositionTarget(ctx, variant.Composition);
+            EnsureDesignedPageTarget(ctx, variant.Content);
             var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The composition scene is empty.");
             var item = scene.Objects.FirstOrDefault(candidate => candidate.Id == targetId)
@@ -2249,11 +2249,11 @@ IActService acts,
             var placed = await compositions.AddImageObjectAsync(
                 ctx.ContentTarget, ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "designedPage", id = placed.Variant.Content.DesignedPageId, contentId = placed.Variant.ContentId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException or DbUpdateConcurrencyException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or DesignedPageRevisionConflictException or DbUpdateConcurrencyException)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is CompositionRevisionConflictException or DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact page composition and retry with the same project-image ID." });
+            return JsonSerializer.Serialize(new { ok = false, code = ex is DesignedPageRevisionConflictException or DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact Designed Page and retry with the same project-image ID." });
         }
     }
 
@@ -2333,46 +2333,45 @@ IActService acts,
         }
     }
 
-    private async Task<string> GetOrCreateCompositionVariantAsync(EditorChatContext ctx, Guid compositionId)
+    private async Task<string> GetOrCreateDesignedPageVariantAsync(EditorChatContext ctx, Guid pageId)
     {
         try
         {
-            var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
-                ?? throw new KeyNotFoundException("Page composition was not found.");
-            if (ctx.ContentTarget.EditionId is not null && composition.EditionId is null)
+            var content = (await compositions.GetAsync(ctx.ProjectId, pageId, ctx.ContentTarget, ctx.TurnCancellationToken))?.Content
+                ?? throw new KeyNotFoundException("Designed Page content was not found.");
+            if (ctx.ContentTarget.EditionId is not null && content.EditionId is null)
             {
-                compositionId = await manuscripts.EnsureEditionCompositionAsync(
-                    ctx.ContentTarget,
-                    composition.ChapterId ?? throw new InvalidOperationException("The selected Designed Page is owned by a publication section."),
-                    composition.Id,
+                var overrideView = await compositions.EnsureReleaseOverrideAsync(
+                    ctx.ProjectId,
+                    content.DesignedPageId,
+                    ctx.ContentTarget.EditionId.Value,
                     ctx.TurnCancellationToken);
-                composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
-                    ?? throw new KeyNotFoundException("The release Designed Page could not be loaded.");
+                content = overrideView.Content;
             }
-            EnsureCompositionTarget(ctx, composition);
+            EnsureDesignedPageTarget(ctx, content);
             var variant = ctx.ContentTarget.EditionId is Guid editionId
-                ? await compositions.GetOrCreateVariantAsync(ctx.ProjectId, compositionId, editionId, ctx.TurnCancellationToken)
-                : await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId, ctx.TurnCancellationToken);
+                ? await compositions.GetOrCreateVariantAsync(ctx.ProjectId, content.Id, editionId, ctx.TurnCancellationToken)
+                : await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, content.Id, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "The selected Editor target layout is ready.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, pageId = content.DesignedPageId, contentId = content.Id, revision = variant.Revision, summary = "The selected Editor target layout is ready.", changedIds = new[] { variant.Id }, mutation = new { kind = "designedPage", pageId = content.DesignedPageId, contentId = content.Id, selectId = variant.Id } });
         }
         catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message });
+            return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId = pageId, summary = ex.Message });
         }
     }
 
-    private async Task<string> StageCompositionVariantAsync(EditorChatContext ctx, Guid variantId, long expectedRevision, CompositionScene scene)
+    private async Task<string> StageDesignedPageVariantAsync(EditorChatContext ctx, Guid variantId, long expectedRevision, CompositionScene scene)
     {
         try
         {
             await RequireVariantTargetAsync(ctx, variantId);
             var stage = await compositions.StageVariantAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, summary = $"Validated {scene.Objects.Count} composition object(s).", stageId = stage.Id, expiresAt = stage.ExpiresAt, diagnosticCounts = new { errors = 0, warnings = 0 } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, summary = $"Validated {scene.Objects.Count} Designed Page object(s).", stageId = stage.Id, expiresAt = stage.ExpiresAt, diagnosticCounts = new { errors = 0, warnings = 0 } });
         }
-        catch (CompositionRevisionConflictException ex)
+        catch (DesignedPageRevisionConflictException ex)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = variantId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the composition, preserve unrelated objects, then stage a new scene once." });
+            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = variantId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the Designed Page, preserve unrelated objects, then stage a new scene once." });
         }
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or KeyNotFoundException)
         {
@@ -2380,80 +2379,79 @@ IActService acts,
         }
     }
 
-    private async Task<string> ApplyCompositionStageAsync(EditorChatContext ctx, Guid stageId, long expectedRevision)
+    private async Task<string> ApplyDesignedPageVariantStageAsync(EditorChatContext ctx, Guid stageId, long expectedRevision)
     {
         try
         {
             var variant = await compositions.ApplyStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Staged Designed Page variant applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "designedPage", pageId = variant.Content.DesignedPageId, contentId = variant.ContentId, variantId = variant.Id } });
         }
-        catch (CompositionRevisionConflictException ex)
+        catch (DesignedPageRevisionConflictException ex)
         {
             return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and stage a new scene; stages are not rebased." });
         }
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or KeyNotFoundException or DbUpdateConcurrencyException)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "STAGE_REJECTED", targetId = stageId, summary = ex.Message, recovery = ex is DbUpdateConcurrencyException ? "Reread the composition and submit a new non-replayed stage." : null });
+            return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "STAGE_REJECTED", targetId = stageId, summary = ex.Message, recovery = ex is DbUpdateConcurrencyException ? "Reread the Designed Page and submit a new non-replayed stage." : null });
         }
     }
 
-    private async Task<string> StageCompositionSemanticAsync(EditorChatContext ctx, Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations)
+    private async Task<string> StageDesignedPageSemanticAsync(EditorChatContext ctx, Guid pageId, long expectedRevision, ManuscriptOperationInput[] operations)
     {
-        try { var composition = await compositions.GetAsync(ctx.ProjectId, compositionId) ?? throw new KeyNotFoundException("Page composition was not found."); EnsureCompositionTarget(ctx, composition); var stage = await compositions.StageSemanticOperationsAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition and submit a replacement stage." }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
+        try { var content = (await compositions.GetAsync(ctx.ProjectId, pageId, ctx.ContentTarget, ctx.TurnCancellationToken))?.Content ?? throw new KeyNotFoundException("Designed Page was not found."); EnsureDesignedPageTarget(ctx, content); var stage = await compositions.StageSemanticOperationsAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, content.Id, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = content.DesignedPageId, contentId = content.Id, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }); }
+        catch (DesignedPageRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = pageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded Designed Page and submit a replacement stage." }); }
+        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = pageId, summary = ex.Message }); }
     }
 
-    private async Task<string> ApplyCompositionSemanticStageAsync(EditorChatContext ctx, Guid stageId, long expectedRevision)
+    private async Task<string> ApplyDesignedPageSemanticStageAsync(EditorChatContext ctx, Guid stageId, long expectedRevision)
     {
-        try { var result = await compositions.ApplySemanticStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }); }
+        try { var result = await compositions.ApplySemanticStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Content.DesignedPageId, contentId = result.Content.Id, revision = result.Content.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "designedPage", pageId = result.Content.DesignedPageId, contentId = result.Content.Id } }); }
+        catch (DesignedPageRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
 
-    private async Task<string> StageCompositionWorkspaceAsync(EditorChatContext ctx, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
+    private async Task<string> StageDesignedPageWorkspaceAsync(EditorChatContext ctx, Guid contentId, long expectedContentRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
     {
-        try { await RequireVariantTargetAsync(ctx, variantId); var stage = await compositions.StageWorkspaceAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
+        try { await RequireVariantTargetAsync(ctx, variantId); var stage = await compositions.StageWorkspaceAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, contentId, expectedContentRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = contentId, revision = expectedContentRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }); }
+        catch (DesignedPageRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = contentId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }); }
+        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = contentId, summary = ex.Message }); }
     }
 
-    private async Task<string> ApplyCompositionWorkspaceStageAsync(EditorChatContext ctx, Guid stageId, long expectedCompositionRevision)
+    private async Task<string> ApplyDesignedPageWorkspaceStageAsync(EditorChatContext ctx, Guid stageId, long expectedContentRevision)
     {
-        try { var result = await compositions.ApplyWorkspaceStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }); }
+        try { var result = await compositions.ApplyWorkspaceStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedContentRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Content.DesignedPageId, contentId = result.Content.Id, revision = result.Content.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "designedPage", pageId = result.Content.DesignedPageId, contentId = result.Content.Id, selectId = result.Variant.Id } }); }
+        catch (DesignedPageRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
 
     private async Task RequireVariantTargetAsync(EditorChatContext context, Guid variantId)
     {
         var variant = await compositions.ReadVariantAsync(context.ProjectId, variantId, context.TurnCancellationToken);
-        EnsureCompositionTarget(context, variant.Composition);
+        EnsureDesignedPageTarget(context, variant.Content);
     }
 
-    private static void EnsureCompositionTarget(EditorChatContext context, PageComposition composition)
+    private static void EnsureDesignedPageTarget(EditorChatContext context, DesignedPageContent content)
     {
-        if (composition.EditionId != context.ContentTarget.EditionId)
-            throw new InvalidOperationException("The page composition belongs to a different Editor content target.");
+        if (content.EditionId != context.ContentTarget.EditionId)
+            throw new InvalidOperationException("The Designed Page belongs to a different Editor content target.");
     }
 
-    private async Task EnsureCompositionReadableAsync(EditorChatContext context, PageComposition composition)
+    private async Task EnsureDesignedPageReadableAsync(EditorChatContext context, DesignedPageContent content)
     {
-        if (composition.EditionId == context.ContentTarget.EditionId)
+        if (content.EditionId == context.ContentTarget.EditionId)
             return;
         if (context.ContentTarget.EditionId is not null
-            && composition.EditionId is null
-            && context.CurrentChapterId == composition.ChapterId)
+            && content.EditionId is null)
         {
             var effective = await manuscripts.GetManuscriptAsync(
                 context.ContentTarget,
-                composition.ChapterId ?? throw new InvalidOperationException("The selected Designed Page is owned by a publication section."),
+                context.CurrentChapterId ?? throw new InvalidOperationException("Reading an inherited Designed Page requires an active chapter."),
                 context.TurnCancellationToken);
-            if (effective?.Document.Content.Any(block => block.PageCompositionId == composition.Id) == true)
+            if (effective?.Document.Content.Any(block => block.DesignedPageId == content.DesignedPageId) == true)
                 return;
         }
-        throw new InvalidOperationException("The page composition belongs to a different Editor content target.");
+        throw new InvalidOperationException("The Designed Page belongs to a different Editor content target.");
     }
 
     private async Task<string> GenerateProjectImageAsync(

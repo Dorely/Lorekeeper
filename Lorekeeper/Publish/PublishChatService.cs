@@ -7,6 +7,7 @@ using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -34,7 +35,7 @@ public interface IPublishChatService
 }
 
 public sealed class PublishChatService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providers, IChatClientFactory clients, IContextBuilder contextBuilder, IPublishAssistantTools tools, IPublicationActorContext actorContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<PublishChatService> logger, IEntityVisualContextService? entityVisualContext = null, ICompositionService? compositions = null) : IPublishChatService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providers, IChatClientFactory clients, IContextBuilder contextBuilder, IPublishAssistantTools tools, IPublicationActorContext actorContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<PublishChatService> logger, IEntityVisualContextService? entityVisualContext = null, IDesignedPageService? compositions = null) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
@@ -115,7 +116,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         "get_or_create_publication_section_page_variant",
         "fill_publication_section_page_image_canvas",
         "place_project_image_in_publication_section_page_frame",
-        "apply_publication_section_page_composition_stage",
+        "apply_publication_section_designed_page_stage",
         "apply_publication_section_page_semantic_stage",
         "apply_publication_section_page_workspace_stage",
         "create_publication_release",
@@ -274,22 +275,23 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             details.Add($"Publication section ID: {sectionId:D}.");
         if (!string.IsNullOrWhiteSpace(workspaceContext.SectionTitle))
             details.Add($"Publication section title: {workspaceContext.SectionTitle}.");
-        if (workspaceContext.CompositionId is Guid compositionId)
+        if (workspaceContext.PageId is Guid pageId)
         {
-            details.Add($"Visible page composition ID: {compositionId:D}.");
-            var composition = compositions is null
+            details.Add($"Visible Designed Page ID: {pageId:D}.");
+            if (!string.IsNullOrWhiteSpace(workspaceContext.PlacementBlockId))
+                details.Add($"Visible placement block ID: {workspaceContext.PlacementBlockId}.");
+            var page = compositions is null
                 ? null
-                : await compositions.GetAsync(projectId, compositionId, cancellationToken);
-            if (composition is not null)
+                : await compositions.GetAsync(projectId, pageId, selectedEditionId is Guid editionId ? EditorContentTarget.ForEdition(editionId) : EditorContentTarget.Core, cancellationToken);
+            if (page is not null)
             {
-                details.Add($"Composition revision: {composition.Revision}.");
+                var content = page.Content;
+                details.Add($"Designed Page content ID: {content.Id:D}; revision: {content.Revision}.");
                 var visibleVariant = workspaceContext.VariantId is Guid visibleVariantId
-                    ? composition.Variants.FirstOrDefault(item => item.Id == visibleVariantId)
-                    : selectedEditionId is Guid editionId && composition.EditionId == editionId
-                        ? (await compositions!.ListVariantsAsync(projectId, compositionId, editionId, cancellationToken)).FirstOrDefault()
-                        : composition.ActiveAuthoringVariantId is Guid activeId
-                            ? composition.Variants.FirstOrDefault(item => item.Id == activeId)
-                            : composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+                    ? content.Variants.FirstOrDefault(item => item.Id == visibleVariantId)
+                    : content.ActiveVariantId is Guid activeId
+                        ? content.Variants.FirstOrDefault(item => item.Id == activeId)
+                        : content.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
                 if (visibleVariant is not null)
                 {
                     details.Add($"Visible geometry variant ID: {visibleVariant.Id:D}.");
@@ -750,15 +752,16 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 null,
                 toolName == "remove_publication_section" ? null : ReadGuid(resultJson, "sectionId") ?? ReadGuid(resultJson, "targetId"),
                 toolName == "create_publication_section_designed_page"
-                    ? ReadGuid(resultJson, "compositionId") ?? ReadGuid(resultJson, "targetId")
-                    : null);
+                    ? ReadGuid(resultJson, "pageId") ?? ReadGuid(resultJson, "targetId")
+                    : null,
+                toolName == "create_publication_section_designed_page" ? ReadString(resultJson, "placementBlockId") : null);
         }
         if (toolName is "patch_publication_section_page_element"
             or "get_or_create_publication_section_page_variant"
             or "fill_publication_section_page_image_canvas"
             or "place_project_image_in_publication_section_page_frame"
             or "add_project_image_to_publication_section_page"
-            or "apply_publication_section_page_composition_stage"
+            or "apply_publication_section_designed_page_stage"
             or "apply_publication_section_page_semantic_stage"
             or "apply_publication_section_page_workspace_stage")
         {
@@ -769,7 +772,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 PublishWorkspaceMutationKind.Edition,
                 ReadGuid(resultJson, "selectId") ?? ReadGuid(argumentsJson, "targetId"),
                 ReadGuid(resultJson, "sectionId"),
-                ReadGuid(resultJson, "compositionId") ?? ReadGuid(argumentsJson, "compositionId"),
+                ReadGuid(resultJson, "pageId") ?? ReadGuid(argumentsJson, "pageId"),
+                ReadString(resultJson, "placementBlockId") ?? ReadString(argumentsJson, "placementBlockId"),
                 ReadGuid(resultJson, "variantId")
                     ?? (toolName == "get_or_create_publication_section_page_variant"
                         ? ReadGuid(resultJson, "targetId")
@@ -850,6 +854,24 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 {
                     return value;
                 }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return null;
+    }
+
+    private static string? ReadString(string json, string name)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String)
+                    return property.Value.GetString();
             }
         }
         catch (JsonException)

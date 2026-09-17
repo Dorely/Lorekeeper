@@ -14,6 +14,7 @@ public static class ProjectSearchSourceTypes
     public const string Act = Context.ContextVectorSourceTypes.Act;
     public const string IngestSource = Context.ContextVectorSourceTypes.IngestSource;
     public const string IngestSourceChunk = Context.ContextVectorSourceTypes.IngestSourceChunk;
+    public const string DesignedPage = "designed_page";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -27,6 +28,7 @@ public static class ProjectSearchSourceTypes
         Act,
         IngestSource,
         IngestSourceChunk,
+        DesignedPage,
     };
 
     public static readonly IReadOnlySet<string> DirectReferenceNarrativeTypes =
@@ -61,6 +63,7 @@ public static class ProjectSearchSourceTypes
             "rawsource" or "raw_source" or "raw_ingest_source" or "ingest_source" => RawIngestSource,
             "project_profile" or "context_project_profile" or "project profile" or "profile" => ProjectProfile,
             "writing_sample" or "context_writing_sample" or "writing sample" or "writingsample" => WritingSample,
+            "designed_page" or "designed page" or "designedpage" or "page" or "pages" => DesignedPage,
             _ => value,
         };
     }

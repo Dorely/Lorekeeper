@@ -18,7 +18,7 @@ schema/data upgrades.
 
 ## Scope and ownership
 
-This chapter owns the current manuscript v4 document contract, target-aware
+This chapter owns the current manuscript v5 document contract, target-aware
 chapter content, semantic editing operations, the ProseMirror adapter boundary,
 Book Text Styles and direct paragraph presentation, review annotations, and
 in-process manual authoring history. It also owns the manuscript-facing side of Figure
@@ -34,12 +34,12 @@ return.
 
 ## Current architecture and invariants
 
-### Manuscript v4 is the current contract
+### Manuscript v5 is the current contract
 
-Each Core or release-owned chapter persists one format-neutral manuscript v4
+Each Core or release-owned chapter persists one format-neutral manuscript v5
 JSON document plus a monotonic revision. `ManuscriptDocument.CurrentSchemaVersion`
-is `4`, and [`docs/schemas/manuscript-v4.schema.json`](../schemas/manuscript-v4.schema.json)
-is the current interchange schema. The v1, v2, and v3 schemas and identifiers
+is `5`, and [`docs/schemas/manuscript-v5.schema.json`](../schemas/manuscript-v5.schema.json)
+is the current interchange schema. The v1 through v4 schemas and identifiers
 remain only as immutable migration history and isolated versioned import inputs;
 they are not current runtime compatibility paths.
 
@@ -56,7 +56,7 @@ with exact ordinal matches taking priority and ambiguous normalized matches
 failing closed. Mutation responses return the exact stored spelling. Unknown
 custom semantic roles fail validation rather than being guessed.
 
-`ManuscriptSchemaUpgrade` performs strict, lossless older-to-v4 upgrades for
+`ManuscriptSchemaUpgrade` performs strict, lossless older-to-v5 upgrades for
 live and nested historical payloads. Startup migration, import adapters, and
 historical audit readers call that explicit boundary; normal runtime services
 accept only current documents. Malformed current documents or non-result audit
@@ -68,9 +68,9 @@ editing route.
 ### Model-facing manuscript projection
 
 `AgentManuscriptProjection` is the single model-facing manuscript serializer.
-It emits `agent-manuscript-v1` without changing canonical manuscript v4
+It emits `agent-manuscript-v2` without changing canonical manuscript v5
 persistence, import/export, audit rows, or stable-ID mutation contracts. The
-projection repeats identity, v4 schema version, revision, plain-text source
+projection repeats identity, v5 schema version, revision, plain-text source
 hash, source state, completeness, and pagination. Each included block appears
 exactly once as `[absoluteIndex, stableBlockId, exactText]`; absolute indexes
 remain document-relative for bounded and filtered reads but are compact
@@ -79,11 +79,15 @@ cross-references, never mutation identities.
 Sparse overlays carry only applicable meaning: structure rows, overlapping
 UTF-16 mark ranges and optional values, first-use deterministic interned
 paragraph formats and block references, complete Figure asset/accessibility/
-presentation data, Designed Page composition references, and bound publication
+presentation data, Designed Page references, and bound publication
 fields. Null and empty overlays are omitted while meaningful `false` and `0`
 values remain explicit. Inline-node segmentation may normalize away when it
 does not change text or mark ranges. Direct paragraph formatting overrides a
 named Book Text Style, which overrides built-in defaults.
+
+The Designed Page overlay emits each occurrence as
+`[absoluteIndex, placementBlockId, designedPageId]`. The placement block ID is
+the occurrence identity; the page ID identifies reusable shared content.
 
 The active Editor/revision-worker chapter context, manuscript read and inspect
 tools, Publish section reads, and Contest candidate source all use this shared
@@ -108,8 +112,8 @@ relative width, alignment, spacing, contain/cover fit, crop position, bleed,
 page-break intent, and caption placement. The manuscript stores a reference and
 intent, not copied image bytes or a release-specific placement row.
 
-Designed Page blocks contain stable references to project-owned compositions.
-The composition owns its semantic fragment exactly once, and
+Designed Page blocks contain stable references to project-owned pages. The
+page's effective Core or release content owns its semantic fragment exactly once, and
 `ChapterSemanticProjectionService` expands that fragment into chapter reading
 order for plain text, context, search, and publication without duplicating
 storage. Range resolution validates UTF-16 boundaries, surrogate pairs,
@@ -119,7 +123,7 @@ and object editing remain under [composition-media.md](composition-media.md).
 There is no chapter-level visual classification. A chapter can freely mix
 semantic prose, Figures, and Designed Pages. Legacy Picture Page/layout records
 are interpreted only by guarded migration/import DTOs. New code must reason from
-the v4 block sequence.
+the v5 block sequence.
 
 ### Core and release authoring targets
 
@@ -132,11 +136,13 @@ switch during an operation.
 Core owns the canonical chapter. Release content is copy-on-write: an untouched
 release chapter reads Core live, while its first manuscript or layout mutation
 snapshots the complete current document, records the Core base revision/hash,
-and clones referenced Designed Page compositions while preserving stable scene
-relationships. Later Core edits do not rewrite that release snapshot. Reset
-deletes only the release chapter snapshot and edition-owned compositions,
-returning the chapter to live Core inheritance. Shared images and Book Text
-Styles survive reset, discard, and release deletion.
+and creates complete release content-and-layout overrides for referenced Designed
+Pages while preserving stable page and scene relationships. Later Core edits do
+not rewrite those release snapshots. Reset deletes only the release chapter
+snapshot and its page overrides, returning the chapter and shared pages to live
+Core inheritance. Release-only pages are separate project records scoped to the
+release. Shared images and Book Text Styles survive reset, discard, and release
+deletion.
 
 `IChapterService` owns outline-level chapter lifecycle while `ChapterService`
 implements the target-aware manuscript boundary. Replacing or applying a
@@ -408,10 +414,11 @@ asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
-### Accepted M2-M5 implementation contract
+### Current M2 and accepted M3-M5 implementation contract
 
-This is accepted implementation guidance, not a claim that these next-version
-contracts are already live. `AuthoringBatchProtocolV1` and
+The reusable Designed Page identity and placement contract above is current.
+The remaining guidance in this section describes accepted next-version work and
+does not claim M3-M5 are already live. `AuthoringBatchProtocolV1` and
 `AuthoringJournalV1` are the sole manual-edit transport and recovery contracts.
 A batch has an ordered target set, expected version/generation per target,
 session, batch identity/sequence, action label, operations, and selections.
@@ -455,15 +462,17 @@ table row groups and footnote content produce named Press diagnostics.
 
 The original structured-manuscript migration uses a protected SQLite backup,
 cross-process lease, journal, transactional live/history conversion, normalized
-text-hash comparison, and recovery-shell fallback. Later v3 composition and v4
-authoring-page cutovers preserve semantic IDs/text, Figures, live pending
-manuscript state, Picture Page geometry, compositions, artifacts, and hashes while
+text-hash comparison, and recovery-shell fallback. Later v3 composition, v4
+authoring-page, and v5 independent Designed Page cutovers preserve semantic
+IDs/text, Figures, live pending manuscript state, Picture Page geometry, page
+content/layout, artifacts, and hashes while
 removing obsolete runtime fields through forward migrations. Historical
-migration names and source version numbers remain accurate even though v4 is
+migration names and source version numbers remain accurate even though v5 is
 current.
 
-Project export v30 writes v4 manuscripts, Core/release annotation rows, page
-setup and compositions, style definitions, release snapshots, and current
+Project export v31 is the final JSON writer. It writes v5 manuscripts,
+Core/release annotation rows, page setup and Designed Page aggregates, style
+definitions, release snapshots, and current
 publication content, including linked image-upscale provenance. Older manuscript inputs are accepted only through isolated
 versioned transformers. Search, context, TXT, Markdown, EPUB, Read preview, and
 Press all consume the semantic document or its explicit projection. A change to
@@ -484,8 +493,8 @@ mutation boundary as other persisted manuscript changes.
 
 | File or family | Architectural role |
 |---|---|
-| [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v4.schema.json`](../schemas/manuscript-v4.schema.json) | Current v4 document, block, inline, mark, Figure, presentation, and schema contract. |
-| [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v4 serialization remains in `ManuscriptCodec`. |
+| [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v5.schema.json`](../schemas/manuscript-v5.schema.json) | Current v5 document, block, inline, mark, Figure, Designed Page reference, presentation, and schema contract. |
+| [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v5 serialization remains in `ManuscriptCodec`. |
 | [`Lorekeeper/Manuscripts/ManuscriptCodec.cs`](../../Lorekeeper/Manuscripts/ManuscriptCodec.cs), [`ManuscriptOperations.cs`](../../Lorekeeper/Manuscripts/ManuscriptOperations.cs), and inspection/range helpers | Validation, normalization, hashing, stable-ID lookup, semantic operations, structural inspection, and exact UTF-16 range resolution. |
 | [`Lorekeeper/Manuscripts/IManuscriptService.cs`](../../Lorekeeper/Manuscripts/IManuscriptService.cs) and [`Lorekeeper/Chapters/`](../../Lorekeeper/Chapters/) | Sole target-aware runtime chapter-manuscript boundary plus chapter lifecycle, copy-on-write release content, projections, and side effects. |
 | [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |
@@ -495,7 +504,7 @@ mutation boundary as other persisted manuscript changes.
 | [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, authoring workspace state, and the opt-in timestamp-only local performance-trace bridge. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
 | [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and direct apply over the canonical manuscript service. |
-| [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |
+| [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v4 document and nested historical-payload upgrade logic used only by migration/import owners. |
 
 ## Related chapters
 

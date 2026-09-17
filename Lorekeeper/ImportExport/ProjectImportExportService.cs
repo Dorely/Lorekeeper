@@ -243,34 +243,43 @@ public sealed class ProjectImportExportService(
                     .Select(ProjectPublicationEdition)
                     .ToList()
                 : [],
-            PageCompositions = kind == ProjectExportKind.Full
-                ? (await db.PageCompositions
+            // v31 writes only project-owned Designed Pages. v1-v30
+            // PageComposition payloads remain read-only import adapters.
+            LegacyPageCompositions = null,
+            DesignedPages = kind == ProjectExportKind.Full
+                ? (await db.DesignedPages
                     .AsNoTracking()
-                    .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
-                    .Where(composition => composition.ProjectId == projectId && composition.DetachedAt == null)
-                    .OrderBy(composition => composition.ChapterId)
-                    .ThenBy(composition => composition.CreatedAt)
+                    .Include(page => page.Contents)
+                    .ThenInclude(content => content.Variants)
+                    .Where(page => page.ProjectId == projectId)
+                    .OrderBy(page => page.ScopeEditionId)
+                    .ThenBy(page => page.CreatedAt)
                     .ToListAsync(cancellationToken))
-                    .Select(composition => new ProjectExportPageComposition(
-                        composition.Id,
-                        composition.ChapterId,
-                        composition.Name,
-                        composition.SemanticManuscriptJson,
-                        composition.Revision,
-                        composition.Variants
-                            .OrderBy(variant => variant.GeometryKey, StringComparer.Ordinal)
-                            .Select(variant => new ProjectExportPageCompositionVariant(
-                                variant.Id,
-                                variant.GeometryKey,
-                                variant.SceneJson,
-                                variant.Revision))
-                            .ToList(),
-                        composition.ActiveAuthoringVariantId)
-                    {
-                        EditionId = composition.EditionId,
-                        SourceCompositionId = composition.SourceCompositionId,
-                        PublicationSectionId = composition.PublicationSectionId,
-                    })
+                    .Select(page => new ProjectExportDesignedPage(
+                        page.Id,
+                        page.Name,
+                        page.ScopeEditionId,
+                        page.Contents
+                            .OrderBy(content => content.EditionId)
+                            .ThenBy(content => content.Id)
+                            .Select(content => new ProjectExportDesignedPageContent(
+                                content.Id,
+                                content.DesignedPageId,
+                                content.EditionId,
+                                content.SemanticManuscriptJson,
+                                content.AccessibilityDescription,
+                                content.Revision,
+                                content.Variants
+                                    .OrderBy(variant => variant.GeometryKey, StringComparer.Ordinal)
+                                    .Select(variant => new ProjectExportDesignedPageVariant(
+                                        variant.Id,
+                                        variant.ContentId,
+                                        variant.GeometryKey,
+                                        variant.SceneJson,
+                                        variant.Revision))
+                                    .ToList(),
+                                content.ActiveVariantId))
+                            .ToList()))
                     .ToList()
                 : [],
             PublicationSections = kind == ProjectExportKind.Full
@@ -561,7 +570,7 @@ public sealed class ProjectImportExportService(
             new ProjectExportNodeRef(from.NodeType, from.Key),
             new ProjectExportNodeRef(to.NodeType, to.Key),
             edge.EdgeType,
-            new Dictionary<string, object?>(edge.Properties),
+            properties,
             edge.SortOrder,
             edge.CreatedAt,
             edge.UpdatedAt);

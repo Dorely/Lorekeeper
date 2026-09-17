@@ -170,14 +170,29 @@ public sealed class PublicationBookService(
                 item.LocalOrder,
                 item.ManuscriptJson,
             }).ToListAsync(cancellationToken);
-        var compositions = await db.PageCompositions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && item.EditionId == null && item.DetachedAt == null)
-            .OrderBy(item => item.Id).Select(item => new
+        var placedDesignedPageIds = chapters
+            .SelectMany(chapter => ManuscriptCodec.Deserialize(
+                chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision).Content)
+            .Concat(publicationSections.SelectMany(section => ManuscriptCodec.Deserialize(
+                section.ManuscriptJson, section.Id, section.Revision).Content))
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId.HasValue)
+            .Select(block => block.DesignedPageId!.Value)
+            .Distinct()
+            .ToList();
+        var compositions = await db.DesignedPageContents.AsNoTracking()
+            // Only placed Core pages participate in the Core artifact
+            // fingerprint. Unplaced pages must remain searchable without
+            // invalidating publication output.
+            .Where(item => item.ProjectId == projectId
+                && item.Page.ScopeEditionId == null
+                && item.EditionId == null
+                && placedDesignedPageIds.Contains(item.DesignedPageId))
+            .OrderBy(item => item.DesignedPageId).Select(item => new
             {
-                item.Id,
+                Id = item.DesignedPageId,
                 item.Revision,
                 item.SemanticManuscriptJson,
-                Variants = item.Variants.Where(v => v.DetachedAt == null).OrderBy(v => v.Id)
+                Variants = item.Variants.OrderBy(v => v.Id)
                     .Select(v => new { v.Id, v.Revision, v.GeometryKey, v.SceneJson })
             }).ToListAsync(cancellationToken);
         var assetRows = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId)

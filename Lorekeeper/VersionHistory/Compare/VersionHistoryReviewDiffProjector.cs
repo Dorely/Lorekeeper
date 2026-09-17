@@ -20,9 +20,7 @@ public static class VersionHistoryReviewDiffProjector
         var result = new JsonObject
         {
             ["hasManuscriptChanges"] = chapter.HasManuscriptChanges,
-            ["hasVisualChanges"] = chapter.HasVisualChanges,
             ["sections"] = new JsonArray(),
-            ["compositions"] = new JsonArray(),
         };
 
         var before = ToDocument(chapter.Before, chapter.ChapterId);
@@ -36,35 +34,35 @@ public static class VersionHistoryReviewDiffProjector
             result["sections"] = ProjectSections(manuscriptDiff);
         }
 
-        var compositions = (JsonArray)result["compositions"]!;
-        foreach (var composition in chapter.CompositionChanges)
-            compositions.Add(ProjectComposition(composition));
-
         return result;
     }
 
-    public static JsonObject ProjectComposition(ProjectVersionReviewComposition composition)
+    public static JsonObject ProjectDesignedPage(ProjectVersionReviewDesignedPage designedPage)
     {
-        ArgumentNullException.ThrowIfNull(composition);
+        ArgumentNullException.ThrowIfNull(designedPage);
 
-        var before = ToDocument(composition.Before, composition.CompositionId);
-        var after = ToDocument(composition.After, composition.CompositionId);
+        var before = ToDocument(designedPage.Before, designedPage.DesignedPageId);
+        var after = ToDocument(designedPage.After, designedPage.DesignedPageId);
         var result = new JsonObject
         {
-            ["compositionId"] = composition.CompositionId,
-            ["chapterId"] = composition.ChapterId,
-            ["editionId"] = composition.EditionId,
-            ["name"] = composition.After?.Name ?? composition.Before?.Name ?? "Designed Page",
-            ["hasChanges"] = composition.HasChanges,
-            ["before"] = ProjectCompositionPreview(composition.Before),
-            ["after"] = ProjectCompositionPreview(composition.After),
+            ["designedPageId"] = designedPage.DesignedPageId,
+            ["name"] = designedPage.After?.Name ?? designedPage.Before?.Name ?? "Designed Page",
+            ["hasChanges"] = designedPage.HasChanges,
+            ["placementLinks"] = new JsonArray(designedPage.PlacementLinks.Select(link => (JsonNode)new JsonObject
+            {
+                ["chapterId"] = link.ChapterId,
+                ["contentTarget"] = link.ContentTarget.StorageKey,
+                ["blockId"] = link.BlockId,
+            }).ToArray()),
+            ["before"] = ProjectDesignedPagePreview(designedPage.Before),
+            ["after"] = ProjectDesignedPagePreview(designedPage.After),
             ["sections"] = new JsonArray(),
         };
 
         if (ManuscriptReviewDiffBuilder.TryBuild(
                 before,
                 after,
-                composition.After?.Name ?? composition.Before?.Name ?? "Designed Page",
+                designedPage.After?.Name ?? designedPage.Before?.Name ?? "Designed Page",
                 out var diff))
         {
             result["sections"] = ProjectSections(diff);
@@ -131,26 +129,31 @@ public static class VersionHistoryReviewDiffProjector
         return sections;
     }
 
-    private static JsonObject? ProjectCompositionPreview(ProjectExportPageComposition? composition)
+    private static JsonObject? ProjectDesignedPagePreview(ProjectExportDesignedPage? designedPage)
     {
-        if (composition is null)
+        if (designedPage is null)
             return null;
 
         return new JsonObject
         {
-            ["id"] = composition.Id,
-            ["chapterId"] = composition.ChapterId,
-            ["editionId"] = composition.EditionId,
-            ["name"] = composition.Name,
-            ["revision"] = composition.Revision,
-            ["activeAuthoringVariantId"] = composition.ActiveAuthoringVariantId,
-            ["variantCount"] = composition.Variants.Count,
-            ["variants"] = ProjectCompositionVariants(composition.Variants),
+            ["id"] = designedPage.Id,
+            ["editionId"] = designedPage.ScopeEditionId,
+            ["name"] = designedPage.Name,
+            ["contentCount"] = designedPage.Contents.Count,
+            ["contents"] = new JsonArray(designedPage.Contents.Select(content => (JsonNode)new JsonObject
+            {
+                ["id"] = content.Id,
+                ["editionId"] = content.EditionId,
+                ["revision"] = content.Revision,
+                ["activeVariantId"] = content.ActiveVariantId,
+                ["variantCount"] = content.Variants.Count,
+                ["variants"] = ProjectDesignedPageVariants(content.Variants),
+            }).ToArray()),
         };
     }
 
-    private static JsonArray ProjectCompositionVariants(
-        IEnumerable<ProjectExportPageCompositionVariant> variants)
+    private static JsonArray ProjectDesignedPageVariants(
+        IEnumerable<ProjectExportDesignedPageVariant> variants)
     {
         var result = new JsonArray();
         foreach (var variant in variants.OrderBy(variant => variant.Id))
@@ -177,17 +180,12 @@ public static class VersionHistoryReviewDiffProjector
         return ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
     }
 
-    private static ManuscriptDocument ToDocument(ProjectExportPageComposition? composition, Guid compositionId)
+    private static ManuscriptDocument ToDocument(ProjectExportDesignedPage? designedPage, Guid designedPageId)
     {
-        if (composition is null || string.IsNullOrWhiteSpace(composition.SemanticManuscriptJson))
-        {
-            var revision = composition is null ? 0 : Math.Max(0, composition.Revision);
-            return ManuscriptCodec.CreateEmpty(composition?.Id ?? compositionId, revision);
-        }
-
-        return ManuscriptCodec.Deserialize(
-            composition.SemanticManuscriptJson,
-            composition.Id,
-            composition.Revision);
+        var content = designedPage?.Contents.FirstOrDefault(item => item.EditionId is null)
+            ?? designedPage?.Contents.FirstOrDefault();
+        return content is null || string.IsNullOrWhiteSpace(content.SemanticManuscriptJson)
+            ? ManuscriptCodec.CreateEmpty(designedPage?.Id ?? designedPageId, content is null ? 0 : Math.Max(0, content.Revision))
+            : ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision);
     }
 }

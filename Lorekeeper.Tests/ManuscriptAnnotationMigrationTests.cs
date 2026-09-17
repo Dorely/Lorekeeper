@@ -446,6 +446,7 @@ public sealed class ManuscriptAnnotationMigrationTests
                     new PublicationSectionMigrationService(
                         recovery,
                         NullLogger<PublicationSectionMigrationService>.Instance),
+                    new DesignedPageMigrationService(),
                     new PrintArtifactProfileMigrationService(
                         recovery,
                         new PrintArtifactProfileRegistry(),
@@ -453,44 +454,56 @@ public sealed class ManuscriptAnnotationMigrationTests
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
 
-                var detachedCompositionId = Guid.NewGuid();
-                var detachedVariantId = Guid.NewGuid();
-                var retainedCompositionId = Guid.NewGuid();
+                var unplacedPageId = Guid.NewGuid();
+                var unplacedVariantId = Guid.NewGuid();
+                var retainedPageId = Guid.NewGuid();
                 var retainedVariantId = Guid.NewGuid();
                 var sceneJson = JsonSerializer.Serialize(new CompositionScene(), ManuscriptCodec.JsonOptions);
-                db.PageCompositions.AddRange(
-                    new PageComposition
+                db.DesignedPages.AddRange(
+                    new DesignedPage
                     {
-                        Id = detachedCompositionId,
+                        Id = unplacedPageId,
                         ProjectId = projectId,
-                        Name = "Detached history-only page",
-                        SemanticManuscriptJson = manuscript,
-                        Revision = 1,
-                        DetachedAt = DateTime.UtcNow,
+                        Name = "Unplaced library page",
                     },
-                    new PageComposition
+                    new DesignedPage
                     {
-                        Id = retainedCompositionId,
+                        Id = retainedPageId,
                         ProjectId = projectId,
-                        Name = "Retained page with live variant",
-                        SemanticManuscriptJson = manuscript,
-                        Revision = 1,
-                        DetachedAt = DateTime.UtcNow,
+                        Name = "Retained page with authored layout",
                     });
-                db.PageCompositionVariants.AddRange(
-                    new PageCompositionVariant
+                db.DesignedPageContents.AddRange(
+                    new DesignedPageContent
                     {
-                        Id = detachedVariantId,
-                        CompositionId = detachedCompositionId,
-                        GeometryKey = "detached",
+                        Id = unplacedPageId,
+                        ProjectId = projectId,
+                        DesignedPageId = unplacedPageId,
+                        SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(unplacedPageId, 1)),
+                        ActiveVariantId = unplacedVariantId,
+                        Revision = 1,
+                    },
+                    new DesignedPageContent
+                    {
+                        Id = retainedPageId,
+                        ProjectId = projectId,
+                        DesignedPageId = retainedPageId,
+                        SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(retainedPageId, 1)),
+                        ActiveVariantId = retainedVariantId,
+                        Revision = 1,
+                    });
+                db.DesignedPageVariants.AddRange(
+                    new DesignedPageVariant
+                    {
+                        Id = unplacedVariantId,
+                        ContentId = unplacedPageId,
+                        GeometryKey = "unplaced",
                         SceneJson = sceneJson,
                         Revision = 1,
-                        DetachedAt = DateTime.UtcNow,
                     },
-                    new PageCompositionVariant
+                    new DesignedPageVariant
                     {
                         Id = retainedVariantId,
-                        CompositionId = retainedCompositionId,
+                        ContentId = retainedPageId,
                         GeometryKey = "retained",
                         SceneJson = sceneJson,
                         Revision = 1,
@@ -499,14 +512,14 @@ public sealed class ManuscriptAnnotationMigrationTests
 
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
                 db.ChangeTracker.Clear();
-                Assert.Null(await db.PageCompositionVariants.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == detachedVariantId));
-                Assert.Null(await db.PageCompositions.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == detachedCompositionId));
-                Assert.NotNull(await db.PageCompositionVariants.AsNoTracking()
+                Assert.NotNull(await db.DesignedPageVariants.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == unplacedVariantId));
+                Assert.NotNull(await db.DesignedPages.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == unplacedPageId));
+                Assert.NotNull(await db.DesignedPageVariants.AsNoTracking()
                     .SingleOrDefaultAsync(item => item.Id == retainedVariantId));
-                Assert.NotNull(await db.PageCompositions.AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.Id == retainedCompositionId));
+                Assert.NotNull(await db.DesignedPages.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == retainedPageId));
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

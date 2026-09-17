@@ -48,7 +48,8 @@ public sealed record PublicationSectionInput(
 
 public sealed record PublicationSectionDesignedPageResult(
     PublicationSectionView Section,
-    PageComposition Composition);
+    DesignedPageView Page,
+    string PlacementId);
 
 public sealed record PublicationSectionHistoryResult(
     PublicationSectionView Section,
@@ -81,7 +82,10 @@ public sealed class PublicationSectionService(
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IManuscriptStyleService manuscriptStyles,
+    IManuscriptService manuscripts,
+    IDesignedPageService designedPages,
     IAuthoringHistoryRuntime authoringHistory,
+    IAuthoringCompoundManuscriptRestoreService compoundHistoryRestores,
     IAuthoringMutationContextAccessor authoringMutationContext,
     ProjectVersionHistoryUiEvents historyEvents) : IPublicationSectionService
 {
@@ -248,6 +252,11 @@ public sealed class PublicationSectionService(
         }
 
         Apply(row, input, document);
+        await SyncPlacementReferencesAsync(
+            db,
+            row,
+            ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision),
+            cancellationToken);
         await TouchTargetAsync(target, cancellationToken);
         string? afterHistory = null;
         if (beforeHistory is not null)
@@ -382,31 +391,20 @@ public sealed class PublicationSectionService(
         var current = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
             db, currentDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
         var historyTarget = SectionHistoryTarget(target, row.Id);
-        var applied = false;
-        async Task Apply(string payload, CancellationToken ct)
-        {
-            var saved = AuthoringSnapshotCodec.ReadManuscript(payload);
-            if (saved.Compositions.Count != 0)
-                throw new InvalidDataException("A prose publication-section history snapshot cannot contain page canvases.");
-            var document = ManuscriptCodec.Deserialize(saved.ManuscriptJson) with
-            {
-                ManuscriptId = row.Id,
-                Revision = checked(row.Revision + 1)
-            };
-            ValidateSectionMode(document);
-            await ValidateDocumentAsync(target, document, ct);
-            row.Revision = document.Revision;
-            row.ManuscriptJson = ManuscriptCodec.Serialize(document);
-            row.UpdatedAt = DateTime.UtcNow;
-            await TouchTargetAsync(target, ct);
-            await db.SaveChangesAsync(ct);
-            applied = true;
-        }
         var result = redo
-            ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
-            : await authoringHistory.UndoAsync(historyTarget, current, Apply, cancellationToken);
-        if (applied)
-            historyEvents.PublishReviewStateChanged(target.ProjectId);
+            ? await authoringHistory.RedoCompoundAwareAsync(
+                historyTarget, current, compoundHistoryRestores.ApplyAsync, cancellationToken)
+            : await authoringHistory.UndoCompoundAwareAsync(
+                historyTarget, current, compoundHistoryRestores.ApplyAsync, cancellationToken);
+        foreach (var affected in result.AffectedTargets.Where(item =>
+                     item.Kind is AuthoringHistoryDocumentKind.CoreChapter or AuthoringHistoryDocumentKind.EditionChapter))
+        {
+            var affectedTarget = affected.Kind == AuthoringHistoryDocumentKind.CoreChapter
+                ? EditorContentTarget.Core
+                : EditorContentTarget.ForEdition(affected.EditionId!.Value);
+            await manuscripts.RefreshDerivedStateAsync(affectedTarget, affected.DocumentId, cancellationToken);
+        }
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
         return new PublicationSectionHistoryResult(
             await GetStoredAsync(target, row.Id, cancellationToken),
             result.State,
@@ -484,10 +482,13 @@ public sealed class PublicationSectionService(
         if (document.Content.Count > 0 && document.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage))
         {
             var currentValues = await BindingValuesAsync(target, cancellationToken);
-            var compositions = await db.PageCompositions
-                .Where(item => item.PublicationSectionId == section.Id && item.DetachedAt == null)
+            var pageIds = document.Content.Select(block => block.DesignedPageId!.Value).Distinct().ToList();
+            var contents = await db.DesignedPageContents
+                .Where(item => item.ProjectId == target.ProjectId
+                    && item.EditionId == target.EditionId
+                    && pageIds.Contains(item.DesignedPageId))
                 .ToListAsync(cancellationToken);
-            var changed = ApplyResolvedBindings(compositions, currentValues) > 0;
+            var changed = ApplyResolvedBindings(contents, currentValues) > 0;
             if (changed)
             {
                 await db.SaveChangesAsync(cancellationToken);
@@ -505,7 +506,7 @@ public sealed class PublicationSectionService(
                 ?? BoundBlock(field, field == PublicationBoundField.Title
                     ? ManuscriptStyleRoles.ChapterHeading
                     : ManuscriptStyleRoles.Body)).ToList();
-        var compositionId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
         var semanticBlocks = sourceBlocks.Select((block, index) => block with
         {
             Id = $"section-text-{Guid.NewGuid():N}",
@@ -515,13 +516,13 @@ public sealed class PublicationSectionService(
                 : ManuscriptBlockType.Paragraph,
             HeadingLevel = index == 0 && section.SystemRole == PublicationSectionSystemRole.Title ? 1 : null,
         }).ToList();
-        var semantic = new ManuscriptDocument { ManuscriptId = compositionId, Content = semanticBlocks };
+        var semantic = new ManuscriptDocument { ManuscriptId = contentId, Content = semanticBlocks };
         CompositionScene scene;
         if (target.EditionId is Guid editionId)
-            scene = CompositionService.CreatePageScene(
+            scene = DesignedPageService.CreatePageScene(
                 (await effectiveConfigurations.ResolveReleaseAsync(target.ProjectId, editionId, cancellationToken)).Edition);
         else
-            scene = CompositionService.CreatePageScene(await db.ProjectPageSetups.AsNoTracking()
+            scene = DesignedPageService.CreatePageScene(await db.ProjectPageSetups.AsNoTracking()
                 .SingleAsync(item => item.ProjectId == target.ProjectId, cancellationToken));
         var layerId = scene.Layers[0].Id;
         var objects = semanticBlocks.Select((block, index) => new CompositionObject
@@ -546,42 +547,21 @@ public sealed class PublicationSectionService(
             ReadingOrder = index + 1,
         }).ToList();
         scene = scene with { Objects = objects };
-        CompositionService.Validate(scene, semantic);
-        var variant = new PageCompositionVariant
-        {
-            Id = Guid.NewGuid(),
-            CompositionId = compositionId,
-            GeometryKey = CompositionService.SceneGeometryKey(scene),
-            SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
-        };
-        db.PageCompositions.Add(new PageComposition
-        {
-            Id = compositionId,
-            ProjectId = target.ProjectId,
-            PublicationSectionId = section.Id,
-            EditionId = target.EditionId,
-            Name = section.Title,
-            SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic),
-            ActiveAuthoringVariantId = variant.Id,
-            Variants = [variant],
-        });
-        section.Revision = checked(section.Revision + 1);
-        section.ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
-        {
-            ManuscriptId = section.Id,
-            Revision = section.Revision,
-            Content =
-            [
-                new ManuscriptBlock
-                {
-                    Id = $"designed-page-{Guid.NewGuid():N}",
-                    Type = ManuscriptBlockType.DesignedPage,
-                    StyleRole = ManuscriptStyleRoles.DesignedPage,
-                    PageCompositionId = compositionId,
-                },
-            ],
-        });
-        section.UpdatedAt = DateTime.UtcNow;
+        DesignedPageService.Validate(scene, semantic);
+        var contentTarget = target.EditionId is Guid releaseId
+            ? EditorContentTarget.ForEdition(releaseId)
+            : EditorContentTarget.Core;
+        _ = await designedPages.CreateAndPlaceAsync(
+            contentTarget,
+            target.ProjectId,
+            DesignedPageContainer.PublicationSection(section.Id),
+            0,
+            section.Title,
+            section.Revision,
+            semanticBlocks: semantic.Content,
+            authoredScene: scene,
+            replaceContainerContent: true,
+            cancellationToken: cancellationToken);
         await TouchTargetAsync(target, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         historyEvents.PublishReviewStateChanged(target.ProjectId);
@@ -604,12 +584,18 @@ public sealed class PublicationSectionService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var row = await db.PublicationSections.Include(item => item.PageCompositions)
+        var row = await db.PublicationSections
             .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.EditionId == editionId && item.Id == sectionId, cancellationToken)
             ?? throw new KeyNotFoundException("Release publication section was not found.");
         if (row.CoreSectionId is null)
             throw new InvalidOperationException("A release-only section cannot be reset to Core Book.");
         var historyTargets = await OwnedHistoryTargetsAsync(row, cancellationToken);
+        var placementReferences = await db.DesignedPagePlacementReferences
+            .Where(item => item.ProjectId == projectId
+                && item.ContainerKind == DesignedPageContainerKind.PublicationSection
+                && item.ContainerId == row.Id)
+            .ToListAsync(cancellationToken);
+        db.DesignedPagePlacementReferences.RemoveRange(placementReferences);
         db.PublicationSections.Remove(row);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -666,6 +652,12 @@ public sealed class PublicationSectionService(
             if (row.SystemRole != PublicationSectionSystemRole.None)
                 throw new InvalidOperationException("Generated publication sections can be omitted but not deleted.");
             var historyTargets = await OwnedHistoryTargetsAsync(row, cancellationToken);
+            var placementReferences = await db.DesignedPagePlacementReferences
+                .Where(item => item.ProjectId == target.ProjectId
+                    && item.ContainerKind == DesignedPageContainerKind.PublicationSection
+                    && item.ContainerId == row.Id)
+                .ToListAsync(cancellationToken);
+            db.DesignedPagePlacementReferences.RemoveRange(placementReferences);
             db.PublicationSections.Remove(row);
             await TouchTargetAsync(target, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -683,17 +675,9 @@ public sealed class PublicationSectionService(
         PublicationSection row,
         CancellationToken cancellationToken)
     {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var compositionIds = await db.PageCompositions.IgnoreQueryFilters().AsNoTracking()
-            .Where(item => item.PublicationSectionId == row.Id)
-            .Select(item => item.Id)
-            .ToListAsync(cancellationToken);
         return
         [
             new AuthoringHistoryTarget(row.ProjectId, AuthoringHistoryDocumentKind.PublicationSection, row.Id, row.EditionId),
-            .. compositionIds.Select(compositionId =>
-                new AuthoringHistoryTarget(row.ProjectId, AuthoringHistoryDocumentKind.PageComposition, compositionId)),
         ];
     }
 
@@ -836,50 +820,30 @@ public sealed class PublicationSectionService(
         if (target.EditionId is Guid editionId)
         {
             var effective = await effectiveConfigurations.ResolveReleaseAsync(target.ProjectId, editionId, cancellationToken);
-            scene = CompositionService.CreatePageScene(effective.Edition, layoutMode);
+            scene = DesignedPageService.CreatePageScene(effective.Edition, layoutMode);
         }
         else
         {
             var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == target.ProjectId, cancellationToken);
-            scene = CompositionService.CreatePageScene(setup, layoutMode);
+            scene = DesignedPageService.CreatePageScene(setup, layoutMode);
         }
-        var compositionId = Guid.NewGuid();
-        var variantId = Guid.NewGuid();
-        var composition = new PageComposition
-        {
-            Id = compositionId,
-            ProjectId = target.ProjectId,
-            PublicationSectionId = section.Id,
-            EditionId = target.EditionId,
-            Name = string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim(),
-            SemanticManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = compositionId }),
-            ActiveAuthoringVariantId = variantId,
-            Variants =
-            [
-                new PageCompositionVariant
-                {
-                    Id = variantId, CompositionId = compositionId,
-                    GeometryKey = CompositionService.SceneGeometryKey(scene),
-                    SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
-                },
-            ],
-        };
-        db.PageCompositions.Add(composition);
-        var blocks = document.Content.ToList();
-        blocks.Insert(blockIndex, new ManuscriptBlock
-        {
-            Id = $"designed-page-{Guid.NewGuid():N}",
-            Type = ManuscriptBlockType.DesignedPage,
-            StyleRole = ManuscriptStyleRoles.DesignedPage,
-            PageCompositionId = compositionId,
-        });
-        section.Revision = checked(section.Revision + 1);
-        section.ManuscriptJson = ManuscriptCodec.Serialize(document with { Revision = section.Revision, Content = blocks });
-        section.UpdatedAt = DateTime.UtcNow;
+        var contentTarget = target.EditionId is Guid releaseId
+            ? EditorContentTarget.ForEdition(releaseId)
+            : EditorContentTarget.Core;
+        var placement = await designedPages.CreateAndPlaceAsync(
+            contentTarget,
+            target.ProjectId,
+            DesignedPageContainer.PublicationSection(section.Id),
+            blockIndex,
+            name,
+            expectedRevision,
+            new DesignedPageInitialContent { LayoutMode = layoutMode },
+            authoredScene: scene,
+            cancellationToken: cancellationToken);
         await TouchTargetAsync(target, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         historyEvents.PublishReviewStateChanged(target.ProjectId);
-        return new(await GetStoredAsync(target, section.Id, cancellationToken), composition);
+        return new(await GetStoredAsync(target, section.Id, cancellationToken), placement.Page, placement.PlacementId);
     }
 
     internal static ManuscriptDocument ResolveBindings(ManuscriptDocument document, IReadOnlyDictionary<PublicationBoundField, string> values) =>
@@ -899,40 +863,35 @@ public sealed class PublicationSectionService(
         IReadOnlyDictionary<PublicationBoundField, string> values,
         CancellationToken cancellationToken = default)
     {
-        var compositions = await db.PageCompositions
-            .Where(item => item.ProjectId == target.ProjectId
-                && item.EditionId == target.EditionId
-                && item.DetachedAt == null
-                && item.PublicationSectionId != null)
+        var contents = await db.DesignedPageContents
+            .Where(item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId)
             .ToListAsync(cancellationToken);
-        return ApplyResolvedBindings(compositions, values);
+        return ApplyResolvedBindings(contents, values);
     }
 
     private static int ApplyResolvedBindings(
-        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyList<DesignedPageContent> contents,
         IReadOnlyDictionary<PublicationBoundField, string> values)
     {
         var changed = 0;
-        foreach (var composition in compositions)
+        foreach (var content in contents)
         {
-            // Binding refreshes update the semantic manuscript and its owning
-            // composition as one revisioned record. Older builds incremented
-            // only the composition row, so accept that one known drift here
-            // and repair it before exposing the canvas again.
-            var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson);
-            ManuscriptCodec.Validate(current, composition.Id, current.Revision);
-            if (current.Revision > composition.Revision)
-                throw new InvalidDataException("A publication page manuscript is newer than its owning composition.");
+            // Binding refreshes update semantic content and its owning revision
+            // together. Accept and repair the one legacy revision drift.
+            var current = ManuscriptCodec.Deserialize(content.SemanticManuscriptJson);
+            ManuscriptCodec.Validate(current, content.Id, current.Revision);
+            if (current.Revision > content.Revision)
+                throw new InvalidDataException("A publication page manuscript is newer than its owning content revision.");
             var resolved = ResolveBindings(current, values);
             var contentChanged = !ManuscriptCodec.ContentEquals(current, resolved);
-            var revisionDrifted = current.Revision != composition.Revision;
+            var revisionDrifted = current.Revision != content.Revision;
             if (!contentChanged && !revisionDrifted)
                 continue;
 
             if (contentChanged)
-                composition.Revision = checked(composition.Revision + 1);
-            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(
-                resolved with { Revision = composition.Revision });
+                content.Revision = checked(content.Revision + 1);
+            content.SemanticManuscriptJson = ManuscriptCodec.Serialize(
+                resolved with { Revision = content.Revision });
             changed++;
         }
         return changed;
@@ -1055,6 +1014,11 @@ public sealed class PublicationSectionService(
         if (clone.Anchor != input.Anchor || clone.TargetKind != input.TargetKind || clone.TargetId != input.TargetId)
             clone.LocalOrder = await NextOrderAsync(new(projectId, editionId), input.Anchor, input.TargetId, cancellationToken);
         Apply(clone, input with { Id = clone.Id, ExpectedRevision = clone.Revision }, document with { ManuscriptId = clone.Id });
+        await SyncPlacementReferencesAsync(
+            db,
+            clone,
+            ManuscriptCodec.Deserialize(clone.ManuscriptJson, clone.Id, clone.Revision),
+            cancellationToken);
         db.PublicationSections.Add(clone);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -1102,49 +1066,18 @@ public sealed class PublicationSectionService(
             Revision = core.Revision,
         };
         var document = ManuscriptCodec.Deserialize(core.ManuscriptJson, core.Id, core.Revision);
-        var sourceIds = document.Content.Where(item => item.PageCompositionId.HasValue).Select(item => item.PageCompositionId!.Value).Distinct().ToList();
-        var sources = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => sourceIds.Contains(item.Id) && item.DetachedAt == null).ToListAsync(cancellationToken);
-        var remap = new Dictionary<Guid, Guid>();
-        foreach (var source in sources)
-        {
-            var compositionId = Guid.NewGuid();
-            remap[source.Id] = compositionId;
-            var composition = new PageComposition
-            {
-                Id = compositionId,
-                ProjectId = core.ProjectId,
-                PublicationSectionId = clone.Id,
-                EditionId = editionId,
-                SourceCompositionId = source.Id,
-                Name = source.Name,
-                SemanticManuscriptJson = RemapDocumentId(source.SemanticManuscriptJson, compositionId),
-                Revision = source.Revision,
-            };
-            foreach (var variant in source.Variants)
-            {
-                var copy = new PageCompositionVariant
-                {
-                    Id = Guid.NewGuid(),
-                    CompositionId = compositionId,
-                    GeometryKey = variant.GeometryKey,
-                    SceneJson = variant.SceneJson,
-                    Revision = variant.Revision,
-                };
-                composition.Variants.Add(copy);
-                if (source.ActiveAuthoringVariantId == variant.Id)
-                    composition.ActiveAuthoringVariantId = copy.Id;
-            }
-            clone.PageCompositions.Add(composition);
-        }
         clone.ManuscriptJson = ManuscriptCodec.Serialize(document with
         {
             ManuscriptId = clone.Id,
-            Content = document.Content.Select(block => block.PageCompositionId is Guid id && remap.TryGetValue(id, out var mapped)
-                ? block with { PageCompositionId = mapped }
+            Content = document.Content.Select(block => block.Type == ManuscriptBlockType.DesignedPage
+                ? block with { Id = $"designed-page-{Guid.NewGuid():N}" }
                 : block).ToList(),
         });
+        await SyncPlacementReferencesAsync(
+            db,
+            clone,
+            ManuscriptCodec.Deserialize(clone.ManuscriptJson, clone.Id, clone.Revision),
+            cancellationToken);
         return clone;
     }
 
@@ -1162,17 +1095,69 @@ public sealed class PublicationSectionService(
         if (imageIds.Count > 0 && await db.PublishAssets.AsNoTracking().CountAsync(
             item => item.ProjectId == target.ProjectId && imageIds.Contains(item.Id), cancellationToken) != imageIds.Count)
             throw new InvalidDataException("The publication section references an image outside this project.");
-        var compositionIds = document.Content.Where(item => item.PageCompositionId.HasValue)
-            .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
-        if (compositionIds.Count == 0)
+        var pageIds = document.Content.Where(item => item.DesignedPageId.HasValue)
+            .Select(item => item.DesignedPageId!.Value).Distinct().ToList();
+        if (pageIds.Count == 0)
             return;
-        var owned = await db.PageCompositions.AsNoTracking().CountAsync(item => compositionIds.Contains(item.Id)
-            && item.ProjectId == target.ProjectId
-            && item.DetachedAt == null
-            && item.EditionId == target.EditionId,
-            cancellationToken);
-        if (owned != compositionIds.Count)
+        var pages = await db.DesignedPages.AsNoTracking()
+            .Include(item => item.Contents)
+            .Where(item => pageIds.Contains(item.Id) && item.ProjectId == target.ProjectId)
+            .ToListAsync(cancellationToken);
+        if (pages.Count != pageIds.Count
+            || pages.Any(page => page.ScopeEditionId is Guid scopeId && scopeId != target.EditionId)
+            || pages.Any(page => !page.Contents.Any(content => content.EditionId == target.EditionId)
+                && !page.Contents.Any(content => content.EditionId == null)))
             throw new InvalidDataException("The publication section references a Designed Page outside its current book target.");
+    }
+
+    private static async Task SyncPlacementReferencesAsync(
+        AppDbContext db,
+        PublicationSection section,
+        ManuscriptDocument document,
+        CancellationToken cancellationToken)
+    {
+        var desired = document.Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage).ToList();
+        if (desired.GroupBy(block => block.Id, StringComparer.Ordinal).Any(group => group.Count() > 1))
+            throw new InvalidDataException("Designed Page placement IDs must be unique within the publication section.");
+        var desiredIds = desired.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+        var stored = await db.DesignedPagePlacementReferences
+            .Where(item => item.ProjectId == section.ProjectId
+                && item.ContainerKind == DesignedPageContainerKind.PublicationSection
+                && item.ContainerId == section.Id
+                && item.EditionId == section.EditionId)
+            .ToListAsync(cancellationToken);
+        var current = stored.Concat(db.DesignedPagePlacementReferences.Local.Where(item =>
+                item.ProjectId == section.ProjectId
+                && item.ContainerKind == DesignedPageContainerKind.PublicationSection
+                && item.ContainerId == section.Id
+                && item.EditionId == section.EditionId))
+            .Distinct()
+            .ToList();
+        foreach (var obsolete in current.Where(item => !desiredIds.Contains(item.Id)))
+            db.DesignedPagePlacementReferences.Remove(obsolete);
+
+        var now = DateTime.UtcNow;
+        foreach (var block in desired)
+        {
+            var reference = current.SingleOrDefault(item => item.Id == block.Id);
+            if (reference is null)
+            {
+                reference = new DesignedPagePlacementReference
+                {
+                    Id = block.Id,
+                    ProjectId = section.ProjectId,
+                    ContainerKind = DesignedPageContainerKind.PublicationSection,
+                    ContainerId = section.Id,
+                    EditionId = section.EditionId,
+                    CreatedAt = now,
+                };
+                db.DesignedPagePlacementReferences.Add(reference);
+                current.Add(reference);
+            }
+            reference.DesignedPageId = block.DesignedPageId!.Value;
+            reference.ManuscriptRevision = document.Revision;
+            reference.UpdatedAt = now;
+        }
     }
 
     private static void ValidateSectionMode(ManuscriptDocument document)
@@ -1180,7 +1165,7 @@ public sealed class PublicationSectionService(
         var hasDesignedPages = document.Content.Any(block => block.Type == ManuscriptBlockType.DesignedPage);
         if (hasDesignedPages && document.Content.Any(block => block.Type != ManuscriptBlockType.DesignedPage))
             throw new InvalidOperationException("A publication section is either a prose section or a designed-page section. Put prose and page canvases in separate publication sections.");
-        if (hasDesignedPages && document.Content.Any(block => !block.PageCompositionId.HasValue))
+        if (hasDesignedPages && document.Content.Any(block => !block.DesignedPageId.HasValue))
             throw new InvalidOperationException("Every block in a designed-page publication section must reference a page canvas.");
     }
 
@@ -1248,7 +1233,7 @@ public sealed class PublicationSectionService(
         if (role is PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright
             && document.Content.Count > 0
             && document.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage
-                && block.PageCompositionId.HasValue))
+                && block.DesignedPageId.HasValue))
             return;
         var expected = role switch
         {

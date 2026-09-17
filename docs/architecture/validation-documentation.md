@@ -399,17 +399,17 @@ contain/cover/stretch geometry; 180/300-DPI thresholds; and aggregation to the
 maximum required proportional raster. Press conformance remains unchanged because
 the application passes the prepared assets through its existing request contract.
 Approved migration/import fixtures cover historical
-print-resample reclassification, preparation-job preservation, v30 full and
+print-resample reclassification, preparation-job preservation, v31 full and
 non-structural round trips, parent remapping/missing-parent rejection, legacy
-cover-description adaptation, and snapshot-schema-v6 restore preservation. Ordinary publication
+cover-description adaptation, and snapshot-schema-v7 restore preservation. Ordinary publication
 service or UI tests remain outside the automated-test boundary. The sole related
 exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
-### Accepted M2-M5 contract evidence
+### Current M2 and accepted M3-M5 contract evidence
 
-Before the corresponding implementations land, fixtures are normative input,
+M2 fixtures now have implementation evidence. Before the remaining implementations land, fixtures are normative input,
 not formatter- or exporter-generated snapshots. Focused deterministic regressions
 must cover Designed Page migration/placement/release isolation and occurrence
 mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,

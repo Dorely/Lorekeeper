@@ -165,7 +165,7 @@ public sealed class VersionHistorySnapshotWriter(
             document.ManuscriptStyles.OrderBy(item => item.Id).ToList()));
 
         AddJson(files, "composition/composition.json", new VersionHistorySnapshotCompositionArea(
-            document.PageCompositions.OrderBy(item => item.Id).ToList()));
+            document.DesignedPages.OrderBy(item => item.Id).ToList()));
 
         AddJson(files, "publication/publication.json", new VersionHistorySnapshotPublicationArea(
             document.PublicationBook,

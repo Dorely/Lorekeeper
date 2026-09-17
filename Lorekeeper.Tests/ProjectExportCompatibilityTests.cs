@@ -21,7 +21,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V30WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V31WritesDesignedPagesAndOmitsTheLegacyCompositionMember()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -43,7 +43,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(30, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(31, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -56,6 +56,8 @@ public sealed class ProjectExportCompatibilityTests
         Assert.Contains("\"publicationSectionOrder\":", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"manuscriptAnnotations\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"designedPages\":[]", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"pageCompositions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"printArtifactProfileKey\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("printProductKey", json, StringComparison.Ordinal);
         Assert.DoesNotContain("printFinish", json, StringComparison.Ordinal);
@@ -70,6 +72,28 @@ public sealed class ProjectExportCompatibilityTests
         Assert.DoesNotContain("\"bodyFontSizePoints\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyLineHeight\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("backCopy", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V30ReadsLegacyCompositionPayloadWithoutWritingItBack()
+    {
+        var compositionId = Guid.NewGuid();
+        var document = Document(new ProjectExportChapter()) with
+        {
+            FormatVersion = 30,
+            LegacyPageCompositions =
+            [
+                new ProjectExportPageComposition(
+                    compositionId, null, "Legacy page", "{}", 1, []),
+            ],
+        };
+
+        var legacyJson = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
+        var imported = JsonSerializer.Deserialize<ProjectExportDocument>(legacyJson, ManuscriptCodec.JsonOptions)!;
+        var currentJson = JsonSerializer.Serialize(imported with { FormatVersion = 31, LegacyPageCompositions = null }, ManuscriptCodec.JsonOptions);
+
+        Assert.Equal(compositionId, Assert.Single(imported.PageCompositions).Id);
+        Assert.DoesNotContain("\"pageCompositions\"", currentJson, StringComparison.Ordinal);
     }
 
     [Fact]

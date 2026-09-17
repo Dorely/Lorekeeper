@@ -16,7 +16,7 @@
 @inject IProjectFontService Fonts
 @inject IProjectPageSetupService PageSetups
 @inject ITypographyDefaultsService TypographyDefaults
-@inject Lorekeeper.Composition.ICompositionService Compositions
+@inject IDesignedPageService DesignedPages
 @inject IAuthoringHistoryRuntime AuthoringHistory
 @inject IPerformanceTraceWriter PerformanceTrace
 @inject ILogger<ChapterBodyEditor> Logger
@@ -208,7 +208,7 @@
             throw new ArgumentException("Choose a supported Designed Page layout.", nameof(layoutMode));
         if (CreateDesignedPageOverrideAsync is not null)
             return await CreateDesignedPageOverrideAsync(name, layoutMode, blockIndex, expectedRevision);
-        var result = await Compositions.CreateDesignedPageAsync(
+        var result = await DesignedPages.CreateDesignedPageAsync(
             ContentTarget,
             ProjectId,
             ChapterId,
@@ -218,10 +218,29 @@
             new DesignedPageInitialContent { LayoutMode = parsedLayoutMode });
         return new
         {
-            id = result.Composition.Id,
-            result.Composition.Name,
+            id = result.Page.Id,
+            result.Page.Name,
             manuscriptJson = ManuscriptCodec.Serialize(result.Manuscript.Document),
-            summary = BuildDesignedPageSummary(result.Composition),
+            summary = BuildDesignedPageSummary(new DesignedPageView(result.Page, result.Content, IsInherited: false)),
+        };
+    }
+
+    [JSInvokable]
+    public async Task<object> OnPlaceDesignedPage(Guid pageId, int blockIndex, long expectedRevision)
+    {
+        var result = await DesignedPages.PlaceAsync(
+            ContentTarget,
+            ProjectId,
+            pageId,
+            DesignedPageContainer.Chapter(ChapterId),
+            blockIndex,
+            expectedRevision);
+        return new
+        {
+            id = result.Page.Page.Id,
+            result.Page.Page.Name,
+            manuscriptJson = ManuscriptCodec.Serialize(result.Containers.Single().Document),
+            summary = BuildDesignedPageSummary(result.Page),
         };
     }
 
@@ -354,23 +373,17 @@
 
     private async Task<IReadOnlyList<DesignedPageEditorSummary>> LoadDesignedPageSummariesAsync()
     {
-        var document = ManuscriptCodec.Deserialize(InitialManuscriptJson);
-        var summaries = new List<DesignedPageEditorSummary>();
-        foreach (var compositionId in document.Content
-            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
-            .Select(block => block.PageCompositionId!.Value)
-            .Distinct())
-        {
-            if (await Compositions.GetAsync(ProjectId, compositionId) is { } composition)
-                summaries.Add(BuildDesignedPageSummary(composition));
-        }
-        return summaries;
+        return (await DesignedPages.ListAsync(ProjectId, ContentTarget))
+            .OrderBy(page => page.Page.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(page => page.Page.Id)
+            .Select(BuildDesignedPageSummary)
+            .ToList();
     }
 
-    private DesignedPageEditorSummary BuildDesignedPageSummary(PageComposition composition)
+    private DesignedPageEditorSummary BuildDesignedPageSummary(DesignedPageView page)
     {
         CompositionScene? selectedScene = null;
-        foreach (var variant in composition.Variants.OrderByDescending(item => item.UpdatedAt))
+        foreach (var variant in page.Content.Variants.OrderByDescending(item => item.UpdatedAt))
         {
             CompositionScene? scene;
             try
@@ -416,8 +429,8 @@
                     ? "1 image"
                     : $"{objectCount} objects · {imageCount} images";
         return new DesignedPageEditorSummary(
-            composition.Id,
-            composition.Name,
+            page.Page.Id,
+            page.Page.Name,
             surfaceLabel,
             status,
             previewUrl);

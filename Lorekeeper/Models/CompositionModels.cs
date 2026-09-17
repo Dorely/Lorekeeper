@@ -4,40 +4,70 @@ using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Models;
 
-public class PageComposition
+public class DesignedPage
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;
-    public Guid? ChapterId { get; set; }
-    public Chapter? Chapter { get; set; }
-    public Guid? PublicationSectionId { get; set; }
-    public PublicationSection? PublicationSection { get; set; }
-    public Guid? EditionId { get; set; }
-    public PublicationEdition? Edition { get; set; }
-    public Guid? SourceCompositionId { get; set; }
     public string Name { get; set; } = "Designed page";
-    public string SemanticManuscriptJson { get; set; } = string.Empty;
-    public long Revision { get; set; }
-    public Guid? ActiveAuthoringVariantId { get; set; }
-    public ICollection<PageCompositionVariant> Variants { get; set; } = [];
+    public Guid? ScopeEditionId { get; set; }
+    public PublicationEdition? ScopeEdition { get; set; }
+    public ICollection<DesignedPageContent> Contents { get; set; } = [];
+    public ICollection<DesignedPagePlacementReference> PlacementReferences { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? DetachedAt { get; set; }
 }
 
-public class PageCompositionVariant
+public class DesignedPageContent
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid CompositionId { get; set; }
-    public PageComposition Composition { get; set; } = null!;
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public Guid DesignedPageId { get; set; }
+    public DesignedPage Page { get; set; } = null!;
+    public Guid? EditionId { get; set; }
+    public PublicationEdition? Edition { get; set; }
+    public string SemanticManuscriptJson { get; set; } = string.Empty;
+    public string AccessibilityDescription { get; set; } = string.Empty;
+    public long Revision { get; set; }
+    public Guid? ActiveVariantId { get; set; }
+    public ICollection<DesignedPageVariant> Variants { get; set; } = [];
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class DesignedPageVariant
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ContentId { get; set; }
+    public DesignedPageContent Content { get; set; } = null!;
     public string GeometryKey { get; set; } = string.Empty;
     public string SceneJson { get; set; } = string.Empty;
     public long Revision { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? DetachedAt { get; set; }
 }
+
+public class DesignedPagePlacementReference
+{
+    public Guid ReferenceId { get; set; } = Guid.NewGuid();
+    /// <summary>The exact stable manuscript block ID. Manuscript content remains authoritative.</summary>
+    public required string Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public Guid DesignedPageId { get; set; }
+    public DesignedPage Page { get; set; } = null!;
+    public DesignedPageContainerKind ContainerKind { get; set; }
+    public Guid ContainerId { get; set; }
+    public Guid? EditionId { get; set; }
+    public PublicationEdition? Edition { get; set; }
+    public long ManuscriptRevision { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<DesignedPageContainerKind>))]
+public enum DesignedPageContainerKind { Chapter, PublicationSection }
 
 public class CompositionMutationStage
 {

@@ -1,0 +1,109 @@
+{
+  "protocolVersion": 13,
+  "jobId": "11111111111111111111111111111111",
+  "profile": "kdp-paperback-v1",
+  "ink": "BlackAndWhite",
+  "document": {
+    "title": "The Cartographer's Lantern",
+    "subtitle": "A Lorekeeper Press fixture",
+    "author": "Mara Vale",
+    "language": "en",
+    "publisher": "North Window Press",
+    "copyright": "Copyright 2026 Mara Vale",
+    "publicationSections": [
+      {
+        "id": "20000000-0000-0000-0000-000000000001",
+        "anchor": "Front",
+        "kind": "Dedication",
+        "systemRole": "None",
+        "localOrder": 2,
+        "title": "Dedication",
+        "blocks": [
+          {
+            "id": "30000000-0000-0000-0000-000000000001",
+            "type": "Paragraph",
+            "styleRole": "dedication",
+            "headingLevel": 0,
+            "content": [{ "type": "Text", "text": "For the mapmakers.", "marks": [] }]
+          }
+        ],
+        "designedPages": []
+      },
+      { "id": "20000000-0000-0000-0000-000000000002", "anchor": "Back", "kind": "Acknowledgments", "systemRole": "None", "localOrder": 0, "title": "Acknowledgments", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000003", "anchor": "Back", "kind": "AboutAuthor", "systemRole": "None", "localOrder": 1, "title": "About the author", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000004", "anchor": "Back", "kind": "AlsoBy", "systemRole": "None", "localOrder": 2, "title": "Also by", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000005", "anchor": "Back", "kind": "References", "systemRole": "None", "localOrder": 3, "title": "References", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000006", "anchor": "Back", "kind": "Custom", "systemRole": "None", "localOrder": 4, "title": "Colophon", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000007", "anchor": "Front", "kind": "Copyright", "systemRole": "Copyright", "localOrder": 1, "title": "Copyright", "blocks": [{ "id": "30000000-0000-0000-0000-000000000007", "type": "Paragraph", "styleRole": "copyright", "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }] }], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000008", "anchor": "Front", "kind": "Epigraph", "systemRole": "None", "localOrder": 3, "title": "Epigraph", "blocks": [], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000009", "anchor": "Front", "kind": "TitlePage", "systemRole": "Title", "localOrder": 0, "title": "Title page", "blocks": [{ "id": "30000000-0000-0000-0000-000000000009", "type": "Heading", "styleRole": "chapter-title", "content": [{ "type": "Text", "text": "The Cartographer's Lantern", "marks": [] }] }], "designedPages": [] },
+      { "id": "20000000-0000-0000-0000-000000000010", "anchor": "Front", "kind": "Contents", "systemRole": "Contents", "localOrder": 4, "title": "Contents", "blocks": [], "designedPages": [] },
+      { "id": "70000000-0000-0000-0000-000000000001", "anchor": "BeforeChapter", "targetId": "50000000-0000-0000-0000-000000000001", "kind": "ImagePage", "systemRole": "None", "localOrder": 0, "title": "Compass rose", "blocks": [{ "id": "30000000-0000-0000-0000-000000000010", "type": "Figure", "styleRole": "figure-caption", "assetId": "90000000-0000-0000-0000-000000000001", "caption": "A compass rose.", "altText": "A canonical fixture image.", "decorative": false, "presentation": { "placement": "DedicatedPage", "widthPercent": 100, "alignment": "Center", "textWrap": "None", "fit": "Contain", "cropXPercent": 50, "cropYPercent": 50, "captionPlacement": "Below" }, "content": [{ "type": "Text", "text": "A compass rose.", "marks": [] }] }], "designedPages": [] }
+    ],
+    "includeActHeadings": true,
+    "includeChapterHeadings": true,
+    "numberActs": true,
+    "numberChapters": true,
+    "sections": [
+      {
+        "id": "40000000-0000-0000-0000-000000000001",
+        "title": "Discovery",
+        "synopsis": "The lantern is found.",
+        "includePage": true,
+        "includeHeading": true,
+        "chapters": [
+          {
+            "id": "50000000-0000-0000-0000-000000000001",
+            "title": "The First Coordinate",
+            "synopsis": "Mara follows the light.",
+            "includeHeading": true,
+            "blocks": [
+              { "id": "60000000-0000-0000-0000-000000000001", "type": "Heading", "styleRole": "chapter-opening", "headingLevel": 2, "content": [{ "type": "Text", "text": "North by Lantern", "marks": [{ "type": "Strong", "value": "" }] }] },
+              { "id": "60000000-0000-0000-0000-000000000002", "type": "Paragraph", "styleRole": "body", "headingLevel": 0, "content": [{ "type": "Text", "text": "Mara unfolded the impossible map and followed its phosphorescent meridian. ", "marks": [] }, { "type": "Text", "text": "The lantern remembered.", "marks": [{ "type": "Emphasis", "value": "" }] }] },
+              { "id": "60000000-0000-0000-0000-000000000003", "type": "BlockQuote", "styleRole": "epigraph", "headingLevel": 0, "content": [{ "type": "Text", "text": "Every border is a promise made by someone absent.", "marks": [] }] },
+              { "id": "60000000-0000-0000-0000-000000000004", "type": "Figure", "styleRole": "figure", "headingLevel": 0, "assetId": "90000000-0000-0000-0000-000000000001", "caption": "A field sketch.", "altText": "A lantern resting beneath an old map.", "decorative": false, "presentation": { "placement": "Float", "widthPercent": 42, "alignment": "End", "textWrap": "Start", "fit": "Cover", "cropXPercent": 50, "cropYPercent": 50, "startOnNewPage": false, "captionPlacement": "Below" }, "content": [{ "type": "Text", "text": "A field sketch.", "marks": [] }] },
+              { "id": "60000000-0000-0000-0000-000000000006", "type": "Paragraph", "styleRole": "body", "headingLevel": 0, "content": [{ "type": "Text", "text": "underlined", "marks": [{ "type": "Underline", "value": "" }] }, { "type": "Text", "text": " struck", "marks": [{ "type": "Strikethrough", "value": "" }] }, { "type": "Text", "text": " code", "marks": [{ "type": "Code", "value": "" }] }, { "type": "Text", "text": " linked", "marks": [{ "type": "Link", "value": "https://example.invalid" }] }, { "type": "Text", "text": " English", "marks": [{ "type": "Language", "value": "en" }] }, { "type": "Text", "text": " small caps", "marks": [{ "type": "SmallCaps", "value": "" }] }, { "type": "Text", "text": " super", "marks": [{ "type": "Superscript", "value": "" }] }, { "type": "Text", "text": " sub", "marks": [{ "type": "Subscript", "value": "" }] }, { "type": "Text", "text": " character", "marks": [{ "type": "CharacterStyle", "value": "fixture-character" }] }] },
+              { "id": "60000000-0000-0000-0000-000000000007", "type": "SceneBreak", "styleRole": "scene-break", "headingLevel": 0, "content": [] },
+              { "id": "60000000-0000-0000-0000-000000000008", "type": "ListItem", "styleRole": "list-item", "headingLevel": 0, "content": [{ "type": "Text", "text": "A measured list item.", "marks": [] }] }
+            ],
+            "designedPages": []
+          },
+          {
+            "id": "50000000-0000-0000-0000-000000000002",
+            "title": "The Folded Sea",
+            "synopsis": "A spread crosses the binding.",
+            "includeHeading": true,
+            "blocks": [{ "id": "60000000-0000-0000-0000-000000000005", "type": "DesignedPage", "styleRole": "designed-page", "designedPageId": "70000000-0000-0000-0000-000000000002", "content": [] }],
+            "designedPages": [{
+              "id": "70000000-0000-0000-0000-000000000002",
+              "name": "The Folded Sea",
+              "revision": 1,
+              "semanticBlocks": [{ "id": "71000000-0000-0000-0000-000000000001", "type": "Paragraph", "styleRole": "body", "content": [{ "type": "Text", "text": "The sea occupied both leaves.", "marks": [] }] }],
+              "variants": [{
+                "id": "72000000-0000-0000-0000-000000000001",
+                "geometryKey": "fixture-facing-spread",
+                "revision": 1,
+                "scene": {
+                  "schemaVersion": 1,
+                  "surface": { "kind": "FacingSpread", "outputPageMode": "EditionLeaves", "widthPoints": 864, "heightPoints": 648, "bleedPoints": 0, "safeInsetPoints": 36, "allowIndependentPdfPage": false },
+                  "layers": [{ "id": "73000000-0000-0000-0000-000000000001", "name": "Content", "order": 0 }],
+                  "objects": [
+                    { "id": "74000000-0000-0000-0000-000000000001", "layerId": "73000000-0000-0000-0000-000000000001", "kind": "Image", "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 }, "imageId": "90000000-0000-0000-0000-000000000001", "imageFit": "Cover", "altText": "An illustrated sea chart spanning two pages.", "decorative": false, "semanticRole": "Figure", "readingOrder": 1, "zIndex": 0 },
+                    { "id": "74000000-0000-0000-0000-000000000002", "layerId": "73000000-0000-0000-0000-000000000001", "kind": "Text", "bounds": { "xPercent": 58, "yPercent": 70, "widthPercent": 32, "heightPercent": 12 }, "contentReferences": [{ "blockId": "71000000-0000-0000-0000-000000000001" }], "fontFamilyKey": "sans", "fontSizePoints": 16, "fillColor": "#ffffff", "semanticRole": "Paragraph", "readingOrder": 2, "zIndex": 1 }
+                  ]
+                }
+              }]
+            }]
+          }
+        ]
+      }
+    ],
+    "styles": [
+      { "name": "Body", "kind": "Paragraph", "semanticRole": "body", "definition": { "fontFamilyKey": "serif", "fontWeight": 400, "italic": false, "lineHeight": 1.45, "textAlign": "justify" } },
+      { "name": "Fixture character", "kind": "Character", "semanticRole": "fixture-character", "definition": { "fontFamilyKey": "sans", "fontWeight": 700, "italic": true, "smallCaps": true, "fontSizePoints": 9.0 } }
+    ]
+  },
+  "trim": { "widthInches": 6.0, "heightInches": 9.0, "marginInches": 0.75, "bodyFontSizePoints": 11.0, "bodyLineHeight": 1.45, "mirrorMargins": true, "rectoChapterStarts": true, "minimumWidowLines": 2, "minimumOrphanLines": 2 },
+  "cover": { "bleedInches": 0.125, "description": "A lantern. A forbidden map. A border that refuses to stay still.", "title": "The Cartographer's Lantern", "subtitle": "A Lorekeeper Press fixture", "author": "Mara Vale", "spineText": "", "backgroundColor": "#16324f", "isbn": "9780306406157", "barcodeMode": "LorekeeperBarcode", "assetId": "90000000-0000-0000-0000-000000000001", "imageCropXPercent": 50, "imageCropYPercent": 45 },
+  "assets": [{ "id": "90000000-0000-0000-0000-000000000001", "relativePath": "assets/pixel.png", "mediaType": "image/png", "byteLength": 0, "sha256": "", "widthPixels": 1, "heightPixels": 1, "altText": "A canonical fixture image." }]
+}

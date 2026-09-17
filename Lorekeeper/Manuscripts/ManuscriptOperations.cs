@@ -25,7 +25,7 @@ public static class ManuscriptOperations
                         insert.HeadingLevel,
                         insert.Decorative,
                         insert.FigurePresentation,
-                        insert.PageCompositionId,
+                        insert.DesignedPageId,
                         insert.Language,
                         insert.AccessibilityRole,
                         insert.BlockId);
@@ -164,9 +164,9 @@ public static class ManuscriptOperations
                         AccessibilityRole = blockType.Type == ManuscriptBlockType.Figure
                             ? blockType.AccessibilityRole
                             : null,
-                        PageCompositionId = blockType.Type == ManuscriptBlockType.DesignedPage
-                            ? blockType.PageCompositionId
-                                ?? (typeIsUnchanged ? current.PageCompositionId : null)
+                        DesignedPageId = blockType.Type == ManuscriptBlockType.DesignedPage
+                            ? blockType.DesignedPageId
+                                ?? (typeIsUnchanged ? current.DesignedPageId : null)
                             : null,
                         HeadingLevel = blockType.Type == ManuscriptBlockType.Heading
                             ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
@@ -371,7 +371,7 @@ public static class ManuscriptOperations
         int? headingLevel = null,
         bool decorative = false,
         FigurePresentation? figurePresentation = null,
-        Guid? pageCompositionId = null,
+        Guid? designedPageId = null,
         string? language = null,
         FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure,
         string? blockId = null) =>
@@ -386,7 +386,7 @@ public static class ManuscriptOperations
             headingLevel,
             decorative,
             figurePresentation,
-            pageCompositionId,
+            designedPageId,
             language,
             accessibilityRole,
             blockId);
@@ -400,7 +400,7 @@ public static class ManuscriptOperations
         int? headingLevel = null,
         bool decorative = false,
         FigurePresentation? figurePresentation = null,
-        Guid? pageCompositionId = null,
+        Guid? designedPageId = null,
         string? language = null,
         FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure,
         string? blockId = null) =>
@@ -420,7 +420,7 @@ public static class ManuscriptOperations
             FigurePresentation = type == ManuscriptBlockType.Figure
                 ? figurePresentation ?? new FigurePresentation()
                 : null,
-            PageCompositionId = type == ManuscriptBlockType.DesignedPage ? pageCompositionId : null,
+            DesignedPageId = type == ManuscriptBlockType.DesignedPage ? designedPageId : null,
             HeadingLevel = type == ManuscriptBlockType.Heading ? headingLevel ?? 2 : null,
         };
 

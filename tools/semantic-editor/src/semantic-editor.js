@@ -94,11 +94,11 @@ const blockAttrs = {
     accessibilityRole: {default: null},
     presentation: {default: null},
     paragraphPresentation: {default: null},
-    pageCompositionId: {default: null},
-    compositionName: {default: null},
-    compositionSurfaceLabel: {default: null},
-    compositionStatus: {default: null},
-    compositionPreviewUrl: {default: null}
+    designedPageId: {default: null},
+    designedPageName: {default: null},
+    designedPageSurfaceLabel: {default: null},
+    designedPageStatus: {default: null},
+    designedPagePreviewUrl: {default: null}
 };
 
 function paragraphStyle(presentation) {
@@ -171,11 +171,11 @@ function figureDomStyle(presentation) {
 }
 
 function designedPageDom(node) {
-    const compositionId = node.attrs.pageCompositionId;
-    const preview = node.attrs.compositionPreviewUrl
+    const designedPageId = node.attrs.designedPageId;
+    const preview = node.attrs.designedPagePreviewUrl
         ? ["img", {
             class: "semantic-designed-page-preview",
-            src: node.attrs.compositionPreviewUrl,
+            src: node.attrs.designedPagePreviewUrl,
             alt: "",
             draggable: "false"
         }]
@@ -184,18 +184,18 @@ function designedPageDom(node) {
         class: "semantic-designed-page",
         "data-block-id": node.attrs.id,
         "data-style-role": "designed-page",
-        "data-page-composition-id": compositionId
+        "data-designed-page-id": designedPageId
     },
     preview,
     ["span", {class: "semantic-designed-page-details"},
-        ["strong", node.attrs.compositionName || "Designed page"],
+        ["strong", node.attrs.designedPageName || "Designed page"],
         ["span", {class: "semantic-designed-page-meta"},
-            `${node.attrs.compositionSurfaceLabel || "Geometry not configured"} · ${node.attrs.compositionStatus || "Open to configure"}`]],
+            `${node.attrs.designedPageSurfaceLabel || "Geometry not configured"} · ${node.attrs.designedPageStatus || "Open to configure"}`]],
     ["button", {
         type: "button",
         class: "semantic-designed-page-open",
-        "data-open-page-composition": compositionId,
-        "aria-label": `Open ${node.attrs.compositionName || "Designed page"} editor`
+        "data-open-designed-page": designedPageId,
+        "aria-label": `Open ${node.attrs.designedPageName || "Designed page"} editor`
     }, "Edit page"]];
 }
 
@@ -310,11 +310,11 @@ const schema = new Schema({
             selectable: true,
             attrs: {...blockAttrs, styleRole: {default: "designed-page"}},
             parseDOM: [{
-                tag: "section[data-page-composition-id]",
+                tag: "section[data-designed-page-id]",
                 getAttrs: element => ({
                     id: element.dataset.blockId,
                     styleRole: "designed-page",
-                    pageCompositionId: element.dataset.pageCompositionId
+                    designedPageId: element.dataset.designedPageId
                 })
             }],
             toDOM: designedPageDom
@@ -421,11 +421,11 @@ function documentFromDomain(document) {
             ,accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null)
             ,presentation: block.figurePresentation || null
             ,paragraphPresentation: block.paragraphPresentation || null
-            ,pageCompositionId: block.pageCompositionId || null
-            ,compositionName: block.compositionName || null
-            ,compositionSurfaceLabel: block.compositionSurfaceLabel || null
-            ,compositionStatus: block.compositionStatus || null
-            ,compositionPreviewUrl: block.compositionPreviewUrl || null
+            ,designedPageId: block.designedPageId || null
+            ,designedPageName: block.designedPageName || null
+            ,designedPageSurfaceLabel: block.designedPageSurfaceLabel || null
+            ,designedPageStatus: block.designedPageStatus || null
+            ,designedPagePreviewUrl: block.designedPagePreviewUrl || null
         };
         if (nodeName === "heading")
             attrs.level = block.headingLevel || 2;
@@ -487,10 +487,10 @@ function domainFromDocument(doc, manuscriptId, revision) {
             block.figurePresentation = node.attrs.presentation || {...defaultFigurePresentation};
         }
         if (node.type.name === "designed_page")
-            block.pageCompositionId = node.attrs.pageCompositionId;
+            block.designedPageId = node.attrs.designedPageId;
         content.push(block);
     });
-    return {schemaVersion: 4, manuscriptId, revision, content};
+    return {schemaVersion: 5, manuscriptId, revision, content};
 }
 
 export function roundTripManuscriptJson(json) {
@@ -1607,13 +1607,29 @@ async function editFigurePresentation(view, root) {
     view.focus();
 }
 
-async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument, root) {
+async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument, root, designedPages) {
+    const existingPageOptions = designedPages
+        .map(page => [String(page.id), `${page.name} — ${page.surfaceLabel || "layout unavailable"}${page.status ? ` · ${page.status}` : ""}`]);
     const values = await showEditorForm(root, {
         title: "Insert Designed Page",
-        description: "Choose the authoring layout. Publication compatibility is checked later in Publish.",
-        submitLabel: "Create page",
+        description: "Create a page or place an existing page from this project's library. Existing pages remain shared; release edits customize that page's release content rather than this placement.",
+        submitLabel: "Insert page",
         fields: [
+            {
+                name: "choice",
+                label: "Page",
+                type: "select",
+                value: "create",
+                options: [["create", "Create a new Designed Page"], ["existing", "Place an existing Designed Page"]]
+            },
             {name: "name", label: "Page name", type: "text", value: "Designed page", required: true},
+            {
+                name: "pageId",
+                label: "Existing page",
+                type: "select",
+                value: existingPageOptions[0]?.[0] ?? "",
+                options: existingPageOptions.length > 0 ? existingPageOptions : [["", "No pages in this library"]]
+            },
             {
                 name: "layoutMode",
                 label: "Layout",
@@ -1622,7 +1638,9 @@ async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDo
                 options: [["SinglePage", "Single page"], ["FacingSpread", "Facing spread"]]
             }
         ],
-        validate: value => !value.name.trim() ? "Enter a page name." : null
+        validate: value => value.choice === "create"
+            ? (!value.name.trim() ? "Enter a page name." : null)
+            : (!value.pageId ? "Choose an existing Designed Page." : null)
     });
     if (!values) return;
     if (!await flush()) {
@@ -1632,16 +1650,18 @@ async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDo
     const resolved = view.state.selection.$from;
     const blockIndex = resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0);
     try {
-        const composition = await dotNetRef.invokeMethodAsync(
-            "OnCreateDesignedPage",
-            values.name.trim(),
-            values.layoutMode,
-            blockIndex,
-            getRevision());
-        if (!composition?.id || !composition?.manuscriptJson)
+        const page = values.choice === "existing"
+            ? await dotNetRef.invokeMethodAsync("OnPlaceDesignedPage", values.pageId, blockIndex, getRevision())
+            : await dotNetRef.invokeMethodAsync(
+                "OnCreateDesignedPage",
+                values.name.trim(),
+                values.layoutMode,
+                blockIndex,
+                getRevision());
+        if (!page?.id || !page?.manuscriptJson)
             throw new Error("The application returned no Designed Page.");
-        replaceDocument(composition.manuscriptJson, composition.summary);
-        await dotNetRef.invokeMethodAsync("OnOpenDesignedPage", composition.id);
+        replaceDocument(page.manuscriptJson, page.summary);
+        await dotNetRef.invokeMethodAsync("OnOpenDesignedPage", page.id);
     } catch (error) {
         showEditorNotice(
             root,
@@ -2172,15 +2192,15 @@ function hydrateFigureImageUrls(document, imageById) {
     return document;
 }
 
-function hydrateDesignedPageSummaries(document, compositionById) {
+function hydrateDesignedPageSummaries(document, designedPageById) {
     for (const block of document.content || []) {
         const summary = block.type === "designedPage"
-            ? compositionById.get(String(block.pageCompositionId).toLowerCase())
+            ? designedPageById.get(String(block.designedPageId).toLowerCase())
             : null;
-        block.compositionName = summary?.name ?? null;
-        block.compositionSurfaceLabel = summary?.surfaceLabel ?? null;
-        block.compositionStatus = summary?.status ?? null;
-        block.compositionPreviewUrl = summary?.previewUrl ?? null;
+        block.designedPageName = summary?.name ?? null;
+        block.designedPageSurfaceLabel = summary?.surfaceLabel ?? null;
+        block.designedPageStatus = summary?.status ?? null;
+        block.designedPagePreviewUrl = summary?.previewUrl ?? null;
     }
     return document;
 }
@@ -2194,12 +2214,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
     JSON.parse(editionsJson);
-    const pageCompositions = JSON.parse(compositionsJson);
+    const designedPages = JSON.parse(compositionsJson);
     const fontFamilies = JSON.parse(fontFamiliesJson);
     let reviewAnnotations = allowAnnotations ? JSON.parse(annotationsJson) : [];
     let typography = JSON.parse(typographyJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
-    const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
+    const designedPageById = new Map(designedPages.map(page => [String(page.id).toLowerCase(), page]));
     const paragraphRoles = new Set([
         ...builtInParagraphRoles,
         ...namedStyles
@@ -2211,7 +2231,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             .filter(style => style.kind === "character")
             .map(style => style.semanticRole));
     hydrateFigureImageUrls(initial, imageById);
-    hydrateDesignedPageSummaries(initial, compositionById);
+    hydrateDesignedPageSummaries(initial, designedPageById);
     let manuscriptId = initial.manuscriptId;
     let revision = initial.revision;
     let timer = null;
@@ -2356,12 +2376,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         timer = setTimeout(() => { void saveNow(); }, debounceMs);
     };
 
-    const replaceDocument = (json, compositionSummary = null) => {
-        if (compositionSummary?.id)
-            compositionById.set(String(compositionSummary.id).toLowerCase(), compositionSummary);
+    const replaceDocument = (json, designedPageSummary = null) => {
+        if (designedPageSummary?.id)
+            designedPageById.set(String(designedPageSummary.id).toLowerCase(), designedPageSummary);
         const incoming = hydrateDesignedPageSummaries(
             hydrateFigureImageUrls(JSON.parse(json), imageById),
-            compositionById);
+            designedPageById);
         manuscriptId = incoming.manuscriptId;
         revision = incoming.revision;
         changeGeneration = 0;
@@ -2452,18 +2472,18 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                     event.preventDefault();
                     return selectFigureFromElement(view, figureImage);
                 }
-                const button = event.target.closest("[data-open-page-composition]");
-                if (!button?.dataset.openPageComposition) return false;
+                const button = event.target.closest("[data-open-designed-page]");
+                if (!button?.dataset.openDesignedPage) return false;
                 event.preventDefault();
-                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", button.dataset.openPageComposition);
+                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", button.dataset.openDesignedPage);
                 return true;
             },
             dblclick(_view, event) {
                 const element = event.target instanceof Element
-                    ? event.target.closest("[data-page-composition-id]")
+                    ? event.target.closest("[data-designed-page-id]")
                     : null;
-                if (!element?.dataset.pageCompositionId) return false;
-                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", element.dataset.pageCompositionId);
+                if (!element?.dataset.designedPageId) return false;
+                void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", element.dataset.designedPageId);
                 return true;
             }
         },
@@ -2604,7 +2624,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
 
     const designedPageControls = allowDesignedPages
         ? [iconButton("▣", "Insert a designed page at the current manuscript position", () =>
-            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root))]
+            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root, designedPages))]
         : [];
 
     const createAnnotation = async kind => {

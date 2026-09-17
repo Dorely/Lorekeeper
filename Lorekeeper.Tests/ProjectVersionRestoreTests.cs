@@ -11,6 +11,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
+using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Lorekeeper.VersionHistory.Restore;
 using Lorekeeper.VersionHistory.Git;
@@ -553,6 +554,224 @@ public sealed class ProjectVersionRestoreTests
         Assert.Equal(current.Graph.Nodes.Select(item => item.Key), merged.Graph.Nodes.Select(item => item.Key));
         Assert.Equal(current.RepositoryId, merged.RepositoryId);
         Assert.Equal(current.ProjectId, merged.ProjectId);
+    }
+
+    [Fact]
+    public void Schema7DesignedPageRestoreSelectsCurrentDataWithoutLegacyCompositionData()
+    {
+        var repositoryId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var chapterId = Guid.NewGuid();
+        var pageId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var chapter = CreateChapter(chapterId, "Chapter") with
+        {
+            ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = chapterId,
+                Revision = 1,
+                Content = [new ManuscriptBlock
+                {
+                    Id = "page-placement",
+                    Type = ManuscriptBlockType.DesignedPage,
+                    StyleRole = ManuscriptStyleRoles.DesignedPage,
+                    DesignedPageId = pageId,
+                }],
+            }),
+            ManuscriptRevision = 1,
+        };
+        var current = CreatePayload(repositoryId, projectId, chapter: chapter);
+        var historical = current with
+        {
+            Composition = new VersionHistorySnapshotCompositionArea(
+            [
+                new ProjectExportDesignedPage(pageId, "Restored page", null,
+                [
+                    new ProjectExportDesignedPageContent(contentId, pageId, null, "{}", "", 2, [], null),
+                ]),
+            ]),
+        };
+
+        var merged = Merge(current, historical, VersionHistoryRestoreSelection.ForMajorAreas(["composition"]));
+
+        Assert.Empty(merged.Composition.PageCompositions);
+        var page = Assert.Single(merged.Composition.DesignedPages);
+        Assert.Equal(pageId, page.Id);
+        Assert.Equal(contentId, Assert.Single(page.Contents).Id);
+    }
+
+    [Fact]
+    public void HistoryRestoreIndexesCoreAndReleasePlacementsWithTheSameBlockId()
+    {
+        var projectId = Guid.NewGuid();
+        var repositoryId = Guid.NewGuid();
+        var chapterId = Guid.NewGuid();
+        var editionId = Guid.NewGuid();
+        var pageId = Guid.NewGuid();
+        const string blockId = "reused-placement-block";
+        var document = new ManuscriptDocument
+        {
+            ManuscriptId = chapterId,
+            Revision = 2,
+            Content = [new ManuscriptBlock
+            {
+                Id = blockId,
+                Type = ManuscriptBlockType.DesignedPage,
+                StyleRole = ManuscriptStyleRoles.DesignedPage,
+                DesignedPageId = pageId,
+            }],
+        };
+        var chapter = CreateChapter(chapterId, "Chapter") with
+        {
+            ManuscriptJson = ManuscriptCodec.Serialize(document),
+            ManuscriptRevision = document.Revision,
+        };
+        var edition = new ProjectExportPublicationEdition(
+            editionId, "Release", PublicationEditionFormat.DigitalPdf, PublicationVendor.Generic,
+            string.Empty, PublicationEditionStatus.Draft, false, 1,
+            string.Empty, string.Empty, string.Empty, "en", string.Empty, string.Empty, string.Empty, string.Empty,
+            true, false, false, false, false, true, false, false,
+            PublishTitlePageMode.Automatic, 6, 9, 0.75, null,
+            default, default, default, false, false, [], null)
+        {
+            ChapterOverrides = [new ProjectExportEditionChapterOverride(
+                Guid.NewGuid(), chapterId, ManuscriptCodec.Serialize(document), document.Revision, 1, "base",
+                DateTime.UnixEpoch, DateTime.UnixEpoch)],
+        };
+        var payload = CreatePayload(repositoryId, projectId, chapter: chapter) with
+        {
+            Composition = new VersionHistorySnapshotCompositionArea([DesignedPage(pageId, "Shared", 1)]),
+            Publication = new VersionHistorySnapshotPublicationArea(null, [edition], []),
+        };
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite("Data Source=:memory:").Options;
+        using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+
+        ProjectVersionRestoreService.AddDesignedPagePlacements(db, projectId, payload);
+
+        var references = db.ChangeTracker.Entries<DesignedPagePlacementReference>()
+            .Select(entry => entry.Entity).OrderBy(reference => reference.EditionId).ToList();
+        Assert.Equal(2, references.Count);
+        Assert.All(references, reference => Assert.Equal(blockId, reference.Id));
+        Assert.Contains(references, reference => reference.EditionId is null && reference.ContainerId == chapterId);
+        Assert.Contains(references, reference => reference.EditionId == editionId && reference.ContainerId == chapterId);
+    }
+
+    [Fact]
+    public void ReleaseClonePageContentAndPlacementRemapPreserveIsolation()
+    {
+        var sourcePageId = Guid.NewGuid();
+        var clonePageId = Guid.NewGuid();
+        var sourceEditionId = Guid.NewGuid();
+        var cloneEditionId = Guid.NewGuid();
+        var sourceVariantId = Guid.NewGuid();
+        var source = new DesignedPageContent
+        {
+            ProjectId = Guid.NewGuid(),
+            DesignedPageId = sourcePageId,
+            EditionId = sourceEditionId,
+            SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(Guid.NewGuid())),
+            AccessibilityDescription = "A release-only page.",
+            Revision = 4,
+            ActiveVariantId = sourceVariantId,
+            Variants =
+            [
+                new DesignedPageVariant
+                {
+                    Id = sourceVariantId,
+                    GeometryKey = "6x9",
+                    SceneJson = "{}",
+                    Revision = 3,
+                },
+            ],
+        };
+
+        var cloned = PublicationEditionService.CloneDesignedPageContent(source, clonePageId, cloneEditionId);
+        Assert.Equal(clonePageId, cloned.DesignedPageId);
+        Assert.Equal(cloneEditionId, cloned.EditionId);
+        Assert.NotEqual(source.Id, cloned.Id);
+        Assert.Equal(source.AccessibilityDescription, cloned.AccessibilityDescription);
+        var clonedVariant = Assert.Single(cloned.Variants);
+        Assert.NotEqual(sourceVariantId, clonedVariant.Id);
+        Assert.Equal(clonedVariant.Id, cloned.ActiveVariantId);
+
+        var manuscriptId = Guid.NewGuid();
+        var remappedJson = PublicationEditionService.RemapDesignedPagePlacements(
+            ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = manuscriptId,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = "release-page-placement",
+                        Type = ManuscriptBlockType.DesignedPage,
+                        StyleRole = ManuscriptStyleRoles.DesignedPage,
+                        DesignedPageId = sourcePageId,
+                    },
+                ],
+            }),
+            manuscriptId,
+            0,
+            new Dictionary<Guid, Guid> { [sourcePageId] = clonePageId });
+        var remapped = ManuscriptCodec.Deserialize(remappedJson, manuscriptId, 0);
+        Assert.Equal(clonePageId, Assert.Single(remapped.Content).DesignedPageId);
+
+        var importedContentId = Guid.NewGuid();
+        var rehomed = ProjectImportJobProcessor.RehomeImportedEditionContent(
+            ManuscriptCodec.CreateEmpty(Guid.NewGuid()),
+            importedContentId,
+            new Dictionary<string, string>());
+        Assert.Equal(importedContentId, rehomed.ManuscriptId);
+    }
+
+    [Fact]
+    public void Schema7SelectiveDesignedPageRestoreReplacesOnlyTheIndependentPage()
+    {
+        var repositoryId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var chapterId = Guid.NewGuid();
+        var pageId = Guid.NewGuid();
+        var unrelatedPageId = Guid.NewGuid();
+        var chapter = CreateChapter(chapterId, "Chapter") with
+        {
+            ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = chapterId,
+                Content = [new ManuscriptBlock
+                {
+                    Id = "shared-placement",
+                    Type = ManuscriptBlockType.DesignedPage,
+                    StyleRole = ManuscriptStyleRoles.DesignedPage,
+                    DesignedPageId = pageId,
+                }],
+            }),
+        };
+        var current = CreatePayload(repositoryId, projectId, chapter: chapter) with
+        {
+            Composition = new VersionHistorySnapshotCompositionArea(
+            [
+                DesignedPage(pageId, "Current", 3),
+                DesignedPage(unrelatedPageId, "Unrelated", 8),
+            ]),
+        };
+        var source = current with
+        {
+            Composition = new VersionHistorySnapshotCompositionArea(
+            [
+                DesignedPage(pageId, "Historical", 1),
+                DesignedPage(unrelatedPageId, "Unrelated", 8),
+            ]),
+        };
+        var method = typeof(ProjectVersionRestoreService).GetMethod(
+            "SynthesizeDesignedPageRestore", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new MissingMethodException(typeof(ProjectVersionRestoreService).FullName, "SynthesizeDesignedPageRestore");
+        var restored = (VersionHistorySnapshotPayload)(method.Invoke(null,
+            [source, current, pageId])
+            ?? throw new InvalidOperationException("The designed page restore returned no payload."));
+
+        Assert.Empty(restored.Composition.PageCompositions);
+        Assert.Equal("Historical", restored.Composition.DesignedPages.Single(page => page.Id == pageId).Name);
+        Assert.Equal(8, Assert.Single(restored.Composition.DesignedPages.Single(page => page.Id == unrelatedPageId).Contents).Revision);
     }
 
     [Fact]
@@ -1327,6 +1546,15 @@ public sealed class ProjectVersionRestoreTests
         Order = 0,
     };
 
+    private static ProjectExportDesignedPage DesignedPage(Guid pageId, string name, long revision)
+    {
+        var contentId = Guid.NewGuid();
+        return new ProjectExportDesignedPage(pageId, name, null,
+        [
+            new ProjectExportDesignedPageContent(contentId, pageId, null, "{}", string.Empty, revision, [], null),
+        ]);
+    }
+
     private static ProjectExportManuscriptAnnotation CreateAnnotation(Guid id, Guid chapterId, string note) =>
         new(
             id,
@@ -1395,7 +1623,7 @@ public sealed class ProjectVersionRestoreTests
 
         public Task<ProjectVersionCheckpointView> CreateReviewApprovalForBlocksAsync(Guid projectId, ProjectVersionReviewTarget target, IReadOnlyCollection<string> blockIds, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved selected manuscript changes", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
 
-        public Task<ProjectVersionCheckpointView> ApproveReviewCompositionAsync(Guid projectId, ProjectVersionReviewTarget target, Guid compositionId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Designed Page change", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+        public Task<ProjectVersionCheckpointView> ApproveReviewDesignedPageAsync(Guid projectId, Guid designedPageId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Designed Page change", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
 
         public Task<ProjectVersionReviewBlockMutationResult> RestoreReviewBlocksAsync(Guid projectId, ProjectVersionReviewTarget target, IReadOnlyCollection<string> blockIds, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Undid selected manuscript changes", CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
 

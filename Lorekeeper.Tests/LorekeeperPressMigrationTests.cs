@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Lorekeeper.Authoring;
 using Lorekeeper.Composition;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -22,6 +23,643 @@ public sealed class LorekeeperPressMigrationTests
     private sealed class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
     {
         public AppDbContext CreateDbContext() => new(options, NullLogger<AppDbContext>.Instance);
+    }
+
+    private sealed class TestManuscriptService(IAppDatabaseOperationFactory database) : IManuscriptService
+    {
+        public async Task<ManuscriptSnapshot?> GetManuscriptAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            CancellationToken cancellationToken = default)
+        {
+            if (target.EditionId is not null)
+                throw new NotSupportedException();
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            var chapter = await operation.Db.Chapters.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == chapterId, cancellationToken);
+            if (chapter is null)
+                return null;
+            var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+            var plainText = ManuscriptCodec.ProjectPlainText(document);
+            return new ManuscriptSnapshot(
+                chapter.Id,
+                chapter.ManuscriptRevision,
+                ManuscriptCodec.HashPlainText(plainText),
+                plainText,
+                document);
+        }
+
+        public Task<ManuscriptMutationResult> ReplaceDocumentAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            ManuscriptDocument document,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<ManuscriptMutationResult> ApplyAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations,
+            CancellationToken cancellationToken = default) =>
+            ApplyPersistedUnderProjectMutationLeaseAsync(target, chapterId, expectedRevision, operations, cancellationToken);
+
+        public Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations,
+            CancellationToken cancellationToken = default) =>
+            ApplyPersistedUnderProjectMutationLeaseAsync(target, chapterId, expectedRevision, operations, cancellationToken);
+
+        public async Task<ManuscriptMutationResult> ApplyPersistedUnderProjectMutationLeaseAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations,
+            CancellationToken cancellationToken = default)
+        {
+            if (target.EditionId is not null)
+                throw new NotSupportedException();
+            await using var operation = await database.OpenWriteAsync(cancellationToken);
+            var db = operation.Db;
+            var chapter = await db.Chapters.AsTracking()
+                .SingleAsync(item => item.Id == chapterId, cancellationToken);
+            if (chapter.ManuscriptRevision != expectedRevision)
+                throw new ManuscriptRevisionConflictException(expectedRevision, chapter.ManuscriptRevision);
+            var current = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+            var applied = ManuscriptOperations.Apply(current, operations);
+            chapter.ManuscriptJson = ManuscriptCodec.Serialize(applied.Document);
+            chapter.ManuscriptRevision = applied.Document.Revision;
+
+            var stored = await db.DesignedPagePlacementReferences.AsTracking()
+                .Where(item => item.ProjectId == chapter.ProjectId
+                    && item.ContainerKind == DesignedPageContainerKind.Chapter
+                    && item.ContainerId == chapter.Id
+                    && item.EditionId == null)
+                .ToListAsync(cancellationToken);
+            db.DesignedPagePlacementReferences.RemoveRange(stored);
+            foreach (var block in applied.Document.Content.Where(item => item.Type == ManuscriptBlockType.DesignedPage))
+            {
+                db.DesignedPagePlacementReferences.Add(new DesignedPagePlacementReference
+                {
+                    Id = block.Id,
+                    ProjectId = chapter.ProjectId,
+                    DesignedPageId = block.DesignedPageId!.Value,
+                    ContainerKind = DesignedPageContainerKind.Chapter,
+                    ContainerId = chapter.Id,
+                    ManuscriptRevision = applied.Document.Revision,
+                });
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            var plainText = ManuscriptCodec.ProjectPlainText(applied.Document);
+            return new ManuscriptMutationResult(
+                new ManuscriptSnapshot(
+                    chapter.Id,
+                    applied.Document.Revision,
+                    ManuscriptCodec.HashPlainText(plainText),
+                    plainText,
+                    applied.Document),
+                applied.ChangedBlockIds);
+        }
+
+        public Task ValidateDocumentReferencesAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            ManuscriptDocument document,
+            IReadOnlyList<ManuscriptStyleView>? styleCatalog = null,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class TestContestMutationGuard(bool locked) : IEditorContestMutationGuard
+    {
+        public int EnsureCallCount { get; private set; }
+
+        public Task<EditorContestLockState> GetLockStateAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(locked
+                ? new EditorContestLockState(true, Guid.NewGuid(), null, null, ContestBatchStatus.Running,
+                    "Contest Review is active.")
+                : EditorContestLockState.Unlocked);
+
+        public Task EnsureMutationAllowedAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default)
+        {
+            EnsureCallCount++;
+            return locked
+                ? Task.FromException(new InvalidOperationException("Contest Review is active."))
+                : Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task DesignedPageCreationPersistsItsActiveVariantAndClonesAllReleaseLayouts()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "designed-page-create.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
+            Guid projectId;
+            Guid editionId;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Name = "Designed Page contracts",
+                    Slug = $"designed-page-{Guid.NewGuid():N}",
+                };
+                var setup = new ProjectPageSetup { ProjectId = project.Id, Project = project };
+                var edition = new PublicationEdition
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Name = "Release",
+                    EditionSpecificContentEnabled = true,
+                    AllowDesignedPageOverrides = true,
+                };
+                db.AddRange(project, setup, edition);
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+                editionId = edition.Id;
+            }
+
+            var history = new AuthoringHistoryRuntime();
+            var service = new DesignedPageService(
+                database,
+                null!,
+                null!,
+                new PublicationEffectiveConfigurationResolver(database),
+                history,
+                new AuthoringMutationContextAccessor(),
+                null!,
+                null!);
+            var created = await service.CreateAsync(projectId, EditorContentTarget.Core, "Map");
+
+            string secondScene;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var stored = await db.DesignedPageContents.AsTracking()
+                    .Include(item => item.Variants)
+                    .SingleAsync(item => item.Id == created.Content.Id);
+                var active = Assert.Single(stored.Variants);
+                Assert.Equal(active.Id, stored.ActiveVariantId);
+                var second = new DesignedPageVariant
+                {
+                    ContentId = stored.Id,
+                    GeometryKey = "test:alternate",
+                    SceneJson = active.SceneJson,
+                };
+                db.DesignedPageVariants.Add(second);
+                await db.SaveChangesAsync();
+                secondScene = second.SceneJson;
+            }
+
+            var release = await service.EnsureReleaseOverrideAsync(projectId, created.Page.Id, editionId);
+            Assert.False(release.IsInherited);
+            Assert.Equal(2, release.Content.Variants.Count);
+            Assert.DoesNotContain(
+                release.Content.Variants.Select(item => item.Id),
+                id => created.Content.Variants.Any(core => core.Id == id));
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var coreVariant = await db.DesignedPageVariants.AsTracking()
+                    .Where(item => item.ContentId == created.Content.Id)
+                    .OrderBy(item => item.GeometryKey)
+                    .FirstAsync();
+                coreVariant.SceneJson = coreVariant.SceneJson.Replace("\"schemaVersion\":1", "\"schemaVersion\":1 ", StringComparison.Ordinal);
+                await db.SaveChangesAsync();
+                var releaseScenes = await db.DesignedPageVariants.AsNoTracking()
+                    .Where(item => item.ContentId == release.Content.Id)
+                    .Select(item => item.SceneJson)
+                    .ToListAsync();
+                Assert.Contains(secondScene, releaseScenes);
+                Assert.DoesNotContain(coreVariant.SceneJson, releaseScenes);
+            }
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var edition = await db.PublicationEditions.AsTracking().SingleAsync(item => item.Id == editionId);
+                edition.Status = PublicationEditionStatus.Archived;
+                await db.SaveChangesAsync();
+            }
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ResetReleaseOverrideAsync(projectId, created.Page.Id, editionId));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateAsync(projectId, EditorContentTarget.ForEdition(editionId), "Archived page"));
+
+            var deletable = await service.CreateAsync(projectId, EditorContentTarget.Core, "Delete guard");
+            var placement = new DesignedPagePlacementReference
+            {
+                Id = "shared-placement",
+                ProjectId = projectId,
+                DesignedPageId = deletable.Page.Id,
+                ContainerKind = DesignedPageContainerKind.Chapter,
+                ContainerId = Guid.NewGuid(),
+            };
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                db.DesignedPagePlacementReferences.Add(placement);
+                await db.SaveChangesAsync();
+            }
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(projectId, deletable.Page.Id));
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                db.DesignedPagePlacementReferences.Remove(new DesignedPagePlacementReference
+                {
+                    ReferenceId = placement.ReferenceId,
+                    Id = placement.Id,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var pageHistory = new AuthoringHistoryTarget(
+                projectId,
+                AuthoringHistoryDocumentKind.DesignedPageContent,
+                deletable.Content.Id);
+            var unrelatedHistory = new AuthoringHistoryTarget(
+                projectId,
+                AuthoringHistoryDocumentKind.DesignedPageContent,
+                Guid.NewGuid());
+            await history.RecordManualActionAsync(pageHistory, "{}", "{\"revision\":1}", "Edit Designed Page");
+            await history.RecordManualActionAsync(unrelatedHistory, "{}", "{\"revision\":1}", "Edit another page");
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(projectId, deletable.Page.Id));
+            await service.DeleteAsync(projectId, deletable.Page.Id, clearAffectedHistory: true);
+            Assert.False((await history.ReadStateAsync(pageHistory)).CanUndo);
+            Assert.True((await history.ReadStateAsync(unrelatedHistory)).CanUndo);
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                Assert.False(await db.DesignedPages.AsNoTracking().AnyAsync(item => item.Id == deletable.Page.Id));
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesignedPagePlacementIdentityIsScopedToItsTargetAndContainer()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "designed-page-placement-identity.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            Guid projectId;
+            Guid editionId;
+            Guid pageId;
+            var containerId = Guid.NewGuid();
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Name = "Placement identity",
+                    Slug = $"placement-identity-{Guid.NewGuid():N}",
+                };
+                var edition = new PublicationEdition
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Name = "Release",
+                };
+                var page = new DesignedPage
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Name = "Shared page",
+                };
+                db.AddRange(project, edition, page);
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+                editionId = edition.Id;
+                pageId = page.Id;
+            }
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                db.DesignedPagePlacementReferences.AddRange(
+                    new DesignedPagePlacementReference
+                    {
+                        Id = "same-block-id",
+                        ProjectId = projectId,
+                        DesignedPageId = pageId,
+                        ContainerKind = DesignedPageContainerKind.Chapter,
+                        ContainerId = containerId,
+                    },
+                    new DesignedPagePlacementReference
+                    {
+                        Id = "same-block-id",
+                        ProjectId = projectId,
+                        DesignedPageId = pageId,
+                        ContainerKind = DesignedPageContainerKind.Chapter,
+                        ContainerId = containerId,
+                        EditionId = editionId,
+                    });
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                db.DesignedPagePlacementReferences.Add(new DesignedPagePlacementReference
+                {
+                    Id = "same-block-id",
+                    ProjectId = projectId,
+                    DesignedPageId = pageId,
+                    ContainerKind = DesignedPageContainerKind.Chapter,
+                    ContainerId = containerId,
+                    EditionId = editionId,
+                });
+                await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CompoundHistoryMovesEveryParticipantCursorTogether()
+    {
+        var runtime = new AuthoringHistoryRuntime();
+        var projectId = Guid.NewGuid();
+        var source = new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.CoreChapter, Guid.NewGuid());
+        var destination = new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.PublicationSection, Guid.NewGuid());
+        await runtime.RecordCompoundManualActionAsync(
+            [
+                new(source, "{\"source\":\"before\"}", "{\"source\":\"after\"}"),
+                new(destination, "{\"destination\":\"before\"}", "{\"destination\":\"after\"}"),
+            ],
+            "Move Designed Page placement");
+
+        IReadOnlyList<AuthoringHistorySnapshotRestore>? applied = null;
+        var result = await runtime.UndoCompoundAwareAsync(
+            source,
+            "{\"source\":\"after\"}",
+            (restores, _) =>
+            {
+                applied = restores;
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(2, applied!.Count);
+        Assert.Equal(2, result.AffectedTargets.Count);
+        Assert.True(result.State.CanRedo);
+        Assert.True((await runtime.ReadStateAsync(destination)).CanRedo);
+        Assert.False((await runtime.ReadStateAsync(destination)).CanUndo);
+    }
+
+    [Fact]
+    public async Task SectionOriginCompoundUndoHonorsContestGuardOnlyWhenAChapterParticipates()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "compound-contest-guard.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
+            var guard = new TestContestMutationGuard(locked: true);
+            var restoreService = new AuthoringCompoundManuscriptRestoreService(
+                database,
+                new ManuscriptAnnotationService(database, guard),
+                guard);
+            Guid projectId;
+            Guid sectionId;
+            string sectionSnapshot;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Name = "Compound Contest guard",
+                    Slug = $"compound-contest-{Guid.NewGuid():N}",
+                };
+                var section = new PublicationSection
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Title = "Section",
+                };
+                var document = ManuscriptCodec.CreateEmpty(section.Id);
+                section.ManuscriptJson = ManuscriptCodec.Serialize(document);
+                db.AddRange(project, section);
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+                sectionId = section.Id;
+                sectionSnapshot = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                    db, document, project.Id, null, section.Id, null, default);
+            }
+
+            var sectionTarget = new AuthoringHistoryTarget(
+                projectId,
+                AuthoringHistoryDocumentKind.PublicationSection,
+                sectionId);
+            await restoreService.ApplyAsync(
+                [new AuthoringHistorySnapshotRestore(sectionTarget, sectionSnapshot, sectionSnapshot)]);
+            Assert.Equal(0, guard.EnsureCallCount);
+
+            var chapterTarget = new AuthoringHistoryTarget(
+                projectId,
+                AuthoringHistoryDocumentKind.CoreChapter,
+                Guid.NewGuid());
+            var runtime = new AuthoringHistoryRuntime();
+            var before = AuthoringSnapshotCodec.Serialize(new AuthoringManuscriptSnapshot(
+                ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(sectionId))));
+            var afterDocument = ManuscriptOperations.Apply(
+                ManuscriptCodec.CreateEmpty(sectionId),
+                [new InsertManuscriptBlock(0, ManuscriptBlockType.Paragraph, "Changed", ManuscriptStyleRoles.Body)]).Document;
+            var after = AuthoringSnapshotCodec.Serialize(new AuthoringManuscriptSnapshot(
+                ManuscriptCodec.Serialize(afterDocument)));
+            await runtime.RecordCompoundManualActionAsync(
+                [
+                    new AuthoringHistorySnapshotTransition(chapterTarget, before, after),
+                    new AuthoringHistorySnapshotTransition(sectionTarget, before, after),
+                ],
+                "Move Designed Page placement");
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                runtime.UndoCompoundAwareAsync(
+                    sectionTarget,
+                    after,
+                    restoreService.ApplyAsync));
+            Assert.Equal("Contest Review is active.", error.Message);
+            Assert.Equal(1, guard.EnsureCallCount);
+            Assert.True((await runtime.ReadStateAsync(sectionTarget)).CanUndo);
+            Assert.False((await runtime.ReadStateAsync(sectionTarget)).CanRedo);
+            Assert.True((await runtime.ReadStateAsync(chapterTarget)).CanUndo);
+            Assert.False((await runtime.ReadStateAsync(chapterTarget)).CanRedo);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CrossContainerPlacementMoveCommitsOneCompoundHistoryAction()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "designed-page-compound-move.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
+            var history = new AuthoringHistoryRuntime();
+            var manuscripts = new TestManuscriptService(database);
+            Guid projectId;
+            Guid chapterId;
+            Guid sectionId;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Name = "Compound placement move",
+                    Slug = $"compound-move-{Guid.NewGuid():N}",
+                };
+                var setup = new ProjectPageSetup { ProjectId = project.Id, Project = project };
+                var chapter = new Chapter
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Title = "Chapter",
+                };
+                chapter.ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapter.Id));
+                var section = new PublicationSection
+                {
+                    ProjectId = project.Id,
+                    Project = project,
+                    Title = "Section",
+                };
+                section.ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(section.Id));
+                db.AddRange(project, setup, chapter, section);
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+                chapterId = chapter.Id;
+                sectionId = section.Id;
+            }
+
+            var service = new DesignedPageService(
+                database,
+                manuscripts,
+                null!,
+                new PublicationEffectiveConfigurationResolver(database),
+                history,
+                new AuthoringMutationContextAccessor(),
+                null!,
+                null!);
+            var page = await service.CreateAsync(projectId, EditorContentTarget.Core, "Map");
+            const string placementId = "move-me";
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var chapter = await db.Chapters.AsTracking().SingleAsync(item => item.Id == chapterId);
+                var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+                var inserted = ManuscriptOperations.Apply(document,
+                    [new InsertManuscriptBlock(0, ManuscriptBlockType.DesignedPage, string.Empty,
+                        ManuscriptStyleRoles.DesignedPage, DesignedPageId: page.Page.Id, BlockId: placementId)]);
+                chapter.ManuscriptJson = ManuscriptCodec.Serialize(inserted.Document);
+                chapter.ManuscriptRevision = inserted.Document.Revision;
+                db.DesignedPagePlacementReferences.Add(new DesignedPagePlacementReference
+                {
+                    Id = placementId,
+                    ProjectId = projectId,
+                    DesignedPageId = page.Page.Id,
+                    ContainerKind = DesignedPageContainerKind.Chapter,
+                    ContainerId = chapterId,
+                    ManuscriptRevision = inserted.Document.Revision,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var moved = await service.MovePlacementAsync(
+                EditorContentTarget.Core,
+                projectId,
+                placementId,
+                DesignedPageContainer.Chapter(chapterId),
+                expectedSourceRevision: 1,
+                DesignedPageContainer.PublicationSection(sectionId),
+                destinationIndex: 0,
+                expectedDestinationRevision: 0);
+            Assert.Equal(2, moved.Containers.Count);
+            var sourceTarget = new AuthoringHistoryTarget(
+                projectId, AuthoringHistoryDocumentKind.CoreChapter, chapterId);
+            var destinationTarget = new AuthoringHistoryTarget(
+                projectId, AuthoringHistoryDocumentKind.PublicationSection, sectionId);
+            Assert.True((await history.ReadStateAsync(sourceTarget)).CanUndo);
+            Assert.True((await history.ReadStateAsync(destinationTarget)).CanUndo);
+
+            string sourceAfter;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var chapter = await db.Chapters.AsNoTracking().SingleAsync(item => item.Id == chapterId);
+                var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+                sourceAfter = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                    db, document, projectId, chapterId, null, null, default);
+                Assert.Empty(document.Content);
+                var section = await db.PublicationSections.AsNoTracking().SingleAsync(item => item.Id == sectionId);
+                Assert.Equal(placementId, Assert.Single(
+                    ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision).Content).Id);
+            }
+
+            IReadOnlyList<AuthoringHistorySnapshotRestore>? restores = null;
+            var undone = await history.UndoCompoundAwareAsync(
+                sourceTarget,
+                sourceAfter,
+                (items, _) =>
+                {
+                    restores = items;
+                    return Task.CompletedTask;
+                });
+            Assert.Equal(2, restores!.Count);
+            Assert.Equal(2, undone.AffectedTargets.Count);
+            Assert.True((await history.ReadStateAsync(destinationTarget)).CanRedo);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -48,6 +686,7 @@ public sealed class LorekeeperPressMigrationTests
                 new PublicationCoreMigrationService(database, recovery, NullLogger<PublicationCoreMigrationService>.Instance),
                 new EditionContentMigrationService(recovery, new MigrationManuscriptService(db), NullLogger<EditionContentMigrationService>.Instance),
                 new PublicationSectionMigrationService(recovery, NullLogger<PublicationSectionMigrationService>.Instance),
+                new DesignedPageMigrationService(),
                 new PrintArtifactProfileMigrationService(recovery, new PrintArtifactProfileRegistry(), NullLogger<PrintArtifactProfileMigrationService>.Instance),
                 recovery);
 
@@ -71,19 +710,29 @@ public sealed class LorekeeperPressMigrationTests
                 Description = "Keep this description",
                 Revision = 7,
             };
-            var scene = CompositionService.CreatePageScene(edition);
+            var scene = DesignedPageService.CreatePageScene(edition);
             var sceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
-            var composition = new PageComposition { ProjectId = project.Id, Name = "Preserved page", Revision = 4 };
-            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(composition.Id, composition.Revision));
-            var variant = new PageCompositionVariant
+            var page = new DesignedPage { ProjectId = project.Id, Name = "Preserved page" };
+            var content = new DesignedPageContent
             {
-                CompositionId = composition.Id,
-                GeometryKey = CompositionService.LegacyEditionOnlyGeometryKey(edition),
+                Id = page.Id,
+                ProjectId = project.Id,
+                DesignedPageId = page.Id,
+                Page = page,
+                Revision = 4,
+            };
+            content.SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(content.Id, content.Revision));
+            var variant = new DesignedPageVariant
+            {
+                ContentId = content.Id,
+                Content = content,
+                GeometryKey = DesignedPageService.LegacyEditionOnlyGeometryKey(edition),
                 SceneJson = sceneJson,
                 Revision = 5,
             };
+            content.ActiveVariantId = variant.Id;
             var cover = new PublicationCoverDesign { EditionId = edition.Id, CompositionSceneJson = sceneJson, Revision = 6 };
-            db.AddRange(project, edition, composition, variant, cover);
+            db.AddRange(project, edition, page, content, variant, cover);
             await db.SaveChangesAsync();
             // Schema upgrades can finish before this independent data migration.
             await db.ManuscriptMigrationJournals.Where(item => item.MigrationName == VisualCompositionMigrationService.GeometryPolicyMigrationName)
@@ -97,16 +746,16 @@ public sealed class LorekeeperPressMigrationTests
             Assert.False(preservedEdition.InheritsCoreCover);
             Assert.Equal(edition.Description, preservedEdition.Description);
             Assert.Equal(edition.Revision, preservedEdition.Revision);
-            var preservedVariant = await db.PageCompositionVariants.SingleAsync(item => item.Id == variant.Id);
+            var preservedVariant = await db.DesignedPageVariants.SingleAsync(item => item.Id == variant.Id);
             var normalizedScene = scene with { Surface = scene.Surface with { AllowIndependentPdfPage = false } };
-            Assert.Equal(CompositionService.SceneGeometryKey(normalizedScene), preservedVariant.GeometryKey);
+            Assert.Equal(DesignedPageService.SceneGeometryKey(normalizedScene), preservedVariant.GeometryKey);
             Assert.Equal(JsonSerializer.Serialize(normalizedScene, ManuscriptCodec.JsonOptions), preservedVariant.SceneJson);
             Assert.Equal(variant.Revision, preservedVariant.Revision);
             var preservedCover = await db.PublicationCoverDesigns.SingleAsync(item => item.Id == cover.Id);
             Assert.Equal(sceneJson, preservedCover.CompositionSceneJson);
             Assert.Equal(cover.Revision, preservedCover.Revision);
-            Assert.Equal(composition.SemanticManuscriptJson,
-                (await db.PageCompositions.SingleAsync(item => item.Id == composition.Id)).SemanticManuscriptJson);
+            Assert.Equal(content.SemanticManuscriptJson,
+                (await db.DesignedPageContents.SingleAsync(item => item.Id == content.Id)).SemanticManuscriptJson);
             Assert.True((await db.Projects.SingleAsync(item => item.Id == project.Id)).ReviewEditsEnabled);
             Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
         }
@@ -142,6 +791,7 @@ public sealed class LorekeeperPressMigrationTests
                 new PublicationCoreMigrationService(database, recovery, NullLogger<PublicationCoreMigrationService>.Instance),
                 new EditionContentMigrationService(recovery, new MigrationManuscriptService(db), NullLogger<EditionContentMigrationService>.Instance),
                 new PublicationSectionMigrationService(recovery, NullLogger<PublicationSectionMigrationService>.Instance),
+                new DesignedPageMigrationService(),
                 new PrintArtifactProfileMigrationService(recovery, new PrintArtifactProfileRegistry(), NullLogger<PrintArtifactProfileMigrationService>.Instance),
                 recovery);
             Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
@@ -569,6 +1219,7 @@ public sealed class LorekeeperPressMigrationTests
                     new PublicationSectionMigrationService(
                         recovery,
                         NullLogger<PublicationSectionMigrationService>.Instance),
+                    new DesignedPageMigrationService(),
                     new PrintArtifactProfileMigrationService(
                         recovery,
                         new PrintArtifactProfileRegistry(),
@@ -715,20 +1366,20 @@ public sealed class LorekeeperPressMigrationTests
                     .SingleAsync(item => item.Id == pictureChapterId);
                 var designedPage = Assert.Single(pictureChapter.Manuscript.Content);
                 Assert.Equal(ManuscriptBlockType.DesignedPage, designedPage.Type);
-                var compositionId = Assert.IsType<Guid>(designedPage.PageCompositionId);
-                var composition = await db.PageCompositions.AsNoTracking()
-                    .SingleAsync(item => item.Id == compositionId && item.ProjectId == pictureProjectId);
-                Assert.Null(composition.DetachedAt);
+                var pageId = Assert.IsType<Guid>(designedPage.DesignedPageId);
+                var page = await db.DesignedPages.AsNoTracking()
+                    .SingleAsync(item => item.Id == pageId && item.ProjectId == pictureProjectId);
+                var content = await db.DesignedPageContents.AsNoTracking()
+                    .SingleAsync(item => item.DesignedPageId == page.Id && item.EditionId == null);
                 Assert.Equal(
                     "The lighthouse shone across the water.\n\nA second paragraph remained in the same legacy frame.",
                     ManuscriptCodec.ProjectPlainText(
-                        composition.SemanticManuscriptJson,
-                        composition.Id,
-                        composition.Revision));
-                var activeVariantId = Assert.IsType<Guid>(composition.ActiveAuthoringVariantId);
-                var variant = await db.PageCompositionVariants.AsNoTracking()
-                    .SingleAsync(item => item.Id == activeVariantId && item.CompositionId == composition.Id);
-                Assert.Null(variant.DetachedAt);
+                        content.SemanticManuscriptJson,
+                        content.Id,
+                        content.Revision));
+                var activeVariantId = Assert.IsType<Guid>(content.ActiveVariantId);
+                var variant = await db.DesignedPageVariants.AsNoTracking()
+                    .SingleAsync(item => item.Id == activeVariantId && item.ContentId == content.Id);
                 var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
                 Assert.NotNull(scene);
                 Assert.Equal(CompositionSurfaceKind.FacingSpread, scene.Surface.Kind);
@@ -751,8 +1402,8 @@ public sealed class LorekeeperPressMigrationTests
                 var history = new AuthoringHistoryRuntime();
                 var historyTarget = new AuthoringHistoryTarget(
                     pictureProjectId,
-                    AuthoringHistoryDocumentKind.PageComposition,
-                    composition.Id);
+                    AuthoringHistoryDocumentKind.DesignedPageContent,
+                    content.Id);
                 var historyState = await history.RecordManualActionAsync(
                     historyTarget,
                     "{\"state\":\"before\"}",
@@ -775,7 +1426,7 @@ public sealed class LorekeeperPressMigrationTests
                     pictureImageBytes,
                     (await db.PublishAssets.AsNoTracking().SingleAsync(item => item.Id == pictureImageId)).Data);
                 Assert.False(await db.CompositionMutationStages.AsNoTracking().AnyAsync(item =>
-                    item.TargetKind == "page-composition-seed" && item.TargetId == composition.Id));
+                    item.TargetKind == "designed-page-seed" && item.TargetId == content.Id));
                 var authoringJournal = await db.ManuscriptMigrationJournals.AsNoTracking()
                     .SingleAsync(item => item.MigrationName == AuthoringPageMigrationService.MigrationName);
                 Assert.Contains("\"restoredPicturePages\":1", authoringJournal.ValidationReportJson, StringComparison.Ordinal);

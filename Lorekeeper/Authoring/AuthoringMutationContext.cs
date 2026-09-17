@@ -10,14 +10,17 @@ public sealed record AuthoringMutationContext(
 public interface IAuthoringMutationContextAccessor
 {
     AuthoringMutationContext? Current { get; }
+    bool IsHistorySuppressed { get; }
     IDisposable BeginAssistantTurn(
         Guid turnId,
         string actionLabel);
+    IDisposable SuppressHistory();
 }
 
 public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContextAccessor
 {
     private static readonly AsyncLocal<AuthoringMutationContext?> Ambient = new();
+    private static readonly AsyncLocal<int> HistorySuppressionDepth = new();
 
     // The scoped value survives AI tool schedulers that do not flow ExecutionContext. The
     // ambient value carries the same turn into intentionally created revision-worker scopes.
@@ -25,6 +28,7 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
     private AuthoringMutationContext? _current;
 
     public AuthoringMutationContext? Current => Ambient.Value ?? _current;
+    public bool IsHistorySuppressed => HistorySuppressionDepth.Value > 0;
 
     public IDisposable BeginAssistantTurn(
         Guid turnId,
@@ -39,6 +43,12 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
             Ambient.Value = previousAmbient;
             _current = previous;
         });
+    }
+
+    public IDisposable SuppressHistory()
+    {
+        HistorySuppressionDepth.Value++;
+        return new Scope(() => HistorySuppressionDepth.Value = Math.Max(0, HistorySuppressionDepth.Value - 1));
     }
 
     private sealed class Scope(Action dispose) : IDisposable

@@ -404,8 +404,7 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
         if (await db.EditorContextPreferences.AnyAsync(preference => preference.ProjectId == projectId && (preference.Key.Contains(idN) || preference.Key.Contains(idD)), cancellationToken)) return true;
         if (await db.Chapters.AnyAsync(chapter => chapter.ProjectId == projectId
             && (chapter.ManuscriptJson.Contains(idN) || chapter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
-        if (await db.PageCompositionVariants.AnyAsync(variant => variant.Composition.ProjectId == projectId
-            && variant.DetachedAt == null && variant.Composition.DetachedAt == null
+        if (await db.DesignedPageVariants.AnyAsync(variant => variant.Content.ProjectId == projectId
             && (variant.SceneJson.Contains(idN) || variant.SceneJson.Contains(idD)), cancellationToken)) return true;
         if (await db.PublicationCoverDesigns.AnyAsync(cover => cover.Edition.ProjectId == projectId
             && (cover.CompositionSceneJson.Contains(idN) || cover.CompositionSceneJson.Contains(idD)), cancellationToken)) return true;

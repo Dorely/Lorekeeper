@@ -121,6 +121,7 @@ public sealed class DatabaseMigrationRecoveryTests
                 null!,
                 null!,
                 null!,
+                null!,
                 recovery);
 
             Assert.False(await startup.ApplyAsync());

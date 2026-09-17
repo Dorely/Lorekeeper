@@ -49,7 +49,7 @@ public sealed class ProjectImportJobProcessor(
         public Dictionary<Guid, Guid> ImageMap { get; } = [];
         public Dictionary<Guid, Guid> ActMap { get; } = [];
         public Dictionary<Guid, Guid> ChapterMap { get; } = [];
-        public Dictionary<Guid, Guid> CompositionMap { get; } = [];
+        public Dictionary<Guid, Guid> DesignedPageMap { get; } = [];
         public Dictionary<Guid, Guid> PublicationSectionMap { get; } = [];
         public Dictionary<Guid, Guid> FontFamilyMap { get; } = [];
         public Dictionary<Guid, Guid> EditionMap { get; } = [];
@@ -111,8 +111,15 @@ public sealed class ProjectImportJobProcessor(
                     await ImportProjectFontsAsync(job, document, state, cancellationToken);
                     await StepAsync(job, "Imported project fonts.", cancellationToken);
                     await ImportManuscriptStylesAsync(job, document.ManuscriptStyles, cancellationToken);
-                    foreach (var composition in document.PageCompositions)
-                        state.CompositionMap[composition.Id] = Guid.NewGuid();
+                    foreach (var (exportedId, pageId) in EffectiveDesignedPageIdentityMap(document))
+                    {
+                        if (!state.DesignedPageMap.TryGetValue(pageId, out var localPageId))
+                        {
+                            localPageId = Guid.NewGuid();
+                            state.DesignedPageMap[pageId] = localPageId;
+                        }
+                        state.DesignedPageMap[exportedId] = localPageId;
+                    }
                     foreach (var section in document.PublicationSections)
                         state.PublicationSectionMap[section.Id] = Guid.NewGuid();
                     foreach (var edition in document.PublicationEditions)
@@ -132,7 +139,7 @@ public sealed class ProjectImportJobProcessor(
                             state.ImageMap,
                             state.FontFamilyMap,
                             state.EditionMap,
-                            state.CompositionMap,
+                            state.DesignedPageMap,
                             state.PublicationSectionMap,
                             state.CoreMatterMap,
                             state.CorePlacementMap,
@@ -142,7 +149,7 @@ public sealed class ProjectImportJobProcessor(
                     }
                     if (document.FormatVersion >= 19)
                         await ImportPublicationSectionsAsync(job.ProjectId, document, state, cancellationToken);
-                    await ImportPageCompositionsAsync(job, document, state, cancellationToken);
+                    await ImportDesignedPagesAsync(job, document, state, cancellationToken);
                     if (document.FormatVersion < 18)
                         await MaterializeImportedLegacyEditionContentAsync(job.ProjectId, document, state, cancellationToken);
                     if (document.FormatVersion < 16)
@@ -150,7 +157,11 @@ public sealed class ProjectImportJobProcessor(
                     if (document.FormatVersion < 19)
                         await PublicationSectionMigrationService.ConvertImportedLegacyProjectAsync(
                             db, job.ProjectId, cancellationToken);
-                    await MaterializeImportedLegacyCompositionVariantsAsync(job.ProjectId, cancellationToken);
+                    await MaterializeImportedDesignedPageVariantsAsync(job.ProjectId, cancellationToken);
+                    // Rebuild only after legacy release materialization and
+                    // section conversion so every Core/release manuscript has
+                    // an authoritative reverse placement row.
+                    await RebuildImportedDesignedPagePlacementsAsync(job.ProjectId, cancellationToken);
                     await StepAsync(job, "Appended exported outline structure and imported publish page settings.", cancellationToken);
                 }
                 else
@@ -641,15 +652,16 @@ public sealed class ProjectImportJobProcessor(
         if (document.FormatVersion >= 14)
         {
             var chapterIds = document.Chapters.Select(chapter => chapter.Id).ToHashSet();
-            if (document.PageCompositions.GroupBy(item => item.Id).Any(group => group.Count() > 1))
-                throw new InvalidOperationException("Import file contains duplicate page compositions.");
-            var compositionIds = document.PageCompositions.Select(item => item.Id).ToHashSet();
+            var designedPages = EffectiveDesignedPages(document);
+            if (designedPages.GroupBy(item => item.Id).Any(group => group.Count() > 1))
+                throw new InvalidOperationException("Import file contains duplicate Designed Pages.");
+            var compositionIds = designedPages.Select(item => item.Id).ToHashSet();
             foreach (var chapter in document.Chapters)
             {
                 var manuscript = ReadCurrentManuscript(chapter, document.FormatVersion);
                 var missing = manuscript.Content.FirstOrDefault(block =>
                     block.Type == ManuscriptBlockType.DesignedPage
-                    && block.PageCompositionId is Guid compositionId
+                    && block.DesignedPageId is Guid compositionId
                     && !compositionIds.Contains(compositionId));
                 if (missing is not null)
                     throw new InvalidOperationException($"Designed Page block {missing.Id} references a missing composition.");
@@ -663,7 +675,7 @@ public sealed class ProjectImportJobProcessor(
                     var manuscript = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
                     var missing = manuscript.Content.FirstOrDefault(block =>
                         block.Type == ManuscriptBlockType.DesignedPage
-                        && block.PageCompositionId is Guid compositionId
+                        && block.DesignedPageId is Guid compositionId
                         && !compositionIds.Contains(compositionId));
                     if (missing is not null)
                         throw new InvalidOperationException($"Publication section {section.Id:N} references a missing Designed Page composition.");
@@ -686,13 +698,26 @@ public sealed class ProjectImportJobProcessor(
                 {
                     var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                         ?? throw new InvalidOperationException($"Page composition variant {variant.Id:N} has no scene.");
-                    CompositionService.Validate(scene, semantic);
+                    DesignedPageService.Validate(scene, semantic);
                     ValidateExportSceneReferences(
                         scene,
                         exportedImageIds,
                         document.FontFamilies.Select(family => family.Id).ToHashSet(),
                         allowCoverBindings: false,
                         $"Page composition variant {variant.Id:N}");
+                }
+            }
+            if (document.FormatVersion >= 31)
+            {
+                foreach (var page in designedPages)
+                foreach (var content in page.Contents)
+                {
+                    if (content.DesignedPageId != page.Id
+                        || content.Variants.GroupBy(variant => variant.GeometryKey, StringComparer.Ordinal).Any(group => group.Count() > 1)
+                        || (content.ActiveVariantId is Guid activeVariantId && !content.Variants.Any(variant => variant.Id == activeVariantId)))
+                    {
+                        throw new InvalidOperationException($"Designed Page {page.Id:N} has invalid content or variants.");
+                    }
                 }
             }
         }
@@ -748,9 +773,9 @@ public sealed class ProjectImportJobProcessor(
                 throw new InvalidOperationException($"Publication section {section.Id:N} has an invalid outline anchor.");
 
             var manuscript = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
-            foreach (var block in manuscript.Content.Where(block => block.PageCompositionId.HasValue))
+            foreach (var block in manuscript.Content.Where(block => block.DesignedPageId.HasValue))
             {
-                if (!compositionIds.Contains(block.PageCompositionId!.Value))
+                if (!compositionIds.Contains(block.DesignedPageId!.Value))
                     throw new InvalidOperationException($"Publication section {section.Id:N} references a missing composition.");
             }
         }
@@ -900,7 +925,7 @@ public sealed class ProjectImportJobProcessor(
                     coverWithScene.CompositionSceneJson,
                     ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidOperationException($"Publication edition {edition.Id:N} has an empty cover scene.");
-                CompositionService.Validate(
+                DesignedPageService.Validate(
                     scene,
                     ManuscriptCodec.CreateEmpty(edition.Id),
                     allowCanonicalTextBindings: true);
@@ -1533,7 +1558,7 @@ public sealed class ProjectImportJobProcessor(
                     tracked.Id,
                     document.FormatVersion,
                     state.ImageMap,
-                    state.CompositionMap,
+                    state.DesignedPageMap,
                     state.EditionMap)
                 : ManuscriptCodec.FromPlainText(
                     tracked.Id,
@@ -1563,17 +1588,18 @@ public sealed class ProjectImportJobProcessor(
                 manuscriptToStore = ConvertImportedIllustrations(importedManuscript, illustrationLayoutJson, assetAltById);
             if (document.FormatVersion < 14 && importedChapter.VisualMode == ChapterVisualMode.PicturePage)
             {
-                var composition = CreateImportedPageComposition(
+                var designedPage = CreateImportedDesignedPage(
                     job.ProjectId,
                     tracked.Id,
                     importedChapter,
                     importedManuscript,
                     pageLayoutJson,
                     assetAltById);
-                var seed = composition.Variants.Single();
-                composition.Variants.Clear();
-                db.PageCompositions.Add(composition);
-                db.CompositionMutationStages.Add(CreateCompositionSeed(composition, seed.SceneJson));
+                var content = designedPage.Contents.Single();
+                var seed = content.Variants.Single();
+                content.Variants.Clear();
+                db.DesignedPages.Add(designedPage);
+                db.CompositionMutationStages.Add(CreateCompositionSeed(designedPage, content, seed.SceneJson));
                 manuscriptToStore = new ManuscriptDocument
                 {
                     ManuscriptId = tracked.Id,
@@ -1582,10 +1608,10 @@ public sealed class ProjectImportJobProcessor(
                     [
                         new ManuscriptBlock
                         {
-                            Id = composition.Id.ToString("N"),
+                            Id = designedPage.Id.ToString("N"),
                             Type = ManuscriptBlockType.DesignedPage,
                             StyleRole = ManuscriptStyleRoles.DesignedPage,
-                            PageCompositionId = composition.Id,
+                            DesignedPageId = designedPage.Id,
                         },
                     ],
                 };
@@ -1798,6 +1824,7 @@ public sealed class ProjectImportJobProcessor(
         return parsed.RootElement.GetProperty("schemaVersion").GetInt32() switch
         {
             ManuscriptDocument.CurrentSchemaVersion => json,
+            4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, id, revision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, id, revision),
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, id, revision),
             1 => ManuscriptSchemaUpgrade.UpgradeV1DocumentJson(json, id, revision),
@@ -1828,7 +1855,7 @@ public sealed class ProjectImportJobProcessor(
                 manuscript,
                 localId,
                 state.ImageMap,
-                state.CompositionMap,
+            state.DesignedPageMap,
                 state.EditionMap);
             var editionId = imported.EditionId is Guid exportedEditionId
                 ? state.EditionMap.GetValueOrDefault(exportedEditionId)
@@ -1893,7 +1920,7 @@ public sealed class ProjectImportJobProcessor(
             _ => PublicationSectionStartSide.Next,
         };
 
-    private async Task ImportPageCompositionsAsync(
+    private async Task ImportDesignedPagesAsync(
         ProjectImportJob job,
         ProjectExportDocument document,
         ImportState state,
@@ -1902,99 +1929,228 @@ public sealed class ProjectImportJobProcessor(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        foreach (var imported in document.PageCompositions)
+        var importedPages = EffectiveDesignedPages(document);
+        var activeVariants = new List<(DesignedPageContent Content, Guid? ActiveVariantId)>();
+        foreach (var imported in importedPages)
         {
-            if (!state.CompositionMap.TryGetValue(imported.Id, out var localId))
-            {
-                throw new InvalidOperationException($"Page composition {imported.Id:N} was not mapped.");
-            }
-            var localChapterId = imported.ChapterId is Guid importedChapterId
-                ? state.ChapterMap.GetValueOrDefault(importedChapterId)
-                : Guid.Empty;
-            var localSectionId = document.FormatVersion >= 19 && imported.PublicationSectionId is Guid importedSectionId
-                ? state.PublicationSectionMap.GetValueOrDefault(importedSectionId)
-                : Guid.Empty;
-            if ((localChapterId != Guid.Empty) == (localSectionId != Guid.Empty))
-                throw new InvalidOperationException($"Page composition {imported.Id:N} must belong to exactly one imported chapter or publication section.");
+            if (!state.DesignedPageMap.TryGetValue(imported.Id, out var localId))
+                throw new InvalidOperationException($"Designed Page {imported.Id:N} was not mapped.");
 
-            var semantic = ManuscriptCodec.Deserialize(
-                UpgradeImportedManuscript(imported.SemanticManuscriptJson, imported.Id, imported.Revision),
-                imported.Id,
-                imported.Revision);
-            var remappedSemantic = RemapManuscriptFigures(
-                semantic,
-                localId,
-                state.ImageMap,
-                state.CompositionMap,
-                state.EditionMap);
-            var composition = new PageComposition
+            var page = new DesignedPage
             {
                 Id = localId,
                 ProjectId = job.ProjectId,
-                ChapterId = localChapterId == Guid.Empty ? null : localChapterId,
-                PublicationSectionId = localSectionId == Guid.Empty ? null : localSectionId,
-                EditionId = document.FormatVersion >= 18 && imported.EditionId is Guid exportedEditionId
+                ScopeEditionId = imported.ScopeEditionId is Guid exportedEditionId
                     ? state.EditionMap.GetValueOrDefault(exportedEditionId) is var localEditionId && localEditionId != Guid.Empty
                         ? localEditionId
-                        : throw new InvalidDataException($"Page composition {imported.Id:N} references an edition that was not imported.")
-                    : null,
-                SourceCompositionId = document.FormatVersion >= 18 && imported.SourceCompositionId is Guid exportedSourceId
-                    ? state.CompositionMap.GetValueOrDefault(exportedSourceId) is var localSourceId && localSourceId != Guid.Empty
-                        ? localSourceId
-                        : null
+                        : throw new InvalidDataException($"Designed Page {imported.Id:N} references an edition that was not imported.")
                     : null,
                 Name = string.IsNullOrWhiteSpace(imported.Name) ? "Designed page" : imported.Name.Trim(),
-                SemanticManuscriptJson = ManuscriptCodec.Serialize(remappedSemantic),
-                Revision = imported.Revision,
             };
-            foreach (var importedVariant in imported.Variants)
+            foreach (var importedContent in imported.Contents)
             {
-                var scene = JsonSerializer.Deserialize<CompositionScene>(
-                    AuthoringPageMigrationService.UpgradeJson(importedVariant.SceneJson, removeGuides: true),
-                    ManuscriptCodec.JsonOptions)
-                    ?? throw new InvalidDataException(
-                        $"Page composition variant {importedVariant.Id:N} has an empty scene.");
-                var remappedScene = scene with
+                var localContentId = Guid.NewGuid();
+                var semantic = ManuscriptCodec.Deserialize(
+                    UpgradeImportedManuscript(importedContent.SemanticManuscriptJson, importedContent.Id, importedContent.Revision),
+                    importedContent.Id,
+                    importedContent.Revision);
+                var content = new DesignedPageContent
                 {
-                    Styles = scene.Styles.Select(style => style with
-                    {
-                        FontFamilyKey = RemapFontKey(style.FontFamilyKey, state.FontFamilyMap),
-                    }).ToList(),
-                    Objects = scene.Objects.Select(item => item with
-                    {
-                        ImageId = item.ImageId is Guid exportedImageId
-                            ? state.ImageMap.TryGetValue(exportedImageId, out var localImageId)
-                                ? localImageId
-                                : throw new InvalidDataException(
-                                    $"Composition object {item.Id:N} references an image that was not imported.")
-                            : null,
-                        FontFamilyKey = RemapFontKey(item.FontFamilyKey, state.FontFamilyMap),
-                    }).ToList(),
+                    Id = localContentId,
+                    ProjectId = job.ProjectId,
+                    DesignedPageId = localId,
+                    EditionId = importedContent.EditionId is Guid exportedContentEditionId
+                        ? state.EditionMap.GetValueOrDefault(exportedContentEditionId) is var localContentEditionId && localContentEditionId != Guid.Empty
+                            ? localContentEditionId
+                            : throw new InvalidDataException($"Designed Page content {importedContent.Id:N} references an edition that was not imported.")
+                        : null,
+                    SemanticManuscriptJson = ManuscriptCodec.Serialize(RemapManuscriptFigures(
+                        semantic, localContentId, state.ImageMap, state.DesignedPageMap, state.EditionMap)),
+                    AccessibilityDescription = importedContent.AccessibilityDescription,
+                    Revision = importedContent.Revision,
                 };
-                var variant = new PageCompositionVariant
+                foreach (var importedVariant in importedContent.Variants)
                 {
-                    GeometryKey = importedVariant.GeometryKey,
-                    SceneJson = JsonSerializer.Serialize(remappedScene, ManuscriptCodec.JsonOptions),
-                    Revision = importedVariant.Revision,
-                };
-                composition.Variants.Add(variant);
-                if (imported.ActiveAuthoringVariantId == importedVariant.Id)
-                    composition.ActiveAuthoringVariantId = variant.Id;
+                    var scene = JsonSerializer.Deserialize<CompositionScene>(
+                        AuthoringPageMigrationService.UpgradeJson(importedVariant.SceneJson, removeGuides: true),
+                        ManuscriptCodec.JsonOptions)
+                        ?? throw new InvalidDataException($"Designed Page variant {importedVariant.Id:N} has an empty scene.");
+                    var remappedScene = scene with
+                    {
+                        Styles = scene.Styles.Select(style => style with { FontFamilyKey = RemapFontKey(style.FontFamilyKey, state.FontFamilyMap) }).ToList(),
+                        Objects = scene.Objects.Select(item => item with
+                        {
+                            ImageId = item.ImageId is Guid exportedImageId
+                                ? state.ImageMap.TryGetValue(exportedImageId, out var localImageId)
+                                    ? localImageId
+                                    : throw new InvalidDataException($"Composition object {item.Id:N} references an image that was not imported.")
+                                : null,
+                            FontFamilyKey = RemapFontKey(item.FontFamilyKey, state.FontFamilyMap),
+                        }).ToList(),
+                    };
+                    var variant = new DesignedPageVariant
+                    {
+                        Id = Guid.NewGuid(), ContentId = localContentId, GeometryKey = importedVariant.GeometryKey,
+                        SceneJson = JsonSerializer.Serialize(remappedScene, ManuscriptCodec.JsonOptions), Revision = importedVariant.Revision,
+                    };
+                    content.Variants.Add(variant);
+                    if (importedContent.ActiveVariantId == importedVariant.Id)
+                        content.ActiveVariantId = variant.Id;
+                }
+                content.ActiveVariantId ??= content.Variants.OrderByDescending(item => item.UpdatedAt).Select(item => (Guid?)item.Id).FirstOrDefault();
+                activeVariants.Add((content, content.ActiveVariantId));
+                content.ActiveVariantId = null;
+                page.Contents.Add(content);
             }
-            composition.ActiveAuthoringVariantId ??= composition.Variants.OrderByDescending(item => item.UpdatedAt).Select(item => (Guid?)item.Id).FirstOrDefault();
-            db.PageCompositions.Add(composition);
+            db.DesignedPages.Add(page);
         }
-        if (document.PageCompositions.Count > 0)
+        if (importedPages.Count > 0)
         {
+            await db.SaveChangesAsync(cancellationToken);
+            foreach (var (content, activeVariantId) in activeVariants)
+                content.ActiveVariantId = activeVariantId;
             await db.SaveChangesAsync(cancellationToken);
             await AddReportAsync(
                 job,
                 ProjectImportReportItemKind.Structural,
-                $"Imported {document.PageCompositions.Count} designed page composition(s)",
+                $"Imported {importedPages.Count} Designed Page(s)",
                 "Semantic content, geometry variants, image references, and font references were remapped into the project.",
-                "PageComposition",
+                "DesignedPage",
                 job.ProjectId.ToString("N"),
                 cancellationToken: cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// The v31 writer emits page-owned content. Older JSON is deliberately
+    /// adapted only at this import boundary: an owner-bound composition becomes
+    /// a project page with one Core or release content record. Its manuscript
+    /// placement has already been preserved in the legacy block ID.
+    /// </summary>
+    private static IReadOnlyList<ProjectExportDesignedPage> EffectiveDesignedPages(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 31)
+            return document.DesignedPages;
+
+        var legacy = document.PageCompositions;
+        var byId = legacy.ToDictionary(item => item.Id);
+        // Only a single valid source clone for the exact release/source
+        // lineage is an override. Multiple candidates are divergent data and
+        // remain release-only pages rather than silently coalescing content.
+        var cloneOwner = legacy
+            .Where(item => item.SourceCompositionId is Guid sourceId
+                && byId.TryGetValue(sourceId, out var source)
+                && source.EditionId is null)
+            .GroupBy(item => new { item.EditionId, item.SourceCompositionId })
+            .Where(group => group.Count() == 1)
+            .SelectMany(group => group)
+            .ToDictionary(item => item.Id, item => item.SourceCompositionId!.Value);
+
+        return legacy
+            .Where(item => !cloneOwner.ContainsKey(item.Id))
+            .Select(page =>
+            {
+                var contents = legacy
+                    .Where(item => item.Id == page.Id || cloneOwner.GetValueOrDefault(item.Id) == page.Id)
+                    .Select(content => LegacyDesignedPageContent(page.Id, content))
+                    .ToList();
+                return new ProjectExportDesignedPage(page.Id, page.Name, page.EditionId, contents);
+            })
+            .ToList();
+    }
+
+    private static IReadOnlyDictionary<Guid, Guid> EffectiveDesignedPageIdentityMap(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 31)
+            return document.DesignedPages.ToDictionary(page => page.Id, page => page.Id);
+
+        var legacy = document.PageCompositions;
+        var byId = legacy.ToDictionary(item => item.Id);
+        var cloneOwner = legacy
+            .Where(item => item.SourceCompositionId is Guid sourceId
+                && byId.TryGetValue(sourceId, out var source)
+                && source.EditionId is null)
+            .GroupBy(item => new { item.EditionId, item.SourceCompositionId })
+            .Where(group => group.Count() == 1)
+            .SelectMany(group => group)
+            .ToDictionary(item => item.Id, item => item.SourceCompositionId!.Value);
+        return legacy.ToDictionary(
+            item => item.Id,
+            item => cloneOwner.GetValueOrDefault(item.Id, item.Id));
+    }
+
+    private static ProjectExportDesignedPageContent LegacyDesignedPageContent(
+        Guid pageId,
+        ProjectExportPageComposition composition) => new(
+            composition.Id,
+            pageId,
+            composition.EditionId,
+            composition.SemanticManuscriptJson,
+            string.Empty,
+            composition.Revision,
+            composition.Variants.Select(variant => new ProjectExportDesignedPageVariant(
+                variant.Id,
+                composition.Id,
+                variant.GeometryKey,
+                variant.SceneJson,
+                variant.Revision)).ToList(),
+            composition.ActiveAuthoringVariantId);
+
+    private async Task RebuildImportedDesignedPagePlacementsAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var pages = await db.DesignedPages.AsNoTracking()
+            .Where(page => page.ProjectId == projectId)
+            .Select(page => page.Id)
+            .ToHashSetAsync(cancellationToken);
+        var placements = new List<DesignedPagePlacementReference>();
+        var placementKeys = new HashSet<(DesignedPageContainerKind Kind, Guid ContainerId, Guid? EditionId, string BlockId)>();
+        foreach (var chapter in await db.Chapters.Where(chapter => chapter.ProjectId == projectId).ToListAsync(cancellationToken))
+            AddPlacementReferences(projectId, chapter.Manuscript, DesignedPageContainerKind.Chapter, chapter.Id, null, pages, placementKeys, placements);
+        foreach (var chapterOverride in await db.PublicationEditionChapterOverrides
+            .Where(item => item.Edition.ProjectId == projectId)
+            .ToListAsync(cancellationToken))
+        {
+            var manuscript = ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapterOverride.ChapterId, chapterOverride.Revision);
+            AddPlacementReferences(projectId, manuscript, DesignedPageContainerKind.Chapter, chapterOverride.ChapterId, chapterOverride.EditionId, pages, placementKeys, placements);
+        }
+        foreach (var section in await db.PublicationSections.Where(section => section.ProjectId == projectId).ToListAsync(cancellationToken))
+        {
+            var manuscript = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
+            AddPlacementReferences(projectId, manuscript, DesignedPageContainerKind.PublicationSection, section.Id, section.EditionId, pages, placementKeys, placements);
+        }
+        db.DesignedPagePlacementReferences.AddRange(placements);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void AddPlacementReferences(
+        Guid projectId,
+        ManuscriptDocument manuscript,
+        DesignedPageContainerKind containerKind,
+        Guid containerId,
+        Guid? editionId,
+        IReadOnlySet<Guid> pageIds,
+        ISet<(DesignedPageContainerKind Kind, Guid ContainerId, Guid? EditionId, string BlockId)> placementKeys,
+        ICollection<DesignedPagePlacementReference> placements)
+    {
+        foreach (var block in manuscript.Content.Where(block => block.Type == ManuscriptBlockType.DesignedPage))
+        {
+            if (block.DesignedPageId is not Guid pageId || !pageIds.Contains(pageId))
+                throw new InvalidDataException($"Designed Page block {block.Id} references a page outside the imported project.");
+            if (!placementKeys.Add((containerKind, containerId, editionId, block.Id)))
+                throw new InvalidDataException($"Designed Page placement block ID {block.Id} is not unique within its manuscript container.");
+            placements.Add(new DesignedPagePlacementReference
+            {
+                Id = block.Id,
+                ProjectId = projectId,
+                DesignedPageId = pageId,
+                ContainerKind = containerKind,
+                ContainerId = containerId,
+                EditionId = editionId,
+                ManuscriptRevision = manuscript.Revision,
+            });
         }
     }
 
@@ -2079,7 +2235,7 @@ public sealed class ProjectImportJobProcessor(
             return;
         var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidOperationException("Core Book contains an empty cover scene.");
-        CompositionService.Validate(scene, ManuscriptCodec.CreateEmpty(Guid.Empty), allowCanonicalTextBindings: true);
+        DesignedPageService.Validate(scene, ManuscriptCodec.CreateEmpty(Guid.Empty), allowCanonicalTextBindings: true);
         ValidateExportSceneReferences(scene, imageIds, fontFamilyIds, allowCoverBindings: true, "Core Book cover");
         if (scene.Surface.Kind != CompositionSurfaceKind.SinglePage
             || scene.Objects.Any(item => item.RegionConstraint is CompositionRegionConstraint.Back
@@ -2560,8 +2716,8 @@ public sealed class ProjectImportJobProcessor(
                 transformed = transformed with
                 {
                     Content = transformed.Content.Select(block =>
-                        block.PageCompositionId is Guid sourceId && remap.TryGetValue(sourceId, out var cloneId)
-                            ? block with { PageCompositionId = cloneId }
+                        block.DesignedPageId is Guid sourceId && remap.TryGetValue(sourceId, out var cloneId)
+                            ? block with { DesignedPageId = cloneId }
                             : block).ToList(),
                 };
                 edition.ChapterOverrides.Add(new PublicationEditionChapterOverride
@@ -2635,36 +2791,45 @@ public sealed class ProjectImportJobProcessor(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var sourceIds = document.Content.Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.PageCompositionId.HasValue)
-            .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
+        var sourceIds = document.Content.Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.DesignedPageId.HasValue)
+            .Select(item => item.DesignedPageId!.Value).Distinct().ToList();
         if (sourceIds.Count == 0)
             return [];
-        var sources = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId
-                && item.EditionId == null && item.DetachedAt == null && sourceIds.Contains(item.Id))
+        var sources = await db.DesignedPages.AsNoTracking()
+            .Include(item => item.Contents)
+            .ThenInclude(content => content.Variants)
+            .Where(item => item.ProjectId == projectId && item.ScopeEditionId == null && sourceIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
         var map = new Dictionary<Guid, Guid>();
+        var activeVariants = new List<(DesignedPageContent Content, Guid? ActiveVariantId)>();
         foreach (var source in sources)
         {
-            var clone = new PageComposition
+            var core = source.Contents.SingleOrDefault(content => content.EditionId is null)
+                ?? throw new InvalidDataException($"Designed Page {source.Id:N} has no Core content.");
+            if (source.Contents.Any(content => content.EditionId == editionId))
+            {
+                map[source.Id] = source.Id;
+                continue;
+            }
+            var clone = new DesignedPageContent
             {
                 ProjectId = projectId,
-                ChapterId = chapterId,
+                DesignedPageId = source.Id,
                 EditionId = editionId,
-                SourceCompositionId = source.SourceCompositionId ?? source.Id,
-                Name = source.Name,
-                SemanticManuscriptJson = ManuscriptCodec.Serialize(ReplaceImportedStyleRoles(
-                    ManuscriptCodec.Deserialize(source.SemanticManuscriptJson, source.Id, source.Revision),
-                    roles)),
-                Revision = source.Revision,
+                AccessibilityDescription = core.AccessibilityDescription,
+                Revision = core.Revision,
             };
+            var semantic = RehomeImportedEditionContent(
+                ManuscriptCodec.Deserialize(core.SemanticManuscriptJson, core.Id, core.Revision),
+                clone.Id,
+                roles);
+            clone.SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic);
             var variantMap = new Dictionary<Guid, Guid>();
-            foreach (var sourceVariant in source.Variants)
+            foreach (var sourceVariant in core.Variants)
             {
-                var cloneVariant = new PageCompositionVariant
+                var cloneVariant = new DesignedPageVariant
                 {
-                    Composition = clone,
+                    Content = clone,
                     GeometryKey = sourceVariant.GeometryKey,
                     SceneJson = sourceVariant.SceneJson,
                     Revision = sourceVariant.Revision,
@@ -2672,13 +2837,28 @@ public sealed class ProjectImportJobProcessor(
                 variantMap[sourceVariant.Id] = cloneVariant.Id;
                 clone.Variants.Add(cloneVariant);
             }
-            if (source.ActiveAuthoringVariantId is Guid activeId && variantMap.TryGetValue(activeId, out var cloneActiveId))
-                clone.ActiveAuthoringVariantId = cloneActiveId;
-            db.PageCompositions.Add(clone);
-            map[source.Id] = clone.Id;
+            if (core.ActiveVariantId is Guid activeId && variantMap.TryGetValue(activeId, out var cloneActiveId))
+                clone.ActiveVariantId = cloneActiveId;
+            activeVariants.Add((clone, clone.ActiveVariantId));
+            clone.ActiveVariantId = null;
+            db.DesignedPageContents.Add(clone);
+            map[source.Id] = source.Id;
+        }
+        if (activeVariants.Count > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            foreach (var (content, activeVariantId) in activeVariants)
+                content.ActiveVariantId = activeVariantId;
+            await db.SaveChangesAsync(cancellationToken);
         }
         return map;
     }
+
+    internal static ManuscriptDocument RehomeImportedEditionContent(
+        ManuscriptDocument document,
+        Guid contentId,
+        IReadOnlyDictionary<string, string> roles) =>
+        ReplaceImportedStyleRoles(document, roles) with { ManuscriptId = contentId };
 
     private static ManuscriptDocument ReplaceImportedStyleRoles(
         ManuscriptDocument document,
@@ -3318,7 +3498,7 @@ public sealed class ProjectImportJobProcessor(
                     : block.Type == ManuscriptBlockType.DesignedPage
                         ? block with
                         {
-                            PageCompositionId = block.PageCompositionId is Guid exportedCompositionId
+                            DesignedPageId = block.DesignedPageId is Guid exportedCompositionId
                                 && compositionMap?.TryGetValue(exportedCompositionId, out var localCompositionId) == true
                                     ? localCompositionId
                                     : throw new InvalidOperationException(
@@ -3420,7 +3600,7 @@ public sealed class ProjectImportJobProcessor(
         return source with { Content = blocks };
     }
 
-    private static PageComposition CreateImportedPageComposition(
+    private static DesignedPage CreateImportedDesignedPage(
         Guid projectId,
         Guid chapterId,
         ProjectExportChapter chapter,
@@ -3534,38 +3714,48 @@ public sealed class ProjectImportJobProcessor(
             Layers = [new CompositionLayer(layerId, "Content", 0)],
             Objects = objects,
         };
-        return new PageComposition
+        var contentId = Guid.NewGuid();
+        return new DesignedPage
         {
             Id = id,
             ProjectId = projectId,
-            ChapterId = chapterId,
             Name = chapter.Title,
-            SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic with { ManuscriptId = id }),
-            Revision = semantic.Revision,
-            Variants =
+            Contents =
             [
-                new PageCompositionVariant
+                new DesignedPageContent
                 {
-                    GeometryKey = "import-seed",
-                    SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
+                    Id = contentId,
+                    ProjectId = projectId,
+                    DesignedPageId = id,
+                    SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic with { ManuscriptId = contentId }),
+                    Revision = semantic.Revision,
+                    Variants =
+                    [
+                        new DesignedPageVariant
+                        {
+                            ContentId = contentId,
+                            GeometryKey = "import-seed",
+                            SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
+                        },
+                    ],
                 },
             ],
         };
     }
 
-    private static CompositionMutationStage CreateCompositionSeed(PageComposition composition, string sceneJson) => new()
+    private static CompositionMutationStage CreateCompositionSeed(DesignedPage page, DesignedPageContent content, string sceneJson) => new()
     {
-        ProjectId = composition.ProjectId,
+        ProjectId = page.ProjectId,
         ConversationId = Guid.Empty,
-        TargetKind = "page-composition-seed",
-        TargetId = composition.Id,
-        ExpectedRevision = composition.Revision,
+        TargetKind = "designed-page-seed",
+        TargetId = content.Id,
+        ExpectedRevision = content.Revision,
         OperationsJson = sceneJson,
         PayloadSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sceneJson))),
         ExpiresAt = DateTime.MaxValue,
     };
 
-    private async Task MaterializeImportedLegacyCompositionVariantsAsync(
+    private async Task MaterializeImportedDesignedPageVariantsAsync(
         Guid projectId,
         CancellationToken cancellationToken)
     {
@@ -3579,34 +3769,33 @@ public sealed class ProjectImportJobProcessor(
         var seeds = await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId
                 && item.ConversationId == Guid.Empty
-                && item.TargetKind == "page-composition-seed")
+                && item.TargetKind == "designed-page-seed")
             .ToListAsync(cancellationToken);
         if (seeds.Count == 0) return;
-        var compositionIds = seeds.Select(item => item.TargetId).ToHashSet();
-        var compositions = await db.PageCompositions
-            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
-            .Where(item => item.ProjectId == projectId && item.DetachedAt == null
-                && compositionIds.Contains(item.Id))
+        var contentIds = seeds.Select(item => item.TargetId).ToHashSet();
+        var contents = await db.DesignedPageContents
+            .Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId && contentIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         foreach (var seed in seeds)
         {
-            if (!compositions.TryGetValue(seed.TargetId, out var composition))
-                throw new InvalidDataException($"Imported composition seed {seed.Id:N} has no composition.");
+            if (!contents.TryGetValue(seed.TargetId, out var content))
+                throw new InvalidDataException($"Imported Designed Page seed {seed.Id:N} has no content.");
             var actualHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(seed.OperationsJson)));
             if (!string.Equals(actualHash, seed.PayloadSha256, StringComparison.Ordinal))
-                throw new InvalidDataException($"Imported composition seed {seed.Id:N} failed its integrity check.");
-            var semantic = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson);
+                throw new InvalidDataException($"Imported Designed Page seed {seed.Id:N} failed its integrity check.");
+            var semantic = ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision);
             foreach (var edition in editions)
             {
-                var scene = CompositionService.AdaptSeedScene(seed.OperationsJson, edition);
-                var geometryKey = CompositionService.GeometryKey(edition, scene);
-                if (composition.Variants.Any(item => item.GeometryKey == geometryKey))
+                var scene = DesignedPageService.AdaptSeedScene(seed.OperationsJson, edition);
+                var geometryKey = DesignedPageService.GeometryKey(edition, scene);
+                if (content.Variants.Any(item => item.GeometryKey == geometryKey))
                     continue;
-                CompositionService.ValidateVariantGeometry(edition, scene);
-                CompositionService.Validate(scene, semantic);
-                db.PageCompositionVariants.Add(new PageCompositionVariant
+                DesignedPageService.ValidateVariantGeometry(edition, scene);
+                DesignedPageService.Validate(scene, semantic);
+                db.DesignedPageVariants.Add(new DesignedPageVariant
                 {
-                    CompositionId = composition.Id,
+                    ContentId = content.Id,
                     GeometryKey = geometryKey,
                     SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
                 });

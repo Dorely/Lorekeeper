@@ -195,7 +195,7 @@ public sealed class EditorChatService(
     public async IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(
         Guid projectId,
         Guid? currentChapterId,
-        Guid? currentCompositionId,
+        Guid? currentDesignedPageId,
         EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
@@ -329,7 +329,7 @@ public sealed class EditorChatService(
                 projectId,
                 conversation.Id,
                 currentChapterId,
-                currentCompositionId,
+                currentDesignedPageId,
                 contentTarget,
                 persistedProvider.Id,
                 visionReady,
@@ -1168,29 +1168,21 @@ public sealed class EditorChatService(
                 return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.Manuscript, ChapterId: id, Revision: revision, ChangedIds: changedIds);
             if (string.Equals(kind, "projectPageSetup", StringComparison.OrdinalIgnoreCase))
                 return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.ProjectPageSetup, Revision: revision, ChangedIds: changedIds);
-            if (string.Equals(kind, "pageComposition", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(kind, "designedPage", StringComparison.OrdinalIgnoreCase))
             {
-                var compositionId = ReadGuid(mutation, "compositionId") ?? id;
+                var pageId = ReadGuid(mutation, "pageId") ?? id;
                 var variantId = ReadGuid(mutation, "variantId") ?? ReadGuid(root, "variantId") ?? ReadGuid(arguments, "variantId");
                 var selectedObjectId = ReadGuid(mutation, "selectId")
                     ?? ReadGuid(root, "selectId")
                     ?? (toolName.Contains("patch", StringComparison.Ordinal) ? ReadGuid(arguments, "targetId") : null);
                 return new EditorWorkspaceMutated(
-                    EditorWorkspaceMutationKind.PageComposition,
-                    CompositionId: compositionId,
+                    EditorWorkspaceMutationKind.DesignedPage,
+                    DesignedPageId: pageId,
                     VariantId: variantId,
                     Revision: revision,
                     ChangedIds: changedIds,
                     SelectedObjectId: selectedObjectId);
             }
-            if (string.Equals(kind, "pageCompositionVariant", StringComparison.OrdinalIgnoreCase))
-                return new EditorWorkspaceMutated(
-                    EditorWorkspaceMutationKind.PageComposition,
-                    CompositionId: ReadGuid(mutation, "compositionId"),
-                    VariantId: ReadGuid(mutation, "variantId") ?? id,
-                    Revision: revision,
-                    ChangedIds: changedIds,
-                    SelectedObjectId: ReadGuid(mutation, "selectId") ?? ReadGuid(root, "selectId") ?? ReadGuid(arguments, "targetId"));
             return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.Other, Revision: revision, ChangedIds: changedIds);
         }
         catch (JsonException)

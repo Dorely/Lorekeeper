@@ -284,7 +284,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 12,
+            protocol_version: 13,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
