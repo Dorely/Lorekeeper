@@ -365,6 +365,11 @@ after explicit attachment and a successful local checkpoint. Attaching a remote 
 explicit acknowledgement that creative material may be uploaded. After attachment,
 the consent and repository-selection controls collapse into the attached remote
 status and actions; removing the remote makes setup available again.
+The device code and explicit **Check authorization** action remain application-
+owned. Its exact `https://github.com/login/device` target passes through the same
+validated external-authorization launcher as OpenAI: Electron opens the system
+browser, while browser hosting leaves the explicit user-activated link in the
+device-flow panel.
 Credentialed Git transport accepts only absolute `https://github.com/...` clone
 URLs matching the selected owner and repository; alternate hosts fail closed.
 

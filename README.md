@@ -343,7 +343,7 @@ its planned features are not claims about current capabilities.
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
-- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a versioned stable catalog for Astra, Sol, Terra, and Luna; Sol is preferred, catalog models are ready without manual Test when credentials and entitlement permit, and the 272,000-token usable input budget stays separate from advertised context. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Credentials and configuration remain in local SQLite.
+- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a versioned stable catalog for Astra, Sol, Terra, and Luna; Sol is preferred, catalog models are ready without manual Test when credentials and entitlement permit, and the 272,000-token usable input budget stays separate from advertised context. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings refreshes automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Credentials and configuration remain in local SQLite.
 
 ## Version history and optional synchronization
 
@@ -404,7 +404,9 @@ so **Connect GitHub** can start device authorization without per-user setup. For
 and custom deployments can replace it with `VersionHistory:GitHub:ClientId` in
 configuration or `VersionHistory__GitHub__ClientId` as an environment variable.
 Lorekeeper stores the resulting access token only in its provider-owned local
-credential row. GitHub device authorization, repository listing/creation, fetch,
+credential row. The device verification page uses the same validated external-
+browser launcher as OpenAI while keeping its one-time code and explicit
+authorization check in Lorekeeper. GitHub device authorization, repository listing/creation, fetch,
 manual push, and remote checkout contact the network only after the corresponding
 action is selected. Automatic pushes are limited to explicitly attached remotes
 and are driven by durable local checkpoint intents.
@@ -444,9 +446,12 @@ Run the normal browser-hosted app:
 dotnet run --project Lorekeeper --launch-profile http
 ```
 
-The HTTP launch profile is pinned to `http://localhost:1455` for the Codex OAuth
-callback. Use this explicit profile for browser-driven UI validation; the Electron
-profile intentionally remains the default development target.
+The HTTP launch profile is pinned to `http://localhost:1455` for the OpenAI OAuth
+callback. Before Connect is enabled, Lorekeeper verifies that the configured
+callback origin is served by the active host; a port mismatch is shown inline
+and no second listener is started. Use this explicit profile for browser-driven
+UI validation; the Electron profile intentionally remains the default
+development target.
 
 ## Desktop Development
 
@@ -464,9 +469,10 @@ $env:Desktop__HttpPort = '1456'
 dotnet run --project Lorekeeper --launch-profile electron
 ```
 
-Codex OAuth uses `Auth:Codex:RedirectUri`, which defaults to
-`http://localhost:1455/auth/callback`. Changing the desktop port can break Codex
-OAuth unless that redirect URI is also accepted by the OAuth provider.
+OpenAI OAuth uses `Auth:Codex:RedirectUri`, which defaults to
+`http://localhost:1455/auth/callback`. Changing the desktop port disables Connect
+until the redirect configuration, active Lorekeeper host, and provider-accepted
+callback agree.
 
 ## Contributing
 

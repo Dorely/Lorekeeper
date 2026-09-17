@@ -27,6 +27,7 @@ public sealed class CodexChatClient : IChatClient
     public CodexChatClient(
         HttpClient httpClient,
         string accessToken,
+        string externalAccountId,
         string model,
         LlmReasoningEffort? reasoningEffort,
         ILogger<CodexChatClient> logger)
@@ -35,7 +36,7 @@ public sealed class CodexChatClient : IChatClient
         _accessToken = accessToken;
         _model = string.IsNullOrWhiteSpace(model) ? LlmProviderCatalog.OpenAiDefaultMainlineModel : model;
         _reasoningEffort = reasoningEffort?.ToWireValue();
-        _accountId = CodexProvider.ExtractAccountId(accessToken);
+        _accountId = externalAccountId;
         _logger = logger;
     }
 

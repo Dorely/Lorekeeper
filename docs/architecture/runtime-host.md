@@ -54,8 +54,11 @@ OAuth and media endpoints, installs the startup gate, and creates the desktop
 window. Keep provider-specific transport behavior behind provider-neutral
 contracts and keep feature behavior in injected services; the composition root
 should wire those owners rather than reproduce their logic.
-The scoped OpenAI account-catalog reconciler is one such owner: Settings and the
-authorization boundary invoke it, while the host only registers the contract.
+The scoped OpenAI account-catalog, authorization, and token services are such
+owners. Process-local authorization state, per-account operation coordination,
+callback-origin validation, and the platform-selected external launcher are
+registered at the host boundary; Settings and the callback invoke their
+contracts while the composition root contains no OAuth behavior.
 
 Razor pages and components own interaction and presentation state. Domain services
 own validation, persistence, graph/index maintenance, provider resolution, image
@@ -87,8 +90,10 @@ production hosting enables HSTS and HTTPS redirection; the local Electron path i
 explicitly HTTP on its hardened loopback binding. Status-code handling re-executes
 the application-owned not-found route rather than exposing host chrome.
 
-Minimal API endpoints exist only where an HTTP boundary is necessary: Codex OAuth
-redirects and scoped binary/media delivery are representative examples. Endpoint
+Minimal API endpoints exist only where an HTTP boundary is necessary: the OpenAI
+OAuth callback and scoped binary/media delivery are representative examples. The
+callback returns a standalone completion page and never redirects into a Blazor
+circuit; authorization starts from the still-mounted Settings component. Endpoint
 handlers validate identifiers and delegate to owning services; they do not become
 an alternate domain layer. Local image, mask, chat-visual, artifact, or other media
 routes must enforce the same project/ownership rules as the Razor surface and must
@@ -131,14 +136,19 @@ semantics are owned by
 Electron is the primary debug and product target. The desktop host binds to the
 configured local host and port, while the explicit `http` launch profile supports
 browser development and validation. Both development profiles use
-`localhost:1455`; Codex OAuth depends on
-`http://localhost:1455/auth/callback`. A port change must update the desktop
-binding and an accepted OAuth redirect together. The host remains local-only
-unless a deliberate architecture and security change expands its exposure.
+`localhost:1455`; OpenAI OAuth depends on
+`http://localhost:1455/auth/callback`. Connect remains disabled unless that exact
+configured loopback origin is present in the active server addresses. A port
+change must update the host binding and accepted OAuth redirect together; no
+second listener is created to compensate. The host remains local-only unless a
+deliberate architecture and security change expands its exposure.
 
 Electron-only responsibilities include hardened binding, desktop-window creation,
-shutdown, and the deliberately narrow external-browser handoff used by the Free
-distribution channel. `DistributionChannelPolicy` resolves immutable assembly
+shutdown, and deliberately narrow external-browser handoffs. The shared
+authorization launcher opens only exact allowlisted OpenAI/GitHub HTTPS targets;
+browser hosting instead renders explicit user-activated links. The Free update
+channel retains its separate validated release-page handoff.
+`DistributionChannelPolicy` resolves immutable assembly
 metadata at startup; it is not a user setting. Development always disables update
 checks. A Release build defaults to `Free`, which registers the constrained public
 GitHub release checker only after the user chooses the shared-top-bar **Check for

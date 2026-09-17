@@ -3,7 +3,7 @@
 ## When to read
 
 Read this chapter completely when a task changes LLM connections, model
-discovery, chat or vision transports, Codex OAuth, embeddings, web-search or
+discovery, chat or vision transports, OpenAI account authorization, embeddings, web-search or
 web-fetch providers, image-generation transport, provider settings, request
 timeouts, retries, queues, hosted workers, notifiers, cancellation, or restart
 reconciliation. Read it for a new long-running app-process operation even when
@@ -21,7 +21,7 @@ require [Press production](press-production.md).
 
 This chapter owns configuration and resolution of external AI/search services,
 provider-neutral chat, vision, embedding, web, and image transport boundaries,
-Codex OAuth behavior, wire-compatibility policy, network safety, and the shared
+OpenAI account authorization behavior, wire-compatibility policy, network safety, and the shared
 lifecycle rules for app-process queues and workers. It documents how work remains
 alive, observable, cancellable, and recoverable without assigning feature-domain
 validation to infrastructure.
@@ -154,11 +154,29 @@ preserved and restored on the correlated assistant/tool-result request.
 
 ### OAuth and credential security
 
-Codex uses a PKCE OAuth flow with application endpoints at
-`/auth/start/{accountId}` and `/auth/callback`. The configured redirect is
-`http://localhost:1455/auth/callback`, so changing the desktop/HTTP port requires
-an accepted OAuth redirect update. OAuth success may best-effort configure a
-default Codex embedding model when embedding configuration is still unset.
+OpenAI account authorization is account-oriented and starts directly from the
+mounted Providers component; there is no application `/auth/start` redirect.
+`OpenAiAuthorizationFlowRegistry` keeps one process-local flow per account with
+a 256-bit state, independent 256-bit PKCE verifier, ten-minute expiry, and
+terminal status. Starting a replacement cancels the older state, callback claim
+is atomic and single-use, and per-account coordination prevents a canceled or
+stale callback from replacing credentials. Reconnect preserves the existing
+credential row until the replacement exchange commits successfully.
+
+`IExternalAuthorizationLauncher` is the single OpenAI/GitHub handoff boundary.
+It accepts only exact allowlisted HTTPS authorization targets. Electron opens the
+validated URL through the system browser; browser hosting returns the URL to be
+rendered as an explicit user-activated external link. Settings polls only while
+its flow is pending, cancels on user cancellation or unmount, and refreshes the
+account catalog plus previously unset embedding configuration after success.
+The `/auth/callback` endpoint accepts success or denial, consumes the flow, and
+renders a standalone no-store Lorekeeper completion page. It never redirects to
+Settings or opens another application session.
+
+The configured redirect remains `http://localhost:1455/auth/callback`. Before
+Connect is enabled, Lorekeeper validates that this exact loopback origin and
+callback path are served by the active host. A port/configuration mismatch is
+shown inline; the application never starts or terminates another listener.
 
 LLM and search API keys are persisted on their provider rows. OpenAI-account
 access and refresh tokens are stored in dedicated SQLite rows owned by
@@ -168,14 +186,20 @@ log API keys, authorization codes, access tokens, refresh tokens, or sensitive
 provider payloads, and never copy credentials onto unrelated feature entities or
 assistant tool payloads.
 
-Refresh, callback replacement, and revoke operations are serialized per account
-for the whole application process and start from a fresh persisted-token read. A
-token endpoint `401`, `invalid_grant`, or `invalid_token` response marks that exact
-persisted token unusable in memory and presents the connection as disconnected;
-it does not delete the row. A new PKCE connection replaces it. Transport errors,
-server errors, and malformed responses remain errors. The Providers surface catches
-those at the card boundary so one unavailable OAuth endpoint cannot break the
-settings page.
+Callback commit, disconnect, reconnect start, and token refresh are serialized
+per account for the whole process and begin from fresh persistence reads. The
+external ChatGPT account identity is read only at the successful authorization
+boundary and persisted on `OpenAiAccount`; chat, vision, embeddings, model
+discovery, and image generation use that persisted identity and never inspect
+access-token shape at request time. A migrated token without persisted external
+identity fails closed as Reauthentication required.
+
+A token endpoint `401`, `invalid_grant`, or `invalid_token` marks the account as
+requiring reauthentication while retaining the credential row. Transient
+transport/server failures also retain credentials and remain retryable errors.
+Only a successful replacement flow swaps credentials; explicit Disconnect
+removes them. The Providers surface catches sanitized failures at the card
+boundary so one unavailable OAuth endpoint cannot break Settings.
 
 Version-control GitHub access is a separate provider-owned boundary. Its device
 authorization and REST client use the shipped public client ID for Lorekeeper's
@@ -201,7 +225,7 @@ connections, discovers or accepts a model, tests it before save, and may unset t
 feature. `ProviderEmbeddingService` resolves the current provider/model, truncates
 oversized input, batches requests, validates returned dimensions, and reports
 availability. `EmbeddingClient` supports native Ollama `/api/embed`,
-OpenAI-compatible `/v1/embeddings`, and Codex OAuth routing.
+OpenAI-compatible `/v1/embeddings`, and OpenAI account authorization routing.
 
 Changing the active embedding model cancels and awaits any current bulk rebuild,
 updates configuration, and queues a versioned replacement. `EmbeddingRebuildQueue`
@@ -400,7 +424,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Provider presets, persisted connection/model ownership, working-default resolution, and shared credential lookup. |
 | [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport, verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
-| [`Lorekeeper/Llm/CodexAuthService.cs`](../../Lorekeeper/Llm/CodexAuthService.cs), [`CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | PKCE lifecycle, Codex endpoint/default constants, token refresh/revoke behavior, and local callback endpoints. |
+| [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
 | [`Lorekeeper/Llm/EmbeddingClient.cs`](../../Lorekeeper/Llm/EmbeddingClient.cs), [`EmbeddingConfigurationService.cs`](../../Lorekeeper/Llm/EmbeddingConfigurationService.cs), and [`ProviderEmbeddingService.cs`](../../Lorekeeper/Llm/ProviderEmbeddingService.cs) | Embedding transport, test-before-save configuration, active-provider resolution, batching, truncation, and dimension validation. |
 | [`Lorekeeper/Llm/EmbeddingRebuild*`](../../Lorekeeper/Llm/) | Versioned/coalesced rebuild queue, hosted worker, scoped bulk index rebuild, throttling, retry, and cancellation. |
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |

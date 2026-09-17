@@ -9,16 +9,17 @@ namespace Lorekeeper.Llm;
 /// </summary>
 internal static class LlmConnectionResolver
 {
-    public static async Task<(string? ApiKey, AuthType EffectiveAuthType)> ResolveAsync(
+    public static async Task<LlmConnectionAccess> ResolveAsync(
         ILlmProviderService providerService,
         LlmProvider provider,
         CancellationToken cancellationToken)
     {
         if (provider.OpenAiAccountId is not null)
         {
-            return provider.Id == 0
-                ? (await providerService.GetOpenAiAccountTokenAsync(provider.OpenAiAccountId.Value, cancellationToken), AuthType.OAuth)
-                : (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), AuthType.OAuth);
+            var access = await providerService.GetOpenAiAccountAccessAsync(
+                provider.OpenAiAccountId.Value,
+                cancellationToken);
+            return new LlmConnectionAccess(access?.AccessToken, AuthType.OAuth, access?.ExternalAccountId);
         }
 
         if (provider.CredentialSourceId is int sourceId)
@@ -27,12 +28,22 @@ internal static class LlmConnectionResolver
                 ?? throw new InvalidOperationException($"Credential source provider {sourceId} not found.");
 
             var sourceApiKey = await providerService.GetEffectiveApiKeyAsync(sourceId, cancellationToken);
-            return (sourceApiKey, credentialSource.AuthType);
+            return new LlmConnectionAccess(sourceApiKey, credentialSource.AuthType, null);
         }
 
         if (provider.Id != 0)
-            return (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), provider.AuthType);
+        {
+            return new LlmConnectionAccess(
+                await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken),
+                provider.AuthType,
+                null);
+        }
 
-        return (provider.ApiKey, provider.AuthType);
+        return new LlmConnectionAccess(provider.ApiKey, provider.AuthType, null);
     }
 }
+
+internal sealed record LlmConnectionAccess(
+    string? ApiKey,
+    AuthType EffectiveAuthType,
+    string? ExternalAccountId);

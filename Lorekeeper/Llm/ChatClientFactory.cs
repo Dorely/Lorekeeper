@@ -48,8 +48,8 @@ public class ChatClientFactory(
         var provider = await providerService.GetByIdAsync(providerId, cancellationToken)
             ?? throw new InvalidOperationException($"Provider {providerId} not found.");
 
-        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
-        return CreateChatClient(provider, apiKey, effectiveAuthType);
+        var access = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
+        return CreateChatClient(provider, access);
     }
 
     public async Task TestModelAsync(int providerId, CancellationToken cancellationToken = default)
@@ -60,27 +60,30 @@ public class ChatClientFactory(
 
     public async Task TestModelAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
-        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
-        var chatClient = CreateChatClient(provider, apiKey, effectiveAuthType);
+        var access = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
+        var chatClient = CreateChatClient(provider, access);
         await TestChatClientAsync(chatClient, cancellationToken);
     }
 
-    private IChatClient CreateChatClient(LlmProvider provider, string? apiKey, AuthType effectiveAuthType)
+    private IChatClient CreateChatClient(LlmProvider provider, LlmConnectionAccess access)
     {
-        if (provider.OpenAiAccountId is not null && apiKey is not null)
+        if (provider.OpenAiAccountId is not null
+            && access.ApiKey is not null
+            && access.ExternalAccountId is not null)
         {
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
             return new CodexChatClient(
                 httpClient,
-                apiKey,
+                access.ApiKey,
+                access.ExternalAccountId,
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
                 loggerFactory.CreateLogger<CodexChatClient>());
         }
 
-        if (effectiveAuthType != AuthType.None && apiKey is null)
+        if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)
             throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
 
         var chatTimeoutSeconds = Math.Clamp(agentOptions.Value.ChatRequestTimeoutSeconds, 60, 3600);
@@ -114,7 +117,7 @@ public class ChatClientFactory(
         }
 
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
-        var credential = new ApiKeyCredential(apiKey ?? "ollama");
+        var credential = new ApiKeyCredential(access.ApiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
         IChatClient chatClient = new OpenAIChatToolMetadataClient(
             client.GetChatClient(provider.ModelId).AsIChatClient());

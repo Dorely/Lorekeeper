@@ -1,3 +1,4 @@
+using Lorekeeper.Authorization;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -5,7 +6,7 @@ using Lorekeeper.Persistence.Repositories;
 namespace Lorekeeper.Llm;
 
 public class LlmProviderService(
-IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProviderService
+IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens) : ILlmProviderService
 {
     public async Task<List<LlmProvider>> GetAllAsync(CancellationToken cancellationToken = default)
     {
@@ -331,7 +332,7 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
         try
         {
-            return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(accountId, cancellationToken));
+            return await accountTokens.GetValidAccessAsync(accountId, cancellationToken) is not null;
         }
         catch
         {
@@ -519,7 +520,7 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         if (credentialProvider is null) return null;
 
         if (credentialProvider.OpenAiAccountId is int accountId)
-            return await codexAuth.GetValidTokenAsync(accountId, cancellationToken);
+            return (await accountTokens.GetValidAccessAsync(accountId, cancellationToken))?.AccessToken;
 
         if (credentialProvider.AuthType == AuthType.ApiKey)
             return credentialProvider.ApiKey;
@@ -527,8 +528,10 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         return null;
     }
 
-    public Task<string?> GetOpenAiAccountTokenAsync(int accountId, CancellationToken cancellationToken = default) =>
-        codexAuth.GetValidTokenAsync(accountId, cancellationToken);
+    public Task<OpenAiAccountAccess?> GetOpenAiAccountAccessAsync(
+        int accountId,
+        CancellationToken cancellationToken = default) =>
+        accountTokens.GetValidAccessAsync(accountId, cancellationToken);
 
     private async Task<bool> IsChatProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
@@ -652,8 +655,13 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         {
             try
             {
-                return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(accountId, cancellationToken))
-                    ? new CredentialStatus(true, string.Empty)
+                if (await accountTokens.GetValidAccessAsync(accountId, cancellationToken) is not null)
+                    return new CredentialStatus(true, string.Empty);
+
+                await using var accountRead = await database.OpenReadAsync(cancellationToken);
+                var account = await accountRead.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken);
+                return account?.RequiresReauthenticationAt is not null
+                    ? new CredentialStatus(false, "Reauthentication is required. Reconnect your OpenAI account in Settings > Providers.")
                     : new CredentialStatus(false, "Connect your OpenAI account in Settings > Providers.");
             }
             catch (Exception ex)

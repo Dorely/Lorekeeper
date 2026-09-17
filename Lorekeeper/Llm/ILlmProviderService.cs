@@ -1,3 +1,4 @@
+using Lorekeeper.Authorization;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Llm;
@@ -36,7 +37,7 @@ public interface ILlmProviderService
     /// <see cref="LlmProvider.OpenAiAccountId"/>.
     /// </summary>
     Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default);
-    Task<string?> GetOpenAiAccountTokenAsync(int accountId, CancellationToken cancellationToken = default);
+    Task<OpenAiAccountAccess?> GetOpenAiAccountAccessAsync(int accountId, CancellationToken cancellationToken = default);
 }
 
 public sealed record LlmConnectionUpdate(

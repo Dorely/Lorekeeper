@@ -41,7 +41,7 @@ public sealed class ModelCatalogService(
         Func<JsonElement, IReadOnlyList<T>> parse,
         CancellationToken cancellationToken)
     {
-        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
+        var access = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
         // Don't block discovery when AuthType is ApiKey but no key has been entered yet.
         // CommandCode's GET /v1/models succeeds without auth and many gateways return an
         // empty or public list anonymously; authenticated gateways will return 401/403
@@ -49,12 +49,12 @@ public sealed class ModelCatalogService(
         // Providers "List models" work prior to API-key configuration.
 
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-        if (effectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(apiKey))
+        if (access.EffectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(access.ApiKey))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            if (CodexProvider.IsAccountBacked(provider))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.ApiKey);
+            if (CodexProvider.IsAccountBacked(provider) && access.ExternalAccountId is not null)
             {
-                request.Headers.TryAddWithoutValidation("chatgpt-account-id", CodexProvider.ExtractAccountId(apiKey));
+                request.Headers.TryAddWithoutValidation("chatgpt-account-id", access.ExternalAccountId);
                 request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
             }
         }

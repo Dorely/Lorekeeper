@@ -1,69 +1,36 @@
-using Lorekeeper.Llm;
+using Lorekeeper.Authorization;
 
 namespace Lorekeeper.Auth;
 
 public static class CodexOAuthEndpoints
 {
     /// <summary>
-    /// Maps the Codex OAuth2 PKCE flow endpoints. Returns to <c>/settings/providers</c>
-    /// with a status message after callback success or failure.
+    /// Maps the OpenAI OAuth callback onto Lorekeeper's existing web host.
     /// </summary>
     public static IEndpointRouteBuilder MapCodexOAuth(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/auth/start/{accountId:int}", (int accountId, ICodexAuthService authService) =>
-        {
-            var (url, _) = authService.StartPkceFlow(accountId);
-            return Results.Redirect(url);
-        });
-
         endpoints.MapGet("/auth/callback", async (
-            string? code,
-            string? state,
-            ICodexAuthService authService,
-            ILlmProviderService providerService,
-            IOpenAiAccountModelCatalogService accountCatalog,
-            IEmbeddingConfigurationService embeddingConfiguration,
+            HttpContext context,
+            IOpenAiAccountAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
-                return RedirectToProviders("OAuth callback missing code or state.", "danger");
-
-            try
-            {
-                var accountId = await authService.HandleCallbackAsync(code, state, cancellationToken);
-                try
-                {
-                    var refresh = await accountCatalog.RefreshAvailabilityAsync(accountId, cancellationToken);
-                    var accountModels = (await providerService.GetAllAsync(cancellationToken))
-                        .Where(provider => provider.OpenAiAccountId == accountId)
-                        .ToList();
-                    var providerId = accountModels.FirstOrDefault(provider => provider.IsDefault)?.Id
-                        ?? accountModels.FirstOrDefault()?.Id
-                        ?? throw new InvalidOperationException("The connected OpenAI account has no saved model.");
-                    var configured = await embeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(providerId, cancellationToken);
-                    var message = configured
-                        ? $"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}."
-                        : "OpenAI account connected. Existing embedding model kept.";
-                    if (!refresh.Succeeded)
-                        message += " Model availability could not be refreshed; the bundled catalog remains usable and can be retried in Settings.";
-                    return RedirectToProviders(message, refresh.Succeeded ? "success" : "warning");
-                }
-                catch (Exception ex)
-                {
-                    return RedirectToProviders($"OpenAI account connected, but Codex embeddings were not configured: {ex.Message}", "warning");
-                }
-            }
-            catch (Exception ex)
-            {
-                return RedirectToProviders("OAuth failed: " + ex.Message, "danger");
-            }
+            var result = await authorization.HandleCallbackAsync(
+                context.Request.Query["code"].FirstOrDefault(),
+                context.Request.Query["state"].FirstOrDefault(),
+                context.Request.Query["error"].FirstOrDefault(),
+                context.Request.Query["error_description"].FirstOrDefault(),
+                cancellationToken);
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            context.Response.Headers.ContentSecurityPolicy =
+                "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+            return Results.Content(
+                OpenAiAuthorizationCompletionPage.Render(result),
+                "text/html; charset=utf-8");
         });
 
         return endpoints;
     }
-
-    private static IResult RedirectToProviders(string message, string statusKind) =>
-        Results.Redirect(
-            "/settings/providers?message=" + Uri.EscapeDataString(message)
-            + "&statusKind=" + Uri.EscapeDataString(statusKind));
 }

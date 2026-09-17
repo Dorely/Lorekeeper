@@ -1,4 +1,5 @@
 @page "/settings/providers"
+@using Lorekeeper.Authorization
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
 @using Microsoft.AspNetCore.Components.Web
@@ -7,13 +8,16 @@
 @inject ILlmProviderService ProviderService
 @inject IOpenAiAccountService OpenAiAccounts
 @inject IOpenAiAccountModelCatalogService OpenAiCatalog
-@inject ICodexAuthService CodexAuth
+@inject IOpenAiAccountAuthorizationService OpenAiAuthorization
+@inject IOpenAiAccountTokenService OpenAiTokens
+@inject IOpenAiCallbackOriginValidator CallbackOrigin
+@inject IEmbeddingConfigurationService EmbeddingConfiguration
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
 @inject IModelCatalogService ModelCatalog
 @inject NavigationManager Nav
 @inject ILogger<Providers> Logger
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>LLM Providers</PageTitle>
 
@@ -143,19 +147,40 @@
                     <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI account</h2><p>Use the bundled model catalog without managing an API key or running manual model tests.</p></div>
                 </div>
                 <div class="connection-actions">
+                    @if (_authorizationFlow?.IsPending == true)
+                    {
+                        <span class="lk-status-pill is-warning">Authorization pending</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelOpenAiAuthorizationAsync">Cancel</button>
+                    }
                     @if (_codexConnected)
                     {
                         <span class="lk-status-pill is-success">Connected</span>
                         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_refreshingOpenAiCatalog" @onclick="RefreshOpenAiCatalogAsync">@(_refreshingOpenAiCatalog ? "Refreshing…" : "Refresh models")</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Reconnect</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
                     }
                     else
                     {
                         <span class="lk-status-pill is-warning">Not connected</span>
-                        <button type="button" class="btn btn-sm btn-primary" @onclick="ConnectCodexAsync">Connect OpenAI</button>
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Connect OpenAI</button>
                     }
                 </div>
             </header>
+            @if (_callbackOrigin is { IsValid: false })
+            {
+                <div class="alert alert-warning">@_callbackOrigin.Message</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastAuthenticationError))
+            {
+                <div class="alert alert-warning">@_openAiAccount.LastAuthenticationError</div>
+            }
+            @if (_authorizationTarget is not null)
+            {
+                <div class="alert alert-info">
+                    OpenAI authorization is ready. Use this explicit external link, then return to this page while Lorekeeper completes the connection.
+                    <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
+                </div>
+            }
             @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastCatalogRefreshError))
             {
                 <div class="alert alert-warning">@_openAiAccount.LastCatalogRefreshError</div>
@@ -323,7 +348,6 @@
 @code {
     private List<LlmProvider> _parents = [];
     private Dictionary<int, List<LlmProvider>> _children = [];
-    private Dictionary<int, bool> _oauthStatus = [];
     private Dictionary<int, bool> _chatReadyStatus = [];
     private Dictionary<int, bool> _visionReadyStatus = [];
     private LlmProvider? _codexProvider;
@@ -331,6 +355,12 @@
     private bool _codexConnected;
     private bool _refreshingOpenAiCatalog;
     private bool _hasWorkingChatProvider;
+    private OpenAiCallbackOriginValidation? _callbackOrigin;
+    private OpenAiAuthorizationFlowSnapshot? _authorizationFlow;
+    private Uri? _authorizationTarget;
+    private CancellationTokenSource? _authorizationPollingCancellation;
+    private Task? _authorizationPollingTask;
+    private bool _disposed;
 
     private readonly Dictionary<int, ChildDraft> _childForms = [];
     private NewProviderDraft _newProvider = new();
@@ -377,6 +407,8 @@
     ];
 
     private bool AnyTestRunning => _testingProviderId is not null || _isTestingNewProvider || _listingNewProviderModels || _listingRowModelId is not null || _listingChildModelParentId is not null;
+    private bool CanStartOpenAiAuthorization =>
+        _callbackOrigin?.IsValid == true && _authorizationFlow?.IsPending != true;
     private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsAccountBacked(provider));
     private IReadOnlyList<LlmProvider> CodexModels => _openAiAccount is null
         ? []
@@ -399,10 +431,29 @@
     {
         Nav.LocationChanged += OnLocationChanged;
         ConsumeStatusFromQuery();
+        _callbackOrigin = CallbackOrigin.Validate();
         await ReloadAsync();
     }
 
-    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        Nav.LocationChanged -= OnLocationChanged;
+        if (_authorizationFlow?.IsPending == true)
+            await OpenAiAuthorization.CancelAsync(_authorizationFlow.AccountId);
+        _authorizationPollingCancellation?.Cancel();
+        if (_authorizationPollingTask is not null)
+        {
+            try
+            {
+                await _authorizationPollingTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        _authorizationPollingCancellation?.Dispose();
+    }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
@@ -453,13 +504,12 @@
             .GroupBy(p => p.CredentialSourceId!.Value)
             .ToDictionary(g => g.Key, g => g.OrderBy(c => c.ModelId).ToList());
 
-        _oauthStatus = new Dictionary<int, bool>();
-        foreach (var account in await OpenAiAccounts.GetAllAsync())
+        _codexConnected = false;
+        if (_openAiAccount is not null)
         {
             try
             {
-                var token = await CodexAuth.GetValidTokenAsync(account.Id);
-                _oauthStatus[account.Id] = token is not null;
+                _codexConnected = await OpenAiTokens.GetValidAccessAsync(_openAiAccount.Id) is not null;
             }
             catch (OperationCanceledException)
             {
@@ -467,14 +517,15 @@
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Unable to validate OpenAI account {AccountId}", account.Id);
-                _oauthStatus[account.Id] = false;
+                Logger.LogWarning(ex, "Unable to validate OpenAI account {AccountId}", _openAiAccount.Id);
                 if (_statusMessage is null)
                 {
-                    _statusMessage = "An OAuth connection could not be checked. Retry or reconnect the account.";
+                    _statusMessage = "The OpenAI connection could not be checked. Retry or reconnect the account.";
                     _statusKind = "warning";
                 }
             }
+
+            _openAiAccount = await OpenAiAccounts.GetByIdAsync(_openAiAccount.Id);
         }
 
         _chatReadyStatus = new Dictionary<int, bool>();
@@ -487,8 +538,6 @@
             _visionReadyStatus[provider.Id] = await ProviderService.IsVisionProviderWorkingAsync(provider.Id);
 
         _codexProvider = CodexModels.FirstOrDefault();
-        _codexConnected = _openAiAccount is not null
-            && _oauthStatus.TryGetValue(_openAiAccount.Id, out var c) && c;
     }
 
     private async Task CreateProviderAsync()
@@ -811,10 +860,131 @@
 
     private async Task ConnectCodexAsync()
     {
-        var account = _openAiAccount ?? await OpenAiAccounts.CreateAsync();
-        await OpenAiCatalog.EnsureCatalogAsync(account.Id);
+        _callbackOrigin = CallbackOrigin.Validate();
+        if (!_callbackOrigin.IsValid)
+        {
+            SetStatus(_callbackOrigin.Message, "warning");
+            return;
+        }
 
-        Nav.NavigateTo($"/auth/start/{account.Id}", forceLoad: true);
+        try
+        {
+            var account = _openAiAccount ?? await OpenAiAccounts.CreateAsync();
+            _openAiAccount = account;
+            await OpenAiCatalog.EnsureCatalogAsync(account.Id);
+            var started = await OpenAiAuthorization.StartAsync(account.Id);
+            _authorizationFlow = started.Flow;
+            _authorizationTarget = started.Launch.Disposition == ExternalAuthorizationLaunchDisposition.UserActivationRequired
+                ? started.Launch.Target
+                : null;
+            SetStatus(
+                started.Launch.Disposition == ExternalAuthorizationLaunchDisposition.OpenedExternally
+                    ? "OpenAI authorization opened in your system browser. Return here after approving it."
+                    : "OpenAI authorization is ready. Use the external link below, then return here.",
+                "info");
+            StartAuthorizationPolling(account.Id, started.Flow.FlowId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to start OpenAI authorization");
+            SetStatus("OpenAI authorization could not be started. Check the callback configuration and try again.", "danger");
+        }
+    }
+
+    private void StartAuthorizationPolling(int accountId, Guid flowId)
+    {
+        _authorizationPollingCancellation?.Cancel();
+        _authorizationPollingCancellation?.Dispose();
+        _authorizationPollingCancellation = new CancellationTokenSource();
+        _authorizationPollingTask = PollAuthorizationAsync(
+            accountId,
+            flowId,
+            _authorizationPollingCancellation.Token);
+    }
+
+    private async Task PollAuthorizationAsync(
+        int accountId,
+        Guid flowId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                var flow = OpenAiAuthorization.GetFlow(accountId);
+                if (flow is null || flow.FlowId != flowId)
+                    return;
+
+                _authorizationFlow = flow;
+                if (flow.IsPending)
+                {
+                    if (!_disposed)
+                        await InvokeAsync(StateHasChanged);
+                    continue;
+                }
+
+                _authorizationTarget = null;
+                if (flow.Status == OpenAiAuthorizationFlowStatus.Succeeded)
+                    await FinishOpenAiConnectionAsync(accountId, cancellationToken);
+                else
+                {
+                    SetStatus(
+                        flow.Message ?? "OpenAI authorization was not completed. Start a new connection attempt.",
+                        flow.Status == OpenAiAuthorizationFlowStatus.Failed ? "danger" : "warning");
+                    await ReloadAsync();
+                }
+
+                _authorizationFlow = null;
+                if (!_disposed)
+                    await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to finish OpenAI authorization {FlowId}", flowId);
+            if (!_disposed)
+            {
+                SetStatus("OpenAI connected, but account setup could not be refreshed. Use Refresh models to retry.", "warning");
+                await ReloadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task FinishOpenAiConnectionAsync(int accountId, CancellationToken cancellationToken)
+    {
+        var refresh = await OpenAiCatalog.RefreshAvailabilityAsync(accountId, cancellationToken);
+        var accountModels = (await ProviderService.GetAllAsync(cancellationToken))
+            .Where(provider => provider.OpenAiAccountId == accountId)
+            .ToList();
+        var providerId = accountModels.FirstOrDefault(provider => provider.IsDefault)?.Id
+            ?? accountModels.FirstOrDefault(provider =>
+                OpenAiAccountModelCatalog.Find(provider.ModelId)?.IsPreferred == true)?.Id
+            ?? accountModels.FirstOrDefault()?.Id;
+        var configuredEmbedding = providerId is int id
+            && await EmbeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(id, cancellationToken);
+        var message = configuredEmbedding
+            ? $"OpenAI account connected. Codex embeddings use {CodexProvider.DefaultEmbeddingModel}."
+            : "OpenAI account connected. Existing embedding settings were kept.";
+        if (!refresh.Succeeded)
+            message += " Model availability could not be refreshed; the bundled catalog remains usable. Use Refresh models to retry.";
+        SetStatus(message, refresh.Succeeded ? "success" : "warning");
+        await ReloadAsync();
+    }
+
+    private async Task CancelOpenAiAuthorizationAsync()
+    {
+        if (_authorizationFlow?.IsPending == true)
+            await OpenAiAuthorization.CancelAsync(_authorizationFlow.AccountId);
+        _authorizationPollingCancellation?.Cancel();
+        _authorizationTarget = null;
+        _authorizationFlow = null;
+        SetStatus("OpenAI authorization was canceled. Existing credentials were kept.", "info");
     }
 
     private async Task RefreshOpenAiCatalogAsync()
@@ -843,8 +1013,9 @@
     private async Task DisconnectCodexAsync()
     {
         if (_openAiAccount is null) return;
-        await CodexAuth.RevokeTokenAsync(_openAiAccount.Id);
-        SetStatus("Codex disconnected.", "success");
+        await CancelOpenAiAuthorizationAsync();
+        await OpenAiTokens.DisconnectAsync(_openAiAccount.Id);
+        SetStatus("OpenAI account disconnected.", "success");
         await ReloadAsync();
     }
 

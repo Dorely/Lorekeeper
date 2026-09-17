@@ -98,6 +98,13 @@ Account-backed model rows persist catalog/manual origin, entitlement state,
 availability check time/error, and last-known advertised context. Bundled effort,
 capability, and usable-budget metadata remains versioned code-owned catalog data,
 so discovery cannot silently rewrite the compaction contract.
+`OpenAiAccount.ExternalAccountId` is the persisted request identity populated only
+after a successful authorization exchange. `RequiresReauthenticationAt` and the
+sanitized last-authentication error distinguish terminal refresh rejection or a
+migrated credential lacking that identity from transient refresh failure. A
+reconnect does not overwrite the current `OAuthToken` row until its single-use
+flow commits; terminal refresh failures retain the row, while explicit
+disconnect removes it.
 The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into

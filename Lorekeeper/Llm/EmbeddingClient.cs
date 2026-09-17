@@ -119,13 +119,17 @@ public sealed class EmbeddingClient(
 
         if (includeBearerToken)
         {
-            var apiKey = await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken);
+            var accountAccess = provider.OpenAiAccountId is int accountId
+                ? await providerService.GetOpenAiAccountAccessAsync(accountId, cancellationToken)
+                : null;
+            var apiKey = accountAccess?.AccessToken
+                ?? await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken);
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            if (CodexProvider.IsAccountBacked(provider))
+            if (accountAccess is not null)
             {
-                client.DefaultRequestHeaders.TryAddWithoutValidation("chatgpt-account-id", CodexProvider.ExtractAccountId(apiKey));
+                client.DefaultRequestHeaders.TryAddWithoutValidation("chatgpt-account-id", accountAccess.ExternalAccountId);
                 client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Lorekeeper");
             }
         }
@@ -151,7 +155,7 @@ public sealed class EmbeddingClient(
         if (isCodex && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             throw new HttpRequestException(
-                $"{operation} failed ({response.StatusCode}): the Codex OAuth token was rejected by the OpenAI platform embeddings endpoint {CodexProvider.PlatformEmbeddingsEndpoint}. Reconnect OpenAI Codex and try again; if it still fails, this account token cannot be reused for platform embeddings. Response: {redactedErrorBody}",
+                $"{operation} failed ({response.StatusCode}): the OpenAI account authorization was rejected by the platform embeddings endpoint {CodexProvider.PlatformEmbeddingsEndpoint}. Reconnect OpenAI and try again; if it still fails, this account authorization cannot be reused for platform embeddings. Response: {redactedErrorBody}",
                 null,
                 response.StatusCode);
         }

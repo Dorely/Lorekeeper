@@ -43,15 +43,18 @@ public sealed class VisionModelClientFactory(
         if (string.IsNullOrWhiteSpace(prompt))
             throw new ArgumentException("Prompt is required.", nameof(prompt));
 
-        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
+        var access = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
         var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromMinutes(5);
 
-        if (provider.OpenAiAccountId is not null && apiKey is not null)
+        if (provider.OpenAiAccountId is not null
+            && access.ApiKey is not null
+            && access.ExternalAccountId is not null)
         {
             return await ReadCodexImageAsync(
                 httpClient,
-                apiKey,
+                access.ApiKey,
+                access.ExternalAccountId,
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
                 imageBytes,
@@ -61,14 +64,14 @@ public sealed class VisionModelClientFactory(
                 cancellationToken);
         }
 
-        if (effectiveAuthType != AuthType.None && apiKey is null)
+        if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)
             throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
 
         return await ReadOpenAiCompatibleImageAsync(
             httpClient,
             provider,
-            apiKey,
-            effectiveAuthType,
+            access.ApiKey,
+            access.EffectiveAuthType,
             imageBytes,
             mediaType,
             prompt,
@@ -103,6 +106,7 @@ public sealed class VisionModelClientFactory(
     private async Task<string> ReadCodexImageAsync(
         HttpClient httpClient,
         string accessToken,
+        string accountId,
         string model,
         LlmReasoningEffort? reasoningEffort,
         byte[] imageBytes,
@@ -111,7 +115,6 @@ public sealed class VisionModelClientFactory(
         int maxOutputTokens,
         CancellationToken cancellationToken)
     {
-        var accountId = CodexProvider.ExtractAccountId(accessToken);
         var content = new List<Dictionary<string, object?>>
         {
             new()

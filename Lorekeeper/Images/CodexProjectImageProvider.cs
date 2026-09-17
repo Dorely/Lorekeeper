@@ -10,7 +10,6 @@ namespace Lorekeeper.Images;
 
 public sealed class CodexProjectImageProvider(
     ILlmProviderService providerService,
-    ICodexAuthService codexAuth,
     IHttpClientFactory httpClientFactory,
     IOptions<ProjectImageGenerationOptions> options,
     ILogger<CodexProjectImageProvider> logger) : IProjectImageProvider
@@ -86,13 +85,13 @@ public sealed class CodexProjectImageProvider(
         var provider = (await providerService.GetAllAsync(cancellationToken))
             .FirstOrDefault(CodexProvider.IsAccountBacked);
         if (provider?.OpenAiAccountId is not int accountId)
-            throw new InvalidOperationException("No OpenAI Codex OAuth provider is configured. Connect OpenAI Codex in Settings first.");
+            throw new InvalidOperationException("No OpenAI account is configured. Connect OpenAI in Settings first.");
 
-        var token = await codexAuth.GetValidTokenAsync(accountId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException("Connect OpenAI Codex in Settings before generating images.");
+        var access = await providerService.GetOpenAiAccountAccessAsync(accountId, cancellationToken);
+        if (access is null)
+            throw new InvalidOperationException("Connect or reauthenticate OpenAI in Settings before generating images.");
 
-        return new CodexImageConnection(token, CodexProvider.ExtractAccountId(token));
+        return new CodexImageConnection(access.AccessToken, access.ExternalAccountId);
     }
 
     private async Task<CodexImageReadResult> SendImageRequestAsync(

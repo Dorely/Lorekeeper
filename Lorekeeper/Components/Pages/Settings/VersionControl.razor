@@ -1,7 +1,9 @@
 @page "/settings/version-control"
+@using Lorekeeper.Authorization
 @using Lorekeeper.VersionHistory.GitHub
 @rendermode InteractiveServer
 @inject IGitHubConnectionService GitHub
+@inject IExternalAuthorizationLauncher ExternalAuthorizationLauncher
 @implements IDisposable
 
 <PageTitle>Version control - Lorekeeper</PageTitle>
@@ -210,7 +212,12 @@
             {
                 _authorization = authorization;
                 _configurationMissing = false;
-                _message = "GitHub authorization is ready. Open the verification link, enter the code, and then check authorization here.";
+                var launch = await ExternalAuthorizationLauncher.LaunchAsync(
+                    authorization.VerificationUriComplete ?? authorization.VerificationUri,
+                    cancellation.Token);
+                _message = launch.Disposition == ExternalAuthorizationLaunchDisposition.OpenedExternally
+                    ? "GitHub authorization opened in your system browser. Enter the code there, then check authorization here."
+                    : "GitHub authorization is ready. Open the verification link, enter the code, and then check authorization here.";
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -222,6 +229,10 @@
         {
             _authorization = null;
             SetGitHubError(exception);
+        }
+        catch (InvalidOperationException)
+        {
+            _error = "GitHub authorization is ready, but the system browser could not be opened. Use the explicit authorization link below.";
         }
         finally
         {

@@ -1,3 +1,4 @@
+using Lorekeeper.Authorization;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -240,7 +241,7 @@ public sealed class OpenAiAccountModelCatalogTests
         {
             _connection = connection;
             _database = database;
-            Auth = new FakeCodexAuthService();
+            Auth = new FakeOpenAiAccountTokenService();
             Accounts = new OpenAiAccountService(database);
             ProviderService = new LlmProviderService(database, Auth);
             Catalog = new OpenAiAccountModelCatalogService(
@@ -249,7 +250,7 @@ public sealed class OpenAiAccountModelCatalogTests
                 NullLogger<OpenAiAccountModelCatalogService>.Instance);
         }
 
-        public FakeCodexAuthService Auth { get; }
+        public FakeOpenAiAccountTokenService Auth { get; }
         public IOpenAiAccountService Accounts { get; }
         public LlmProviderService ProviderService { get; }
         public OpenAiAccountModelCatalogService Catalog { get; }
@@ -288,20 +289,18 @@ public sealed class OpenAiAccountModelCatalogTests
             new(_options, NullLogger<AppDbContext>.Instance);
     }
 
-    private sealed class FakeCodexAuthService : ICodexAuthService
+    private sealed class FakeOpenAiAccountTokenService : IOpenAiAccountTokenService
     {
         public int? ConnectedAccountId { get; set; }
 
-        public (string AuthorizationUrl, string State) StartPkceFlow(int accountId) =>
-            throw new NotSupportedException();
+        public Task<OpenAiAccountAccess?> GetValidAccessAsync(
+            int accountId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(accountId == ConnectedAccountId
+                ? new OpenAiAccountAccess(accountId, "external-test-account", "valid-test-token")
+                : null);
 
-        public Task<int> HandleCallbackAsync(string code, string state, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<string?> GetValidTokenAsync(int accountId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(accountId == ConnectedAccountId ? "valid-test-token" : null);
-
-        public Task RevokeTokenAsync(int accountId, CancellationToken cancellationToken = default) =>
+        public Task DisconnectAsync(int accountId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 

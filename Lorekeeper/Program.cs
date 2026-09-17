@@ -1,6 +1,7 @@
 using System.Reflection;
 using ElectronNET.API;
 using ElectronNET.API.Entities;
+using Lorekeeper.Authorization;
 using Lorekeeper.Printing;
 using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
@@ -83,6 +84,14 @@ builder.Services.AddSingleton(new ApplicationStartupOptions(
 builder.Services.AddHostedService<ApplicationStartupWorker>();
 
 builder.Services.AddHttpClient();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<OpenAiAccountOperationCoordinator>();
+builder.Services.AddSingleton<OpenAiAuthorizationFlowRegistry>();
+builder.Services.AddSingleton<IOpenAiCallbackOriginValidator, OpenAiCallbackOriginValidator>();
+if (isElectronMode)
+    builder.Services.AddSingleton<IExternalAuthorizationLauncher, ElectronExternalAuthorizationLauncher>();
+else
+    builder.Services.AddSingleton<IExternalAuthorizationLauncher, BrowserExternalAuthorizationLauncher>();
 if (isElectronMode && distributionChannelPolicy.UsesGitHubReleaseChecks)
 {
     builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
@@ -168,7 +177,10 @@ builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<IOpenAiAccountService, OpenAiAccountService>();
 builder.Services.AddScoped<ISystemPromptComposer, SystemPromptComposer>();
-builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
+builder.Services.AddScoped<OpenAiAccountTokenService>();
+builder.Services.AddScoped<IOpenAiAccountTokenService>(services =>
+    services.GetRequiredService<OpenAiAccountTokenService>());
+builder.Services.AddScoped<IOpenAiAccountAuthorizationService, OpenAiAccountAuthorizationService>();
 builder.Services.AddHostedService<EmbeddingRebuildWorker>();
 
 // Search providers

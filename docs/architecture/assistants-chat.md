@@ -127,6 +127,10 @@ version/source/date, and effective effort. Editing settings during a turn cannot
 switch those values halfway through client creation, compaction, or tool
 execution. Contest candidates, revision workers, ingest jobs, embeddings, image
 generation, and Press rendering keep their separate selection contracts.
+For OpenAI account models, client creation resolves the account-owned access token
+and persisted external account identity together. An unavailable credential or
+reauthentication requirement fails the selected provider explicitly; assistants
+never infer account identity from token shape or substitute a different model.
 
 All six surfaces use the active model's resolved input-token limit (explicit
 provider-row value, then the bundled account catalog when applicable, then the
