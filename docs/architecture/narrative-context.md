@@ -155,6 +155,15 @@ by `AgentManuscriptProjection`: its paged and filtered results preserve absolute
 document indexes and omit empty semantic overlays rather than using a generic
 object paginator.
 
+### Project creation and profile indexing
+
+Creating a project persists its empty Book Brief and page setup with the project
+before seeding local graph defaults. The creation path never waits for an
+embedding provider: the derived semantic project-profile index is populated by
+the first substantive profile mutation or a full embedding rebuild. Direct
+project-profile reads and lexical search continue to use the canonical project
+and Book Brief rows.
+
 ### Direct project references and provenance
 
 `ProjectReference` is a direct, read-only continuity link from an active

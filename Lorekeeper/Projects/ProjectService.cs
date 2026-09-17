@@ -17,7 +17,6 @@ public class ProjectService(
     IVectorStore vectors,
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
-    IBookBriefService bookBriefs,
     IContextIndexingService contextIndexing,
     IAuthoringHistoryRuntime authoringHistory,
     IProjectMutationCoordinator projectMutations,
@@ -57,11 +56,11 @@ public class ProjectService(
             Name = trimmed,
             Slug = slug,
             ProjectGuidance = string.Empty,
+            BookBrief = new BookBrief(),
             PageSetup = new ProjectPageSetup(),
         };
         await repo.AddAsync(project, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        project.BookBrief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
     }

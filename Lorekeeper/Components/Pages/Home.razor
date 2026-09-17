@@ -45,16 +45,18 @@
                     <p>Give the project a working title. You can rename it later without changing its address.</p>
                 </div>
             </div>
-            <div class="create-project-form">
+            <div class="create-project-form" aria-busy="@_createBusy">
                 <label>
                     <span>Project name</span>
                     <input class="form-control" @bind="_newName" @bind:event="oninput"
-                           @onkeyup="OnCreateKeyUp" placeholder="e.g. Ashes of the Horde" autofocus />
+                           @onkeyup="OnCreateKeyUp" placeholder="e.g. Ashes of the Horde" disabled="@_createBusy" autofocus />
                 </label>
                 <div class="lk-toolbar">
                     <button type="button" class="btn btn-primary"
-                            disabled="@(string.IsNullOrWhiteSpace(_newName))" @onclick="CreateAsync">Create project</button>
-                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelCreate">Cancel</button>
+                            disabled="@(_createBusy || string.IsNullOrWhiteSpace(_newName))" @onclick="CreateAsync">
+                        @(_createBusy ? "Creating…" : "Create project")
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_createBusy" @onclick="CancelCreate">Cancel</button>
                 </div>
             </div>
         </section>
@@ -279,6 +281,7 @@
 @code {
     private List<Project>? _projects;
     private bool _creating;
+    private bool _createBusy;
     private string _newName = string.Empty;
     private Guid? _renamingId;
     private string _renameValue = string.Empty;
@@ -325,18 +328,26 @@
 
     private void CancelCreate()
     {
+        if (_createBusy) return;
+
         _creating = false;
         _newName = string.Empty;
     }
 
     private async Task OnCreateKeyUp(KeyboardEventArgs e)
     {
+        if (_createBusy) return;
+
         if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_newName)) await CreateAsync();
         else if (e.Key == "Escape") CancelCreate();
     }
 
     private async Task CreateAsync()
     {
+        if (_createBusy || string.IsNullOrWhiteSpace(_newName)) return;
+
+        _createBusy = true;
+        _error = null;
         try
         {
             var project = await Projects.CreateAsync(_newName);
@@ -345,6 +356,7 @@
             Nav.NavigateTo($"/projects/{project.Slug}/editor");
         }
         catch (Exception ex) { _error = ex.Message; }
+        finally { _createBusy = false; }
     }
 
     private void StartRename(Project project)
