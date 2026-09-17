@@ -27,12 +27,12 @@ Start here when resuming work, then read the relevant specification below.
 | Field | Current value |
 |---|---|
 | Active milestone | M1 - OpenAI account catalog and external OAuth (In progress); M0 remains in progress but blocked on its recorded native/Mac prerequisites |
-| Next bounded step | M1 integration evidence - with separate authorization, exercise fresh connection, cancellation, denial, expiry, reconnect, refresh rejection, unavailable models, stale callbacks, and callback-port mismatch in browser-hosted and Electron paths |
-| Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight. M1.1 introduces account-owned OpenAI credentials with a guarded forward migration. M1.2 adds catalog schema v1 for Astra/Sol/Terra/Luna, deterministic entitlement reconciliation, catalog-resolved efforts/capabilities/usable budgets, zero-Test catalog readiness, and fail-closed explicit selections. M1.3 replaces redirect-based authorization with account services, a single-use process-local flow registry, serialized refresh/credential replacement, callback-origin validation, a shared allowlisted OpenAI/GitHub external launcher, mounted Settings polling, and a standalone callback page |
+| Next bounded step | M1 integration evidence - with separate authorization, exercise fresh connection, cancellation, denial, expiry, reconnect, token-refresh rejection, provider rejection of an explicitly selected catalog model, stale callbacks, and callback-port mismatch in browser-hosted and Electron paths |
+| Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight. M1.1 introduces account-owned OpenAI credentials with a guarded forward migration. M1.2 adds a fully local catalog schema v1 for Astra/Sol/Terra/Luna, rejects account-backed model discovery, resolves catalog efforts/capabilities/usable budgets, provides zero-Test catalog readiness, and preserves fail-closed explicit selections. M1.3 replaces redirect-based authorization with account services, a single-use process-local flow registry, serialized refresh/credential replacement, callback-origin validation, a shared allowlisted OpenAI/GitHub external launcher, mounted Settings polling, and a standalone callback page |
 | Next investigation | Obtain explicit authorization and safe test credentials for M1 browser/Electron integration evidence. Retain M0.3/M0.5 native-evidence blockers and M0.6 Apple prerequisites; do not perform live OAuth, provider calls, or browser/Electron automation without that authorization |
 | Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
 | Scope boundary for the next session | Implement deterministic M1 code, migrations, and approved provider-configuration regressions. Do not use live OAuth/provider calls, install an MSIX, create a Store submission, create MAS signing assets, or alter the dispatch-only macOS workflow without separate authorization |
-| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, catalog manifest/reconciliation, zero-Test readiness, advertised-versus-usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider entitlement, browser UI, or Electron behavior. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
+| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -193,8 +193,9 @@ M1 implementation substeps:
   references, account-routed runtime paths, and rollback-on-ambiguity evidence.
 - [x] **M1.2 - Versioned account catalog (complete 2026-09-16).** Added catalog
   schema v1 for Astra/Sol/Terra/Luna, Sol preference, effort/capability/budget
-  resolution, entitlement reconciliation and fallback, zero-Test bundled
-  readiness, manual-row preservation, and fail-closed explicit selection.
+  resolution, zero-Test bundled readiness, manual-row preservation, fail-closed
+  explicit selection, and a hard boundary that rejects account-backed model-list
+  discovery before any provider request.
 - [x] **M1.3 - External authorization implementation (complete 2026-09-16).**
   Added account authorization/token services, single-use expiring process-local
   flow state, serialized refresh/reconnect/disconnect, persisted external account
@@ -216,6 +217,7 @@ M1 implementation substeps:
 | 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit legal/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
 | 2026-09-16 | Added M0.5 local update-channel policy and full-trust MSIX preflight | Free builds use user-initiated GitHub release notification/browser download only; Store builds suppress GitHub, browser, and Electron updater paths. The local package preflight proves the Store closure, contents, and embedded CMS signer without installation, trusted-store mutation, Store submission, or OAuth | [M0.5 evidence](evidence/m0.5-windows-msix-feasibility.md) |
 | 2026-09-16 | Recorded M0.6 as blocked pending owner-supplied Apple signing and Apple-silicon host inputs | Preserve the direct-DMG/macOS workflow while defining the minimum MAS sandbox acceptance boundary; no MAS build flavor, entitlement, certificate, device test, signing, notarization, Store submission, or GitHub secret was added | [M0.6 prerequisite record](evidence/m0.6-mac-app-store-feasibility.md) |
+| 2026-09-16 | Replaced account entitlement discovery with a fully static OpenAI account catalog | The bundled stable-four list is authoritative and must not call `/v1/models`; Settings no longer refreshes account model availability, manual account IDs remain an explicit Advanced/Test workflow, and generic provider discovery is unchanged | Owner correction during M1 implementation |
 
 ## 2. Release definition and settled scope
 
@@ -294,18 +296,17 @@ capabilities, and effective context budgets. Record its source and validation da
 
 - Use metadata verified for the **Codex account transport**; API context-window
   documentation alone is insufficient.
-- Refresh account metadata automatically after connection and reconcile it with
-  the bundled catalog.
-- Preserve a usable bundled/last-known catalog when discovery fails; show
-  availability failures clearly without demanding manual configuration.
+- Materialize the bundled catalog locally after account creation or connection;
+  never fetch or reconcile an account-backed model list at runtime.
 - Keep the existing preferred default where supported. Never silently substitute
-  a more expensive model for an unavailable explicit selection.
+  another model when an explicit selection cannot be used.
 - Validate effort choices against each model's supported values.
-- Distinguish advertised context capacity from Lorekeeper's usable input budget.
-  Capture the resolved budget and model configuration at turn start.
-- Catalog models require no manual Test action. Connection state and actual model
-  entitlement remain separate; authorization failures must remain actionable.
-- Manual model entry stays available under advanced configuration.
+- Capture the resolved usable budget and model configuration at turn start; no
+  discovered account-context value changes compaction behavior.
+- Catalog models require no manual Test action. Connection and provider-call
+  failures remain actionable at their actual boundaries.
+- Manual model entry stays available under advanced configuration with an
+  explicit Test action and no dynamic account model picker.
 
 #### OAuth handoff
 
@@ -323,8 +324,8 @@ Add one `IExternalAuthorizationLauncher` used by OpenAI and GitHub.
 - Port conflicts produce an application-owned explanation; never terminate another process.
 
 Acceptance includes fresh connection, cancellation, denial, expiration,
-reconnect, refresh failure, unavailable models, and simultaneous stale callbacks
-on both supported platforms.
+reconnect, token-refresh failure, provider rejection of an explicitly selected
+catalog model, and simultaneous stale callbacks on both supported platforms.
 
 ### B. Independent Designed Pages (M2)
 

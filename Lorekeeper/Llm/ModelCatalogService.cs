@@ -12,14 +12,14 @@ public sealed class ModelCatalogService(
 {
     public async Task<IReadOnlyList<LlmDiscoveredModel>> ListChatModelsAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
-        var endpoint = CodexProvider.IsAccountBacked(provider)
-            ? CodexProvider.PlatformModelsEndpoint
-            : BuildModelsEndpointUrl(provider.EndpointUrl);
+        RejectAccountBackedDiscovery(provider);
+        var endpoint = BuildModelsEndpointUrl(provider.EndpointUrl);
         return await QueryModelsAsync(provider, endpoint, ParseOpenAiChatModels, cancellationToken);
     }
 
     public async Task<IReadOnlyList<string>> ListEmbeddingModelsAsync(LlmProvider provider, EmbeddingApiKind apiKind, CancellationToken cancellationToken = default)
     {
+        RejectAccountBackedDiscovery(provider);
         if (apiKind == EmbeddingApiKind.OllamaNative)
         {
             return await QueryModelsAsync(
@@ -29,9 +29,7 @@ public sealed class ModelCatalogService(
                 cancellationToken);
         }
 
-        var endpoint = CodexProvider.IsAccountBacked(provider)
-            ? CodexProvider.PlatformModelsEndpoint
-            : BuildModelsEndpointUrl(provider.EndpointUrl);
+        var endpoint = BuildModelsEndpointUrl(provider.EndpointUrl);
         return await QueryModelsAsync(provider, endpoint, ParseOpenAiModelIds, cancellationToken);
     }
 
@@ -52,11 +50,6 @@ public sealed class ModelCatalogService(
         if (access.EffectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(access.ApiKey))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.ApiKey);
-            if (CodexProvider.IsAccountBacked(provider) && access.ExternalAccountId is not null)
-            {
-                request.Headers.TryAddWithoutValidation("chatgpt-account-id", access.ExternalAccountId);
-                request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-            }
         }
 
         var httpClient = httpClientFactory.CreateClient();
@@ -166,5 +159,14 @@ public sealed class ModelCatalogService(
         return trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
             ? trimmed[..^3]
             : trimmed;
+    }
+
+    private static void RejectAccountBackedDiscovery(LlmProvider provider)
+    {
+        if (CodexProvider.IsAccountBacked(provider))
+        {
+            throw new InvalidOperationException(
+                "OpenAI account model IDs come from Lorekeeper's bundled catalog or explicit manual entry and are not fetched dynamically.");
+        }
     }
 }

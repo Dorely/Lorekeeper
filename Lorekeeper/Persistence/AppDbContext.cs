@@ -746,9 +746,6 @@ public class AppDbContext(
             entity.Property(e => e.ModelOrigin)
                 .HasConversion<string>()
                 .HasDefaultValue(LlmModelOrigin.Manual);
-            entity.Property(e => e.AccountAvailability)
-                .HasConversion<string>()
-                .HasDefaultValue(AccountModelAvailability.Unknown);
             entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
             entity.Property(e => e.LastChatTestReasoningEffort).HasConversion<string>();
             entity.Property(e => e.LastVisionTestAuthType).HasConversion<string>();

@@ -126,69 +126,33 @@ public sealed class OpenAiAccountModelCatalogTests
     }
 
     [Fact]
-    public async Task ReconciliationKeepsCatalogAuthorityAndLastKnownMetadataOnFailure()
+    public async Task AccountBackedModelDiscoveryIsRejectedWithoutAProviderRequest()
     {
         await using var fixture = await CatalogFixture.CreateAsync();
-        var account = await fixture.AddAccountAsync("Discovery");
-        var manual = await fixture.AddProviderAsync(new LlmProvider
-        {
-            Name = "manual-account-model",
-            DisplayName = "Manual account model",
-            EndpointUrl = CodexProvider.ResponsesEndpoint,
-            ModelId = "manual-model",
-            ReasoningEffort = LlmReasoningEffort.None,
-            MaxInputTokens = 90_000,
-            AuthType = AuthType.OAuth,
-            OpenAiAccountId = account.Id,
-            ModelOrigin = LlmModelOrigin.Manual,
-        });
-        await fixture.Catalog.EnsureCatalogAsync(account.Id);
-        var firstCheck = new DateTime(2026, 9, 16, 18, 0, 0, DateTimeKind.Utc);
+        var account = await fixture.AddAccountAsync("Static catalog");
+        var model = (await fixture.Catalog.EnsureCatalogAsync(account.Id)).Single(provider =>
+            provider.ModelId == "gpt-5.6-sol");
+        var discovery = new ModelCatalogService(
+            fixture.ProviderService,
+            null!,
+            NullLogger<ModelCatalogService>.Instance);
 
-        await fixture.Catalog.ReconcileAvailabilityAsync(
-            account.Id,
-            [new("gpt-6-astra", 400_000), new("gpt-5.6-sol", 350_000), new("manual-model", 90_000)],
-            firstCheck);
-        var secondCheck = firstCheck.AddMinutes(5);
-        var reconciled = await fixture.Catalog.ReconcileAvailabilityAsync(
-            account.Id,
-            [new("gpt-6-astra", 410_000), new("manual-model", null)],
-            secondCheck);
+        var chatError = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => discovery.ListChatModelsAsync(model));
+        var embeddingError = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => discovery.ListEmbeddingModelsAsync(model, EmbeddingApiKind.OpenAICompatible));
 
-        var astra = reconciled.Single(model => model.ModelId == "gpt-6-astra");
-        Assert.Equal(AccountModelAvailability.Available, astra.AccountAvailability);
-        Assert.Equal(410_000, astra.DiscoveredContextWindowTokens);
-        Assert.Equal(272_000, astra.EffectiveMaxInputTokens);
-        var sol = reconciled.Single(model =>
-            model.ModelOrigin == LlmModelOrigin.BundledCatalog && model.ModelId == "gpt-5.6-sol");
-        Assert.Equal(AccountModelAvailability.Unavailable, sol.AccountAvailability);
-        Assert.Equal(350_000, sol.DiscoveredContextWindowTokens);
-        var preservedManual = reconciled.Single(model => model.Id == manual.Id);
-        Assert.Equal(LlmModelOrigin.Manual, preservedManual.ModelOrigin);
-        Assert.Equal(LlmReasoningEffort.None, preservedManual.ReasoningEffort);
-        Assert.Equal(90_000, preservedManual.MaxInputTokens);
-
-        var failed = await fixture.Catalog.RecordRefreshFailureAsync(account.Id, secondCheck.AddMinutes(5));
-        Assert.Equal(AccountModelAvailability.Available,
-            failed.Single(model => model.Id == astra.Id).AccountAvailability);
-        Assert.Equal(410_000, failed.Single(model => model.Id == astra.Id).DiscoveredContextWindowTokens);
-        Assert.All(failed, model => Assert.Contains("retry", model.AccountAvailabilityError!, StringComparison.OrdinalIgnoreCase));
-        var storedAccount = await fixture.Accounts.GetByIdAsync(account.Id);
-        Assert.Equal(secondCheck.AddMinutes(5), storedAccount!.LastCatalogRefreshAt);
-        Assert.Contains("last-known", storedAccount.LastCatalogRefreshError!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bundled catalog", chatError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not fetched dynamically", embeddingError.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task BundledModelsNeedCredentialsAndEntitlementButNotManualTestsOrSilentFallback()
+    public async Task BundledModelsNeedCredentialsButNotManualTestsOrSilentFallback()
     {
         await using var fixture = await CatalogFixture.CreateAsync();
         var account = await fixture.AddAccountAsync("Readiness");
         fixture.Auth.ConnectedAccountId = account.Id;
         await fixture.Catalog.EnsureCatalogAsync(account.Id);
-        await fixture.Catalog.ReconcileAvailabilityAsync(
-            account.Id,
-            [new("gpt-6-astra", null), new("gpt-5.6-sol", null)],
-            DateTime.UtcNow);
 
         var models = await fixture.ProviderService.GetAllAsync();
         var sol = models.Single(model =>
@@ -199,14 +163,11 @@ public sealed class OpenAiAccountModelCatalogTests
         Assert.True(await fixture.ProviderService.IsVisionProviderWorkingAsync(sol.Id));
         Assert.True(await fixture.ProviderService.IsChatProviderWorkingAsync(astra.Id));
 
-        await fixture.Catalog.ReconcileAvailabilityAsync(
-            account.Id,
-            [new("gpt-6-astra", null)],
-            DateTime.UtcNow.AddMinutes(1));
+        fixture.Auth.ConnectedAccountId = null;
         var defaultAvailability = await fixture.ProviderService.GetDefaultChatProviderAvailabilityAsync();
         Assert.False(defaultAvailability.IsAvailable);
         Assert.Equal(sol.Id, defaultAvailability.Provider!.Id);
-        Assert.Contains("not available", defaultAvailability.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Connect your OpenAI account", defaultAvailability.Message, StringComparison.OrdinalIgnoreCase);
 
         var selection = await fixture.ProviderService.ResolveChatModelSelectionAsync(sol.Id);
         Assert.False(selection.IsAvailable);
@@ -222,7 +183,6 @@ public sealed class OpenAiAccountModelCatalogTests
             AuthType = AuthType.OAuth,
             OpenAiAccountId = account.Id,
             ModelOrigin = LlmModelOrigin.Manual,
-            AccountAvailability = AccountModelAvailability.Available,
         });
         Assert.False(await fixture.ProviderService.IsChatProviderWorkingAsync(manual.Id));
 
@@ -244,10 +204,7 @@ public sealed class OpenAiAccountModelCatalogTests
             Auth = new FakeOpenAiAccountTokenService();
             Accounts = new OpenAiAccountService(database);
             ProviderService = new LlmProviderService(database, Auth);
-            Catalog = new OpenAiAccountModelCatalogService(
-                database,
-                new FakeModelCatalogService(),
-                NullLogger<OpenAiAccountModelCatalogService>.Instance);
+            Catalog = new OpenAiAccountModelCatalogService(database);
         }
 
         public FakeOpenAiAccountTokenService Auth { get; }
@@ -304,17 +261,4 @@ public sealed class OpenAiAccountModelCatalogTests
             Task.CompletedTask;
     }
 
-    private sealed class FakeModelCatalogService : IModelCatalogService
-    {
-        public Task<IReadOnlyList<LlmDiscoveredModel>> ListChatModelsAsync(
-            LlmProvider provider,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("External model discovery is not used by these deterministic tests.");
-
-        public Task<IReadOnlyList<string>> ListEmbeddingModelsAsync(
-            LlmProvider provider,
-            EmbeddingApiKind apiKind,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
 }

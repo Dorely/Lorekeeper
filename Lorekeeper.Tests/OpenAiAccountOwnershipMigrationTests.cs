@@ -64,8 +64,6 @@ public sealed class OpenAiAccountOwnershipMigrationTests
                 {
                     Assert.Null(provider.CredentialSourceId);
                     Assert.Equal(LlmModelOrigin.Manual, provider.ModelOrigin);
-                    Assert.Equal(AccountModelAvailability.Unknown, provider.AccountAvailability);
-                    Assert.Null(provider.DiscoveredContextWindowTokens);
                 });
                 Assert.Equal(2, accountModels.Count(provider => provider.ModelId == "gpt-5.6-sol" && provider.Id != 101));
                 Assert.Equal(LlmReasoningEffort.High, accountModels.Single(provider => provider.Id == 102).ReasoningEffort);
@@ -89,6 +87,11 @@ public sealed class OpenAiAccountOwnershipMigrationTests
                 Assert.Equal(102, (await db.ResearchConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.ProjectImageConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.PublishConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
+
+                var obsoleteCatalogColumns = await db.Database.SqlQueryRaw<long>(
+                        "SELECT COUNT(*) AS Value FROM pragma_table_info('LlmProviders') WHERE name IN ('AccountAvailability', 'AccountAvailabilityCheckedAt', 'AccountAvailabilityError', 'DiscoveredContextWindowTokens')")
+                    .SingleAsync();
+                Assert.Equal(0, obsoleteCatalogColumns);
             }
         }
         finally

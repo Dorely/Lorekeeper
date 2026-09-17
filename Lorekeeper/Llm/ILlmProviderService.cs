@@ -62,8 +62,8 @@ public sealed record ChatProviderAvailability(
 /// <summary>
 /// A saved provider/model row that is currently usable for chat. Manual rows
 /// require a successful credential-valid readiness snapshot; bundled OpenAI
-/// account rows derive readiness from credentials, catalog validation, and
-/// entitlement. The labels identify both the connection and model.
+/// account rows derive readiness from credentials and local catalog validation.
+/// The labels identify both the connection and model.
 /// </summary>
 public sealed record ChatModelOption(
     int ProviderId,

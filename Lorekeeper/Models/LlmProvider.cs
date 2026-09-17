@@ -21,8 +21,8 @@ public class LlmProvider
     /// <summary>
     /// Explicit input-context budget used for chat compaction decisions. When
     /// null, resolution falls back to the <c>ChatTokens</c> configuration
-    /// mapping and then its default. Discovery may prefill this from
-    /// provider-advertised context metadata; a manual value always wins.
+    /// mapping and then its default. Discovery for user-configured providers
+    /// may prefill this from advertised context metadata; a manual value wins.
     /// </summary>
     public int? MaxInputTokens { get; set; }
 
@@ -38,10 +38,6 @@ public class LlmProvider
     public int? OpenAiAccountId { get; set; }
     public OpenAiAccount? OpenAiAccount { get; set; }
     public LlmModelOrigin ModelOrigin { get; set; } = LlmModelOrigin.Manual;
-    public AccountModelAvailability AccountAvailability { get; set; } = AccountModelAvailability.Unknown;
-    public DateTime? AccountAvailabilityCheckedAt { get; set; }
-    public string? AccountAvailabilityError { get; set; }
-    public int? DiscoveredContextWindowTokens { get; set; }
     public bool IsDefault { get; set; }
     public bool LastChatTestSucceeded { get; set; }
     public DateTime? LastChatTestedAt { get; set; }

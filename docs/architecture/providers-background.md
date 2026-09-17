@@ -75,14 +75,14 @@ image input. Catalog rows retain nullable explicit effort and input-budget
 overrides; runtime resolution supplies catalog defaults only when an override is
 absent. Unsupported saved effort values fail closed.
 
-Model discovery uses OpenAI-compatible `GET /models`, the Codex platform models
-endpoint, or Ollama `GET /api/tags`. For an OpenAI account, the authorized
-`/v1/models` response is only an entitlement/availability signal: it may update
-availability and last-known advertised context, but never replaces bundled
-efforts, capabilities, or usable budgets. Failure preserves bundled and
-last-known rows, records a sanitized Retry message, and leaves never-observed
-availability unknown. Generic connections still degrade to code-owned seeded
-suggestions or manual entry when discovery is unavailable.
+OpenAI account model discovery is intentionally absent: Lorekeeper never calls
+`/v1/models` for an account-backed chat or embedding connection. The bundled
+stable-four manifest is the complete account model list, while Advanced accepts
+an exact manual model ID followed by the existing explicit Test workflow.
+User-configured OpenAI-compatible connections may still discover models through
+`GET /models`, and Ollama connections through `GET /api/tags`; those generic
+paths degrade to code-owned suggestions or manual entry when discovery is
+unavailable.
 
 Provider verification performs a protocol-safe chat probe without a constrained
 output budget and, after chat succeeds, a non-blocking vision probe. Saving is
@@ -93,23 +93,22 @@ Direct OpenAI presets and OpenAI-account chat, vision, and image-mainline
 fallbacks use `gpt-5.6-sol` as the code-owned default; existing persisted model
 selections remain authoritative until the user changes them.
 
-Bundled account rows need valid account credentials and must not be explicitly
-unavailable, but they do not require a manual chat or vision Test. Manual account
-rows retain the explicit Test workflow under Advanced configuration. A new,
-empty account receives the stable four and makes Sol the global default only
-when no default already exists. An unavailable explicit global or conversation
-selection remains selected and returns an actionable error; it is never replaced
-with another usable model.
+Bundled account rows need valid account credentials and catalog-valid settings,
+but they do not require a manual chat or vision Test. Manual account rows retain
+the explicit Test workflow under Advanced configuration. A new, empty account
+receives the stable four and makes Sol the global default only when no default
+already exists. An explicit global or conversation selection whose credentials
+or eventual provider request fail remains selected and returns an actionable
+error; it is never replaced with another model.
 
 ### Input-context budgets
 
 Each chat model row carries an optional `MaxInputTokens` advisory input-context
 override used only for assistant context compaction decisions and panel token
 projection; it never changes the wire request. Bundled account models resolve an
-absent override to the catalog's 272,000-token usable input budget. Their
-provider-advertised context (`DiscoveredContextWindowTokens`) is separate,
-nullable last-known metadata and is never used for compaction. Other connections
-resolve an absent row value through `ChatTokens:ModelMaxInputTokens`, then
+absent override to the catalog's 272,000-token usable input budget. Account
+model-list discovery does not supply a competing advertised-context value. Other
+connections resolve an absent row value through `ChatTokens:ModelMaxInputTokens`, then
 `ChatTokens:DefaultMaxInputTokens`; their interactive discovery picker may still
 prefill the editable row value. The resolved budget and catalog metadata are
 captured in each turn's model snapshot so a running turn remains stable if
@@ -167,8 +166,8 @@ credential row until the replacement exchange commits successfully.
 It accepts only exact allowlisted HTTPS authorization targets. Electron opens the
 validated URL through the system browser; browser hosting returns the URL to be
 rendered as an explicit user-activated external link. Settings polls only while
-its flow is pending, cancels on user cancellation or unmount, and refreshes the
-account catalog plus previously unset embedding configuration after success.
+its flow is pending, cancels on user cancellation or unmount, and ensures the
+local account catalog plus previously unset embedding configuration after success.
 The `/auth/callback` endpoint accepts success or denial, consumes the flow, and
 renders a standalone no-store Lorekeeper completion page. It never redirects to
 Settings or opens another application session.
@@ -190,9 +189,10 @@ Callback commit, disconnect, reconnect start, and token refresh are serialized
 per account for the whole process and begin from fresh persistence reads. The
 external ChatGPT account identity is read only at the successful authorization
 boundary and persisted on `OpenAiAccount`; chat, vision, embeddings, model
-discovery, and image generation use that persisted identity and never inspect
-access-token shape at request time. A migrated token without persisted external
-identity fails closed as Reauthentication required.
+requests, and image generation use that persisted identity and never inspect
+access-token shape at request time. Account model discovery is not a supported
+runtime path. A migrated token without persisted external identity fails closed
+as Reauthentication required.
 
 A token endpoint `401`, `invalid_grant`, or `invalid_token` marks the account as
 requiring reauthentication while retaining the credential row. Transient
@@ -421,7 +421,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 
 | File or family | Architectural role |
 |---|---|
-| [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Provider presets, persisted connection/model ownership, working-default resolution, and shared credential lookup. |
+| [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, persisted connection/model ownership, working-default resolution, and shared credential lookup. Account-backed discovery is rejected. |
 | [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport, verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
 | [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
@@ -457,10 +457,11 @@ provider calls, embeddings, web search, guarded fetching, or image generation
 works.
 
 Exercise the exact integration before making such a claim: connect or refresh the
-relevant account, run the applicable chat/vision/discovery or embedding probe,
-perform the selected web provider/fetch flow, or complete and cancel an image job
-as appropriate. Include failure-path checks for invalid credentials, timeouts,
-malformed provider responses, cancellation, and process restart when those
-contracts change. Browser UI validation remains user-authorized only. Exact base
-commands and test boundaries are in
+relevant account credentials, run the applicable chat/vision or embedding probe,
+run discovery only for a user-configured provider, perform the selected web
+provider/fetch flow, or complete and cancel an image job as appropriate. Include
+failure-path checks for invalid credentials, timeouts, malformed provider
+responses, cancellation, and process restart when those contracts change.
+Browser UI validation remains user-authorized only. Exact base commands and test
+boundaries are in
 [Validation and documentation](validation-documentation.md).

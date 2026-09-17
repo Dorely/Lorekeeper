@@ -155,7 +155,6 @@
                     @if (_codexConnected)
                     {
                         <span class="lk-status-pill is-success">Connected</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_refreshingOpenAiCatalog" @onclick="RefreshOpenAiCatalogAsync">@(_refreshingOpenAiCatalog ? "Refreshing…" : "Refresh models")</button>
                         <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Reconnect</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
                     }
@@ -181,10 +180,6 @@
                     <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
                 </div>
             }
-            @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastCatalogRefreshError))
-            {
-                <div class="alert alert-warning">@_openAiAccount.LastCatalogRefreshError</div>
-            }
             @if (_codexProvider is not null)
             {
                 <div class="model-list">
@@ -196,23 +191,10 @@
                                     <label><span>Display name · @(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog" : "Manual")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" /></label>
                                     <label>
                                         <span>Model ID</span>
-                                        <div class="model-id-field">
-                                            <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" />
-                                            @if (model.ModelOrigin == LlmModelOrigin.Manual)
-                                            {
-                                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
-                                            }
-                                        </div>
-                                        @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
+                                        <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" />
+                                        @if (model.ModelOrigin == LlmModelOrigin.Manual)
                                         {
-                                            <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
-                                                <option value="">-- Select a model --</option>
-                                                @foreach (var candidate in rowModels)
-                                                {
-                                                    <option value="@candidate">@candidate</option>
-                                                }
-                                            </select>
-                                            <small class="field-note">Pick a discovered model or keep your typed ID.</small>
+                                            <small class="field-note">Enter an exact model ID, then use Test before saving it as the default.</small>
                                         }
                                     </label>
                                     <label>
@@ -353,7 +335,6 @@
     private LlmProvider? _codexProvider;
     private OpenAiAccount? _openAiAccount;
     private bool _codexConnected;
-    private bool _refreshingOpenAiCatalog;
     private bool _hasWorkingChatProvider;
     private OpenAiCallbackOriginValidation? _callbackOrigin;
     private OpenAiAuthorizationFlowSnapshot? _authorizationFlow;
@@ -949,7 +930,7 @@
             Logger.LogWarning(ex, "Unable to finish OpenAI authorization {FlowId}", flowId);
             if (!_disposed)
             {
-                SetStatus("OpenAI connected, but account setup could not be refreshed. Use Refresh models to retry.", "warning");
+                SetStatus("OpenAI connected, but local account setup could not be completed. Reopen Settings to retry.", "warning");
                 await ReloadAsync();
                 await InvokeAsync(StateHasChanged);
             }
@@ -958,7 +939,7 @@
 
     private async Task FinishOpenAiConnectionAsync(int accountId, CancellationToken cancellationToken)
     {
-        var refresh = await OpenAiCatalog.RefreshAvailabilityAsync(accountId, cancellationToken);
+        await OpenAiCatalog.EnsureCatalogAsync(accountId, cancellationToken);
         var accountModels = (await ProviderService.GetAllAsync(cancellationToken))
             .Where(provider => provider.OpenAiAccountId == accountId)
             .ToList();
@@ -971,9 +952,7 @@
         var message = configuredEmbedding
             ? $"OpenAI account connected. Codex embeddings use {CodexProvider.DefaultEmbeddingModel}."
             : "OpenAI account connected. Existing embedding settings were kept.";
-        if (!refresh.Succeeded)
-            message += " Model availability could not be refreshed; the bundled catalog remains usable. Use Refresh models to retry.";
-        SetStatus(message, refresh.Succeeded ? "success" : "warning");
+        SetStatus(message, "success");
         await ReloadAsync();
     }
 
@@ -985,29 +964,6 @@
         _authorizationTarget = null;
         _authorizationFlow = null;
         SetStatus("OpenAI authorization was canceled. Existing credentials were kept.", "info");
-    }
-
-    private async Task RefreshOpenAiCatalogAsync()
-    {
-        if (_openAiAccount is null)
-            return;
-
-        _refreshingOpenAiCatalog = true;
-        try
-        {
-            var result = await OpenAiCatalog.RefreshAvailabilityAsync(_openAiAccount.Id);
-            SetStatus(result.Message, result.Succeeded ? "success" : "warning");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Unable to refresh OpenAI catalog {AccountId}", _openAiAccount.Id);
-            SetStatus("Model availability could not be refreshed. Retry after checking the account connection.", "warning");
-        }
-        finally
-        {
-            _refreshingOpenAiCatalog = false;
-            await ReloadAsync();
-        }
     }
 
     private async Task DisconnectCodexAsync()
@@ -1036,7 +992,7 @@
         IsChatReady(provider)
             ? "Set as the default chat provider"
             : provider.ModelOrigin == LlmModelOrigin.BundledCatalog
-                ? "Connect the account and refresh availability before setting this model as default."
+                ? "Connect the OpenAI account before setting this model as default."
                 : "Run Test successfully before setting this provider as default.";
 
     private RenderFragment RenderChatStatus(LlmProvider provider) => __builder =>
@@ -1049,14 +1005,7 @@
 
         if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
         {
-            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
-            {
-                <span class="lk-status-pill is-danger" title="Refresh model availability or choose another model.">Unavailable</span>
-            }
-            else
-            {
-                <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
-            }
+            <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
             return;
         }
 
@@ -1085,14 +1034,7 @@
 
         if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
         {
-            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
-            {
-                <span class="lk-status-pill is-danger" title="Refresh model availability or choose another model.">Unavailable</span>
-            }
-            else
-            {
-                <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
-            }
+            <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
             return;
         }
 
@@ -1129,7 +1071,7 @@
         <label>
             <span>Max input tokens</span>
             <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog default (272,000)" : "Auto (model/default)")" @bind="model.MaxInputTokens" />
-            <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Blank uses the catalog's 272,000-token usable input budget; advertised context is tracked separately." : "Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.")</small>
+            <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Blank uses the catalog's 272,000-token usable input budget." : "Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.")</small>
         </label>
         <label>
             <span>Max tokens field</span>
@@ -1158,9 +1100,16 @@
                     <span>Model ID</span>
                     <div class="model-id-field">
                         <input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" />
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
+                        @if (!CodexProvider.IsAccountBacked(parent))
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
+                        }
                     </div>
-                    @if (_childModels.TryGetValue(parent.Id, out var childModels) && childModels.Count > 0)
+                    @if (CodexProvider.IsAccountBacked(parent))
+                    {
+                        <small class="field-note">Enter an exact model ID. OpenAI account model lists are not fetched dynamically.</small>
+                    }
+                    else if (_childModels.TryGetValue(parent.Id, out var childModels) && childModels.Count > 0)
                     {
                         <select class="form-select form-select-sm" value="@draft.ModelId" @onchange="args => OnChildModelSelected(parent.Id, args)">
                             <option value="">-- Select a model --</option>
@@ -1209,17 +1158,7 @@
     private string? ModelReadinessDetail(LlmProvider provider)
     {
         if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
-        {
-            if (!string.IsNullOrWhiteSpace(provider.AccountAvailabilityError))
-                return provider.AccountAvailabilityError;
-            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
-                return "This model was not advertised for the connected account. Retry availability or choose another saved model.";
-
-            var advertised = provider.DiscoveredContextWindowTokens is int advertisedTokens
-                ? $" Advertised context: {advertisedTokens:N0} tokens."
-                : string.Empty;
-            return $"Catalog v{OpenAiAccountModelCatalog.SchemaVersion}; usable input budget {provider.EffectiveMaxInputTokens:N0} tokens.{advertised}";
-        }
+            return $"Bundled catalog v{OpenAiAccountModelCatalog.SchemaVersion}; usable input budget {provider.EffectiveMaxInputTokens:N0} tokens.";
 
         if (!string.IsNullOrWhiteSpace(provider.LastChatTestError) && !IsChatReady(provider))
             return $"Chat: {provider.LastChatTestError}";

@@ -122,8 +122,8 @@ The shared picker groups working models by connection, labels options by model,
 marks the global default, and retains unavailable explicit selections for
 recovery. A turn captures provider ID, model ID, display label, resolved input
 budget, and resolved account/catalog metadata: account identity, origin,
-entitlement state, supported efforts, capabilities, advertised context, catalog
-version/source/date, and effective effort. Editing settings during a turn cannot
+supported efforts, capabilities, catalog version/source/date, and effective
+effort. Editing settings during a turn cannot
 switch those values halfway through client creation, compaction, or tool
 execution. Contest candidates, revision workers, ingest jobs, embeddings, image
 generation, and Press rendering keep their separate selection contracts.
@@ -135,7 +135,7 @@ never infer account identity from token shape or substitute a different model.
 All six surfaces use the active model's resolved input-token limit (explicit
 provider-row value, then the bundled account catalog when applicable, then the
 `ChatTokens` configuration mapping and configured default) and shared token
-counter. Advertised account context never participates in this resolution.
+counter. Account-backed model discovery never participates in this resolution.
 After a complete tool-call batch, reaching
 90% of that limit tombstones completed function results oldest-first, one result
 at a time, using

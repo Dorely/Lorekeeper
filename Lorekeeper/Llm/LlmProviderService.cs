@@ -537,11 +537,8 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
     {
         if (IsBundledAccountModel(provider))
         {
-            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _)
-                || provider.AccountAvailability == AccountModelAvailability.Unavailable)
-            {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
                 return false;
-            }
 
             var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
             if (!metadata.Capabilities.HasFlag(LlmModelCapabilities.TextInput))
@@ -560,11 +557,8 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
     {
         if (IsBundledAccountModel(provider))
         {
-            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _)
-                || provider.AccountAvailability == AccountModelAvailability.Unavailable)
-            {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
                 return false;
-            }
 
             var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
             if (!metadata.Capabilities.HasFlag(LlmModelCapabilities.ImageInput))
@@ -585,8 +579,6 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         {
             if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
                 return effortError!;
-            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
-                return "The selected model is not available to this OpenAI account. Refresh model availability or choose another saved model.";
 
             var catalogCredentials = await GetCredentialStatusAsync(provider, cancellationToken);
             return catalogCredentials.Available ? string.Empty : catalogCredentials.Message;
@@ -614,8 +606,6 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         {
             if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
                 return effortError!;
-            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
-                return "The selected model is not available to this OpenAI account. Refresh model availability or choose another saved model.";
 
             var catalogCredentials = await GetCredentialStatusAsync(provider, cancellationToken);
             return catalogCredentials.Available ? string.Empty : catalogCredentials.Message;

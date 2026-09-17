@@ -53,10 +53,8 @@ public static class OpenAiAccountModelCatalog
             return new LlmProviderResolvedMetadata(
                 accountId,
                 provider.ModelOrigin,
-                provider.AccountAvailability,
                 entry.SupportedEfforts,
                 entry.Capabilities,
-                provider.DiscoveredContextWindowTokens,
                 provider.MaxInputTokens ?? entry.UsableInputBudgetTokens,
                 provider.ReasoningEffort ?? entry.DefaultEffort,
                 SchemaVersion,
@@ -67,10 +65,8 @@ public static class OpenAiAccountModelCatalog
         return new LlmProviderResolvedMetadata(
             provider.OpenAiAccountId,
             provider.ModelOrigin,
-            provider.AccountAvailability,
             [],
             LlmModelCapabilities.None,
-            provider.DiscoveredContextWindowTokens,
             provider.MaxInputTokens,
             provider.ReasoningEffort,
             null,

@@ -51,7 +51,10 @@
                         <span>Embedding model ID</span>
                         <div class="model-id-field">
                             <input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" />
-                            <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="ListModelsAsync">@(_listingModels ? "Listing…" : "List models")</button>
+                            @if (!SelectedConnectionIsCodex)
+                            {
+                                <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="ListModelsAsync">@(_listingModels ? "Listing…" : "List models")</button>
+                            }
                         </div>
                         @if (_availableModels.Count > 0)
                         {
@@ -63,6 +66,10 @@
                                 }
                             </select>
                             <small class="model-list-note">Pick a discovered model or keep your typed ID.</small>
+                        }
+                        else if (SelectedConnectionIsCodex)
+                        {
+                            <small class="model-list-note">OpenAI account model lists are not fetched dynamically. Keep the suggested model or enter an exact model ID, then test it.</small>
                         }
                     </label>
                 </div>

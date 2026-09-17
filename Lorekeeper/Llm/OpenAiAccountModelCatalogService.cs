@@ -4,13 +4,8 @@ using Lorekeeper.Persistence;
 namespace Lorekeeper.Llm;
 
 public sealed class OpenAiAccountModelCatalogService(
-    IAppDatabaseOperationFactory database,
-    IModelCatalogService modelCatalog,
-    ILogger<OpenAiAccountModelCatalogService> logger) : IOpenAiAccountModelCatalogService
+    IAppDatabaseOperationFactory database) : IOpenAiAccountModelCatalogService
 {
-    private const string RefreshFailureMessage =
-        "Model availability could not be refreshed. The bundled and last-known catalog is still available; retry when the connection is ready.";
-
     public async Task<IReadOnlyList<LlmProvider>> EnsureCatalogAsync(
         int accountId,
         CancellationToken cancellationToken = default)
@@ -69,7 +64,6 @@ public sealed class OpenAiAccountModelCatalogService(
                 AuthType = AuthType.OAuth,
                 OpenAiAccountId = accountId,
                 ModelOrigin = LlmModelOrigin.BundledCatalog,
-                AccountAvailability = AccountModelAvailability.Unknown,
                 IsDefault = freshAccount && !hasGlobalDefault && entry.IsPreferred,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -81,112 +75,6 @@ public sealed class OpenAiAccountModelCatalogService(
 
         account.UpdatedAt = DateTime.UtcNow;
         accounts.Update(account);
-        await operation.SaveChangesAsync(cancellationToken);
-        return Resolve(accountModels);
-    }
-
-    public async Task<AccountModelCatalogRefreshResult> RefreshAvailabilityAsync(
-        int accountId,
-        CancellationToken cancellationToken = default)
-    {
-        var models = await EnsureCatalogAsync(accountId, cancellationToken);
-        var transport = models.FirstOrDefault()
-            ?? throw new InvalidOperationException("The OpenAI account has no model catalog.");
-
-        try
-        {
-            var discovered = await modelCatalog.ListChatModelsAsync(transport, cancellationToken);
-            var reconciled = await ReconcileAvailabilityAsync(
-                accountId,
-                discovered,
-                DateTime.UtcNow,
-                cancellationToken);
-            return new AccountModelCatalogRefreshResult(true, "Model availability refreshed.", reconciled);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(exception, "OpenAI account model refresh failed for account {AccountId}", accountId);
-            var fallback = await RecordRefreshFailureAsync(accountId, DateTime.UtcNow, cancellationToken);
-            return new AccountModelCatalogRefreshResult(false, RefreshFailureMessage, fallback);
-        }
-    }
-
-    public async Task<IReadOnlyList<LlmProvider>> ReconcileAvailabilityAsync(
-        int accountId,
-        IReadOnlyList<LlmDiscoveredModel> discoveredModels,
-        DateTime checkedAtUtc,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureCatalogAsync(accountId, cancellationToken);
-        var discovered = discoveredModels
-            .Where(model => !string.IsNullOrWhiteSpace(model.Id))
-            .GroupBy(model => model.Id, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-
-        await using var operation = await database.OpenWriteAsync(cancellationToken);
-        var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken)
-            ?? throw new InvalidOperationException("The OpenAI account was not found.");
-        var all = await operation.Repositories.LlmProviders.GetAllAsync(cancellationToken);
-        var accountModels = all.Where(provider => provider.OpenAiAccountId == accountId).ToList();
-
-        foreach (var model in accountModels)
-        {
-            if (discovered.TryGetValue(model.ModelId, out var advertised))
-            {
-                model.AccountAvailability = AccountModelAvailability.Available;
-                if (advertised.ContextLengthTokens is > 0)
-                {
-                    model.DiscoveredContextWindowTokens =
-                        (int)Math.Min(advertised.ContextLengthTokens.Value, int.MaxValue);
-                }
-            }
-            else
-            {
-                model.AccountAvailability = AccountModelAvailability.Unavailable;
-            }
-
-            model.AccountAvailabilityCheckedAt = checkedAtUtc;
-            model.AccountAvailabilityError = null;
-            model.UpdatedAt = checkedAtUtc;
-            operation.Repositories.LlmProviders.Update(model);
-        }
-
-        account.LastCatalogRefreshAt = checkedAtUtc;
-        account.LastCatalogRefreshError = null;
-        account.UpdatedAt = checkedAtUtc;
-        operation.Repositories.OpenAiAccounts.Update(account);
-        await operation.SaveChangesAsync(cancellationToken);
-        return Resolve(accountModels);
-    }
-
-    public async Task<IReadOnlyList<LlmProvider>> RecordRefreshFailureAsync(
-        int accountId,
-        DateTime checkedAtUtc,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureCatalogAsync(accountId, cancellationToken);
-        await using var operation = await database.OpenWriteAsync(cancellationToken);
-        var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken)
-            ?? throw new InvalidOperationException("The OpenAI account was not found.");
-        var all = await operation.Repositories.LlmProviders.GetAllAsync(cancellationToken);
-        var accountModels = all.Where(provider => provider.OpenAiAccountId == accountId).ToList();
-
-        foreach (var model in accountModels)
-        {
-            model.AccountAvailabilityCheckedAt = checkedAtUtc;
-            model.AccountAvailabilityError = RefreshFailureMessage;
-            model.UpdatedAt = checkedAtUtc;
-            operation.Repositories.LlmProviders.Update(model);
-        }
-
-        account.LastCatalogRefreshAt = checkedAtUtc;
-        account.LastCatalogRefreshError = RefreshFailureMessage;
-        account.UpdatedAt = checkedAtUtc;
-        operation.Repositories.OpenAiAccounts.Update(account);
         await operation.SaveChangesAsync(cancellationToken);
         return Resolve(accountModels);
     }
