@@ -1,0 +1,99 @@
+{
+  "fixtureVersion": 1,
+  "status": "normative",
+  "kind": "rich-manuscript-citations-and-back-matter",
+  "protocolVersion": 15,
+  "outputPurpose": "publication",
+  "renderScope": "book",
+  "renderMode": "production",
+  "citationFormatter": { "id": "lorekeeper-citations-v1", "style": "Chicago18NotesBibliography", "offline": true },
+  "document": {
+    "id": "10000000-0000-0000-0000-000000000401",
+    "title": "The Harbor Ledger",
+    "language": "en",
+    "topLevelDocuments": [
+      {
+        "id": "40000000-0000-0000-0000-000000000401",
+        "kind": "chapter",
+        "title": "Soundings",
+        "blocks": [
+          {
+            "id": "41000000-0000-0000-0000-000000000401",
+            "type": "Paragraph",
+            "text": "The marker stood beyond the breakwater.",
+            "citationClusters": [
+              {
+                "atomId": "42000000-0000-0000-0000-000000000401",
+                "items": [
+                  { "ordinal": 0, "recordId": "43000000-0000-0000-0000-000000000401", "prefix": "See ", "suffix": ".", "locator": { "label": "page", "value": "42" }, "sourceLocation": null },
+                  { "ordinal": 1, "recordId": "43000000-0000-0000-0000-000000000402", "prefix": null, "suffix": null, "locator": { "label": "page", "value": "110" }, "sourceLocation": { "sourceId": "44000000-0000-0000-0000-000000000401", "extractionId": "44100000-0000-0000-0000-000000000401", "blockId": "44200000-0000-0000-0000-000000000401", "start": 0, "length": 10, "quote": "tidal mark", "verificationHash": "6fa083c30bf22c8a94a5c70bb70f7406bb2c60eedee6bec513e27ab6cbac098f" } }
+                ]
+              }
+            ],
+            "noteReferences": [{ "noteId": "45000000-0000-0000-0000-000000000401", "label": "1" }]
+          },
+          {
+            "id": "41000000-0000-0000-0000-000000000402",
+            "type": "DesignedPage",
+            "placementBlockId": "41000000-0000-0000-0000-000000000402",
+            "pageId": "46100000-0000-0000-0000-000000000401",
+            "semanticBlocks": [
+              { "id": "46200000-0000-0000-0000-000000000401", "type": "Paragraph", "text": "A page can carry a citation", "citationClusters": [{ "atomId": "42000000-0000-0000-0000-000000000402", "items": [{ "ordinal": 0, "recordId": "43000000-0000-0000-0000-000000000401", "locator": { "label": "page", "value": "5" } }] }] },
+              { "id": "46200000-0000-0000-0000-000000000402", "type": "Paragraph", "text": "and a note reference.", "noteReferences": [{ "noteId": "45000000-0000-0000-0000-000000000402", "label": "2" }] }
+            ]
+          }
+        ],
+        "notes": [
+          { "id": "45000000-0000-0000-0000-000000000401", "kind": "Endnote", "referenceId": "note-ref:45000000-0000-0000-0000-000000000401", "blocks": [{ "id": "45100000-0000-0000-0000-000000000401", "type": "Paragraph", "text": "The instrument was checked twice." }] },
+          { "id": "45000000-0000-0000-0000-000000000402", "kind": "Endnote", "referenceId": "note-ref:45000000-0000-0000-0000-000000000402", "blocks": [{ "id": "45100000-0000-0000-0000-000000000402", "type": "Paragraph", "text": "The page is repeated elsewhere." }] }
+        ]
+      },
+      {
+        "id": "40000000-0000-0000-0000-000000000402",
+        "kind": "chapter",
+        "title": "Return",
+        "blocks": [{ "id": "41000000-0000-0000-0000-000000000403", "type": "Paragraph", "text": "The same work returns.", "citationClusters": [{ "atomId": "42000000-0000-0000-0000-000000000403", "items": [{ "ordinal": 0, "recordId": "43000000-0000-0000-0000-000000000401", "locator": { "label": "page", "value": "47" } }] }] }],
+        "notes": []
+      }
+    ],
+    "bibliographyRecords": [
+      { "id": "43000000-0000-0000-0000-000000000401", "type": "Book", "authors": [{ "family": "Nguyen", "given": "Linh" }], "title": "Maps of Quiet Water", "edition": 2, "place": "Portland", "publisher": "North Window Press", "issued": { "year": 2024 } },
+      { "id": "43000000-0000-0000-0000-000000000402", "type": "JournalArticle", "authors": [{ "family": "Nguyen", "given": "Linh" }], "title": "Tidal memory in coastal archives", "containerTitle": "Journal of Small Geographies", "volume": 12, "issue": 3, "pages": "101-119", "issued": { "year": 2024, "month": 6 }, "doi": "10.5555/tidal-memory" }
+    ]
+  },
+  "expected": {
+    "occurrenceIdentity": [
+      { "publicationTarget": "core", "topLevelContainer": "chapter:40000000-0000-0000-0000-000000000401", "placementPath": [], "citationAtomId": "42000000-0000-0000-0000-000000000401", "clusterItemOrdinal": 0, "recordId": "43000000-0000-0000-0000-000000000401" },
+      { "publicationTarget": "core", "topLevelContainer": "chapter:40000000-0000-0000-0000-000000000401", "placementPath": ["placement-block:41000000-0000-0000-0000-000000000402"], "citationAtomId": "42000000-0000-0000-0000-000000000402", "clusterItemOrdinal": 0, "recordId": "43000000-0000-0000-0000-000000000401" },
+      { "publicationTarget": "core", "topLevelContainer": "chapter:40000000-0000-0000-0000-000000000402", "placementPath": [], "citationAtomId": "42000000-0000-0000-0000-000000000403", "clusterItemOrdinal": 0, "recordId": "43000000-0000-0000-0000-000000000401" }
+    ],
+    "notes": {
+      "endnotesFirst": true,
+      "groupsByTopLevelDocument": true,
+      "backlinks": [
+        { "noteId": "45000000-0000-0000-0000-000000000401", "from": "chapter:40000000-0000-0000-0000-000000000401", "anchor": "note-ref:45000000-0000-0000-0000-000000000401" },
+        { "noteId": "45000000-0000-0000-0000-000000000402", "from": "chapter:40000000-0000-0000-0000-000000000401", "anchor": "note-ref:45000000-0000-0000-0000-000000000402" }
+      ]
+    },
+    "backMatter": {
+      "order": ["Endnotes", "Bibliography"],
+      "bibliography": [
+        "Nguyen, Linh. Maps of Quiet Water. 2nd ed. Portland: North Window Press, 2024.",
+        "Nguyen, Linh. \"Tidal memory in coastal archives.\" Journal of Small Geographies 12, no. 3 (June 2024): 101-119. https://doi.org/10.5555/tidal-memory."
+      ],
+      "omitEmptySections": true
+    },
+    "text": {
+      "citationTextSelectable": true,
+      "storedOffsetsUnchangedByNumbering": true,
+      "designedPageOccurrenceExpanded": true
+    }
+  },
+  "assertions": [
+    "Citation clusters may contain multiple bibliography records and optional source evidence.",
+    "Citation and note atoms remain allowed in Designed Page semantic content.",
+    "Repeated Designed Page placement expands with a placement-specific occurrence path and no stored-offset rewrite.",
+    "Generated back matter orders grouped endnotes before a deduplicated publication-wide bibliography.",
+    "Occurrence-specific backlinks resolve to stable note-reference anchors."
+  ]
+}

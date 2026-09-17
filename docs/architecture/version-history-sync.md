@@ -133,6 +133,22 @@ The captured canonical areas are:
 - `publication`: Core Book, editions, publication sections, print project use,
   identifier and cover-submission modes, and cover spine direction.
 
+### Accepted M4 archive/history traversal contract
+
+This is accepted next-contract guidance, not a claim that the current snapshot
+schema already includes it. One dependency traversal implementation serves three
+distinct policies: `FullArchive`, `NonStructuralArchive`, and `HistorySnapshot`.
+Their inclusion, external-project-reference, workflow-setting, and warning rules
+remain policy-specific; common code must not flatten them into one scope.
+
+New history source capture stores a source index, per-source manifests,
+extraction blocks, and reusable content-addressed chunks. Metadata comparison is
+lazy, restore streams and validates data, and results report new/reused bytes.
+The capture boundary freezes canonical mutation and reads stable bounded
+descriptors, then releases the project lease before compression, Git transport,
+or download. Archive/history/Git/restore interfaces exchange declared files or
+streams rather than complete byte arrays.
+
 Chats, conversations, messages and composer drafts; provider connections,
 OpenAI account/catalog rows, OAuth tokens, and credentials; the Review Edits workflow toggle, contests,
 candidate drafts, revision jobs, ingest/image/publication jobs and other

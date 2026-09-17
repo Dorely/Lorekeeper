@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "policyId": "lorekeeper-distribution-gate-v1",
+  "purpose": "Engineering distribution gate for the exact local release inputs. This is not legal advice and does not select the application's source license or replace review of the complete license text.",
+  "prohibitedRestrictionClasses": [
+    "source-disclosure",
+    "network-use",
+    "field-of-use",
+    "commercial"
+  ],
+  "requiredEvidence": [
+    "An exact version and source identity is recorded.",
+    "A machine-readable SPDX expression or an authoritative retained license text is available.",
+    "Attribution and notice obligations are recorded for the shipped closure.",
+    "The selected expression has no prohibited restriction class in this policy."
+  ],
+  "dependencyCategories": [
+    {
+      "id": "NuGet",
+      "description": "Managed .NET packages resolved from project.assets.json and the local NuGet cache."
+    },
+    {
+      "id": "npm",
+      "description": "Semantic-editor packages resolved from package-lock.json and installed package metadata."
+    },
+    {
+      "id": "Cargo",
+      "description": "Rust crates resolved from the locked Lorekeeper Press graph."
+    },
+    {
+      "id": "native-vendored",
+      "description": "Native executables or vendored runtimes shipped in a platform closure."
+    },
+    {
+      "id": "fonts",
+      "description": "Bundled font files and their adjacent license/source records."
+    },
+    {
+      "id": "ICC",
+      "description": "Bundled ICC profiles and their source/redistribution records."
+    },
+    {
+      "id": "assets",
+      "description": "Other shipped web, branding, documentation, and distribution assets."
+    }
+  ],
+  "licenseSelectionPreference": [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "0BSD",
+    "MIT-0",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "OFL-1.1",
+    "Unlicense"
+  ],
+  "admissibleSpdxLicenses": [
+    {
+      "id": "0BSD",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "Apache-2.0",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "BSD-2-Clause",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "BSD-3-Clause",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "CC0-1.0",
+      "family": "dedication",
+      "restrictionClasses": []
+    },
+    {
+      "id": "ISC",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "MIT",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "MIT-0",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "OFL-1.1",
+      "family": "font",
+      "restrictionClasses": []
+    },
+    {
+      "id": "Unlicense",
+      "family": "permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "Unicode-3.0",
+      "family": "data-permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "Unicode-DFS-2016",
+      "family": "data-permissive",
+      "restrictionClasses": []
+    },
+    {
+      "id": "Zlib",
+      "family": "permissive",
+      "restrictionClasses": []
+    }
+  ],
+  "admissibleSpdxExceptions": [
+    {
+      "id": "LLVM-exception",
+      "restrictionClasses": []
+    }
+  ],
+  "restrictedSpdxLicenses": [
+    {
+      "id": "AGPL-1.0-only",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "AGPL-1.0-or-later",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "AGPL-3.0-only",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "AGPL-3.0-or-later",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "BUSL-1.1",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "id": "CDDL-1.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "CDDL-1.1",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "CPAL-1.0",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "CPL-1.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "EPL-1.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "EPL-2.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "EUPL-1.1",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "EUPL-1.2",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "LGPL-2.1-only",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "LGPL-2.1-or-later",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "LGPL-3.0-only",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "LGPL-3.0-or-later",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "MPL-1.1",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "MPL-2.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "OSL-3.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "SSPL-1.0",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "id": "GPL-2.0-only",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "GPL-2.0-or-later",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "GPL-3.0-only",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "GPL-3.0-or-later",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "CC-BY-NC-4.0",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "id": "CC-BY-NC-SA-4.0",
+      "restrictionClasses": [ "commercial", "field-of-use", "source-disclosure" ]
+    },
+    {
+      "id": "CC-BY-ND-4.0",
+      "restrictionClasses": [ "field-of-use" ]
+    },
+    {
+      "id": "CC-BY-SA-4.0",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "id": "Elastic-2.0",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "id": "PolyForm-Free-1.0.0",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "id": "PolyForm-Small-Business-1.0.0",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    }
+  ],
+  "restrictedLicensePrefixes": [
+    {
+      "prefix": "Commons-Clause",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "prefix": "CC-BY-NC",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    },
+    {
+      "prefix": "GPL-",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "prefix": "LGPL-",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "prefix": "AGPL-",
+      "restrictionClasses": [ "source-disclosure", "network-use" ]
+    },
+    {
+      "prefix": "MPL-",
+      "restrictionClasses": [ "source-disclosure" ]
+    },
+    {
+      "prefix": "PolyForm-",
+      "restrictionClasses": [ "commercial", "field-of-use" ]
+    }
+  ]
+}

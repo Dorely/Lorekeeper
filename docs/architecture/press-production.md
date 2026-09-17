@@ -103,6 +103,24 @@ The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
 preview surfaces do not delegate layout to a browser-native PDF viewer.
 
+### Accepted M5 rich-layout contract
+
+This is accepted next-contract guidance, not a claim that the current protocol
+already implements it. Press receives the canonical recursive table/note/citation
+projection and retains the shared `ManuscriptPosition` identity in page maps.
+It repeats contiguous leading table headers after a break and does not split a
+normal row. A row taller than a page splits only at semantic block boundaries,
+never through a row-span group; an unplaceable atomic group reports
+`UnplaceableTableRowGroup`.
+
+Footnotes occupy no more than 40% of the body area. Overflow continues with a
+continuation marker, while the reference stays with at least two note lines when
+possible; unbreakable content reports `UnplaceableFootnoteContent`. Endnotes are
+generated final back matter grouped by top-level document with occurrence
+backlinks. PDF, EPUB, Read, and textual projections preserve citation structure,
+linked notes, bibliography semantics, and deterministic missing-metadata
+diagnostics; pagination never mutates stored atom offsets.
+
 ## Current architecture and invariants
 
 Every Press request stages `input/request.json`, declared PNG/JPEG assets, and

@@ -408,6 +408,49 @@ asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
+### Accepted M2-M5 implementation contract
+
+This is accepted implementation guidance, not a claim that these next-version
+contracts are already live. `AuthoringBatchProtocolV1` and
+`AuthoringJournalV1` are the sole manual-edit transport and recovery contracts.
+A batch has an ordered target set, expected version/generation per target,
+session, batch identity/sequence, action label, operations, and selections.
+Server results carry canonical versions, generation, receipt, and conflict data.
+A cross-container Designed Page move is one multi-target batch and one Undo
+action. The process-wide history owner keeps confirmed deltas only (100 per
+target, 128 MiB total, inactive-confirmed LRU eviction); pending journal entries
+are never evicted. The ProseMirror plugin is only an adapter to that cursor, and
+only one in-process writer lease exists per target.
+
+The browser journal holds recoverable unacknowledged batches/base state in
+IndexedDB. The server derives inverses from validated pre-state and inserts its
+session sequence, mutation, and idempotency receipt in one transaction. A
+same-identity/different-hash replay fails closed. Exact-precondition rebasing is
+the only automatic merge: same-element changes, moved anchors, overlapping
+properties, or ordering ambiguity preserve both variants for an
+application-owned conflict surface. State consumers use a mutation fence that
+freezes edits, flushes a captured sequence, takes the project lease, revalidates
+generations, consumes state, then resumes editing.
+
+The next manuscript schema adds recursive stable identities for tables, rows,
+cells, notes, and inline atoms. `ManuscriptPosition` is the shared UTF-16
+document/container-path/block-or-atom/offset/affinity address. Tables use
+positive integer proportional widths, contiguous leading headers, and complete
+non-overlapping span coverage; cells admit paragraphs, ordered/unordered lists,
+and Figures only. Notes have exactly one reference in their owning document and
+admit paragraphs, lists, Figures, citations, and character formatting only.
+Malformed orphan/multiple-reference notes fail closed. Deleting a reference
+deletes its note in the same reversible operation.
+
+Citation and note atoms are valid in Designed Page semantic content. Citation
+occurrence identity is publication target, top-level container, complete
+placement path, citation atom, and cluster-item ordinal. Footnote and endnote
+numbering restarts for every top-level chapter or publication section; a Designed
+Page occurrence shares its container's sequence and an unplaced preview has its
+own. Footnotes use no more than 40% of a page body, continue with a marker, and
+retain a reference with two note lines where possible. Unsupported/unplaceable
+table row groups and footnote content produce named Press diagnostics.
+
 ### Migration and projection boundaries
 
 The original structured-manuscript migration uses a protected SQLite backup,

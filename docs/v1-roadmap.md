@@ -30,9 +30,9 @@ Start here when resuming work, then read the relevant specification below.
 | Next bounded step | M1 integration evidence - with separate authorization, exercise fresh connection, cancellation, denial, expiry, reconnect, token-refresh rejection, provider rejection of an explicitly selected catalog model, stale callbacks, and callback-port mismatch in browser-hosted and Electron paths |
 | Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight. M1.1 introduces account-owned OpenAI credentials with a guarded forward migration. M1.2 adds a fully local catalog schema v1 for Astra/Sol/Terra/Luna, rejects account-backed model discovery, resolves catalog efforts/capabilities/usable budgets, provides zero-Test catalog readiness, and preserves fail-closed explicit selections. M1.3 replaces redirect-based authorization with account services, a single-use process-local flow registry, serialized refresh/credential replacement, callback-origin validation, a shared allowlisted OpenAI/GitHub external launcher, mounted Settings polling, and a standalone callback page. A focused responsiveness correction also removes provider-backed semantic indexing from blank project creation and gives the Create action immediate busy feedback |
 | Next investigation | Obtain explicit authorization and safe test credentials for M1 browser/Electron integration evidence. Retain M0.3/M0.5 native-evidence blockers and M0.6 Apple prerequisites; do not perform live OAuth, provider calls, or browser/Electron automation without that authorization |
-| Known external dependencies | Legal/dependency review, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
+| Known external dependencies | Owner source-license decision, unresolved dependency/asset provenance, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
 | Scope boundary for the next session | Implement deterministic M1 code, migrations, and approved provider-configuration regressions. Do not use live OAuth/provider calls, install an MSIX, create a Store submission, create MAS signing assets, or alter the dispatch-only macOS workflow without separate authorization |
-| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded legal and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. The project-creation responsiveness correction passes the same-change repository gate and browser-host startup smoke, but has no browser/Electron interaction timing because UI automation was not authorized. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
+| Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded license and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. The project-creation responsiveness correction passes the same-change repository gate and browser-host startup smoke, but has no browser/Electron interaction timing because UI automation was not authorized. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
 | Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
@@ -214,11 +214,13 @@ M1 implementation substeps:
 | 2026-09-16 | Recorded stepwise handoff and maintenance workflow; marked the older DOCX proposal superseded | Preserve the accepted plan across sessions without competing implementation instructions | Owner requested a maintained repository plan and a separate starting prompt |
 | 2026-09-16 | Superseded M0.2 and declined general hosted CI | Keep general repository gates and focused regressions local; retain only the dispatch-only macOS release builder because it provides required native Mac compute | Owner decision |
 | 2026-09-16 | Defined M0.3 as a local Windows Release reference baseline, not a hardware minimum | The documented 32 GiB Windows machine is a comparison environment only; latency targets remain v1 goals and do not establish macOS, Store, updater, provider, or large-library performance | Owner-approved M0.3 scope; [local evidence](evidence/m0.3-local-performance-baseline.md) |
-| 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit legal/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
+| 2026-09-16 | Completed M0.4 local distribution inventory without choosing terms | Preserve a reproducible inventory of current local release inputs and explicit license/account/macOS blockers while deferring license adoption, public-history scanning, publication, and Store actions | [M0.4 inventory](research/m0.4-distribution-inventory.md) |
 | 2026-09-16 | Added M0.5 local update-channel policy and full-trust MSIX preflight | Free builds use user-initiated GitHub release notification/browser download only; Store builds suppress GitHub, browser, and Electron updater paths. The local package preflight proves the Store closure, contents, and embedded CMS signer without installation, trusted-store mutation, Store submission, or OAuth | [M0.5 evidence](evidence/m0.5-windows-msix-feasibility.md) |
 | 2026-09-16 | Recorded M0.6 as blocked pending owner-supplied Apple signing and Apple-silicon host inputs | Preserve the direct-DMG/macOS workflow while defining the minimum MAS sandbox acceptance boundary; no MAS build flavor, entitlement, certificate, device test, signing, notarization, Store submission, or GitHub secret was added | [M0.6 prerequisite record](evidence/m0.6-mac-app-store-feasibility.md) |
 | 2026-09-16 | Replaced account entitlement discovery with a fully static OpenAI account catalog | The bundled stable-four list is authoritative and must not call `/v1/models`; Settings no longer refreshes account model availability, manual account IDs remain an explicit Advanced/Test workflow, and generic provider discovery is unchanged | Owner correction during M1 implementation |
 | 2026-09-16 | Removed provider-backed indexing from blank project creation | Persist the project, page setup, and empty Book Brief together, seed only local graph defaults before navigation, and prevent duplicate Create submissions while work is pending; semantic profile indexing begins with substantive profile changes or a full rebuild | Owner-reported roughly 30-second unresponsive Create action; source trace showed the creation path awaited the configured embedding provider |
+| 2026-09-17 | Accepted the M2-M5 contract revision | Replaces the prospective CSL/Jint formatter with managed `lorekeeper-citations-v1` for Chicago 18, APA 7, and MLA 9; fixes Designed Page ownership, multi-target authoring/recovery, retained-source migration, policy-scoped portable traversal, and rich table/note defaults before implementation | Owner-approved Astra-reviewed revision |
+| 2026-09-17 | Replaced prospective legal review with a fail-closed engineering dependency gate | Admit only dependencies with verified policy-compatible redistribution terms; resolve, remove, or replace everything else. Do not adopt Commons Clause or another Lorekeeper source license without a later owner decision | Owner decision during remaining-v1 planning |
 
 ## 2. Release definition and settled scope
 
@@ -237,18 +239,17 @@ independent Designed Pages, Undo/Redo, OpenAI configuration, and external OAuth.
 | Free distribution | GitHub downloads; update notifications and manual installation |
 | Paid distribution | One-time Store purchase; Store-managed updates; identical writing features |
 | Price | Owner decision before submission; approximately $10 remains the starting point |
-| License | Apache-2.0 plus Commons Clause candidate, subject to legal/dependency review |
+| License | Owner decision before publication; no source license is currently adopted |
 | Public access | Public source and free beta before v1 |
 | Language | English UI and the current Latin-script, left-to-right publishing scope |
 | Testing | Expand focused regression coverage beyond the current migration/Press restriction |
 | Excluded | Additional premium features, subscriptions, license servers, Intel Mac, Windows ARM, Linux release support, new OCR, arbitrary Word layout replication |
 
-Describe Lorekeeper as **source available**, not open source, if Commons Clause
-is adopted. Its restrictions concern selling software-derived offerings; the
-license must not impose restrictions on manuscripts and other author-created
-content. Commons Clause is broader than a simple prohibition on reselling forks,
-so its exact fit needs review before publication. See the
-[license and FAQ](https://commonsclause.com/).
+The prior Apache-2.0 plus Commons Clause candidate is not adopted. Do not describe
+Lorekeeper as open source or source available until the owner selects final
+terms. Any future source license must leave manuscripts and other author-created
+content unrestricted; selecting those terms is a publication gate, not an
+engineering dependency gate.
 
 ## 3. Sequencing and integration
 
@@ -266,6 +267,29 @@ snapshot v6, Press protocol v12, and agent-manuscript v1. These are historical
 planning facts, not reserved version numbers for future work. M2 and M5 must
 coordinate their shared schema/renderer/projection changes without assuming
 they will land in one version bump.
+
+The following allocation is the accepted planning target. Before each format
+commit, inspect checked-in constants; if an upstream change consumed a number,
+use the next unused number and record it. Never reuse a shipped format number.
+
+| Boundary | M2 | M4 | M5A | M5B |
+|---|---:|---:|---:|---:|
+| Manuscript schema | 5 | 5 | 6 | 7 |
+| Legacy JSON project export | 31 | Import-only | Import-only | Import-only |
+| `.lorekeeper` archive envelope | — | 1 | 1 | 1 |
+| Archive record schema | — | 1 | 2 | 3 |
+| History snapshot schema | 7 | 8 | 9 | 10 |
+| Press protocol | 13 | 13 | 14 | 15 |
+| Agent-manuscript projection | 2 | 2 | 3 | 4 |
+| EPUB exporter | 4 | 4 | 5 | 6 |
+| Authoring batch/journal | — | V1 from M3 | V1 | V1 |
+| Citation formatter | — | — | — | V1 |
+| Composition scene | 1 | 1 | 1 | 1 |
+
+Every committed predecessor needs an explicit reader adapter and fixture.
+History adapters validate the predecessor's original manifest and hashes before
+transformation. Migration coverage includes direct v0.3.17-to-final upgrade and
+each intermediate committed database schema.
 
 Read the matching chapters through the architecture routing table for every
 step. In particular, source/page/manuscript changes also reach persistence,
@@ -332,22 +356,34 @@ catalog model, and simultaneous stale callbacks on both supported platforms.
 
 #### Ownership model
 
-Replace chapter/section ownership with:
+Replace `PageComposition` chapter/section ownership with:
 
 | Entity | Responsibility |
 |---|---|
 | `DesignedPage` | Project identity, name, optional release-only scope |
 | `DesignedPageContent` | Semantic content, accessibility description, revision, Core or release override |
-| `DesignedPageVariant` | Revisioned layout for a particular geometry |
+| `DesignedPageVariant` | Authored layout owned by one exact content identity and geometry |
 | Manuscript Designed Page block | One placement, identified by its stable block ID |
 
 A shared page has one Core content record and at most one override per release.
-Release-only pages remain scoped to their release.
+Release-only pages remain scoped to their release. `DesignedPagePlacementReference`
+is a derived reverse index only: manuscripts remain authoritative. Authored
+variants are distinct from disposable preview/reflow caches. The first release
+edit clones the complete effective semantic-content and authored-layout layer,
+so later Core geometry edits cannot overwrite release work.
+
+`IDesignedPageService` is the only service boundary for creating, duplicating,
+placing, moving, removing, deleting, reading effective content, creating/resetting
+overrides, and cloning releases. It preserves archived-release immutability and
+the inherited/customized distinction through lookup, projection, and artifact
+invalidation.
 
 #### Placement behavior
 
 - Place again: new placement ID, same page.
-- Move: preserve placement and page identity.
+- Move: preserve placement and page identity; cross-container moves acquire one
+  project mutation lease and commit both manuscripts and the derived index in one
+  transaction, receipt, and compound history action.
 - Duplicate page: create independent content and layout identities.
 - Remove placement: retain the page.
 - Unplaced pages persist across navigation, restart, chapter deletion, and section deletion.
@@ -378,8 +414,11 @@ in that release uses it.
 - Repeated placements expand into reading order repeatedly, with occurrence-specific anchors.
 - EPUB spine IDs and Press mappings use placement identity, avoiding duplicate IDs.
 - Chapter Undo stores placement changes only; page Undo owns shared page content.
+- Review assigns shared-page/content changes a separate dependency group. A
+  placement approval neither approves nor restores page content; selective
+  restore brings only required valid dependencies and reports ambiguous current
+  shared content as a conflict rather than overwriting it.
 - Review displays a shared page change once, with links to its placements.
-- Cross-container moves are atomic compound history operations.
 
 Add a project Pages workspace with Core/release selection, placement counts,
 unplaced status, duplicate/place/reset commands, and the existing canvas editor.
@@ -388,46 +427,72 @@ Existing chapter Pages mode becomes a filtered entrance to that workspace.
 #### Migration
 
 Preserve existing page, block, scene, and variant identities where possible.
+Core composition IDs become shared page IDs; valid release clones become frozen
+overrides on that page; ambiguous or divergent clones become independent
+release-only pages. Advance every live manuscript-bearing payload together.
 Every existing release clone becomes an explicit frozen override, even when
-currently identical to Core. Never merge divergent legacy clones; preserve them
-as independent release-local pages.
+currently identical to Core. Never merge divergent legacy clones.
 
 ### C. Fast manual Undo/Redo and reliable saving (M3)
 
 Manual history is already in memory at the planning baseline. The redesign
-removes whole-document work and server waits from ordinary Undo.
+removes whole-document work and server waits from ordinary Undo. It introduces
+`AuthoringBatchProtocolV1` and `AuthoringJournalV1`: an `AuthoringBatch` names
+an ordered target set, each target's expected version and generation, client
+session, batch identity and sequence, action label, operations, and selections.
+Results carry a receipt, canonical before/after versions, generation, and
+structured conflict data.
 
 #### Client-first operations
 
-Use a shared batch contract containing target identity, base revision/fingerprint,
-client session and batch IDs, ordered semantic operations, and selection information.
+Use the versioned shared batch contract for one or more targets. A cross-container
+page move is one indivisible multi-target commit and Undo action.
 
 - ProseMirror applies Undo/Redo immediately using local inverse operations.
 - Canvas history uses object/property deltas.
-- A serialized background queue persists accepted changes.
+- A serialized background queue durably appends unacknowledged batches and base/
+  checkpoint data to IndexedDB before dispatch. The journal contains recovery
+  data only; it is not a second confirmed-history authority.
 - Save acknowledgments advance the confirmed revision without replacing the visible document.
 - Typing coalesces; paste, formatting, and structural actions create explicit boundaries.
 - Rare complex edits may use bounded snapshot entries; ordinary typing must not.
 
 The server validates and atomically applies batches through existing owning
-services. Maintain idempotency receipts so a lost acknowledgment cannot apply
-an operation twice.
+services. Session sequence advancement, mutation, and receipt insertion occur
+in one SQLite transaction. The same identity plus request hash returns the
+original receipt; the same identity with different content fails closed.
+Receipts remain until reconciliation is durably acknowledged. The server derives
+canonical inverses from validated pre-mutation state and never trusts a
+client-supplied inverse.
 
 #### Recovery
 
-- Store unacknowledged work in a target-scoped local recovery journal.
-- A network/database failure pauses saving while retaining the local document.
-- Reload recovers pending work; confirmed history remains process-lifetime history.
+- One process-wide delta-history owner, identified by a process-incarnation ID,
+  retains at most 100 confirmed actions per target and 128 MiB across the
+  process. It LRU-evicts only oldest inactive confirmed entries; pending work is
+  never evicted. An individually oversized action saves but clears that target's
+  Undo history and reports that it cannot be undone.
+- ProseMirror history is an adapter to that process-owned cursor, not a second
+  authority. Remount/browser reload rehydrates confirmed history in the same
+  process; a new process drops confirmed Undo while recovering pending work.
+- Only one interactive writable lease per target may exist in the process;
+  other windows are read-only until the active lease flushes and hands off.
+- A network/database failure pauses dispatch while retaining the local document.
+  IndexedDB quota/write failure retains visible edits, marks them not locally
+  recoverable, and prevents dependent actions from claiming the work is saved.
 - A stale save must never silently replace dirty local content.
-- Automatically rebase only provably non-conflicting operations. Structural overlap
-  or ambiguous changes retain both versions and open an application-owned recovery surface.
+- Rebase only with exact preconditions. Same-element edits, moved/removed anchors,
+  overlapping properties, or ordering ambiguity retain both variants and open a
+  Lorekeeper-owned conflict surface.
 - Assistant changes remain outside manual Undo and invalidate affected history generations.
 - Preserve the existing 100-action/128 MiB history bounds; account for delta
   dependencies incrementally.
 
-Navigation, publishing, checkpoints, and assistant mutations flush or explicitly
-resolve pending edits before consuming their state. Failed flushes stop the
-dependent action.
+Checkpoints, restore/sync, publishing, assistants, and every other state consumer
+use a project/target mutation fence: freeze affected edits, flush through a
+captured sequence, acquire the project mutation lease, revalidate every target
+generation, consume state, then release/resume. An unreachable registered dirty
+client blocks that dependent operation until recovery. Failed flushes stop it.
 
 ### D. Source documents, evidence, and bibliography records (M4)
 
@@ -436,7 +501,11 @@ dependent action.
 Extend existing ingest ownership rather than creating a competing corpus.
 
 Support PDF, EPUB, DOCX, text/Markdown, and saved webpages. Retain immutable
-originals and versioned normalized extraction.
+originals and versioned normalized extraction. `SourceOriginal` records name,
+media type, length, SHA-256, and ordered chunk references; chunks are SHA-256
+addressed and at most 8 MiB. `SourceExtractionVersion` records extractor,
+version, options, content hash, terminal status, diagnostics, and bounded
+reading blocks.
 
 - Stage and hash uploads outside database write locks.
 - Keep the existing 100 MiB per-input limit.
@@ -448,6 +517,11 @@ originals and versioned normalized extraction.
 - Scanned documents remain available in original-page view; do not claim searchable
   text without extraction/OCR evidence.
 - Re-extraction creates a new version rather than changing existing citation anchors.
+- Migrate every existing source into a legacy immutable extraction while
+  preserving source/chunk/block/page IDs, normalized text, evidence, and hashes.
+  Set its original state to `OriginalUnavailable`; never synthesize a file from
+  extracted text. Terminal ingest-job cleanup must not delete retained source
+  material.
 
 #### Reader
 
@@ -458,8 +532,8 @@ For PDFs, add original-page viewing through an application-owned surface using
 bounded page rendering. Exact text highlights belong to the normalized reading
 view; original-page links navigate to the relevant page.
 
-A shared `SourceLocation` carries source ID, extraction version, block/page
-identity, normalized range, locator, and quote evidence. Use it in search
+A durable `SourceLocation` carries source ID, extraction version, block/page
+identity, normalized range, locator, quote, and a verification hash. Use it in search
 results, graph provenance, assistant citations, and manuscript citations.
 
 Assistant links resolve through validated source locations. Persist citation
@@ -488,15 +562,28 @@ records rather than introducing another source authority.
 #### Portability
 
 Replace new project exports with a streamed, versioned `.lorekeeper` archive
-containing manifests, structured records, and binary chunks.
+containing manifests, structured records, and binary chunks. JSON v1-v31 remain
+import-only boundary adapters.
 
-- Full export includes all project sources.
-- Non-structural exports preserve dependencies of included content and report
-  omitted source evidence.
+- One dependency traversal engine supports distinct `FullArchive`,
+  `NonStructuralArchive`, and `HistorySnapshot` policies. Each policy retains
+  its own inclusion, external-project-reference, workflow-setting, and warning
+  behavior; shared traversal must not merge these scopes.
+- Full export includes all project sources. Non-structural export preserves
+  dependencies of included content and reports omitted source evidence.
 - Export/import runs as reconnectable jobs using controlled temporary files and
   streaming HTTP transfer, not Base64 through SignalR.
-- Validate paths, declared lengths, hashes, archive expansion, duplicate entries,
-  and references before admitting imported state.
+- Capture freezes canonical mutation, reads a stable no-tracking snapshot into
+  bounded temporary descriptors, then releases the project lease before
+  compression, download, or Git transport. Archive, history, Git, restore, and
+  HTTP contracts use declared files/streams rather than byte arrays.
+- Import jobs progress through `Uploaded`, `Staged`, `Validated`, `Applying`,
+  `Committed`, `Indexing`, `Completed`, `CompletedWithWarnings`, `Failed`, or
+  `Cancelled`. Cancellation is honored only through Applying; after the database
+  transaction commits, indexing is retryable and may only add warnings.
+- Validate paths, duplicate entries, symlinks/reparse points, declared and
+  expanded lengths, hashes, JSON/XML limits, and reference closure before
+  admitting imported state.
 - Retain old JSON formats only as versioned import boundaries.
 
 Version history gains small source indexes, per-source manifests, and bounded
@@ -516,39 +603,68 @@ Extend the semantic manuscript with:
 - Inline note-reference and citation atoms.
 - Citation clusters containing one or more bibliographic references.
 
-Table cells support paragraphs, lists, and figures. Nested tables and Designed
-Pages inside cells are outside v1; import reports them explicitly.
+Table identities are recursive and stable. Column-width weights are positive
+integers normalized to the available width; header rows are contiguous and
+leading; row/column spans must cover without overlap or gaps. Cells support
+paragraphs, ordered/unordered lists, and Figures only. Nested tables and
+Designed Pages inside cells are rejected with explicit import diagnostics.
 
-All nested blocks retain stable identities. Define one shared position-mapping
-contract for editor selections, annotations, atoms, table cells, and notes;
-displayed citation numbering must not change stored anchor positions.
+All nested blocks retain stable identities. `ManuscriptPosition` uses UTF-16 and
+contains document, container path, block/atom identity, offset, and affinity;
+the same traversal drives editor mapping, annotations, operations, assistant
+projection, search, archive/history, and Press page maps. Displayed citation
+numbering must not change stored anchor positions.
+
+Notes are owned by one semantic document and have exactly one reference. Their
+content supports paragraphs, lists, Figures, citations, and character formatting,
+but not tables, Designed Pages, or recursive notes. Copying across documents
+clones the note and nested atom IDs; removing the reference removes its note in
+the same reversible operation. Orphaned/multiply referenced import notes fail
+closed. Footnote/endnote numbering restarts per top-level chapter or publication
+section. Designed Page occurrences participate in their containing document;
+standalone previews use their own sequence. Footnotes reserve at most 40% of a
+page body, continuing with a marker when needed and keeping a reference with at
+least two note lines where possible; unplaceable content has named diagnostics.
 
 Update validation, operations, assistant projections, search, Undo, release
 customization, import/export, history, and rendering together.
 
 #### Citation formatting
 
-Support Chicago notes/bibliography, APA, and MLA through one offline CSL formatter.
+Use a managed C# `ICitationFormatter` with formatter identity
+`lorekeeper-citations-v1`; do not embed a CSL engine. Freeze v1 styles to Chicago
+Manual of Style 18 notes-and-bibliography, APA 7, and MLA 9. Arbitrary
+user-supplied styles are excluded. The formatter preserves author-entered lexical
+capitalization and controls punctuation, ordering, labels, quotation, italics,
+and name inversion without guessing proper nouns.
 
-Use pinned citeproc-js in constrained Jint, with bundled styles/locales and
-deterministic conformance fixtures. Disable network, filesystem, and general CLR
-access. Arbitrary user-supplied CSL styles are excluded.
+Citations are atoms and multi-item clusters. Each item references one M4
+`BibliographicRecord` and carries prefix, suffix, locator label/value, and an
+optional `SourceLocation`. They and note atoms are allowed in Designed Page
+semantic content. Occurrences are identified by publication target, top-level
+container, full placement path, citation atom ID, and cluster-item ordinal, so a
+repeated Designed Page has distinct publication occurrences without changed
+stored offsets.
 
-The selected processor's CPAL obligations, including covered-source availability
-and notices, must pass dependency review before distribution. See
-[processor license metadata](https://raw.githubusercontent.com/Juris-M/citeproc-js/master/package.json)
-and [CPAL terms](https://opensource.org/license/cpal-1.0).
+Chicago uses a full first note and later shortened notes, never `Ibid.`; APA
+uses publication-wide author-year `a`/`b` disambiguation; MLA uses author or
+short-title locators. Commit an explicit missing-field matrix and actionable
+diagnostics. Bibliography/Works Cited order and deduplication are publication-wide;
+chapter Read derives its format from complete effective publication context.
+Golden outputs are independently authored fixtures, never generated snapshots.
 
-Core owns the citation style; releases may override it. Generate numbering and
-bibliography from effective included content, deduplicating works. Missing
-required metadata produces actionable diagnostics. Inserting an assistant
+Core owns the citation style; releases may override it. Generate final back
+matter with endnotes first (grouped by top-level document and occurrence-backed),
+then Bibliography, References, or Works Cited. Omit empty generated sections.
+Missing required metadata produces actionable diagnostics. Inserting an assistant
 evidence link does not automatically create a manuscript citation.
 
 #### DOCX input
 
-Use the [Open XML SDK](https://learn.microsoft.com/en-us/office/open-xml/open-xml-sdk)
-for file import/export and a Word-aware HTML clipboard adapter feeding the same
-semantic import-fragment contract.
+Use pinned, dependency-admitted [Open XML SDK](https://learn.microsoft.com/en-us/office/open-xml/open-xml-sdk)
+for file import/export and a Word-aware HTML clipboard adapter feeding one
+`SemanticImportFragment` (blocks, notes, citations, staged assets, styles,
+bibliography records, source mappings, and a review report).
 
 - Support Word desktop paste on Windows and Mac.
 - Preserve supported headings, paragraph formatting, lists, tables, images,
@@ -565,7 +681,9 @@ semantic import-fragment contract.
 Clipboard fidelity is limited by the data Word supplies. When important content
 is missing from the clipboard, direct DOCX import is the recovery path.
 
-Bound ZIP/XML expansion and reject unsafe relationships, executable content, or
+Parse outside write locks, then atomically commit assets, styles, bibliography,
+and manuscript at the explicit insertion point. Bound ZIP/XML expansion, never
+fetch remote resources, and reject unsafe relationships, executable content, or
 malformed packages. Unsupported layout features produce a reviewable import
 report rather than silent omission.
 
@@ -584,9 +702,13 @@ Add DOCX to the existing effective-publication export boundary.
 
 Tables, notes, and citations must also work in Read, EPUB, PDF, and text projections.
 
-Extend Press with table pagination, repeated headers, note layout, endnotes,
-and appropriate tagged structure. Unplaceable content yields a named diagnostic.
-EPUB gets semantic tables and linked notes. DOCX support is incomplete until
+Extend Press with table pagination: repeat headers after a break, do not split a
+normal row, split an over-page row only at semantic block boundaries, never split
+a row-span group, and emit `UnplaceableTableRowGroup` when the atomic group cannot
+fit. Endnotes are final back matter with occurrence-specific backlinks.
+`UnplaceableFootnoteContent` is likewise a named diagnostic. EPUB gets semantic
+tables and linked notes.
+DOCX support is incomplete until
 these existing paths preserve the richer manuscript.
 
 ### F. Engineering cleanup (throughout; closure in M6)
@@ -770,9 +892,9 @@ outreach or posts are sent without explicit authorization.
 ### Owner-supplied publication inputs
 
 - Final Store price.
-- Publisher/legal identity and developer accounts.
+- Publisher identity and developer accounts.
 - Verified Buy Me a Coffee URL.
-- Approval of reviewed license and contribution terms.
+- Final owner-selected source-license and contribution terms.
 - Real-device Mac testers and required Store/signing access.
 
 These inputs are publication dependencies, not excuses to stop independent

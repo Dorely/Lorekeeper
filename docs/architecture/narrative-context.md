@@ -247,6 +247,25 @@ Visible source inventories and activity panels are read projections over those
 same durable records. They may summarize progress and provenance, but they must
 not introduce a second canon-selection, relationship, or job-state authority.
 
+### Accepted M4 retained-source contract
+
+This is accepted next-contract guidance, not a statement of current ingest
+storage. Sources become immutable project-owned material: `SourceOriginal`
+records name, media type, length, SHA-256, and ordered 8 MiB-or-smaller content
+addressed chunks; `SourceExtractionVersion` records extractor/version/options,
+content hash, status/diagnostics, and bounded reading blocks. `SourceLocation`
+is durable evidence with source, extraction, block/page, range, locator, quote,
+and verification hash. Re-extraction creates another immutable version and never
+retargets existing evidence.
+
+Every legacy source migrates to an immutable legacy extraction preserving its
+source/chunk/block/page identities, normalized text, evidence, and hashes, with
+original state `OriginalUnavailable`. Extracted text must never be presented as
+a reconstructed original. Bibliographic records are project-owned and may exist
+without a source; detaching a source preserves metadata and marks dependent
+evidence unavailable. Source deletion reports bibliography, manuscript, graph,
+assistant-transcript, and job usage before an explicit resolution.
+
 ## Key files and file families
 
 | File or family | Architectural role |

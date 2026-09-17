@@ -1,0 +1,111 @@
+{
+  "fixtureVersion": 1,
+  "status": "normative",
+  "kind": "rich-manuscript-tables-and-notes",
+  "protocolVersion": 14,
+  "outputPurpose": "publication",
+  "renderScope": "book",
+  "renderMode": "production",
+  "document": {
+    "id": "10000000-0000-0000-0000-000000000301",
+    "title": "The Harbor Ledger",
+    "language": "en",
+    "topLevelDocuments": [
+      {
+        "id": "40000000-0000-0000-0000-000000000301",
+        "kind": "chapter",
+        "title": "Soundings",
+        "blocks": [
+          { "id": "41000000-0000-0000-0000-000000000301", "type": "Heading", "headingLevel": 1, "text": "Soundings" },
+          {
+            "id": "41000000-0000-0000-0000-000000000302",
+            "type": "Table",
+            "tableId": "42000000-0000-0000-0000-000000000301",
+            "columns": [
+              { "id": "42100000-0000-0000-0000-000000000301", "widthWeight": 2 },
+              { "id": "42100000-0000-0000-0000-000000000302", "widthWeight": 3 },
+              { "id": "42100000-0000-0000-0000-000000000303", "widthWeight": 1 }
+            ],
+            "headerRowCount": 1,
+            "rows": [
+              {
+                "id": "42200000-0000-0000-0000-000000000301",
+                "header": true,
+                "cells": [
+                  { "id": "42300000-0000-0000-0000-000000000301", "rowSpan": 1, "columnSpan": 1, "blocks": [{ "type": "Paragraph", "text": "Station" }] },
+                  { "id": "42300000-0000-0000-0000-000000000302", "rowSpan": 1, "columnSpan": 1, "blocks": [{ "type": "Paragraph", "text": "Depth" }] },
+                  { "id": "42300000-0000-0000-0000-000000000303", "rowSpan": 1, "columnSpan": 1, "blocks": [{ "type": "Paragraph", "text": "Trend" }] }
+                ]
+              },
+              {
+                "id": "42200000-0000-0000-0000-000000000302",
+                "header": false,
+                "cells": [
+                  { "id": "42300000-0000-0000-0000-000000000304", "rowSpan": 1, "columnSpan": 1, "blocks": [{ "type": "Paragraph", "text": "North jetty" }] },
+                  { "id": "42300000-0000-0000-0000-000000000305", "rowSpan": 1, "columnSpan": 2, "blocks": [{ "type": "Paragraph", "text": "1.4 m" }] }
+                ]
+              }
+            ]
+          },
+          { "id": "41000000-0000-0000-0000-000000000303", "type": "Paragraph", "text": "The current turned east.", "noteReferences": [{ "noteId": "43000000-0000-0000-0000-000000000301", "label": "1" }] },
+          { "id": "41000000-0000-0000-0000-000000000305", "type": "Paragraph", "text": "The method is documented separately.", "noteReferences": [{ "noteId": "43000000-0000-0000-0000-000000000302", "label": "1" }] }
+        ],
+        "notes": [
+          {
+            "id": "43000000-0000-0000-0000-000000000301",
+            "kind": "Footnote",
+            "referenceId": "note-ref:43000000-0000-0000-0000-000000000301",
+            "blocks": [{ "id": "43100000-0000-0000-0000-000000000301", "type": "Paragraph", "text": "The reading was corrected against the tide gauge." }]
+          },
+          {
+            "id": "43000000-0000-0000-0000-000000000302",
+            "kind": "Endnote",
+            "referenceId": "note-ref:43000000-0000-0000-0000-000000000302",
+            "blocks": [{ "id": "43100000-0000-0000-0000-000000000302", "type": "Paragraph", "text": "Archive method and instrument details." }]
+          }
+        ]
+      },
+      {
+        "id": "40000000-0000-0000-0000-000000000302",
+        "kind": "publication-section",
+        "title": "Methods",
+        "blocks": [{ "id": "41000000-0000-0000-0000-000000000304", "type": "Paragraph", "text": "The same numbering restarts in this top-level document.", "noteReferences": [{ "noteId": "43000000-0000-0000-0000-000000000303", "label": "1" }] }],
+        "notes": [{ "id": "43000000-0000-0000-0000-000000000303", "kind": "Footnote", "referenceId": "note-ref:43000000-0000-0000-0000-000000000303", "blocks": [{ "id": "43100000-0000-0000-0000-000000000303", "type": "Paragraph", "text": "Section-local note." }] }]
+      }
+    ]
+  },
+  "expected": {
+    "table": {
+      "widthWeightSum": 6,
+      "headerRowsRepeatOnPageBreak": true,
+      "normalRowsAtomic": true,
+      "overlongRowSplitAt": "semantic-block-boundaries",
+      "rowSpanGroupsAtomic": true,
+      "invalidDiagnostics": ["UnplaceableTableRowGroup"]
+    },
+    "notes": {
+      "footnoteBodyShareLimit": 0.4,
+      "continuationMarker": true,
+      "keepReferenceWithFirstTwoLines": true,
+      "endnotesInFinalBackMatter": true,
+      "numberingScope": "each-top-level-document",
+      "expectedLabels": {
+        "chapter:40000000-0000-0000-0000-000000000301": { "footnotes": ["1"], "endnotes": ["1"] },
+        "publication-section:40000000-0000-0000-0000-000000000302": { "footnotes": ["1"] }
+      },
+      "invalidDiagnostics": ["UnplaceableFootnoteContent", "NOTE_REFERENCE_INVALID"]
+    },
+    "pageMap": {
+      "tableId": "42000000-0000-0000-0000-000000000301",
+      "repeatedHeaderRowIds": ["42200000-0000-0000-0000-000000000301"],
+      "noteReferenceBlockIds": ["41000000-0000-0000-0000-000000000303", "41000000-0000-0000-0000-000000000305", "41000000-0000-0000-0000-000000000304"]
+    }
+  },
+  "assertions": [
+    "Table, row, and cell identities are stable and recursive.",
+    "Positive column width weights are normalized against available width.",
+    "A row-span group is never split, and an unplaceable atomic group has a named diagnostic.",
+    "Footnote and endnote sequences restart for each top-level chapter or publication section.",
+    "The expected page map keeps semantic table and note identities rather than display coordinates."
+  ]
+}

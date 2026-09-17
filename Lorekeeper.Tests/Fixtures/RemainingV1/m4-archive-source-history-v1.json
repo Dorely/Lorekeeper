@@ -1,0 +1,155 @@
+{
+  "fixtureVersion": 1,
+  "status": "normative",
+  "kind": "archive-source-history-closure",
+  "projectId": "10000000-0000-0000-0000-000000000001",
+  "archive": {
+    "formatId": "lorekeeper.archive",
+    "envelopeVersion": 1,
+    "transport": "stream",
+    "encoding": "utf-8-no-bom",
+    "policies": ["FullArchive", "NonStructuralArchive", "HistorySnapshot"],
+    "manifest": {
+      "manifestPath": "manifest.json",
+      "projectId": "10000000-0000-0000-0000-000000000001",
+      "schemaVersions": { "manuscript": 5, "archiveRecord": 1, "historySnapshot": 8 },
+      "entries": [
+        { "path": "project/project.json", "kind": "structured-record", "byteLength": 148, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        { "path": "sources/sources.json", "kind": "structured-record", "byteLength": 512, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        { "path": "sources/source-0001/original/chunk-0000", "kind": "source-original-chunk", "byteLength": 4, "sha256": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577" },
+        { "path": "sources/source-0001/extractions/extraction-0001/blocks.json", "kind": "source-extraction-blocks", "byteLength": 206, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
+        { "path": "manuscript/chapters/40000000-0000-0000-0000-000000000001.json", "kind": "manuscript", "byteLength": 924, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+      ],
+      "contentHash": "sha256:manifest-content-hash-v1",
+      "manifestHash": "sha256:manifest-hash-v1"
+    }
+  },
+  "sources": {
+    "sourceOriginal": {
+      "id": "60000000-0000-0000-0000-000000000001",
+      "name": "Tide Notes.txt",
+      "mediaType": "text/plain",
+      "length": 4,
+      "sha256": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577",
+      "chunks": [
+        { "index": 0, "sha256": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577", "byteLength": 4, "path": "sources/source-0001/original/chunk-0000" }
+      ],
+      "chunkSizeLimit": 8388608,
+      "bytesForFixture": "tide"
+    },
+    "sourceExtractionVersion": {
+      "id": "61000000-0000-0000-0000-000000000001",
+      "sourceId": "60000000-0000-0000-0000-000000000001",
+      "extractor": "plain-text",
+      "extractorVersion": "fixture-1",
+      "options": {},
+      "contentHash": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577",
+      "status": "Ready",
+      "blocks": [
+        { "id": "62000000-0000-0000-0000-000000000001", "ordinal": 0, "page": null, "text": "tide", "normalizedStart": 0, "normalizedLength": 4 }
+      ]
+    },
+    "bibliographicRecordWithoutSource": {
+      "id": "63000000-0000-0000-0000-000000000001",
+      "kind": "Book",
+      "title": "A Field Guide to Tides",
+      "authors": [{ "family": "Okafor", "given": "Nia" }],
+      "issued": { "year": 2021 },
+      "sourceId": null
+    },
+    "sourceLocation": {
+      "sourceId": "60000000-0000-0000-0000-000000000001",
+      "extractionId": "61000000-0000-0000-0000-000000000001",
+      "blockId": "62000000-0000-0000-0000-000000000001",
+      "page": null,
+      "start": 0,
+      "length": 4,
+      "locator": "paragraph 1",
+      "quote": "tide",
+      "verificationHash": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577"
+    }
+  },
+  "legacySourceMigration": {
+    "legacySourceId": "70000000-0000-0000-0000-000000000001",
+    "legacySourceName": "Scanned field notebook.pdf",
+    "legacyExtractionId": "71000000-0000-0000-0000-000000000001",
+    "original": { "state": "OriginalUnavailable", "bytesSynthesized": false, "reason": "The pre-M4 database retained extraction/evidence but no original file." },
+    "extraction": {
+      "id": "71000000-0000-0000-0000-000000000001",
+      "status": "LegacyImmutable",
+      "contentHash": "0a5c713672e5a3c5c28625f58d3ffa4b3128c6710068a98d1c32df37b91b623f",
+      "blocks": [
+        { "id": "72000000-0000-0000-0000-000000000001", "ordinal": 0, "page": 4, "text": "A blue mark follows the inlet.", "normalizedStart": 0, "normalizedLength": 30 }
+      ]
+    },
+    "evidence": {
+      "sourceId": "70000000-0000-0000-0000-000000000001",
+      "extractionId": "71000000-0000-0000-0000-000000000001",
+      "blockId": "72000000-0000-0000-0000-000000000001",
+      "page": 4,
+      "start": 0,
+      "length": 30,
+      "quote": "A blue mark follows the inlet.",
+      "verificationHash": "0a5c713672e5a3c5c28625f58d3ffa4b3128c6710068a98d1c32df37b91b623f"
+    }
+  },
+  "history": {
+    "schemaVersion": 8,
+    "sourceIndex": [
+      { "sourceId": "60000000-0000-0000-0000-000000000001", "name": "Tide Notes.txt", "originalHash": "8a28929ac7f9a17e97a421ac2cd63ac73568ebe87bc0cee641a193d91c761577", "latestExtractionId": "61000000-0000-0000-0000-000000000001" },
+      { "sourceId": "70000000-0000-0000-0000-000000000001", "name": "Scanned field notebook.pdf", "originalState": "OriginalUnavailable", "latestExtractionId": "71000000-0000-0000-0000-000000000001" }
+    ],
+    "perSourceManifests": [
+      { "sourceId": "60000000-0000-0000-0000-000000000001", "path": "sources/source-0001/manifest.json", "extractionBlocksPath": "sources/source-0001/extractions/extraction-0001/blocks.json", "reusableChunkPaths": ["sources/source-0001/original/chunk-0000"] },
+      { "sourceId": "70000000-0000-0000-0000-000000000001", "path": "sources/source-0002/manifest.json", "extractionBlocksPath": "sources/source-0002/extractions/extraction-0001/blocks.json", "reusableChunkPaths": [] }
+    ],
+    "comparison": { "metadataFirst": true, "loadsBinaryLazily": true, "reusedBytes": 4, "newBytes": 0 },
+    "restore": { "streamsBlobs": true, "validatesHashesBeforeCommit": true, "legacyOriginalRemainsUnavailable": true }
+  },
+  "closurePolicies": [
+    {
+      "policy": "FullArchive",
+      "includedPaths": ["project/project.json", "sources/sources.json", "sources/source-0001/original/chunk-0000", "sources/source-0001/extractions/extraction-0001/blocks.json", "manuscript/chapters/40000000-0000-0000-0000-000000000001.json"],
+      "omitted": [],
+      "warnings": []
+    },
+    {
+      "policy": "NonStructuralArchive",
+      "includedPaths": ["project/project.json", "manuscript/chapters/40000000-0000-0000-0000-000000000001.json"],
+      "omitted": ["source originals", "source extraction blocks", "source evidence"],
+      "warnings": ["SOURCE_EVIDENCE_OMITTED_NON_STRUCTURAL_EXPORT"]
+    },
+    {
+      "policy": "HistorySnapshot",
+      "includedPaths": ["manifest.json", "sources/source-0001/manifest.json", "sources/source-0001/extractions/extraction-0001/blocks.json", "sources/source-0001/original/chunk-0000"],
+      "omitted": ["ingest jobs", "assistant transcripts", "render artifacts", "FTS/vector projections"],
+      "warnings": []
+    }
+  ],
+  "importLifecycle": [
+    "Uploaded",
+    "Staged",
+    "Validated",
+    "Applying",
+    "Committed",
+    "Indexing",
+    "Completed",
+    "CompletedWithWarnings",
+    "Failed",
+    "Cancelled"
+  ],
+  "validationCases": [
+    { "id": "unsafe-path", "input": "../outside.json", "expected": "reject-before-admission" },
+    { "id": "duplicate-entry", "input": "two entries with identical path", "expected": "reject-before-admission" },
+    { "id": "hash-mismatch", "input": "declared length or SHA-256 differs", "expected": "reject-before-admission" },
+    { "id": "missing-reference", "input": "citation points to absent source location", "expected": "reject-before-admission" },
+    { "id": "post-commit-index-failure", "input": "database transaction committed; index retry fails", "expected": "CompletedWithWarnings-not-Failed" }
+  ],
+  "assertions": [
+    "Original bytes are retained before extraction and are content-addressed in ordered chunks no larger than 8 MiB.",
+    "Legacy extracted text and evidence survive with OriginalUnavailable; no original bytes are synthesized from text.",
+    "A bibliography record may exist without a source file.",
+    "FullArchive, NonStructuralArchive, and HistorySnapshot have distinct closure and warning behavior.",
+    "Capture descriptors are stable before streaming compression/transport and restore validates hashes before commit."
+  ]
+}

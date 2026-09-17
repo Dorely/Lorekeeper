@@ -71,6 +71,26 @@ publication sections, release covers, package readiness, and production
 artifacts. This chapter supplies their shared media, canvas, geometry, and
 preview primitives; it does not own publication claims or vendor validation.
 
+### Accepted M2 implementation contract
+
+This accepted next-contract guidance does not claim that the replacement is
+already implemented. `IDesignedPageService` becomes the sole Designed Page
+mutation boundary. `DesignedPage` owns project/name/release-only scope;
+`DesignedPageContent` owns Core or release semantic content, accessibility,
+revision, and active variant; and `DesignedPageVariant` owns authored geometry
+for one exact content identity. Derived preview/reflow caches are never authored
+variants. `DesignedPagePlacementReference` is a rebuildable reverse index only;
+manuscript placements are authoritative.
+
+First release editing clones the complete effective content and authored-layout
+layer. A service operation owns creation, duplication, placement, cross-container
+move, removal, effective reads, override/reset, release cloning, and guarded
+deletion. Live placements block deletion. Page-content history/review remains a
+separate dependency group from placement history/review; immutable Git snapshots
+are never rewritten to satisfy deletion. Repeated placements expand with
+occurrence-specific anchors, while unplaced pages remain searchable without
+staling publication artifacts.
+
 ## Current architecture and invariants
 
 Project images are reusable assets with bytes, media metadata, crop lineage,

@@ -110,6 +110,27 @@ operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
 unrelated feature entities, project exports, assistant tool payloads, or logs.
 
+### Accepted M3-M4 persistence contract
+
+This accepted next-contract guidance governs implementation, not current schema
+claims. Authoring sessions and batch receipts are durable rows. One SQLite
+transaction validates a multi-target batch, applies all targets, advances its
+session sequence, and inserts the request-hash receipt; same identity returns
+the receipt only when the hash matches. Receipts remain until client
+reconciliation acknowledgment. Checkpoint, restore/sync, publishing, assistant,
+and similar consumers invoke the authoring mutation fence rather than reading
+through a dirty registered client.
+
+New portable output is streamed `.lorekeeper`; legacy JSON v1-v31 is
+import-only. Capture freezes canonical project mutation, reads bounded
+no-tracking descriptors, and releases the lease before compression or transport.
+Import validates paths, duplicate entries, links/reparse points, compressed and
+expanded limits, hashes, JSON/XML limits, and reference closure before one
+transactional application. Job state is Uploaded, Staged, Validated, Applying,
+Committed, Indexing, Completed, CompletedWithWarnings, Failed, or Cancelled.
+Cancellation ends at Applying; a committed import cannot later be failed or
+cancelled, while indexing may be retried and add warnings.
+
 ## Current architecture and invariants
 
 The application stores local state in SQLite through `AppDbContext`, including

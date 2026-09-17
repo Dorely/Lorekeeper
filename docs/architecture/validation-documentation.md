@@ -407,6 +407,24 @@ exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
+### Accepted M2-M5 contract evidence
+
+Before the corresponding implementations land, fixtures are normative input,
+not formatter- or exporter-generated snapshots. Focused deterministic regressions
+must cover Designed Page migration/placement/release isolation and occurrence
+mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,
+conflicts, and mutation fences; source legacy `OriginalUnavailable` migration,
+archive/history closure, chunks, streamed restoration, and fail-closed import;
+and rich-manuscript, DOCX, citation, EPUB, and Press conformance. Citation
+fixtures are independently authored for Chicago 18, APA 7, and MLA 9, including
+missing metadata, repeats, and repeated Designed Page occurrences.
+
+Migration checks use copied representative databases and prove rollback without
+modifying developer data. Local scale tooling may measure source/archive memory
+and cancellation on the 50-source fixture, but does not establish native
+navigation evidence. These are accepted target requirements, not evidence that
+the M2-M5 implementations or platform integrations are complete.
+
 ## Key files and file families
 
 | File or family | Architectural role |

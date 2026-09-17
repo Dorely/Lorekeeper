@@ -391,6 +391,32 @@ actionable failures. Publish UI and assistant preparation results surface this
 summary. Since image preparation precedes artifact reuse, both the final artifact
 and its fingerprint describe the permanent replacement references.
 
+### Accepted M2 and M5 publication contract
+
+This is accepted next-contract guidance, not a statement that the described
+features are already implemented. Effective publication projection resolves a
+Designed Page by page identity plus Core/release content and authored-layout
+ownership. Repeated placements expand independently with occurrence-specific
+anchors; release reset restores inherited page content/layout without changing
+the page identity. Artifact freshness follows effective page content/variant
+dependencies, while an unplaced page stays searchable without staling output.
+
+`ICitationFormatter` is managed C# with identity `lorekeeper-citations-v1` and
+the only v1 styles are Chicago Manual of Style 18 notes-and-bibliography, APA 7,
+and MLA 9. Core owns a default style and releases may override it. Formatting,
+work deduplication, APA disambiguation, and bibliography ordering are computed
+from the entire effective publication, including every Designed Page occurrence;
+chapter Read uses that same full context. Final back matter emits endnotes first,
+grouped by top-level document with occurrence-specific backlinks, then the
+applicable nonempty Bibliography, References, or Works Cited.
+
+DOCX output remains an effective-publication boundary. Manuscript prose, lists,
+tables, Figures, notes, citations, and bibliography remain editable Word
+structures; Designed Pages become accessibility-described artwork. Import and
+clipboard parsing produce one semantic fragment and commit all staged assets,
+styles, bibliography records, source mappings, and manuscript changes atomically
+at an explicit insertion point.
+
 ## Key files and file families
 
 Publication PDF previews track the visible page nearest the scroll viewport's

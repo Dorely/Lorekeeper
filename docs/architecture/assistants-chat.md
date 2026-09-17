@@ -590,6 +590,23 @@ managed publication model's layout math. Permanent replacements are system-owned
 invalidate Review Edits/manual history through their content owners just like
 other direct assistant-visible changes.
 
+### Accepted M2-M5 assistant contract
+
+This is accepted implementation guidance, not a claim that these next-version
+tools are already live. Assistant reads and mutations of Designed Pages use
+page identity plus protected Core/release content/variant revisions; a placement
+does not grant write ownership of shared page content. Assistant state-consuming
+operations use the same authoring mutation fence as manual consumers and must
+stop on a dirty client that cannot flush. Assistant mutations are never manual
+Undo actions and invalidate affected authoring generations only after a
+successful committed batch.
+
+Source links in assistant-visible output carry validated durable `SourceLocation`
+data and preserve unavailable/outdated/ambiguous status rather than guessing.
+Manuscript projections and tools preserve `ManuscriptPosition`, table/note
+identities, citation clusters, and Designed Page citation/note atoms. An
+assistant evidence link never silently creates a manuscript citation.
+
 ## Key files and file families
 
 | File or family | Architectural role |
