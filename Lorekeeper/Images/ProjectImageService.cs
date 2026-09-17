@@ -19,7 +19,7 @@ public sealed class ProjectImageService(
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IContextIndexingService contextIndexing,
-    IAuthoringHistoryRuntime authoringHistory) : IProjectImageService
+    IAuthoringDeltaHistoryRuntime authoringHistory) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -619,8 +619,8 @@ public sealed class ProjectImageService(
                 $"Image '{asset.FileName}' is used by a publication-edition placement. Remove the placement in Publish before deleting the image.");
         }
 
-        var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
-            projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, cancellationToken);
+        var dependentHistory = authoringHistory.FindDependentTargets(
+            projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId);
         if (dependentHistory.Count > 0 && !clearAffectedHistory)
             throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This image is retained by {dependentHistory.Count} current in-process Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
 
@@ -629,7 +629,7 @@ public sealed class ProjectImageService(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         if (dependentHistory.Count > 0)
-            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, CancellationToken.None);
+            authoringHistory.ClearDependentTargets(projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId);
         await transaction.DisposeAsync();
         await databaseOperation.DisposeAsync();
         foreach (var entityId in entityIds)

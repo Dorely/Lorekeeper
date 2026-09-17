@@ -25,6 +25,9 @@ public class AppDbContext(
     public DbSet<ProjectVersionRepository> ProjectVersionRepositories => Set<ProjectVersionRepository>();
     public DbSet<ProjectVersionCheckpoint> ProjectVersionCheckpoints => Set<ProjectVersionCheckpoint>();
     public DbSet<ProjectVersionOperation> ProjectVersionOperations => Set<ProjectVersionOperation>();
+    public DbSet<AuthoringSession> AuthoringSessions => Set<AuthoringSession>();
+    public DbSet<AuthoringBatchReceipt> AuthoringBatchReceipts => Set<AuthoringBatchReceipt>();
+    public DbSet<AuthoringTargetGeneration> AuthoringTargetGenerations => Set<AuthoringTargetGeneration>();
     public DbSet<GitHubConnection> GitHubConnections => Set<GitHubConnection>();
     public DbSet<ProjectGitRemote> ProjectGitRemotes => Set<ProjectGitRemote>();
     public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
@@ -466,6 +469,28 @@ public class AppDbContext(
                 .WithMany(e => e.ScopedDesignedPages)
                 .HasForeignKey(e => e.ScopeEditionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringSession>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.ProjectId, item.UpdatedAt });
+            entity.HasOne<Project>().WithMany().HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringBatchReceipt>(entity =>
+        {
+            entity.HasIndex(item => item.BatchId).IsUnique();
+            entity.HasIndex(item => new { item.SessionId, item.Sequence }).IsUnique();
+            entity.HasIndex(item => new { item.ProjectId, item.AcknowledgedAt, item.CreatedAt });
+            entity.HasOne<Project>().WithMany().HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AuthoringSession>().WithMany().HasForeignKey(item => item.SessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringTargetGeneration>(entity =>
+        {
+            entity.HasIndex(item => new { item.ProjectId, item.TargetId }).IsUnique();
+            entity.HasOne<Project>().WithMany().HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<DesignedPageContent>(entity =>

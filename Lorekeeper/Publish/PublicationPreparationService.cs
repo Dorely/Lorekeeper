@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Lorekeeper.Authoring;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Startup;
@@ -85,15 +86,18 @@ public sealed class PublicationPreparationService(
     IPublicationEditionService editions,
     IPublicationRenderService renders,
     PublicationPreparationCancellationRegistry cancellationRegistry,
-    ILogger<PublicationPreparationService> logger) : IPublicationPreparationService
+    ILogger<PublicationPreparationService> logger,
+    IAuthoringMutationFence authoringFence) : IPublicationPreparationService
 {
     internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
     public Task<PublicationPreparationJobView> PrepareCoreAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        CreateAsync(projectId, PublicationTargetKind.CoreBook, null, cancellationToken);
+        ExecuteFenceAsync(projectId, "capture the Core Book before preparation", token =>
+            CreateAsync(projectId, PublicationTargetKind.CoreBook, null, token), cancellationToken);
 
     public Task<PublicationPreparationJobView> PrepareReleaseAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default) =>
-        CreateAsync(projectId, PublicationTargetKind.Release, editionId, cancellationToken);
+        ExecuteFenceAsync(projectId, "capture the publication release before preparation", token =>
+            CreateAsync(projectId, PublicationTargetKind.Release, editionId, token), cancellationToken);
 
     private async Task<PublicationPreparationJobView> CreateAsync(
         Guid projectId,
@@ -262,6 +266,20 @@ public sealed class PublicationPreparationService(
                 0,
                 [new("IMAGE_PREPARATION_SUMMARY_INVALID", "The stored image-preparation summary is invalid.")]);
         }
+    }
+
+    private Task<T> ExecuteFenceAsync<T>(
+        Guid projectId,
+        string purpose,
+        Func<CancellationToken, Task<T>> consume,
+        CancellationToken cancellationToken)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("A project ID is required.", nameof(projectId));
+        return authoringFence.ExecuteAsync(
+            new AuthoringFenceRequest(projectId, [], purpose),
+            (_, token) => consume(token),
+            cancellationToken);
     }
 }
 
@@ -869,4 +887,5 @@ public sealed class PublicationPreparationWorker(
         update(job);
         await operation.SaveChangesAsync(cancellationToken);
     }
+
 }

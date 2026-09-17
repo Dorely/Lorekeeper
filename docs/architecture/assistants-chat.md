@@ -590,10 +590,10 @@ managed publication model's layout math. Permanent replacements are system-owned
 invalidate Review Edits/manual history through their content owners just like
 other direct assistant-visible changes.
 
-### Accepted M2-M5 assistant contract
+### Current M3 and accepted M4-M5 assistant contract
 
-This is accepted implementation guidance, not a claim that these next-version
-tools are already live. Assistant reads and mutations of Designed Pages use
+The M3 mutation-fence contract is current. The remaining guidance is accepted
+next-contract work: assistant reads and mutations of Designed Pages use
 page identity plus protected Core/release content/variant revisions; a placement
 does not grant write ownership of shared page content. Assistant state-consuming
 operations use the same authoring mutation fence as manual consumers and must

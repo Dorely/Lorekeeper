@@ -40,7 +40,7 @@ the current runtime. Source inspection remains the proof of what is implemented.
   and every push require a clean workspace and fast-forward-only history.
   Divergence is preserved rather than silently
   merged or overwritten, and local checkpoint success never waits for network.
-- Manuscripts persist as semantic manuscript v4 documents. Older v1-v3 forms
+- Manuscripts persist as semantic manuscript v5 documents. Older v1-v4 forms
   survive only at immutable migration history and versioned import boundaries.
 - The graph, FTS5, and sqlite-vec projections are maintained through owning
   services. Changes to retrievable content must trace both lexical and semantic

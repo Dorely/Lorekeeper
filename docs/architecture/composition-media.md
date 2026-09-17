@@ -66,6 +66,23 @@ DOM coordinates, or a second manuscript body. `ICompositionCanvasPreviewService`
 owns transient complete-scene inspection for Pages and covers; previews are
 not project images and do not enter the library.
 
+Open Designed Page and cover canvases are registered mutation-fence writers.
+Their normal serial save path is the fence flush path: a fence pauses gesture
+input, waits through the captured local sequence, then resumes only after the
+dependent operation releases its project lease. Canvas history is process-wide
+delta history, not scene snapshots. The adapter stores only object insertion,
+removal, ordering, and changed-property deltas; it derives the inverse from the
+persisted pre-mutation object and validates its fingerprint when replaying.
+Before each serialized canvas dispatch, both workspaces write their bounded
+semantic/scene or cover-property/scene payload and its base revisions to the
+target-scoped `AuthoringJournalV1` IndexedDB bridge. A conditional token delete
+occurs only after the canonical commit; remount recovery uses the same
+target-scoped browser session identity to reattach any retained writer. A quota
+or journal write/read failure stays visible, marks the writer not locally
+recoverable, and therefore blocks dependent fence work. Recovered drafts retain
+their original revisions: a stale dispatch surfaces reconciliation rather than
+retrying against a newer revision and overwriting canonical work.
+
 The owning publication services remain authoritative for Core/release
 publication sections, release covers, package readiness, and production
 artifacts. This chapter supplies their shared media, canvas, geometry, and
@@ -541,9 +558,10 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
 | `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |
-| `Lorekeeper/Components/Pages/Projects/DesignedPageWorkspace.razor` | Canvas-first authoring interaction, variant selection, autosave, diagnostics, and history refresh. |
-| `Lorekeeper/Components/Pages/Projects/CoverCompositionWorkspace.razor` | Shared visual shell for cover editing; publication ownership remains in Publish services. |
+| `Lorekeeper/Components/Pages/Projects/DesignedPageWorkspace.razor` | Canvas-first authoring interaction, variant selection, revision-guarded autosave/recovery, diagnostics, and history refresh. |
+| `Lorekeeper/Components/Pages/Projects/CoverCompositionWorkspace.razor` | Shared visual shell for cover editing, including revision-guarded local canvas recovery; publication ownership remains in Publish services. |
 | `Lorekeeper/wwwroot/js/composition-workspace.js` | Measured stage, pointer capture, image geometry, text editing, selection, and formatting bridges. |
+| `Lorekeeper/wwwroot/js/composition-authoring-journal.js` | Bounded target-scoped `AuthoringJournalV1` IndexedDB records, conditional acknowledgement removal, and stable canvas writer session identity. |
 
 ## Related chapters
 

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Composition;
 using Lorekeeper.Fonts;
 using Lorekeeper.ImportExport;
@@ -19,7 +20,8 @@ public sealed class PublishService(
     IPublicationSectionService publicationSections,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectFontService projectFonts,
-    IEnumerable<IPublishExportFormatter> formatters) : IPublishService
+    IEnumerable<IPublishExportFormatter> formatters,
+    IAuthoringMutationFence authoringFence) : IPublishService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -29,21 +31,32 @@ public sealed class PublishService(
     public Task<PublicationBookView> GetCoreWorkspaceAsync(
         Guid projectId,
         CancellationToken cancellationToken = default) =>
-        books.GetOrCreateAsync(projectId, cancellationToken);
+        ExecuteFenceAsync(projectId, "read the Core Book workspace", token => books.GetOrCreateAsync(projectId, token), cancellationToken);
 
     public Task<PublishWorkspaceView> GetWorkspaceAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default) =>
-        GetWorkspaceAsync(projectId, editionId, includeSourceFingerprint: true, cancellationToken);
+        GetWorkspaceCoreAsync(projectId, editionId, includeSourceFingerprint: true, cancellationToken);
 
     public Task<PublishWorkspaceView> GetWorkspaceForEditingAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default) =>
-        GetWorkspaceAsync(projectId, editionId, includeSourceFingerprint: false, cancellationToken);
+        GetWorkspaceCoreAsync(projectId, editionId, includeSourceFingerprint: false, cancellationToken);
 
-    private async Task<PublishWorkspaceView> GetWorkspaceAsync(
+    private Task<PublishWorkspaceView> GetWorkspaceCoreAsync(
+        Guid projectId,
+        Guid editionId,
+        bool includeSourceFingerprint,
+        CancellationToken cancellationToken) =>
+        ExecuteFenceAsync(
+            projectId,
+            "read the publication workspace",
+            token => BuildWorkspaceAsync(projectId, editionId, includeSourceFingerprint, token),
+            cancellationToken);
+
+    private async Task<PublishWorkspaceView> BuildWorkspaceAsync(
         Guid projectId,
         Guid editionId,
         bool includeSourceFingerprint,
@@ -83,7 +96,18 @@ public sealed class PublishService(
         };
     }
 
-    public async Task<ProjectExportFile> ExportAsync(
+    public Task<ProjectExportFile> ExportAsync(
+        Guid projectId,
+        Guid editionId,
+        PublishExportFormat format,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "export a publication projection",
+            token => ExportCoreAsync(projectId, editionId, format, token),
+            cancellationToken);
+
+    private async Task<ProjectExportFile> ExportCoreAsync(
         Guid projectId,
         Guid editionId,
         PublishExportFormat format,
@@ -102,7 +126,7 @@ public sealed class PublishService(
             throw new InvalidOperationException(
                 "EPUB export is available only from an EPUB release so print ISBN and artifact metadata cannot leak into a digital release.");
         }
-        var document = await GetDocumentAsync(projectId, editionId, cancellationToken);
+        var document = await GetDocumentCoreAsync(projectId, editionId, cancellationToken);
 
         return new ProjectExportFile(
             FileName: ExportFileName(document, formatter.FileExtension),
@@ -110,7 +134,17 @@ public sealed class PublishService(
             Content: formatter.Render(document));
     }
 
-    public async Task<ProjectExportFile> ExportCoreAsync(
+    public Task<ProjectExportFile> ExportCoreAsync(
+        Guid projectId,
+        PublishExportFormat format,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "export the Core Book projection",
+            token => ExportCoreDocumentAsync(projectId, format, token),
+            cancellationToken);
+
+    private async Task<ProjectExportFile> ExportCoreDocumentAsync(
         Guid projectId,
         PublishExportFormat format,
         CancellationToken cancellationToken = default)
@@ -119,14 +153,24 @@ public sealed class PublishService(
             throw new InvalidOperationException("Create an EPUB ebook release to prepare an EPUB file.");
         var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
             ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
-        var document = await GetCoreDocumentAsync(projectId, cancellationToken);
+        var document = await GetCoreDocumentCoreAsync(projectId, cancellationToken);
         return new ProjectExportFile(
             ExportFileName(document, formatter.FileExtension),
             formatter.ContentType,
             formatter.Render(document));
     }
 
-    public async Task<PublishDocument> GetDocumentAsync(
+    public Task<PublishDocument> GetDocumentAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "capture the effective publication document",
+            token => GetDocumentCoreAsync(projectId, editionId, token),
+            cancellationToken);
+
+    private async Task<PublishDocument> GetDocumentCoreAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default)
@@ -143,7 +187,16 @@ public sealed class PublishService(
             cancellationToken);
     }
 
-    public async Task<PublishDocument> GetCoreDocumentAsync(
+    public Task<PublishDocument> GetCoreDocumentAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "capture the effective Core Book document",
+            token => GetCoreDocumentCoreAsync(projectId, token),
+            cancellationToken);
+
+    private async Task<PublishDocument> GetCoreDocumentCoreAsync(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
@@ -846,6 +899,20 @@ public sealed class PublishService(
         }
 
         return builder.ToString().Trim('_', ' ', '.');
+    }
+
+    private Task<T> ExecuteFenceAsync<T>(
+        Guid projectId,
+        string purpose,
+        Func<CancellationToken, Task<T>> consume,
+        CancellationToken cancellationToken)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("A project ID is required.", nameof(projectId));
+        return authoringFence.ExecuteAsync(
+            new AuthoringFenceRequest(projectId, [], purpose),
+            (_, token) => consume(token),
+            cancellationToken);
     }
 
     private sealed record SectionSource(Act? Act, int SortOrder);

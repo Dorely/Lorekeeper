@@ -406,7 +406,7 @@ public sealed class ProjectVersionRemoteUpdateService(
                 headCommitSha,
                 artifact.Manifest.ContentHash,
                 cancellationToken);
-            return await restore.CheckoutValidatedSnapshotUnderLeaseAsync(
+            return await restore.CheckoutValidatedSnapshotAsync(
                 new VersionHistoryValidatedProjectCheckout(
                     projectId,
                     artifact,
@@ -414,7 +414,6 @@ public sealed class ProjectVersionRemoteUpdateService(
                     commit.TreeSha,
                     commit.ParentShas.FirstOrDefault(),
                     "Applied GitHub fast-forward snapshot"),
-                commit,
                 cancellationToken);
         }
         finally

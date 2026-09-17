@@ -18,7 +18,7 @@ public class ProjectService(
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
     IContextIndexingService contextIndexing,
-    IAuthoringHistoryRuntime authoringHistory,
+    IAuthoringDeltaHistoryRuntime authoringHistory,
     IProjectMutationCoordinator projectMutations,
     IGitRepositoryStore historyStore) : IProjectService
 {
@@ -217,7 +217,7 @@ public class ProjectService(
             }
         }
 
-        await authoringHistory.ClearProjectAsync(id, CancellationToken.None);
+        authoringHistory.ClearProject(id);
         if (historyCleanupFailure is not null)
             throw historyCleanupFailure;
     }

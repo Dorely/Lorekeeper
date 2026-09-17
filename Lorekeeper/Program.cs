@@ -234,8 +234,11 @@ builder.Services.AddScoped<IChapterSemanticProjectionService, ChapterSemanticPro
 builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptAnnotationService, ManuscriptAnnotationService>();
-builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringHistoryRuntime, Lorekeeper.Authoring.AuthoringHistoryRuntime>();
-builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringCompoundManuscriptRestoreService, Lorekeeper.Authoring.AuthoringCompoundManuscriptRestoreService>();
+builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringDeltaHistoryRuntime>(
+    _ => new Lorekeeper.Authoring.AuthoringDeltaHistoryRuntime());
+builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringMutationFence, Lorekeeper.Authoring.AuthoringMutationFence>();
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringBatchService, Lorekeeper.Authoring.AuthoringBatchService>();
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringGenerationService, Lorekeeper.Authoring.AuthoringGenerationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();

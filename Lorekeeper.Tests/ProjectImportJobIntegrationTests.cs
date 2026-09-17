@@ -1097,6 +1097,9 @@ public sealed class ProjectImportJobIntegrationTests
 
         public void Continue() => _continue.TrySetResult();
 
+        public IDisposable ShareWithNestedOperations(Guid projectId) =>
+            inner.ShareWithNestedOperations(projectId);
+
         public async ValueTask<IAsyncDisposable> AcquireAsync(
             Guid projectId,
             CancellationToken cancellationToken = default)

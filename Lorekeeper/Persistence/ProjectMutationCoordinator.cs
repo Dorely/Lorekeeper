@@ -10,10 +10,13 @@ public interface IProjectMutationCoordinator
     ValueTask<IAsyncDisposable> AcquireAsync(
         Guid projectId,
         CancellationToken cancellationToken = default);
+
+    IDisposable ShareWithNestedOperations(Guid projectId);
 }
 
 public sealed class ProjectMutationCoordinator : IProjectMutationCoordinator
 {
+    private static readonly AsyncLocal<ProjectMutationScope?> Ambient = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = [];
     private readonly string _crossProcessLockDirectory;
 
@@ -26,6 +29,17 @@ public sealed class ProjectMutationCoordinator : IProjectMutationCoordinator
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        if (Ambient.Value is { } current)
+        {
+            if (current.ProjectId != projectId)
+            {
+                throw new InvalidOperationException(
+                    "A project mutation cannot acquire a different project while another project mutation lease is active.");
+            }
+
+            return NoopReleaser.Instance;
+        }
+
         var projectLock = _locks.GetOrAdd(projectId, _ => new SemaphoreSlim(1, 1));
         await projectLock.WaitAsync(cancellationToken);
         try
@@ -38,6 +52,34 @@ public sealed class ProjectMutationCoordinator : IProjectMutationCoordinator
             projectLock.Release();
             throw;
         }
+    }
+
+    public IDisposable ShareWithNestedOperations(Guid projectId)
+    {
+        var previous = Ambient.Value;
+        if (previous is not null && previous.ProjectId != projectId)
+        {
+            throw new InvalidOperationException(
+                "A project mutation cannot share a different project while another project mutation lease is active.");
+        }
+        if (previous is not null)
+            return NoopReleaser.Instance;
+        var scope = new ProjectMutationScope(projectId);
+        Ambient.Value = scope;
+        return new AmbientReleaser(scope);
+    }
+
+    private sealed record ProjectMutationScope(Guid ProjectId);
+
+    private sealed class NoopReleaser : IDisposable, IAsyncDisposable
+    {
+        public static NoopReleaser Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private async Task<FileStream> AcquireFileLockAsync(
@@ -106,9 +148,29 @@ public sealed class ProjectMutationCoordinator : IProjectMutationCoordinator
             if (!_released)
             {
                 _released = true;
-                await fileLock.DisposeAsync();
-                projectLock.Release();
+                try
+                {
+                    await fileLock.DisposeAsync();
+                }
+                finally
+                {
+                    projectLock.Release();
+                }
             }
+        }
+    }
+
+    private sealed class AmbientReleaser(ProjectMutationScope scope) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            if (ReferenceEquals(Ambient.Value, scope))
+                Ambient.Value = null;
         }
     }
 }

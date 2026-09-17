@@ -13,13 +13,25 @@
 @inject IPublicationSectionService PublicationSections
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
-@inject IAuthoringHistoryRuntime AuthoringHistory
+@inject IAuthoringDeltaHistoryRuntime DeltaHistory
+@inject IAuthoringMutationFence AuthoringFence
+@inject IAuthoringGenerationService AuthoringGenerations
+@inject IAuthoringMutationContextAccessor AuthoringMutations
 @inject IJSRuntime JS
 @inject IPrintPreparationService Printing
 
-<section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
+<section class="composition-workspace @((InteractionLocked || _authoringFrozen) ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@(InteractionLocked || _authoringFrozen)" inert="@((InteractionLocked || _authoringFrozen) ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
-    @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger">@PublicationDiagnosticText.SanitizeIdentifiers(_error)</div> }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger" role="alert">
+            @PublicationDiagnosticText.SanitizeIdentifiers(_error)
+            @if (_recoveryConflict)
+            {
+                <button type="button" class="btn btn-sm btn-outline-danger ms-2" @onclick="ReloadCanonicalAsync">Discard local draft and reload</button>
+            }
+        </div>
+    }
     @if (IsInheritedReleasePage)
     {
         <div class="alert alert-info" role="status">This release is currently inheriting the Core Designed Page. Your first saved change creates an independent release copy; Core content and layout stay unchanged.</div>
@@ -365,6 +377,12 @@
     private Guid? _loadedRequestedVariantId;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
+    private IAsyncDisposable? _authoringWriterLease;
+    private Guid _authoringSessionId;
+    private readonly Guid _authoringWriterId = Guid.NewGuid();
+    private long _authoringGeneration;
+    private bool _authoringFrozen;
+    private bool _replayingCanvasHistory;
     private bool _dirty;
     private long _changeVersion;
     private double _zoom = 1;
@@ -374,6 +392,13 @@
     private ElementReference _stageElement;
     private IJSObjectReference? _workspaceModule;
     private DotNetObjectReference<DesignedPageWorkspace>? _dotNetReference;
+    private IJSObjectReference? _journalModule;
+    private bool _journalInitialized;
+    private bool _journalRecoverable = true;
+    private string? _journalToken;
+    private bool _recoveryConflict;
+    private long? _recoveredContentRevision;
+    private long? _recoveredVariantRevision;
     private readonly HashSet<Guid> _measuredTextObjects = [];
     private readonly HashSet<Guid> _overflowingTextObjects = [];
     private TransformState? _transform;
@@ -525,7 +550,8 @@
             _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList();
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
             await LoadVariantAsync();
-            _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
+            await OpenAuthoringWriterAsync();
+            _history = DeltaHistory.Read(AuthoringTargetId()).State;
             if (RequestedSelectionId is Guid requestedSelectionId
                 && _objects.Any(item => item.Id == requestedSelectionId))
             {
@@ -575,7 +601,7 @@
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
         _selectedId = _objects.FirstOrDefault()?.Id;
-        _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition!.Id);
+        _history = DeltaHistory.Read(AuthoringTargetId()).State;
         await NotifyWorkspaceChangedAsync();
     }
 
@@ -736,6 +762,7 @@
         }
         catch (Exception exception)
         {
+            _replayingCanvasHistory = false;
             _error = exception.Message;
         }
     }
@@ -1261,26 +1288,55 @@
 
     private async Task MoveHistoryAsync(bool redo)
     {
-        if (InteractionLocked)
+        if (InteractionLocked || _authoringFrozen)
             return;
         if (!await FlushAsync())
             return;
+        AuthoringDeltaHistoryMove? move = null;
         try
         {
-            var result = redo
-                ? await DesignedPages.RedoAsync(ContentTarget, ProjectId, _composition!.Id)
-                : await DesignedPages.UndoAsync(ContentTarget, ProjectId, _composition!.Id);
-            _composition = result.Content;
-            _history = result.History;
-            _semanticBlocks = ManuscriptCodec.Deserialize(
-                _composition.SemanticManuscriptJson, _composition.Id, _composition.Revision).Content.ToList();
-            await LoadVariantAsync();
-            RestoreHistorySelection(result.SelectionJson);
+            move = redo ? DeltaHistory.Redo(AuthoringTargetId()) : DeltaHistory.Undo(AuthoringTargetId());
+            if (move is null || _scene is null)
+                return;
+            var operations = move.IsUndo ? move.Action.Inverse : move.Action.Forward;
+            _scene = CompositionCanvasDeltaAdapter.Apply(
+                _scene,
+                operations.Where(operation => operation.Kind.Contains("Canvas", StringComparison.OrdinalIgnoreCase)).ToList());
+            var semanticOperations = operations
+                .Where(operation => !operation.Kind.Contains("Canvas", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (semanticOperations.Count > 0)
+            {
+                var semantic = new ManuscriptDocument
+                {
+                    ManuscriptId = _composition!.Id,
+                    Revision = _composition.Revision,
+                    Content = _semanticBlocks,
+                };
+                _semanticBlocks = AuthoringBatchReducer.Apply(
+                    semantic,
+                    semanticOperations,
+                    allowCanonicalInverseOperations: true).Document.Content.ToList();
+            }
+            _objects = _scene.Objects.ToList();
+            _layers = _scene.Layers.ToList();
+            _styles = _scene.Styles.ToList();
+            _history = move.State;
+            _replayingCanvasHistory = true;
+            MarkDirty();
+            await SaveAsync();
+            _replayingCanvasHistory = false;
+            if (_dirty || _error is not null)
+                throw new InvalidOperationException(_error ?? "The canvas history move was not saved.");
+            DeltaHistory.ConfirmMove(move.ReservationId);
             _error = null;
             await NotifyWorkspaceChangedAsync();
         }
         catch (Exception exception)
         {
+            if (move is not null)
+                DeltaHistory.DiscardMove(move.ReservationId);
+            _replayingCanvasHistory = false;
             _error = exception.Message;
         }
     }
@@ -1291,6 +1347,7 @@
     {
         _dirty = true;
         _changeVersion++;
+        UpdateAuthoringWriterState();
         ScheduleAutosave();
     }
 
@@ -1325,55 +1382,57 @@
             var changeVersion = _changeVersion;
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
             var semanticBlocks = _semanticBlocks.ToList();
-            var saved = await DesignedPages.SaveWorkspaceAsync(
+            var journalToken = Guid.NewGuid().ToString("N");
+            if (!await PersistPendingAsync(journalToken, semanticBlocks, scene))
+                return;
+            var expectedContentRevision = _recoveredContentRevision ?? _composition!.Revision;
+            var expectedVariantRevision = _recoveredVariantRevision ?? _variant.Revision;
+            DesignedPageWorkspaceSaveResult saved;
+            using var historySuppression = _replayingCanvasHistory
+                ? AuthoringMutations.SuppressHistory()
+                : null;
+            saved = await DesignedPages.SaveWorkspaceAsync(
                 ContentTarget,
                 ProjectId,
                 _composition!.Id,
-                _composition.Revision,
+                expectedContentRevision,
                 semanticBlocks,
                 _variant.Id,
-                _variant.Revision,
+                expectedVariantRevision,
                 scene);
-            _composition = saved.Content;
-            _variant = saved.Variant;
-            _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
-            _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
+            _history = DeltaHistory.Read(AuthoringTargetId()).State;
             if (!saved.Applied)
             {
-                _semanticBlocks = ManuscriptCodec.Deserialize(
-                    _composition.SemanticManuscriptJson,
-                    _composition.Id,
-                    _composition.Revision).Content.ToList();
-                _scene = JsonSerializer.Deserialize<CompositionScene>(
-                    _variant.SceneJson,
-                    ManuscriptCodec.JsonOptions)
-                    ?? throw new InvalidDataException("The current composition scene is empty.");
-                _objects = _scene.Objects.ToList();
-                _layers = _scene.Layers.ToList();
-                _styles = _scene.Styles.ToList();
-                _dirty = false;
-                _error = null;
-                await NotifyWorkspaceChangedAsync();
+                // Keep the recorded base revisions. Retrying this recovered draft
+                // against a newly read revision would overwrite canonical work.
+                _error = "This page changed elsewhere. The local recovery draft is retained and must be reconciled before saving.";
+                _recoveryConflict = true;
+                UpdateAuthoringWriterState();
                 await InvokeAsync(StateHasChanged);
                 return;
             }
-            await AuthoringHistory.UpdateSelectionAsync(
-                new AuthoringHistoryTarget(
-                    ProjectId,
-                    AuthoringHistoryDocumentKind.DesignedPageContent,
-                    _composition.Id,
-                    ContentTarget.EditionId),
-                SerializeHistorySelection());
+            _composition = saved.Content;
+            _variant = saved.Variant;
+            _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
+            UpdateAuthoringWriterState();
             if (_changeVersion == changeVersion)
             {
                 _scene = scene;
                 _dirty = false;
+                if (!await RemovePendingAsync(journalToken))
+                    return;
+                _recoveredContentRevision = null;
+                _recoveredVariantRevision = null;
             }
+            UpdateAuthoringWriterState();
             _error = null;
             await NotifyWorkspaceChangedAsync();
             await InvokeAsync(StateHasChanged);
         }
-        catch (Exception exception) { _error = exception.Message; }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
         finally { _saveGate.Release(); }
     }
 
@@ -1387,9 +1446,15 @@
         var overrideView = await DesignedPages.EnsureReleaseOverrideAsync(ProjectId, PageId, editionId);
         _page = overrideView.Page;
         _composition = overrideView.Content;
+        if (_authoringWriterLease is not null)
+        {
+            await _authoringWriterLease.DisposeAsync();
+            _authoringWriterLease = null;
+        }
         _variant = await DesignedPages.GetOrCreateVariantAsync(ProjectId, _composition.Id, editionId);
         _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
-        _history = await DesignedPages.GetHistoryStateAsync(ProjectId, _composition.Id);
+        await OpenAuthoringWriterAsync();
+        _history = DeltaHistory.Read(AuthoringTargetId()).State;
     }
 
     public async Task<bool> FlushAsync()
@@ -1674,6 +1739,17 @@
             _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
             _dotNetReference = DotNetObjectReference.Create(this);
             await _workspaceModule.InvokeVoidAsync("observeTextOverflow", _stageElement, _dotNetReference);
+            try
+            {
+                _journalModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-authoring-journal.js");
+                await RecoverPendingAsync();
+            }
+            catch (Exception exception)
+            {
+                FailJournal(exception.Message);
+            }
+            _journalInitialized = true;
+            await OpenAuthoringWriterAsync();
         }
         if (_workspaceModule is not null && _focusTextId is Guid focusId)
         {
@@ -1812,9 +1888,18 @@
     {
         _autosaveCancellation?.Cancel();
         _autosaveCancellation?.Dispose();
+        var flushed = false;
+        try { flushed = await FlushAsync(); }
+        catch { }
+        if (_authoringWriterLease is not null && flushed)
+            await _authoringWriterLease.DisposeAsync();
+        else if (_authoringWriterLease is not null)
+            MarkAuthoringWriterUnreachable();
         if (_workspaceModule is null)
         {
             _dotNetReference?.Dispose();
+            if (_journalModule is not null)
+                await _journalModule.DisposeAsync();
             return;
         }
         try
@@ -1829,8 +1914,192 @@
         finally
         {
             _dotNetReference?.Dispose();
+            if (_journalModule is not null)
+                await _journalModule.DisposeAsync();
         }
     }
+
+    private string AuthoringTargetId() => ContentTarget.EditionId is { } editionId
+        ? $"release:{editionId:D}:designed-page-content:{_composition!.Id:D}"
+        : $"designed-page-content:{_composition!.Id:D}";
+
+    private async Task OpenAuthoringWriterAsync()
+    {
+        var targetId = AuthoringTargetId();
+        if (_authoringWriterLease is not null)
+            return;
+        if (!_journalInitialized)
+            return;
+        _authoringSessionId = _journalModule is null
+            ? Guid.NewGuid()
+            : await _journalModule.InvokeAsync<Guid>("sessionId", ProjectId.ToString("D"), targetId);
+        _authoringGeneration = (await AuthoringGenerations.ReadAsync(ProjectId, [targetId]))[targetId];
+        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+            new(ProjectId, targetId),
+            _authoringSessionId,
+            _authoringWriterId,
+            FreezeAndFlushAuthoringAsync,
+            async _ => await InvokeAsync(() =>
+            {
+                _authoringFrozen = false;
+                StateHasChanged();
+            })));
+        UpdateAuthoringWriterState();
+    }
+
+    private async Task<AuthoringWriterFlushResult> FreezeAndFlushAuthoringAsync(long capturedSequence, CancellationToken cancellationToken)
+    {
+        _authoringFrozen = true;
+        var saved = false;
+        await InvokeAsync(async () => saved = await FlushAsync());
+        return new(capturedSequence, !saved, IsRecoverable: saved || _journalRecoverable, IsReachable: true,
+            saved ? null : "AUTHORING_FLUSH_FAILED",
+            saved ? null : _error ?? "Designed Page changes could not be saved.");
+    }
+
+    private void UpdateAuthoringWriterState()
+    {
+        if (_authoringWriterLease is null || _composition is null)
+            return;
+        AuthoringFence.UpdateWriterState(new(
+            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _changeVersion, _changeVersion, _dirty ? 0 : _changeVersion,
+            _dirty, IsRecoverable: _journalRecoverable));
+    }
+
+    private void MarkAuthoringWriterUnreachable()
+    {
+        if (_authoringWriterLease is null || _composition is null)
+            return;
+        AuthoringFence.UpdateWriterState(new(
+            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _changeVersion, _changeVersion, 0,
+            IsDirty: true, IsRecoverable: false, IsReachable: false));
+    }
+
+    private async Task<bool> PersistPendingAsync(string token, IReadOnlyList<ManuscriptBlock> semanticBlocks, CompositionScene scene)
+    {
+        if (_journalModule is null || _composition is null || _variant is null)
+            return FailJournal("The local canvas recovery journal is unavailable.");
+        try
+        {
+            await _journalModule.InvokeVoidAsync("write", ProjectId.ToString("D"), AuthoringTargetId(), token,
+                new DesignedPagePending(_recoveredContentRevision ?? _composition.Revision,
+                    _recoveredVariantRevision ?? _variant.Revision, _variant.Id,
+                    ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = _composition.Id, Revision = _composition.Revision, Content = semanticBlocks.ToList() }),
+                    JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions)));
+            _journalToken = token;
+            _journalRecoverable = true;
+            UpdateAuthoringWriterState();
+            return true;
+        }
+        catch (Exception exception) { return FailJournal(exception.Message); }
+    }
+
+    private async Task<bool> RemovePendingAsync(string token)
+    {
+        try
+        {
+            // A later edit can supersede this record while an older dispatch is
+            // in flight. Only that later record is eligible for removal now.
+            if (_journalToken != token)
+                return true;
+            if (_journalModule is null || !await _journalModule.InvokeAsync<bool>("remove", ProjectId.ToString("D"), AuthoringTargetId(), token))
+                return FailJournal("The saved page edit could not be cleared from local recovery.");
+            if (_journalToken == token) _journalToken = null;
+            return true;
+        }
+        catch (Exception exception) { return FailJournal(exception.Message); }
+    }
+
+    private async Task ReloadCanonicalAsync()
+    {
+        if (_journalToken is not null && !await RemovePendingAsync(_journalToken))
+            return;
+        _dirty = false;
+        _recoveryConflict = false;
+        _recoveredContentRevision = null;
+        _recoveredVariantRevision = null;
+        _error = null;
+        _loadedRefreshSignal = -1;
+        await OnParametersSetAsync();
+    }
+
+    private async Task RecoverPendingAsync()
+    {
+        if (_journalModule is null || _composition is null || _variant is null) return;
+        try
+        {
+            var entry = await _journalModule.InvokeAsync<CanvasJournalEntry?>("read", ProjectId.ToString("D"), AuthoringTargetId());
+            var pending = entry?.Payload.Deserialize<DesignedPagePending>(ManuscriptCodec.JsonOptions);
+            if (pending is null) return;
+            if (pending.VariantId != _variant.Id)
+            {
+                var recoveredVariant = await DesignedPages.ReadVariantAsync(ProjectId, pending.VariantId);
+                if (recoveredVariant.ContentId != _composition.Id)
+                    throw new InvalidDataException("The local page recovery record targets a different composition.");
+                _variant = recoveredVariant;
+                // The recovery entry may select another saved layout of the
+                // same content. Hydrate all scene-backed editor collections
+                // before the equivalence shortcut below can return; otherwise
+                // the next edit would save the old variant's objects over it.
+                _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException("The current recovered Designed Page scene is empty.");
+                _objects = _scene.Objects.ToList();
+                _layers = _scene.Layers.ToList();
+                _styles = _scene.Styles.ToList();
+                _groupSelection.Clear();
+                _selectedId = _objects.FirstOrDefault()?.Id;
+            }
+            _journalToken = entry!.Token;
+            if (PendingMatchesCanonical(pending))
+            {
+                // The commit succeeded before a crash or disconnect prevented
+                // acknowledgement. Reconcile the durable canonical state rather
+                // than replaying this now-stale draft.
+                await RemovePendingAsync(entry.Token);
+                return;
+            }
+            _semanticBlocks = ManuscriptCodec.Deserialize(pending.SemanticJson, _composition.Id, _composition.Revision).Content.ToList();
+            var restoredScene = JsonSerializer.Deserialize<CompositionScene>(pending.SceneJson, ManuscriptCodec.JsonOptions)
+                ?? _scene
+                ?? throw new InvalidDataException("The journaled Designed Page scene is empty.");
+            _scene = restoredScene;
+            _objects = restoredScene.Objects.ToList(); _layers = restoredScene.Layers.ToList(); _styles = restoredScene.Styles.ToList();
+            _recoveredContentRevision = pending.ContentRevision;
+            _recoveredVariantRevision = pending.VariantRevision;
+            _journalRecoverable = true;
+            _dirty = true;
+            _changeVersion++;
+            ScheduleAutosave();
+        }
+        catch (Exception exception) { _ = FailJournal(exception.Message); }
+    }
+
+    private bool PendingMatchesCanonical(DesignedPagePending pending)
+    {
+        if (_composition is null || _variant is null)
+            return false;
+        var pendingDocument = ManuscriptCodec.Deserialize(pending.SemanticJson, _composition.Id, pending.ContentRevision);
+        var canonicalDocument = ManuscriptCodec.Deserialize(_composition.SemanticManuscriptJson, _composition.Id, _composition.Revision);
+        var pendingScene = JsonSerializer.Deserialize<CompositionScene>(pending.SceneJson, ManuscriptCodec.JsonOptions);
+        var canonicalScene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions);
+        return JsonSerializer.Serialize(pendingDocument with { Revision = canonicalDocument.Revision }, ManuscriptCodec.JsonOptions)
+                   == JsonSerializer.Serialize(canonicalDocument, ManuscriptCodec.JsonOptions)
+            && JsonSerializer.Serialize(pendingScene, ManuscriptCodec.JsonOptions)
+                   == JsonSerializer.Serialize(canonicalScene, ManuscriptCodec.JsonOptions);
+    }
+
+    private bool FailJournal(string message)
+    {
+        _journalRecoverable = false;
+        _error = $"Local recovery is unavailable: {message}";
+        UpdateAuthoringWriterState();
+        return false;
+    }
+
+    private sealed record DesignedPagePending(long ContentRevision, long VariantRevision, Guid VariantId, string SemanticJson, string SceneJson);
+    private sealed record CanvasJournalEntry(string Token, JsonElement Payload);
 
     private enum TransformMode { Move, Resize, Rotate, Crop }
     private enum ImagePickerMode { Add, Replace }

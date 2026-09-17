@@ -947,16 +947,13 @@ else
                                    InitialManuscriptJson="@ManuscriptCodec.Serialize(_editingSection.Manuscript)"
                                    IsReadOnly="_assistantRunning"
                                    AllowAnnotations="false"
-                                   SaveAsync="SavePublicationSectionDocumentAsync"
                                    ReadDocumentOverrideAsync="ReadPublicationSectionDocumentAsync"
-                                   ReadHistoryOverrideAsync="ReadPublicationSectionHistoryAsync"
-                                   HistoryDocumentKindOverride="AuthoringHistoryDocumentKind.PublicationSection"
-                                   UndoOverrideAsync="UndoPublicationSectionAsync"
-                                   RedoOverrideAsync="RedoPublicationSectionAsync"
+                                   AuthoringTargetIdOverride="@PublicationSectionAuthoringTargetId()"
                                    AllowDesignedPages="false"
                                    OpenProjectImagePicker="OpenPublicationSectionImageModal"
                                    OpenBookTextStyles="OpenBookTextStylesModal"
-                                   StyleCatalogChanged="HandleBookTextStylesChangedAsync" />
+                                   StyleCatalogChanged="HandleBookTextStylesChangedAsync"
+                                   AuthoringSaved="HandlePublicationSectionAuthoringSavedAsync" />
             }
         </div>
     </section>;
@@ -1262,71 +1259,27 @@ else
         return Task.FromResult(_editingSection.Manuscript);
     }
 
-    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SavePublicationSectionDocumentAsync(
-        Guid sectionId,
-        long expectedRevision,
-        string manuscriptJson)
+    private async Task HandlePublicationSectionAuthoringSavedAsync(AuthoringBatchResultV1 result)
     {
-        if (Project is null || _editingSection is null || _editingSection.Id != sectionId)
-            return new(false, expectedRevision);
+        if (_editingSection is null || !result.CanonicalVersions.Any(item => item.TargetId == PublicationSectionAuthoringTargetId()))
+            return;
         try
         {
-            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
-                sectionId, _sectionTitle, _sectionKind, _sectionAnchor, _sectionTargetKind, _sectionTargetId,
-                _sectionInclusion, _sectionStartSide, manuscriptJson, expectedRevision));
-            _editingSection = saved;
-            await RefreshPublicationSectionsAsync(updateEditing: false);
-            return new(true, saved.Revision);
-        }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
-        {
-            await RefreshPublicationSectionsAsync();
-            var current = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
-            return current is null
-                ? new(false, expectedRevision)
-                : new(
-                    true,
-                    current.Revision,
-                    Applied: false,
-                    CurrentManuscriptJson: ManuscriptCodec.Serialize(current.Manuscript));
+            await RefreshPublicationSectionsAsync(updateEditing: true);
         }
         catch (Exception exception)
         {
             _error = exception.Message;
-            return new(false, expectedRevision);
         }
     }
 
-    private Task<Lorekeeper.Authoring.AuthoringHistoryState> ReadPublicationSectionHistoryAsync() =>
-        _editingSection is null
-            ? Task.FromResult(new Lorekeeper.Authoring.AuthoringHistoryState(false, false, null, null))
-            : PublicationSections.GetHistoryStateAsync(CurrentPublicationSectionTarget(), _editingSection.Id);
-
-    private Task<ChapterBodyEditor.SemanticEditorHistoryResult> UndoPublicationSectionAsync() =>
-        MovePublicationSectionHistoryAsync(redo: false);
-
-    private Task<ChapterBodyEditor.SemanticEditorHistoryResult> RedoPublicationSectionAsync() =>
-        MovePublicationSectionHistoryAsync(redo: true);
-
-    private async Task<ChapterBodyEditor.SemanticEditorHistoryResult> MovePublicationSectionHistoryAsync(bool redo)
+    private string PublicationSectionAuthoringTargetId()
     {
-        if (_editingSection is null)
-            return new(false, null, 0, false, false, null, null, null, "No publication section is open.");
-        try
-        {
-            var result = redo
-                ? await PublicationSections.RedoAsync(CurrentPublicationSectionTarget(), _editingSection.Id)
-                : await PublicationSections.UndoAsync(CurrentPublicationSectionTarget(), _editingSection.Id);
-            _editingSection = result.Section;
-            await RefreshPublicationSectionsAsync(updateEditing: false);
-            return new(true, ManuscriptCodec.Serialize(result.Section.Manuscript), result.Section.Revision,
-                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
-                result.SelectionJson, null);
-        }
-        catch (Exception exception)
-        {
-            return new(false, null, 0, false, false, null, null, null, exception.Message);
-        }
+        var sectionId = _editingSection?.Id
+            ?? throw new InvalidOperationException("A publication section target requires an open section.");
+        return _selectedReleaseId is { } editionId
+            ? $"release:{editionId:D}:section:{sectionId:D}"
+            : $"publication-section:{sectionId:D}";
     }
 
     private async Task SavePublicationSectionMetadataAsync()

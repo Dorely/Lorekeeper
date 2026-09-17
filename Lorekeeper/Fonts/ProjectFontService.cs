@@ -10,7 +10,7 @@ namespace Lorekeeper.Fonts;
 public sealed class ProjectFontService(
     IAppDatabaseOperationFactory database,
     IWebHostEnvironment environment,
-    IAuthoringHistoryRuntime authoringHistory) : IProjectFontService
+    IAuthoringDeltaHistoryRuntime authoringHistory) : IProjectFontService
 {
     public async Task<IReadOnlyList<ProjectFontFamilyView>> ListAsync(
         Guid projectId,
@@ -140,8 +140,8 @@ public sealed class ProjectFontService(
                 $"{family.Name} is used by {usedBy.Count} book item(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
         }
 
-        var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
-            projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId, cancellationToken);
+        var dependentHistory = authoringHistory.FindDependentTargets(
+            projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId);
         if (dependentHistory.Count > 0 && !clearAffectedHistory)
             throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This font is retained by {dependentHistory.Count} current in-process Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
 
@@ -151,7 +151,7 @@ public sealed class ProjectFontService(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         if (dependentHistory.Count > 0)
-            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId, CancellationToken.None);
+            authoringHistory.ClearDependentTargets(projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId);
     }
 
     private static bool SceneUsesFont(string json, string key)

@@ -407,9 +407,9 @@ exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
-### Current M2 and accepted M3-M5 contract evidence
+### Current M2-M3 and accepted M4-M5 contract evidence
 
-M2 fixtures now have implementation evidence. Before the remaining implementations land, fixtures are normative input,
+M2 and M3 fixtures now have implementation evidence. Before the remaining implementations land, fixtures are normative input,
 not formatter- or exporter-generated snapshots. Focused deterministic regressions
 must cover Designed Page migration/placement/release isolation and occurrence
 mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,
@@ -423,7 +423,8 @@ Migration checks use copied representative databases and prove rollback without
 modifying developer data. Local scale tooling may measure source/archive memory
 and cancellation on the 50-source fixture, but does not establish native
 navigation evidence. These are accepted target requirements, not evidence that
-the M2-M5 implementations or platform integrations are complete.
+the M4-M5 implementations or platform integrations are complete. M3's native
+latency gate also remains unverified.
 
 ## Key files and file families
 

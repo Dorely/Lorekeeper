@@ -61,7 +61,7 @@ public sealed class EditionContentService(
     IProjectSearchIndex projectSearch,
     IVectorStore vectors,
     IManuscriptAnnotationService annotations,
-    IAuthoringHistoryRuntime? authoringHistory,
+    IAuthoringDeltaHistoryRuntime authoringHistory,
     IEditorContestMutationGuard contestGuard) : IEditionContentService
 {
     public async Task<IReadOnlyList<EditionContentReleaseView>> ListReleasesAsync(
@@ -114,7 +114,7 @@ public sealed class EditionContentService(
         if (!enabled && edition.ChapterOverrides.Count > 0 && !confirmDiscard)
             throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter. Confirmation is required.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var discardedHistoryTargets = new List<AuthoringHistoryTarget>();
+        var discardedHistoryTargets = new List<string>();
         if (!enabled)
         {
             var activeContest = await db.ContestBatches.AsNoTracking().AnyAsync(
@@ -140,11 +140,7 @@ public sealed class EditionContentService(
                 var sourceId = chapterOverride.Id.ToString("N");
                 await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
                 await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
-                discardedHistoryTargets.Add(new(
-                    projectId,
-                    AuthoringHistoryDocumentKind.EditionChapter,
-                    chapterOverride.ChapterId,
-                    editionId));
+                discardedHistoryTargets.Add($"release:{editionId:D}:chapter:{chapterOverride.ChapterId:D}");
             }
             var placementReferences = await db.DesignedPagePlacementReferences
                 .Where(item => item.ProjectId == projectId
@@ -163,9 +159,8 @@ public sealed class EditionContentService(
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        if (authoringHistory is not null)
-            foreach (var historyTarget in discardedHistoryTargets)
-                await authoringHistory.ClearAsync(historyTarget, CancellationToken.None);
+        foreach (var historyTarget in discardedHistoryTargets)
+            authoringHistory.Clear(historyTarget);
         return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, enabled ? edition.ChapterOverrides.Count : 0);
     }
 
@@ -222,10 +217,7 @@ public sealed class EditionContentService(
         var sourceId = chapterOverride.Id.ToString("N");
         await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
         await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
-        var discardedHistoryTargets = new List<AuthoringHistoryTarget>
-        {
-            new(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterId, editionId),
-        };
+        var discardedHistoryTargets = new[] { $"release:{editionId:D}:chapter:{chapterId:D}" };
         var placementReferences = await db.DesignedPagePlacementReferences
             .Where(item => item.ProjectId == projectId
                 && item.ContainerKind == DesignedPageContainerKind.Chapter
@@ -244,9 +236,8 @@ public sealed class EditionContentService(
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        if (authoringHistory is not null)
-            foreach (var historyTarget in discardedHistoryTargets)
-                await authoringHistory.ClearAsync(historyTarget, CancellationToken.None);
+        foreach (var historyTarget in discardedHistoryTargets)
+            authoringHistory.Clear(historyTarget);
     }
 
     public async Task<IReadOnlyList<EditionChapterDifference>> ReadDifferencesAsync(

@@ -21,7 +21,7 @@ using Microsoft.Extensions.AI;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorContestService(
-IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IEditorContestMutationContext contestMutationContext, IEditorContestRunRegistry contestRuns, IAuthoringHistoryRuntime authoringHistory, ILogger<EditorContestService> logger) : IEditorContestService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IEditorContestMutationContext contestMutationContext, IEditorContestRunRegistry contestRuns, IAuthoringMutationContextAccessor authoringMutationContext, IAuthoringGenerationService authoringGenerations, ILogger<EditorContestService> logger) : IEditorContestService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -608,22 +608,9 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             draft,
             cancellationToken: cancellationToken);
         var target = BatchTarget(batch);
-        var historyTarget = new AuthoringHistoryTarget(
-            batch.ProjectId,
-            target.IsCore ? AuthoringHistoryDocumentKind.CoreChapter : AuthoringHistoryDocumentKind.EditionChapter,
-            batch.ChapterId,
-            target.EditionId);
-        var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-            databaseOperation.Db,
-            original,
-            batch.ProjectId,
-            batch.ChapterId,
-            null,
-            target.EditionId,
-            cancellationToken);
-        var afterHistory = string.Empty;
         await using var transaction = await databaseOperation.Db.Database.BeginTransactionAsync(cancellationToken);
         using (contestMutationContext.BeginAuthorizedMutation(batch.ProjectId))
+        using (authoringMutationContext.SuppressHistory())
         {
             await manuscripts.ReplaceDocumentAsync(
                 target,
@@ -632,14 +619,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 draft,
                 cancellationToken);
 
-            afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-                databaseOperation.Db,
-                draft,
-                batch.ProjectId,
-                batch.ChapterId,
-                null,
-                target.EditionId,
-                cancellationToken);
         }
 
         var now = DateTime.UtcNow;
@@ -664,20 +643,12 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         await transaction.CommitAsync(cancellationToken);
         await transaction.DisposeAsync();
         await databaseOperation.DisposeAsync();
-        try
-        {
-            await authoringHistory.RecordManualActionAsync(
-                historyTarget,
-                beforeHistory,
-                afterHistory,
-                "Resolve Contest Review",
-                cancellationToken: CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(exception, "Contest {BatchId} resolved, but authoring history could not be updated.", batch.Id);
-        }
-
+        await authoringGenerations.InvalidateAsync(
+            projectId,
+            [target.EditionId is Guid editionId
+                ? $"release:{editionId:D}:chapter:{chapter.Id:D}"
+                : $"chapter:{chapter.Id:D}"],
+            CancellationToken.None);
         try
         {
             await manuscripts.RefreshDerivedStateAsync(target, chapter.Id, CancellationToken.None);

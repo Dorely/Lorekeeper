@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Chapters;
 using Lorekeeper.Manuscripts;
 
@@ -7,7 +8,8 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorManuscriptApplyService(
     IChapterService chapters,
     IManuscriptService manuscripts,
-    IManuscriptStyleService manuscriptStyles)
+    IManuscriptStyleService manuscriptStyles,
+    IAuthoringMutationFence authoringFence)
 {
     public async Task<string> ApplyAsync(
         EditorChatContext context,
@@ -15,14 +17,37 @@ public sealed class EditorManuscriptApplyService(
         long expectedRevision,
         ManuscriptOperationInput[] operations)
     {
-        var chapter = await chapters.GetAsync(chapterId, context.TurnCancellationToken);
+        try
+        {
+            return await authoringFence.ExecuteAsync(
+                new AuthoringFenceRequest(
+                    context.ProjectId,
+                    [TargetId(context.ContentTarget, chapterId)],
+                    "apply an assistant manuscript mutation"),
+                (_, token) => ApplyCoreAsync(context, chapterId, expectedRevision, operations, token),
+                context.TurnCancellationToken);
+        }
+        catch (AuthoringMutationFenceException exception)
+        {
+            return $"Error: {exception.Code}: {exception.Message}";
+        }
+    }
+
+    private async Task<string> ApplyCoreAsync(
+        EditorChatContext context,
+        Guid chapterId,
+        long expectedRevision,
+        ManuscriptOperationInput[] operations,
+        CancellationToken cancellationToken)
+    {
+        var chapter = await chapters.GetAsync(chapterId, cancellationToken);
         if (chapter is null || chapter.ProjectId != context.ProjectId)
             return $"Error: chapter {chapterId:N} was not found in this project.";
 
         var snapshot = await manuscripts.GetManuscriptAsync(
             context.ContentTarget,
             chapterId,
-            context.TurnCancellationToken);
+            cancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
 
@@ -55,20 +80,20 @@ public sealed class EditorManuscriptApplyService(
             var sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document));
             var styleCatalog = await manuscriptStyles.ListAsync(
                 context.ProjectId,
-                context.TurnCancellationToken);
+                cancellationToken);
             await manuscripts.ValidateDocumentReferencesAsync(
                 context.ContentTarget,
                 chapterId,
                 document,
                 styleCatalog,
-                context.TurnCancellationToken);
+                cancellationToken);
 
             var result = await manuscripts.ReplaceDocumentAsync(
                 context.ContentTarget,
                 chapterId,
                 expectedRevision,
                 document,
-                context.TurnCancellationToken);
+                cancellationToken);
             context.OnMutated();
             return JsonSerializer.Serialize(new
             {
@@ -185,4 +210,8 @@ public sealed class EditorManuscriptApplyService(
     private sealed record ManuscriptMutationDiagnostic(string Severity, string Code, string Message);
 
     private sealed record ManuscriptReadbackRange(Guid ChapterId, int StartBlock, int BlockCount);
+
+    private static string TargetId(EditorContentTarget target, Guid chapterId) => target.IsCore
+        ? $"chapter:{chapterId:D}"
+        : $"release:{target.EditionId!.Value:D}:chapter:{chapterId:D}";
 }

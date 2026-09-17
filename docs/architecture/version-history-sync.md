@@ -60,6 +60,15 @@ parent; the existing ancestor and content checks still reject reparse points
 in the application-owned staging tree. Repository and sync-staging containment
 checks remain unchanged.
 
+Before a checkpoint, live-status/review capture, restore, or synchronized
+checkout consumes canonical project state, it enters the shared authoring
+mutation fence. The fence freezes each registered project writer, flushes its
+captured local sequence, rejects unreachable, incomplete, or non-recoverable
+dirty state, then takes the project/database operation and revalidates target
+generations. Git capture and restore use the resulting canonical state only;
+writers resume after the consumer releases the fence. Network transport and
+projection repair do not retain an EF context across that client flush.
+
 ### Snapshot contract
 
 Schema v1 uses format ID `lorekeeper.version-history-snapshot`. Every checkpoint

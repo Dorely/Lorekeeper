@@ -240,7 +240,7 @@ else
                                        StyleCatalogChanged="OnEditorStyleCatalogChanged"
                                        AnnotationsChanged="OnEditorAnnotationsChangedAsync"
                                        AnnotationSelected="SelectAnnotationCardAsync"
-                                       SaveAsync="SaveDocumentAsync" />
+                                       AuthoringSaved="HandleAuthoringSavedAsync" />
                 }
 
                 @if (_mode == EditorMode.Read && _current is not null)
@@ -1920,104 +1920,53 @@ else
         }
     }
 
-    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SaveDocumentAsync(
-        Guid chapterId,
-        long expectedRevision,
-        string manuscriptJson)
+    private async Task HandleAuthoringSavedAsync(AuthoringBatchResultV1 result)
     {
-        await _saveGate.WaitAsync();
+        if (_current is null || !result.CanonicalVersions.Any(item => item.TargetId == AuthoringTargetIdForCurrentDocument()))
+            return;
+        _saveState = SaveState.Saving;
+        _saveError = null;
         try
         {
-            _saveState = SaveState.Saving;
-            _saveError = null;
-            await InvokeAsync(StateHasChanged);
-
-            var document = ManuscriptCodec.Deserialize(
-                manuscriptJson,
-                chapterId,
-                expectedRevision);
-            var result = await Manuscripts.ReplaceDocumentAsync(
-                _contentTarget,
-                chapterId,
-                expectedRevision,
-                document);
-            Chapter? updated = null;
-            try
+            var updated = await Chapters.ReloadFromStoreAsync(_current.Id);
+            if (updated is not null)
             {
-                updated = await Chapters.ReloadFromStoreAsync(chapterId);
-                if (updated is not null && _current is not null && _current.Id == chapterId)
+                _current = updated;
+                ReplaceCachedChapter(updated);
+                if (_contentTarget.EditionId is Guid editionId && Project is not null)
+                    _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, updated.Id);
+                _previewRefreshSignal++;
+                _annotationRefreshSignal++;
+                if (updated.VectorIndexState == VectorIndexState.Failed)
                 {
-                    _current = updated;
-                    ReplaceCachedChapter(updated);
-                    RecordEditorSave(result.Snapshot);
-                    UpdateChapterMetrics(result.Snapshot.PlainText);
-                    if (_contentTarget.EditionId is Guid statusEditionId && Project is not null)
-                        _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, chapterId);
-                    _previewRefreshSignal++;
-                    _annotationRefreshSignal++;
+                    _saveState = SaveState.IndexFailed;
+                    _saveError = updated.VectorIndexError;
+                }
+                else
+                {
+                    _saveState = SaveState.Saved;
+                    _lastSavedAt = DateTime.Now;
                 }
             }
-            catch (Exception exception)
-            {
-                _saveError =
-                    $"Revision {result.Snapshot.Revision} was saved, but the editor could not refresh: "
-                    + exception.Message;
-            }
-            if (updated?.VectorIndexState == VectorIndexState.Failed)
-            {
-                _saveState = SaveState.IndexFailed;
-                _saveError = updated.VectorIndexError;
-            }
-            else
-            {
-                _saveState = SaveState.Saved;
-            }
-            try
-            {
-                await RefreshContextSurfacesAsync();
-            }
-            catch (Exception exception)
-            {
-                _saveError ??=
-                    $"Revision {result.Snapshot.Revision} was saved, but context refresh failed: "
-                    + exception.Message;
-            }
-            _lastSavedAt = DateTime.Now;
-            if (result.ChangedBlockIds.Count > 0 && Project is { } project)
+            await RefreshContextSurfacesAsync();
+            if (Project is { } project)
                 HistoryEvents.PublishReviewStateChanged(project.Id);
-            return new ChapterBodyEditor.SemanticEditorSaveResult(true, result.Snapshot.Revision);
         }
-        catch (ManuscriptRevisionConflictException)
-        {
-            var current = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
-                ?? throw new InvalidOperationException(
-                    "The chapter was deleted while resolving an editing conflict.");
-            _current = await Chapters.ReloadFromStoreAsync(chapterId);
-            if (_current is not null)
-                ReplaceCachedChapter(_current);
-            RecordEditorSave(current);
-            UpdateChapterMetrics(current.PlainText);
-            _saveState = SaveState.Saved;
-            _saveError = null;
-            return new ChapterBodyEditor.SemanticEditorSaveResult(
-                true,
-                current.Revision,
-                Applied: false,
-                CurrentManuscriptJson: ManuscriptCodec.Serialize(current.Document));
-        }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             _saveState = SaveState.SaveFailed;
-            _saveError = ex.Message;
-            return new ChapterBodyEditor.SemanticEditorSaveResult(false, expectedRevision);
+            _saveError = exception.Message;
         }
         finally
         {
-            _saveGate.Release();
             try { await InvokeAsync(StateHasChanged); }
             catch (ObjectDisposedException) { }
         }
     }
+
+    private string AuthoringTargetIdForCurrentDocument() => _contentTarget.EditionId is { } editionId
+        ? $"release:{editionId:D}:chapter:{_current!.Id:D}"
+        : $"chapter:{_current!.Id:D}";
 
     private async Task<bool> FlushAsync()
     {

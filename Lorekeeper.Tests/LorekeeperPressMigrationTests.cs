@@ -195,16 +195,17 @@ public sealed class LorekeeperPressMigrationTests
                 editionId = edition.Id;
             }
 
-            var history = new AuthoringHistoryRuntime();
+            var deltaHistory = new AuthoringDeltaHistoryRuntime();
             var service = new DesignedPageService(
                 database,
                 null!,
                 null!,
                 new PublicationEffectiveConfigurationResolver(database),
-                history,
+                deltaHistory,
                 new AuthoringMutationContextAccessor(),
+                new AuthoringGenerationService(database, deltaHistory),
                 null!,
-                null!);
+                new TestContestMutationGuard(false));
             var created = await service.CreateAsync(projectId, EditorContentTarget.Core, "Map");
 
             string secondScene;
@@ -286,21 +287,26 @@ public sealed class LorekeeperPressMigrationTests
                 await db.SaveChangesAsync();
             }
 
-            var pageHistory = new AuthoringHistoryTarget(
-                projectId,
-                AuthoringHistoryDocumentKind.DesignedPageContent,
-                deletable.Content.Id);
-            var unrelatedHistory = new AuthoringHistoryTarget(
-                projectId,
-                AuthoringHistoryDocumentKind.DesignedPageContent,
-                Guid.NewGuid());
-            await history.RecordManualActionAsync(pageHistory, "{}", "{\"revision\":1}", "Edit Designed Page");
-            await history.RecordManualActionAsync(unrelatedHistory, "{}", "{\"revision\":1}", "Edit another page");
+            var pageHistory = $"designed-page-content:{deletable.Content.Id:D}";
+            var unrelatedHistory = $"designed-page-content:{Guid.NewGuid():D}";
+            foreach (var targetId in new[] { pageHistory, unrelatedHistory })
+            {
+                var stage = deltaHistory.Stage(
+                    projectId,
+                    [targetId],
+                    new Dictionary<string, long> { [targetId] = 0 },
+                    "Edit Designed Page",
+                    [new(0, "insertBlock", BlockId: Guid.NewGuid().ToString("N"), Index: 0)],
+                    [new(0, "deleteBlock", BlockId: Guid.NewGuid().ToString("N"))],
+                    null,
+                    null);
+                _ = deltaHistory.Confirm(stage.StageId);
+            }
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.DeleteAsync(projectId, deletable.Page.Id));
             await service.DeleteAsync(projectId, deletable.Page.Id, clearAffectedHistory: true);
-            Assert.False((await history.ReadStateAsync(pageHistory)).CanUndo);
-            Assert.True((await history.ReadStateAsync(unrelatedHistory)).CanUndo);
+            Assert.False(deltaHistory.Read(pageHistory).State.CanUndo);
+            Assert.True(deltaHistory.Read(unrelatedHistory).State.CanUndo);
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 Assert.False(await db.DesignedPages.AsNoTracking().AnyAsync(item => item.Id == deletable.Page.Id));
@@ -403,132 +409,6 @@ public sealed class LorekeeperPressMigrationTests
     }
 
     [Fact]
-    public async Task CompoundHistoryMovesEveryParticipantCursorTogether()
-    {
-        var runtime = new AuthoringHistoryRuntime();
-        var projectId = Guid.NewGuid();
-        var source = new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.CoreChapter, Guid.NewGuid());
-        var destination = new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.PublicationSection, Guid.NewGuid());
-        await runtime.RecordCompoundManualActionAsync(
-            [
-                new(source, "{\"source\":\"before\"}", "{\"source\":\"after\"}"),
-                new(destination, "{\"destination\":\"before\"}", "{\"destination\":\"after\"}"),
-            ],
-            "Move Designed Page placement");
-
-        IReadOnlyList<AuthoringHistorySnapshotRestore>? applied = null;
-        var result = await runtime.UndoCompoundAwareAsync(
-            source,
-            "{\"source\":\"after\"}",
-            (restores, _) =>
-            {
-                applied = restores;
-                return Task.CompletedTask;
-            });
-
-        Assert.Equal(2, applied!.Count);
-        Assert.Equal(2, result.AffectedTargets.Count);
-        Assert.True(result.State.CanRedo);
-        Assert.True((await runtime.ReadStateAsync(destination)).CanRedo);
-        Assert.False((await runtime.ReadStateAsync(destination)).CanUndo);
-    }
-
-    [Fact]
-    public async Task SectionOriginCompoundUndoHonorsContestGuardOnlyWhenAChapterParticipates()
-    {
-        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        try
-        {
-            var path = Path.Combine(directory, "compound-contest-guard.db");
-            var options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite($"Data Source={path}")
-                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
-                .Options;
-            var database = new AppDatabaseOperationFactory(
-                new TestDbContextFactory(options),
-                new AppDatabaseWriteCoordinator(),
-                new ProjectMutationCoordinator());
-            var guard = new TestContestMutationGuard(locked: true);
-            var restoreService = new AuthoringCompoundManuscriptRestoreService(
-                database,
-                new ManuscriptAnnotationService(database, guard),
-                guard);
-            Guid projectId;
-            Guid sectionId;
-            string sectionSnapshot;
-            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
-            {
-                await db.Database.MigrateAsync();
-                var project = new Project
-                {
-                    Name = "Compound Contest guard",
-                    Slug = $"compound-contest-{Guid.NewGuid():N}",
-                };
-                var section = new PublicationSection
-                {
-                    ProjectId = project.Id,
-                    Project = project,
-                    Title = "Section",
-                };
-                var document = ManuscriptCodec.CreateEmpty(section.Id);
-                section.ManuscriptJson = ManuscriptCodec.Serialize(document);
-                db.AddRange(project, section);
-                await db.SaveChangesAsync();
-                projectId = project.Id;
-                sectionId = section.Id;
-                sectionSnapshot = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-                    db, document, project.Id, null, section.Id, null, default);
-            }
-
-            var sectionTarget = new AuthoringHistoryTarget(
-                projectId,
-                AuthoringHistoryDocumentKind.PublicationSection,
-                sectionId);
-            await restoreService.ApplyAsync(
-                [new AuthoringHistorySnapshotRestore(sectionTarget, sectionSnapshot, sectionSnapshot)]);
-            Assert.Equal(0, guard.EnsureCallCount);
-
-            var chapterTarget = new AuthoringHistoryTarget(
-                projectId,
-                AuthoringHistoryDocumentKind.CoreChapter,
-                Guid.NewGuid());
-            var runtime = new AuthoringHistoryRuntime();
-            var before = AuthoringSnapshotCodec.Serialize(new AuthoringManuscriptSnapshot(
-                ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(sectionId))));
-            var afterDocument = ManuscriptOperations.Apply(
-                ManuscriptCodec.CreateEmpty(sectionId),
-                [new InsertManuscriptBlock(0, ManuscriptBlockType.Paragraph, "Changed", ManuscriptStyleRoles.Body)]).Document;
-            var after = AuthoringSnapshotCodec.Serialize(new AuthoringManuscriptSnapshot(
-                ManuscriptCodec.Serialize(afterDocument)));
-            await runtime.RecordCompoundManualActionAsync(
-                [
-                    new AuthoringHistorySnapshotTransition(chapterTarget, before, after),
-                    new AuthoringHistorySnapshotTransition(sectionTarget, before, after),
-                ],
-                "Move Designed Page placement");
-
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                runtime.UndoCompoundAwareAsync(
-                    sectionTarget,
-                    after,
-                    restoreService.ApplyAsync));
-            Assert.Equal("Contest Review is active.", error.Message);
-            Assert.Equal(1, guard.EnsureCallCount);
-            Assert.True((await runtime.ReadStateAsync(sectionTarget)).CanUndo);
-            Assert.False((await runtime.ReadStateAsync(sectionTarget)).CanRedo);
-            Assert.True((await runtime.ReadStateAsync(chapterTarget)).CanUndo);
-            Assert.False((await runtime.ReadStateAsync(chapterTarget)).CanRedo);
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
     public async Task CrossContainerPlacementMoveCommitsOneCompoundHistoryAction()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
@@ -544,7 +424,7 @@ public sealed class LorekeeperPressMigrationTests
                 new TestDbContextFactory(options),
                 new AppDatabaseWriteCoordinator(),
                 new ProjectMutationCoordinator());
-            var history = new AuthoringHistoryRuntime();
+            var history = new AuthoringDeltaHistoryRuntime();
             var manuscripts = new TestManuscriptService(database);
             Guid projectId;
             Guid chapterId;
@@ -586,8 +466,9 @@ public sealed class LorekeeperPressMigrationTests
                 new PublicationEffectiveConfigurationResolver(database),
                 history,
                 new AuthoringMutationContextAccessor(),
+                new AuthoringGenerationService(database, history),
                 null!,
-                null!);
+                new TestContestMutationGuard(false));
             var page = await service.CreateAsync(projectId, EditorContentTarget.Core, "Map");
             const string placementId = "move-me";
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
@@ -621,38 +502,27 @@ public sealed class LorekeeperPressMigrationTests
                 destinationIndex: 0,
                 expectedDestinationRevision: 0);
             Assert.Equal(2, moved.Containers.Count);
-            var sourceTarget = new AuthoringHistoryTarget(
-                projectId, AuthoringHistoryDocumentKind.CoreChapter, chapterId);
-            var destinationTarget = new AuthoringHistoryTarget(
-                projectId, AuthoringHistoryDocumentKind.PublicationSection, sectionId);
-            Assert.True((await history.ReadStateAsync(sourceTarget)).CanUndo);
-            Assert.True((await history.ReadStateAsync(destinationTarget)).CanUndo);
+            var sourceTarget = $"chapter:{chapterId:D}";
+            var destinationTarget = $"publication-section:{sectionId:D}";
+            Assert.True(history.Read(sourceTarget).State.CanUndo);
+            Assert.True(history.Read(destinationTarget).State.CanUndo);
 
-            string sourceAfter;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 var chapter = await db.Chapters.AsNoTracking().SingleAsync(item => item.Id == chapterId);
                 var document = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
-                sourceAfter = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-                    db, document, projectId, chapterId, null, null, default);
                 Assert.Empty(document.Content);
                 var section = await db.PublicationSections.AsNoTracking().SingleAsync(item => item.Id == sectionId);
                 Assert.Equal(placementId, Assert.Single(
                     ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision).Content).Id);
             }
 
-            IReadOnlyList<AuthoringHistorySnapshotRestore>? restores = null;
-            var undone = await history.UndoCompoundAwareAsync(
-                sourceTarget,
-                sourceAfter,
-                (items, _) =>
-                {
-                    restores = items;
-                    return Task.CompletedTask;
-                });
-            Assert.Equal(2, restores!.Count);
-            Assert.Equal(2, undone.AffectedTargets.Count);
-            Assert.True((await history.ReadStateAsync(destinationTarget)).CanRedo);
+            var undone = history.Undo(sourceTarget);
+            Assert.NotNull(undone);
+            Assert.Equal(2, undone.Action.TargetIds.Count);
+            Assert.Equal(2, undone.Action.Inverse.Count);
+            history.ConfirmMove(undone.ReservationId);
+            Assert.True(history.Read(destinationTarget).State.CanRedo);
         }
         finally
         {
@@ -1399,17 +1269,6 @@ public sealed class LorekeeperPressMigrationTests
                     reference => Assert.Equal(pictureSecondBlockId, reference.BlockId));
                 Assert.Equal(32, text.FontSizePoints);
                 Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
-                var history = new AuthoringHistoryRuntime();
-                var historyTarget = new AuthoringHistoryTarget(
-                    pictureProjectId,
-                    AuthoringHistoryDocumentKind.DesignedPageContent,
-                    content.Id);
-                var historyState = await history.RecordManualActionAsync(
-                    historyTarget,
-                    "{\"state\":\"before\"}",
-                    "{\"state\":\"after\"}",
-                    "Migration history usability check");
-                Assert.True(historyState.CanUndo);
                 var obsoleteHistoryTables = await db.Database.SqlQueryRaw<int>(
                     """
                     SELECT COUNT(*) AS Value

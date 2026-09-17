@@ -5,6 +5,7 @@ The checked-in browser bundle is built from the exact versions in
 
 - `prosemirror-commands` 1.7.1
 - `prosemirror-gapcursor` 1.4.1
+- `prosemirror-history` 1.5.0
 - `prosemirror-keymap` 1.2.3
 - `prosemirror-model` 1.25.11
 - `prosemirror-state` 1.4.4

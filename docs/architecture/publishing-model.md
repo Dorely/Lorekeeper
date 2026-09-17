@@ -138,6 +138,14 @@ silent but refresh artifact freshness. A stale assistant or UI operation must
 receive a compact conflict/recovery result rather than overwriting newer
 content.
 
+Publish workspace/document reads, exports, and preparation requests consume
+canonical authoring state through the shared project mutation fence. It freezes
+registered authoring writers, flushes their captured sequences, rejects an
+unreachable or non-recoverable dirty client, and revalidates generations while
+the project operation is held. Rendering and external work begin only after
+that bounded state capture and do not keep an EF context across the client wait
+or rendering lifecycle.
+
 Physical-release cover entry and artifact preparation are pagination boundaries.
 After flushing the current release, Publish automatically runs the compact Press
 interior layout needed to obtain the current page count and opens the cover only

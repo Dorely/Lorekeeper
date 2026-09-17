@@ -13,17 +13,24 @@
 @inject IPublicationSectionService PublicationSections
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
-@inject IAuthoringHistoryRuntime AuthoringHistory
+@inject IAuthoringDeltaHistoryRuntime DeltaHistory
+@inject IAuthoringMutationFence AuthoringFence
+@inject IAuthoringGenerationService AuthoringGenerations
+@inject IAuthoringMutationContextAccessor AuthoringMutations
 @inject IPrintArtifactProfileRegistry PrintArtifactProfiles
 @inject IJSRuntime JS
 @inject IPrintPreparationService Printing
 
-<div class="cover-composer @(InteractionLocked ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
+<div class="cover-composer @((InteractionLocked || _authoringFrozen) ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@(InteractionLocked || _authoringFrozen)" inert="@((InteractionLocked || _authoringFrozen) ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error))
     {
         <div class="cover-editor-alert" role="alert">
             <span>@PublicationDiagnosticText.SanitizeUserFacing(_error)</span>
+            @if (_recoveryConflict)
+            {
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ReloadCanonicalAsync">Discard local draft and reload</button>
+            }
             <button type="button" title="Dismiss this message" aria-label="Dismiss cover editor error" @onclick="DismissError">&#215;</button>
         </div>
     }
@@ -325,6 +332,12 @@
     private string RedoTitle => _history.RedoLabel is null ? "Nothing to redo" : $"Redo {_history.RedoLabel}";
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
+    private IAsyncDisposable? _authoringWriterLease;
+    private Guid _authoringSessionId;
+    private readonly Guid _authoringWriterId = Guid.NewGuid();
+    private long _authoringGeneration;
+    private bool _authoringFrozen;
+    private bool _replayingCanvasHistory;
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
@@ -335,6 +348,13 @@
     private Guid? _artworkPickerTargetId;
     private Guid? _fillRegionTargetId;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private DotNetObjectReference<CoverCompositionWorkspace>? _dotNetReference; private CoverTransformState? _transform; private long? _pendingTransformPointerId; private bool _pointerTrackingConnected;
+    private IJSObjectReference? _journalModule;
+    private bool _journalInitialized;
+    private bool _journalRecoverable = true;
+    private string? _journalToken;
+    private bool _recoveryConflict;
+    private long? _recoveredCoverRevision;
+    private long? _recoveredCoreBookRevision;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
     private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
@@ -401,9 +421,8 @@
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
             _spineDirection = _cover.SpineReadingDirection;
-            _history = CoreBook
-                ? await Books.GetCoverHistoryStateAsync(ProjectId)
-                : await Covers.GetHistoryStateAsync(ProjectId, EditionId);
+            await OpenAuthoringWriterAsync();
+            _history = DeltaHistory.Read(AuthoringTargetId()).State;
             _dirty = false;
             _error = null;
             _loadedProjectId = ProjectId;
@@ -506,6 +525,7 @@
     {
         _dirty = true;
         _changeVersion++;
+        UpdateAuthoringWriterState();
         if (scheduleAutosave)
             ScheduleAutosave();
     }
@@ -725,35 +745,37 @@
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); MarkDirty(); }
     private async Task MoveHistoryAsync(bool redo)
     {
-        if (InteractionLocked || !await FlushAsync())
+        if (InteractionLocked || _authoringFrozen || !await FlushAsync())
             return;
+        AuthoringDeltaHistoryMove? move = null;
         try
         {
-            var result = CoreBook
-                ? redo ? await Books.RedoCoverAsync(ProjectId) : await Books.UndoCoverAsync(ProjectId)
-                : redo ? await Covers.RedoAsync(ProjectId, EditionId) : await Covers.UndoAsync(ProjectId, EditionId);
-            _cover = result.Cover;
-            _history = result.History;
+            move = redo ? DeltaHistory.Redo(AuthoringTargetId()) : DeltaHistory.Undo(AuthoringTargetId());
+            if (move is null || _scene is null)
+                return;
             _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
-                JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException("The restored cover scene is empty."));
+                CompositionCanvasDeltaAdapter.Apply(_scene, move.IsUndo ? move.Action.Inverse : move.Action.Forward));
+            ApplyCoverProperties(CompositionCanvasDeltaAdapter.ApplyCoverProperties(
+                CoverProperties(_cover!), move.IsUndo ? move.Action.Inverse : move.Action.Forward));
             _objects = _scene.Objects.ToList();
             _layers = _scene.Layers.ToList();
             _styles = _scene.Styles.ToList();
-            RestoreHistorySelection(result.SelectionJson);
-            _title = _cover.Title;
-            _subtitle = _cover.Subtitle;
-            _author = _cover.Author;
-            _spineText = _cover.SpineText;
-            _description = _cover.Description;
-            _background = _cover.BackgroundColor;
-            _barcodeMode = _cover.BarcodeMode;
-            _dirty = false;
+            _history = move.State;
+            _replayingCanvasHistory = true;
+            MarkDirty();
+            await SaveAsync();
+            _replayingCanvasHistory = false;
+            if (_dirty || _error is not null)
+                throw new InvalidOperationException(_error ?? "The canvas history move was not saved.");
+            DeltaHistory.ConfirmMove(move.ReservationId);
             _error = null;
             await Saved.InvokeAsync();
         }
         catch (Exception exception)
         {
+            if (move is not null)
+                DeltaHistory.DiscardMove(move.ReservationId);
+            _replayingCanvasHistory = false;
             _error = exception.Message;
         }
     }
@@ -802,37 +824,42 @@
     private async Task SaveAsync()
     {
         await _saveGate.WaitAsync();
-        PublicationCoverDesignView? baselineCover = null;
-        CompositionScene? baselineScene = null;
+        AuthoringDeltaHistoryStage? historyStage = null;
         try
         {
             if (!_dirty || _cover is null || _scene is null)
                 return;
             _error = null;
-            baselineCover = _cover;
-            baselineScene = _scene;
             var changeVersion = _changeVersion;
             var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() });
-            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true, _spineDirection);
+            var journalToken = Guid.NewGuid().ToString("N");
+            if (!await PersistPendingAsync(journalToken, scene))
+                return;
+            var expectedCoverRevision = _recoveredCoverRevision ?? _cover.Revision;
+            var expectedCoreBookRevision = _recoveredCoreBookRevision ?? _cover.CoreBookRevision;
+            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, expectedCoverRevision, true, _spineDirection);
             var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
-            _cover = _loadedCoreBook
-                ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
-                : await Covers.SaveSurfaceWorkspaceAsync(saveProjectId, _cover.EditionId, _surfaceRole, update, scene);
-            _history = _loadedCoreBook
-                ? await Books.GetCoverHistoryStateAsync(saveProjectId)
-                : await Covers.GetHistoryStateAsync(saveProjectId, _cover.EditionId);
-            await AuthoringHistory.UpdateSelectionAsync(
-                _loadedCoreBook
-                    ? new AuthoringHistoryTarget(
-                        saveProjectId,
-                        AuthoringHistoryDocumentKind.CoreCover,
-                        saveProjectId)
-                    : new AuthoringHistoryTarget(
-                        saveProjectId,
-                        AuthoringHistoryDocumentKind.ReleaseCover,
-                        _cover.EditionId,
-                        _cover.EditionId),
-                SerializeHistorySelection());
+            var delta = CompositionCanvasDeltaAdapter.Create(_scene, scene);
+            var coverDelta = CompositionCanvasDeltaAdapter.CreateCoverProperties(
+                CoverProperties(_cover), CoverProperties(update));
+            var forward = delta.Forward.Concat(coverDelta.Forward).ToList();
+            var inverse = delta.Inverse.Concat(coverDelta.Inverse).ToList();
+            if (!_replayingCanvasHistory && forward.Count > 0)
+            {
+                historyStage = DeltaHistory.Stage(
+                    saveProjectId,
+                    [AuthoringTargetId()],
+                    new Dictionary<string, long> { [AuthoringTargetId()] = _authoringGeneration },
+                    "Edit cover layout", forward, inverse, null, null);
+            }
+            using (AuthoringMutations.SuppressHistory())
+            {
+                _cover = _loadedCoreBook
+                    ? await Books.SaveCoverAsync(saveProjectId, expectedCoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
+                    : await Covers.SaveSurfaceWorkspaceAsync(saveProjectId, _cover.EditionId, _surfaceRole, update, scene);
+            }
+            if (historyStage is not null)
+                _history = DeltaHistory.Confirm(historyStage.StageId).State;
             var savedScene = CoverCompositionFactory.KeepArtworkBehindCopy(
                 JsonSerializer.Deserialize<CompositionScene>(
                     _cover.CompositionSceneJson,
@@ -845,96 +872,32 @@
                 _layers = savedScene.Layers.ToList();
                 _styles = savedScene.Styles.ToList();
                 _dirty = false;
+                if (!await RemovePendingAsync(journalToken))
+                    return;
+                _recoveredCoverRevision = null;
+                _recoveredCoreBookRevision = null;
             }
+            UpdateAuthoringWriterState();
             await Saved.InvokeAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
-            when (baselineCover is not null && baselineScene is not null)
         {
-            await MergeConcurrentCoverAsync(baselineCover, baselineScene);
-            ScheduleAutosave();
+            if (historyStage is not null)
+                DeltaHistory.Discard(historyStage.StageId);
+            _error = "This cover changed elsewhere. The local draft is retained and must be explicitly reloaded or reconciled before saving.";
+            _recoveryConflict = true;
+            UpdateAuthoringWriterState();
+            await InvokeAsync(StateHasChanged);
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            if (historyStage is not null)
+                DeltaHistory.Discard(historyStage.StageId);
+            _error = ex.Message;
+        }
         finally { _saveGate.Release(); }
     }
-    private async Task MergeConcurrentCoverAsync(PublicationCoverDesignView baselineCover, CompositionScene baselineScene)
-    {
-        var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
-        var currentCover = _loadedCoreBook
-            ? await Books.GetCoverAsync(saveProjectId)
-            : await Covers.GetSurfaceAsync(saveProjectId, _loadedEditionId, _surfaceRole);
-        var currentScene = CoverCompositionFactory.KeepArtworkBehindCopy(
-            JsonSerializer.Deserialize<CompositionScene>(
-                currentCover.CompositionSceneJson,
-                ManuscriptCodec.JsonOptions)
-            ?? throw new InvalidDataException("The current cover scene is empty."));
-        var localScene = CoverCompositionFactory.KeepArtworkBehindCopy(
-            baselineScene with
-            {
-                Layers = _layers.ToList(),
-                Styles = _styles.ToList(),
-                Objects = _objects.ToList(),
-            });
-        _layers = MergeConcurrentItems(baselineScene.Layers, localScene.Layers, currentScene.Layers, item => item.Id);
-        _styles = MergeConcurrentItems(baselineScene.Styles, localScene.Styles, currentScene.Styles, item => item.Id);
-        _objects = MergeConcurrentItems(baselineScene.Objects, localScene.Objects, currentScene.Objects, item => item.Id);
-        _title = MergeConcurrentValue(baselineCover.Title, _title, currentCover.Title);
-        _subtitle = MergeConcurrentValue(baselineCover.Subtitle, _subtitle, currentCover.Subtitle);
-        _author = MergeConcurrentValue(baselineCover.Author, _author, currentCover.Author);
-        _spineText = MergeConcurrentValue(baselineCover.SpineText, _spineText, currentCover.SpineText);
-        _description = currentCover.Description;
-        _background = MergeConcurrentValue(baselineCover.BackgroundColor, _background, currentCover.BackgroundColor);
-        _barcodeMode = MergeConcurrentValue(baselineCover.BarcodeMode, _barcodeMode, currentCover.BarcodeMode);
-        _spineDirection = MergeConcurrentValue(baselineCover.SpineReadingDirection, _spineDirection, currentCover.SpineReadingDirection);
-        _cover = currentCover;
-        _scene = currentScene;
-        _dirty = true;
-        _changeVersion++;
-        _error = null;
-    }
-    private static List<T> MergeConcurrentItems<T>(
-        IReadOnlyList<T> baseline,
-        IReadOnlyList<T> local,
-        IReadOnlyList<T> current,
-        Func<T, Guid> id)
-    {
-        var baselineById = baseline.ToDictionary(id);
-        var localById = local.ToDictionary(id);
-        var result = current.ToList();
-        foreach (var baselineItem in baseline)
-        {
-            var itemId = id(baselineItem);
-            if (!localById.TryGetValue(itemId, out var localItem))
-            {
-                result.RemoveAll(candidate => id(candidate) == itemId);
-                continue;
-            }
-            if (SameSnapshot(baselineItem, localItem))
-                continue;
-            var currentIndex = result.FindIndex(candidate => id(candidate) == itemId);
-            if (currentIndex < 0)
-                result.Add(localItem);
-            else
-                result[currentIndex] = localItem;
-        }
-        foreach (var localItem in local.Where(item => !baselineById.ContainsKey(id(item))))
-        {
-            var itemId = id(localItem);
-            var currentIndex = result.FindIndex(candidate => id(candidate) == itemId);
-            if (currentIndex < 0)
-                result.Add(localItem);
-            else
-                result[currentIndex] = localItem;
-        }
-        return result;
-    }
-    private static bool SameSnapshot<T>(T left, T right) => string.Equals(
-        JsonSerializer.Serialize(left, ManuscriptCodec.JsonOptions),
-        JsonSerializer.Serialize(right, ManuscriptCodec.JsonOptions),
-        StringComparison.Ordinal);
-    private static T MergeConcurrentValue<T>(T baseline, T local, T current) =>
-        EqualityComparer<T>.Default.Equals(baseline, local) ? current : local;
     public async Task<bool> FlushAsync()
     {
         _autosaveCancellation?.Cancel();
@@ -1041,7 +1004,20 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
+        {
             _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
+            try
+            {
+                _journalModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-authoring-journal.js");
+                await RecoverPendingAsync();
+            }
+            catch (Exception exception)
+            {
+                FailJournal(exception.Message);
+            }
+            _journalInitialized = true;
+            await OpenAuthoringWriterAsync();
+        }
         if (_workspaceModule is not null && !_pointerTrackingConnected && _scene is not null)
         {
             _dotNetReference = DotNetObjectReference.Create(this);
@@ -1141,9 +1117,18 @@
     {
         _autosaveCancellation?.Cancel();
         _autosaveCancellation?.Dispose();
+        var flushed = false;
+        try { flushed = await FlushAsync(); }
+        catch { }
+        if (_authoringWriterLease is not null && flushed)
+            await _authoringWriterLease.DisposeAsync();
+        else if (_authoringWriterLease is not null)
+            MarkAuthoringWriterUnreachable();
         if (_workspaceModule is null)
         {
             _dotNetReference?.Dispose();
+            if (_journalModule is not null)
+                await _journalModule.DisposeAsync();
             return;
         }
         try
@@ -1153,8 +1138,213 @@
             await _workspaceModule.DisposeAsync();
         }
         catch (JSDisconnectedException) { }
-        finally { _dotNetReference?.Dispose(); }
+        finally
+        {
+            _dotNetReference?.Dispose();
+            if (_journalModule is not null)
+                await _journalModule.DisposeAsync();
+        }
     }
+
+    private string AuthoringTargetId() => CoreBook
+        ? $"core-cover:{ProjectId:D}"
+        : $"release:{EditionId:D}:cover:{_cover!.Id:D}";
+
+    private static CompositionCoverProperties CoverProperties(PublicationCoverDesignView cover) => new(
+        cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackgroundColor,
+        cover.BarcodeMode.ToString(), cover.SpineReadingDirection.ToString());
+
+    private static CompositionCoverProperties CoverProperties(PublicationCoverDesignUpdate update) => new(
+        update.Title, update.Subtitle, update.Author, update.SpineText, update.BackgroundColor,
+        update.BarcodeMode.ToString(), update.SpineReadingDirection?.ToString() ?? SpineReadingDirection.TopToBottom.ToString());
+
+    private void ApplyCoverProperties(CompositionCoverProperties properties)
+    {
+        _title = properties.Title;
+        _subtitle = properties.Subtitle;
+        _author = properties.Author;
+        _spineText = properties.SpineText;
+        _background = properties.BackgroundColor;
+        _barcodeMode = Enum.Parse<PublicationBarcodeMode>(properties.BarcodeMode);
+        _spineDirection = Enum.Parse<SpineReadingDirection>(properties.SpineReadingDirection);
+    }
+
+    private async Task OpenAuthoringWriterAsync()
+    {
+        if (_authoringWriterLease is not null)
+            return;
+        if (!_journalInitialized || _cover is null)
+            return;
+        var targetId = AuthoringTargetId();
+        _authoringSessionId = _journalModule is null
+            ? Guid.NewGuid()
+            : await _journalModule.InvokeAsync<Guid>("sessionId", ProjectId.ToString("D"), targetId);
+        _authoringGeneration = (await AuthoringGenerations.ReadAsync(ProjectId, [targetId]))[targetId];
+        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+            new(ProjectId, targetId), _authoringSessionId, _authoringWriterId,
+            FreezeAndFlushAuthoringAsync,
+            async _ => await InvokeAsync(() =>
+            {
+                _authoringFrozen = false;
+                StateHasChanged();
+            })));
+        UpdateAuthoringWriterState();
+    }
+
+    private async Task<AuthoringWriterFlushResult> FreezeAndFlushAuthoringAsync(long capturedSequence, CancellationToken cancellationToken)
+    {
+        _authoringFrozen = true;
+        var saved = false;
+        await InvokeAsync(async () => saved = await FlushAsync());
+        return new(capturedSequence, !saved, IsRecoverable: saved || _journalRecoverable, IsReachable: true,
+            saved ? null : "AUTHORING_FLUSH_FAILED",
+            saved ? null : _error ?? "Cover changes could not be saved.");
+    }
+
+    private void UpdateAuthoringWriterState()
+    {
+        if (_authoringWriterLease is null || _cover is null)
+            return;
+        AuthoringFence.UpdateWriterState(new(
+            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _changeVersion, _changeVersion, _dirty ? 0 : _changeVersion,
+            _dirty, IsRecoverable: _journalRecoverable));
+    }
+
+    private void MarkAuthoringWriterUnreachable()
+    {
+        if (_authoringWriterLease is null || _cover is null)
+            return;
+        AuthoringFence.UpdateWriterState(new(
+            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _changeVersion, _changeVersion, 0,
+            IsDirty: true, IsRecoverable: false, IsReachable: false));
+    }
+
+    private async Task<bool> PersistPendingAsync(string token, CompositionScene scene)
+    {
+        if (_journalModule is null || _cover is null)
+            return FailJournal("The local canvas recovery journal is unavailable.");
+        try
+        {
+            await _journalModule.InvokeVoidAsync("write", ProjectId.ToString("D"), AuthoringTargetId(), token,
+                new CoverPending(
+                    _recoveredCoverRevision ?? _cover.Revision,
+                    _recoveredCoreBookRevision ?? _cover.CoreBookRevision,
+                    _surfaceRole,
+                    CoverProperties(new PublicationCoverDesignUpdate(
+                        _title, _subtitle, _author, IsPrint ? _spineText : "", _background,
+                        IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50,
+                        _recoveredCoverRevision ?? _cover.Revision, true, _spineDirection)),
+                    JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions)));
+            _journalToken = token;
+            _journalRecoverable = true;
+            UpdateAuthoringWriterState();
+            return true;
+        }
+        catch (Exception exception) { return FailJournal(exception.Message); }
+    }
+
+    private async Task<bool> RemovePendingAsync(string token)
+    {
+        try
+        {
+            // Never remove an edit that arrived while a prior server dispatch was
+            // pending; the token makes this delete conditional on that dispatch.
+            if (_journalToken != token)
+                return true;
+            if (_journalModule is null || !await _journalModule.InvokeAsync<bool>("remove", ProjectId.ToString("D"), AuthoringTargetId(), token))
+                return FailJournal("The saved cover edit could not be cleared from local recovery.");
+            _journalToken = null;
+            return true;
+        }
+        catch (Exception exception) { return FailJournal(exception.Message); }
+    }
+
+    private async Task ReloadCanonicalAsync()
+    {
+        if (_journalToken is not null && !await RemovePendingAsync(_journalToken))
+            return;
+        _dirty = false;
+        _recoveryConflict = false;
+        _recoveredCoverRevision = null;
+        _recoveredCoreBookRevision = null;
+        _error = null;
+        _loadedRefreshSignal = -1;
+        await OnParametersSetAsync();
+    }
+
+    private async Task RecoverPendingAsync()
+    {
+        if (_journalModule is null || _cover is null || _scene is null)
+            return;
+        try
+        {
+            var entry = await _journalModule.InvokeAsync<CanvasJournalEntry?>("read", ProjectId.ToString("D"), AuthoringTargetId());
+            var pending = entry?.Payload.Deserialize<CoverPending>(ManuscriptCodec.JsonOptions);
+            if (pending is null)
+                return;
+            if (!CoreBook && !string.Equals(pending.SurfaceRole, _surfaceRole, StringComparison.Ordinal)
+                && _surfaceRoles.Contains(pending.SurfaceRole, StringComparer.Ordinal))
+            {
+                _surfaceRole = pending.SurfaceRole;
+                _cover = await Covers.GetSurfaceAsync(ProjectId, EditionId, _surfaceRole);
+                _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                    JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException("The current recovered cover scene is empty."));
+                // Target adoption must refresh every scene and cover-property
+                // backing field before a canonical-equivalence return. The
+                // editor otherwise still renders the prior surface's lists or
+                // title/background controls and could overwrite this surface.
+                _objects = _scene.Objects.ToList();
+                _layers = _scene.Layers.ToList();
+                _styles = _scene.Styles.ToList();
+                _selectedId = _objects.FirstOrDefault()?.Id;
+                ApplyCoverProperties(CoverProperties(_cover));
+            }
+            _journalToken = entry!.Token;
+            if (PendingMatchesCanonical(pending))
+            {
+                // The server save committed before this record could be
+                // acknowledged. Its canonical payload wins and clears the
+                // stale recovery record without replaying it.
+                await RemovePendingAsync(entry.Token);
+                return;
+            }
+            var restoredScene = JsonSerializer.Deserialize<CompositionScene>(pending.SceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The journaled cover scene is empty.");
+            _scene = CoverCompositionFactory.KeepArtworkBehindCopy(restoredScene);
+            _objects = _scene.Objects.ToList();
+            _layers = _scene.Layers.ToList();
+            _styles = _scene.Styles.ToList();
+            ApplyCoverProperties(pending.Properties);
+            _recoveredCoverRevision = pending.CoverRevision;
+            _recoveredCoreBookRevision = pending.CoreBookRevision;
+            _journalRecoverable = true;
+            _dirty = true;
+            _changeVersion++;
+            ScheduleAutosave();
+        }
+        catch (Exception exception) { _ = FailJournal(exception.Message); }
+    }
+
+    private bool PendingMatchesCanonical(CoverPending pending) => _cover is not null && _scene is not null
+        && CoverProperties(_cover) == pending.Properties
+        && JsonSerializer.Serialize(_scene, ManuscriptCodec.JsonOptions)
+            == JsonSerializer.Serialize(
+                JsonSerializer.Deserialize<CompositionScene>(pending.SceneJson, ManuscriptCodec.JsonOptions),
+                ManuscriptCodec.JsonOptions);
+
+    private bool FailJournal(string message)
+    {
+        _journalRecoverable = false;
+        _error = $"Local recovery is unavailable: {message}";
+        UpdateAuthoringWriterState();
+        return false;
+    }
+
+    private sealed record CoverPending(long CoverRevision, long? CoreBookRevision, string SurfaceRole, CompositionCoverProperties Properties, string SceneJson);
+    private sealed record CanvasJournalEntry(string Token, JsonElement Payload);
     private enum CoverTransformMode { Move, Resize, Rotate, Crop }
     private sealed record CoverTransformState(Guid ObjectId, CoverTransformMode Mode, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, long PointerId, CoverStageRect Stage);
     private sealed record CoverStageRect(double Left, double Top, double Width, double Height, double? ImageAspectRatio, bool Active);

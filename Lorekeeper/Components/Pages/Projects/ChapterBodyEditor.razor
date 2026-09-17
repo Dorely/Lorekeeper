@@ -17,7 +17,8 @@
 @inject IProjectPageSetupService PageSetups
 @inject ITypographyDefaultsService TypographyDefaults
 @inject IDesignedPageService DesignedPages
-@inject IAuthoringHistoryRuntime AuthoringHistory
+@inject IAuthoringBatchService AuthoringBatches
+@inject IAuthoringMutationFence AuthoringFence
 @inject IPerformanceTraceWriter PerformanceTrace
 @inject ILogger<ChapterBodyEditor> Logger
 
@@ -54,14 +55,10 @@
     [Parameter] public EventCallback StyleCatalogChanged { get; set; }
     [Parameter] public EventCallback AnnotationsChanged { get; set; }
     [Parameter] public EventCallback<Guid> AnnotationSelected { get; set; }
+    [Parameter] public EventCallback<AuthoringBatchResultV1> AuthoringSaved { get; set; }
     [Parameter] public Func<string, string, int, long, Task<object>>? CreateDesignedPageOverrideAsync { get; set; }
     [Parameter] public Func<long, Task<ManuscriptDocument>>? ReadDocumentOverrideAsync { get; set; }
-    [Parameter] public Func<Task<SemanticEditorHistoryResult>>? UndoOverrideAsync { get; set; }
-    [Parameter] public Func<Task<SemanticEditorHistoryResult>>? RedoOverrideAsync { get; set; }
-    [Parameter] public Func<Task<AuthoringHistoryState>>? ReadHistoryOverrideAsync { get; set; }
-    [Parameter] public AuthoringHistoryDocumentKind? HistoryDocumentKindOverride { get; set; }
-    [Parameter, EditorRequired]
-    public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
+    [Parameter] public string? AuthoringTargetIdOverride { get; set; }
 
     private ElementReference _root;
     private IJSObjectReference? _module;
@@ -76,6 +73,15 @@
     private string? _initializationError;
     private string? _pasteWarning;
     private ManuscriptViewLocation? _pendingLocation;
+    private IAsyncDisposable? _authoringWriterLease;
+    private Guid? _authoringSessionId;
+    private readonly Guid _authoringWriterId = Guid.NewGuid();
+    private long _authoringGeneration;
+    private long _highestAuthoringSequence;
+    private long _lastDispatchedAuthoringSequence;
+    private long _lastAcknowledgedAuthoringSequence;
+    private bool _authoringDirty;
+    private bool _authoringRecoverable = true;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -140,7 +146,12 @@
                     annotationsJson,
                     typographyJson,
                     AllowAnnotations,
-                    PerformanceTrace.IsEnabled);
+                    PerformanceTrace.IsEnabled,
+                    JsonSerializer.Serialize(new
+                    {
+                        projectId = ProjectId,
+                        targetId = AuthoringTargetId(),
+                    }, ManuscriptCodec.JsonOptions));
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -152,6 +163,11 @@
                 }
                 _handle = handle;
                 _appliedTypographyRevision = pageSetup.Revision;
+                if (_handle is not null)
+                {
+                    await RegisterAuthoringWriterAsync();
+                    await _handle.InvokeVoidAsync("reportWriterState");
+                }
                 await ApplyPendingLocationAsync();
             }
             catch (JSDisconnectedException) { }
@@ -437,79 +453,197 @@
     }
 
     [JSInvokable]
-    public async Task<SemanticEditorSaveResult> OnDocumentDebounced(
-        long expectedRevision,
-        string manuscriptJson,
-        string selectionJson)
+    public async Task<AuthoringSessionOpenResultV1> InitializeAuthoringSession(JsonElement request)
     {
-        if (_disposed || SaveAsync is null)
-            return new SemanticEditorSaveResult(false, expectedRevision);
+        var projectId = request.GetProperty("projectId").GetGuid();
+        var sessionId = request.GetProperty("sessionId").GetGuid();
+        var protocolId = request.GetProperty("protocolId").GetString();
+        var targets = request.GetProperty("targets");
+        if (projectId != ProjectId
+            || !string.Equals(protocolId, AuthoringProtocolV1.ProtocolId, StringComparison.Ordinal)
+            || targets.GetArrayLength() != 1
+            || !string.Equals(targets[0].GetProperty("targetId").GetString(), AuthoringTargetId(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The authoring session does not match this editor target.");
+        }
 
-        var result = await SaveAsync(ChapterId, expectedRevision, manuscriptJson);
-        if (result.Saved && result.Applied)
-            await AuthoringHistory.UpdateSelectionAsync(HistoryTarget(), selectionJson);
+        var opened = await AuthoringBatches.OpenSessionAsync(new(
+            ProjectId,
+            sessionId,
+            [new AuthoringSessionTargetV1(AuthoringTargetId())]));
+        _authoringSessionId = opened.SessionId;
+        _authoringGeneration = opened.Targets.Single().Generation;
+        return opened;
+    }
+
+    [JSInvokable]
+    public async Task<AuthoringBatchResultV1> DispatchAuthoringBatch(AuthoringBatchV1 batch)
+    {
+        ValidateAuthoringBatch(batch);
+        var result = await AuthoringBatches.ApplyBatchAsync(batch);
+        if (result.Status is AuthoringBatchStatusV1.Committed or AuthoringBatchStatusV1.Replayed)
+            await AuthoringSaved.InvokeAsync(result);
         return result;
+    }
+
+    [JSInvokable]
+    public Task AcknowledgeAuthoringReceipt(AuthoringReceiptAcknowledgementV1 acknowledgement)
+    {
+        if (acknowledgement.ProjectId != ProjectId)
+            throw new InvalidOperationException("The authoring receipt does not match this project.");
+        return AuthoringBatches.AcknowledgeReceiptAsync(acknowledgement);
+    }
+
+    [JSInvokable]
+    public Task<AuthoringHistoryResultV1> OnUndoAuthoringBatch(AuthoringHistoryRequestV1 request)
+    {
+        ValidateAuthoringHistoryRequest(request);
+        return AuthoringBatches.UndoAsync(request);
+    }
+
+    [JSInvokable]
+    public Task<AuthoringHistoryResultV1> OnRedoAuthoringBatch(AuthoringHistoryRequestV1 request)
+    {
+        ValidateAuthoringHistoryRequest(request);
+        return AuthoringBatches.RedoAsync(request);
+    }
+
+    [JSInvokable]
+    public Task OnAuthoringJournalState(bool recoverable, string? message)
+    {
+        if (!recoverable)
+        {
+            _authoringDirty = true;
+            _authoringRecoverable = false;
+            UpdateAuthoringWriterState(isReachable: true);
+            _initializationError = message ?? "Edits are visible but cannot be safely recovered locally. Saving is paused.";
+            return InvokeAsync(StateHasChanged);
+        }
+        return Task.CompletedTask;
+    }
+
+    private void ValidateAuthoringBatch(AuthoringBatchV1 batch)
+    {
+        if (batch.ProjectId != ProjectId
+            || !string.Equals(batch.ProtocolId, AuthoringProtocolV1.ProtocolId, StringComparison.Ordinal)
+            || batch.Targets.Count != 1
+            || !string.Equals(batch.Targets[0].TargetId, AuthoringTargetId(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The authoring batch does not match this editor target.");
+        }
+    }
+
+    private void ValidateAuthoringHistoryRequest(AuthoringHistoryRequestV1 request)
+    {
+        if (request.ProjectId != ProjectId
+            || !string.Equals(request.TargetId, AuthoringTargetId(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The authoring history request does not match this editor target.");
+        }
+    }
+
+    private async Task RegisterAuthoringWriterAsync()
+    {
+        if (_authoringWriterLease is not null || _authoringSessionId is not Guid sessionId)
+            return;
+
+        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+            new AuthoringTargetReferenceV1(ProjectId, AuthoringTargetId()),
+            sessionId,
+            _authoringWriterId,
+            FreezeAndFlushAuthoringAsync,
+            ResumeAuthoringAsync));
+        // A same-session remount atomically reattaches an unreachable writer.
+        // Do not overwrite its retained dirty state here: the JS handle reports
+        // its recovered journal/queue state immediately after registration.
+    }
+
+    private async Task<AuthoringWriterFlushResult> FreezeAndFlushAuthoringAsync(long sequence, CancellationToken cancellationToken)
+    {
+        if (_handle is null || _disposed || _disposing)
+            return new(_lastAcknowledgedAuthoringSequence, _authoringDirty, _authoringRecoverable, false,
+                "AUTHORING_CLIENT_UNREACHABLE", "The editor is no longer reachable.");
+        try
+        {
+            var result = await _handle.InvokeAsync<AuthoringWriterFlushResult>("freezeAndFlush", cancellationToken, sequence);
+            _lastAcknowledgedAuthoringSequence = Math.Max(_lastAcknowledgedAuthoringSequence, result.FlushedSequence);
+            _authoringDirty = result.IsDirty;
+            _authoringRecoverable = result.IsRecoverable;
+            UpdateAuthoringWriterState(isReachable: result.IsReachable);
+            return result;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            UpdateAuthoringWriterState(isReachable: false);
+            return new(_lastAcknowledgedAuthoringSequence, _authoringDirty, _authoringRecoverable, false,
+                "AUTHORING_CLIENT_UNREACHABLE", exception.Message);
+        }
+    }
+
+    private async Task ResumeAuthoringAsync(CancellationToken cancellationToken)
+    {
+        if (_handle is null)
+            return;
+        await _handle.InvokeVoidAsync("resumeAfterFence", cancellationToken);
+        UpdateAuthoringWriterState(isReachable: true);
+    }
+
+    [JSInvokable]
+    public Task OnAuthoringWriterState(
+        long generation,
+        long highestLocalSequence,
+        long lastDispatchedSequence,
+        long lastAcknowledgedSequence,
+        bool isDirty,
+        bool isRecoverable,
+        bool isReachable)
+    {
+        _authoringGeneration = generation;
+        _highestAuthoringSequence = highestLocalSequence;
+        _lastDispatchedAuthoringSequence = lastDispatchedSequence;
+        _lastAcknowledgedAuthoringSequence = lastAcknowledgedSequence;
+        _authoringDirty = isDirty;
+        _authoringRecoverable = isRecoverable;
+        UpdateAuthoringWriterState(isReachable);
+        return Task.CompletedTask;
+    }
+
+    private void UpdateAuthoringWriterState(bool isReachable)
+    {
+        if (_authoringWriterLease is null || _authoringSessionId is not Guid sessionId)
+            return;
+        try
+        {
+            AuthoringFence.UpdateWriterState(new(
+                new AuthoringTargetReferenceV1(ProjectId, AuthoringTargetId()),
+                sessionId,
+                _authoringWriterId,
+                _authoringGeneration,
+                _highestAuthoringSequence,
+                _lastDispatchedAuthoringSequence,
+                _lastAcknowledgedAuthoringSequence,
+                _authoringDirty,
+                _authoringRecoverable,
+                isReachable));
+        }
+        catch (AuthoringMutationFenceException exception)
+            when (string.Equals(exception.Code, "AUTHORING_WRITER_STALE", StringComparison.Ordinal))
+        {
+            // A same-session reattach replaced this component's callbacks.
+            // Its late dispose/interop notification must not affect the new
+            // writer or turn disposal into a circuit error.
+        }
     }
 
     [JSInvokable]
     public async Task<object> GetAuthoringHistoryState()
     {
-        var state = ReadHistoryOverrideAsync is null
-            ? await AuthoringHistory.ReadStateAsync(HistoryTarget())
-            : await ReadHistoryOverrideAsync();
-        return HistoryPayload(state);
-    }
-
-    [JSInvokable]
-    public async Task<SemanticEditorHistoryResult> OnUndoAuthoring()
-    {
-        if (UndoOverrideAsync is not null)
+        var history = await AuthoringBatches.ReadHistoryStateAsync(new(ProjectId, AuthoringTargetId()));
+        return new
         {
-            var overridden = await UndoOverrideAsync();
-            if (AllowAnnotations && overridden.Applied)
-                await AnnotationsChanged.InvokeAsync();
-            return overridden;
-        }
-        try
-        {
-            var result = await Manuscripts.UndoAsync(ContentTarget, ChapterId);
-            if (AllowAnnotations)
-                await AnnotationsChanged.InvokeAsync();
-            var applied = !string.IsNullOrEmpty(result.ActionLabel);
-            return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
-                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
-                result.SelectionJson, null);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or DbUpdateConcurrencyException)
-        {
-            return new(false, null, 0, false, false, null, null, null, exception.Message);
-        }
-    }
-
-    [JSInvokable]
-    public async Task<SemanticEditorHistoryResult> OnRedoAuthoring()
-    {
-        if (RedoOverrideAsync is not null)
-        {
-            var overridden = await RedoOverrideAsync();
-            if (AllowAnnotations && overridden.Applied)
-                await AnnotationsChanged.InvokeAsync();
-            return overridden;
-        }
-        try
-        {
-            var result = await Manuscripts.RedoAsync(ContentTarget, ChapterId);
-            if (AllowAnnotations)
-                await AnnotationsChanged.InvokeAsync();
-            var applied = !string.IsNullOrEmpty(result.ActionLabel);
-            return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
-                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
-                result.SelectionJson, null);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or DbUpdateConcurrencyException)
-        {
-            return new(false, null, 0, false, false, null, null, null, exception.Message);
-        }
+            state = HistoryPayload(history.State),
+            cursor = history.Cursor,
+        };
     }
 
     private static object HistoryPayload(AuthoringHistoryState state) => new
@@ -520,11 +654,13 @@
         state.RedoLabel,
     };
 
-    private AuthoringHistoryTarget HistoryTarget()
+    private string AuthoringTargetId()
     {
-        var kind = HistoryDocumentKindOverride
-            ?? (ContentTarget.IsCore ? AuthoringHistoryDocumentKind.CoreChapter : AuthoringHistoryDocumentKind.EditionChapter);
-        return new AuthoringHistoryTarget(ProjectId, kind, ChapterId, ContentTarget.EditionId);
+        if (!string.IsNullOrWhiteSpace(AuthoringTargetIdOverride))
+            return AuthoringTargetIdOverride;
+        return ContentTarget.IsCore
+            ? $"chapter:{ChapterId:D}"
+            : $"release:{ContentTarget.EditionId:D}:chapter:{ChapterId:D}";
     }
 
     [JSInvokable]
@@ -742,11 +878,21 @@
         _disposing = true;
         if (_handle is not null)
         {
-            try { await _handle.InvokeAsync<bool>("flush"); } catch { }
+            try { await FreezeAndFlushAuthoringAsync(_highestAuthoringSequence, CancellationToken.None); } catch { }
             try { await _handle.InvokeAsync<bool>("waitForSaves"); } catch { }
             try { await _handle.InvokeVoidAsync("dispose"); } catch { }
             try { await _handle.DisposeAsync(); } catch { }
             _handle = null;
+        }
+        if (_authoringWriterLease is not null)
+        {
+            if (_authoringDirty)
+                UpdateAuthoringWriterState(isReachable: false);
+            else
+            {
+                await _authoringWriterLease.DisposeAsync();
+                _authoringWriterLease = null;
+            }
         }
         _disposed = true;
 
@@ -758,23 +904,6 @@
         _selfRef?.Dispose();
         _disposing = false;
     }
-
-    public sealed record SemanticEditorSaveResult(
-        bool Saved,
-        long Revision,
-        bool Applied = true,
-        string? CurrentManuscriptJson = null);
-
-    public sealed record SemanticEditorHistoryResult(
-        bool Applied,
-        string? ManuscriptJson,
-        long Revision,
-        bool CanUndo,
-        bool CanRedo,
-        string? UndoLabel,
-        string? RedoLabel,
-        string? SelectionJson,
-        string? Error);
 
     private sealed record DesignedPageEditorSummary(
         Guid Id,

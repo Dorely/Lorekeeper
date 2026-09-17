@@ -72,7 +72,7 @@ public sealed class PublicationImagePreparationService(
     IPublishService publishing,
     IProjectImageService images,
     IManuscriptService manuscripts,
-    IAuthoringHistoryRuntime authoringHistory,
+    IAuthoringDeltaHistoryRuntime authoringHistory,
     ProjectVersionHistoryUiEvents historyEvents,
     IOptions<ProjectImageGenerationOptions> imageOptions) : IPublicationImagePreparationService
 {
@@ -133,7 +133,7 @@ public sealed class PublicationImagePreparationService(
 
         var created = 0;
         var reused = 0;
-        var historyTargets = new List<AuthoringHistoryTarget>();
+        var historyTargets = new List<string>();
         var changedChapters = new List<(EditorContentTarget Target, Guid ChapterId)>();
         var replacedReferences = 0;
         var replacementIds = new Dictionary<Guid, Guid>();
@@ -269,8 +269,8 @@ public sealed class PublicationImagePreparationService(
                 exception.Message));
         }
 
-        foreach (var target in historyTargets.Distinct())
-            await authoringHistory.ClearAsync(target, CancellationToken.None);
+        foreach (var target in historyTargets.Distinct(StringComparer.Ordinal))
+            authoringHistory.Clear(target);
         foreach (var (target, chapterId) in changedChapters.Distinct())
             await manuscripts.RefreshDerivedStateAsync(target, chapterId, CancellationToken.None);
         historyEvents.PublishReviewStateChanged(projectId);
@@ -759,7 +759,7 @@ public sealed class PublicationImagePreparationService(
         PublicationRenderScope renderScope,
         PublishDocument document,
         IReadOnlyDictionary<Guid, Guid> replacements,
-        ICollection<AuthoringHistoryTarget> historyTargets,
+        ICollection<string> historyTargets,
         ICollection<(EditorContentTarget Target, Guid ChapterId)> changedChapters,
         CancellationToken cancellationToken)
     {
@@ -806,7 +806,7 @@ public sealed class PublicationImagePreparationService(
                 chapter.ManuscriptRevision++;
                 chapter.UpdatedAt = now;
                 chapter.VectorIndexState = VectorIndexState.Stale;
-                historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id));
+                historyTargets.Add($"chapter:{chapter.Id:D}");
                 changedChapters.Add((EditorContentTarget.Core, chapter.Id));
                 coreChanged = true;
             }
@@ -815,7 +815,7 @@ public sealed class PublicationImagePreparationService(
                 chapterOverride!.ManuscriptJson = serialized;
                 chapterOverride.Revision++;
                 chapterOverride.UpdatedAt = now;
-                historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterOverride.ChapterId, editionId));
+                historyTargets.Add($"release:{editionId:D}:chapter:{chapterOverride.ChapterId:D}");
                 changedChapters.Add((EditorContentTarget.ForEdition(editionId!.Value), chapterOverride.ChapterId));
                 releaseChanged = true;
             }
@@ -835,7 +835,9 @@ public sealed class PublicationImagePreparationService(
             section.Revision++;
             section.ManuscriptJson = ManuscriptCodec.Serialize(updated with { ManuscriptId = section.Id, Revision = section.Revision });
             section.UpdatedAt = now;
-            historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.PublicationSection, section.Id, section.EditionId));
+            historyTargets.Add(section.EditionId is Guid sectionEditionId
+                ? $"release:{sectionEditionId:D}:section:{section.Id:D}"
+                : $"publication-section:{section.Id:D}");
             if (section.EditionId is null) coreChanged = true;
             else releaseChanged = true;
             changed += count;
@@ -864,7 +866,9 @@ public sealed class PublicationImagePreparationService(
             variant.Revision++;
             variant.SceneJson = JsonSerializer.Serialize(updated, JsonOptions);
             variant.UpdatedAt = now;
-            historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.DesignedPageContent, variant.ContentId));
+            historyTargets.Add(variant.Content.EditionId is Guid contentEditionId
+                ? $"release:{contentEditionId:D}:designed-page-content:{variant.ContentId:D}"
+                : $"designed-page-content:{variant.ContentId:D}");
             if (variant.Content.EditionId is Guid variantEditionId)
             {
                 releaseChanged = true;
@@ -908,7 +912,7 @@ public sealed class PublicationImagePreparationService(
                     book.CoverDesign.CompositionSceneJson = sceneJson;
                     book.CoverDesign.Revision++;
                     book.CoverDesign.UpdatedAt = now;
-                    historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.CoreCover, book.CoverDesign.Id));
+                    historyTargets.Add($"core-cover:{projectId:D}");
                     changed += count;
                     coreChanged = true;
                 }
@@ -926,7 +930,7 @@ public sealed class PublicationImagePreparationService(
                     if (surfacesJson is not null) cover.SurfaceScenesJson = surfacesJson;
                     cover.Revision++;
                     cover.UpdatedAt = now;
-                    historyTargets.Add(new(projectId, AuthoringHistoryDocumentKind.ReleaseCover, cover.Id, editionId));
+                    historyTargets.Add($"release:{editionId:D}:cover:{cover.Id:D}");
                     changed += count;
                     releaseChanged = true;
                 }

@@ -110,14 +110,17 @@ operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
 unrelated feature entities, project exports, assistant tool payloads, or logs.
 
-### Accepted M3-M4 persistence contract
+### Current M3 and accepted M4 persistence contract
 
-This accepted next-contract guidance governs implementation, not current schema
-claims. Authoring sessions and batch receipts are durable rows. One SQLite
+The authoring portion is current behavior; the M4 archive/import portion remains
+accepted next-contract guidance rather than a current schema claim. Authoring
+sessions and batch receipts are durable rows. One SQLite
 transaction validates a multi-target batch, applies all targets, advances its
 session sequence, and inserts the request-hash receipt; same identity returns
 the receipt only when the hash matches. Receipts remain until client
-reconciliation acknowledgment. Checkpoint, restore/sync, publishing, assistant,
+reconciliation acknowledgment. Undo/Redo uses its history-request ID as the
+durable batch ID, so response-loss retry resolves the committed receipt before
+reserving another cursor move. Checkpoint, restore/sync, publishing, assistant,
 and similar consumers invoke the authoring mutation fence rather than reading
 through a dirty registered client.
 
@@ -164,6 +167,10 @@ writes acquire the project mutation lease first. The required lock order is:
 3. SQLite transaction.
 
 Nested helpers borrow the active operation instead of opening another writer.
+Longer authoring-fence consumers hold only the project mutation lease and enter
+an explicit caller-side same-project sharing scope; they never retain a write
+operation or EF context across the consumer callback. A nested different-project
+lease request fails closed.
 Raw FTS5 and sqlite-vec mutations use the same write coordinator. No EF context
 remains alive across model streaming, provider/network calls, render waits,
 retry delays, or background polling. Repositories attach only intended root

@@ -1,4 +1,5 @@
 using Lorekeeper.ImportExport;
+using Lorekeeper.Authoring;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -25,7 +26,8 @@ public sealed class ProjectVersionHistoryService(
     ProjectVersionHistoryCache reviewCache,
     ProjectVersionHistoryUiEvents historyEvents,
     IProjectVersionAutoPushQueue autoPushQueue,
-    IManuscriptService manuscripts) : IProjectVersionHistoryService
+    IManuscriptService manuscripts,
+    IAuthoringMutationFence authoringFence) : IProjectVersionHistoryService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-";
 
@@ -51,7 +53,20 @@ public sealed class ProjectVersionHistoryService(
         return ToRepositoryView(repository, ProjectVersionRepositoryHealthFromCache(repository));
     }
 
-    public async Task<ProjectVersionCheckpointView> CreateCheckpointAsync(
+    public Task<ProjectVersionCheckpointView> CreateCheckpointAsync(
+        Guid projectId,
+        ProjectVersionCheckpointKind kind,
+        string semanticMessage,
+        string? requestKey = null,
+        DateTimeOffset? authoredAt = null,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "capture a version-history checkpoint",
+            token => CreateCheckpointCoreAsync(projectId, kind, semanticMessage, requestKey, authoredAt, token),
+            cancellationToken);
+
+    private async Task<ProjectVersionCheckpointView> CreateCheckpointCoreAsync(
         Guid projectId,
         ProjectVersionCheckpointKind kind,
         string semanticMessage,
@@ -263,7 +278,17 @@ public sealed class ProjectVersionHistoryService(
         return failedOperations.Count;
     }
 
-    public async Task<ProjectVersionStatusView?> GetStatusAsync(
+    public Task<ProjectVersionStatusView?> GetStatusAsync(
+        Guid projectId,
+        bool includeCurrentSnapshotHash = true,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "read version-history status",
+            token => GetStatusCoreAsync(projectId, includeCurrentSnapshotHash, token),
+            cancellationToken);
+
+    private async Task<ProjectVersionStatusView?> GetStatusCoreAsync(
         Guid projectId,
         bool includeCurrentSnapshotHash = true,
         CancellationToken cancellationToken = default)
@@ -274,6 +299,22 @@ public sealed class ProjectVersionHistoryService(
     }
 
     public async Task SetReviewEditsEnabledAsync(
+        Guid projectId,
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await ExecuteFenceAsync(
+            projectId,
+            "change the Review Edits saved-state policy",
+            async token =>
+            {
+                await SetReviewEditsEnabledCoreAsync(projectId, enabled, token);
+                return true;
+            },
+            cancellationToken);
+    }
+
+    private async Task SetReviewEditsEnabledCoreAsync(
         Guid projectId,
         bool enabled,
         CancellationToken cancellationToken = default)
@@ -346,7 +387,17 @@ public sealed class ProjectVersionHistoryService(
         await operation.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<ProjectVersionReviewView?> GetReviewAsync(
+    public Task<ProjectVersionReviewView?> GetReviewAsync(
+        Guid projectId,
+        IReadOnlyCollection<ProjectVersionReviewTarget>? targets = null,
+        CancellationToken cancellationToken = default) =>
+        ExecuteFenceAsync(
+            projectId,
+            "capture pending Review Edits state",
+            token => GetReviewCoreAsync(projectId, targets, token),
+            cancellationToken);
+
+    private async Task<ProjectVersionReviewView?> GetReviewCoreAsync(
         Guid projectId,
         IReadOnlyCollection<ProjectVersionReviewTarget>? targets = null,
         CancellationToken cancellationToken = default)
@@ -2746,5 +2797,18 @@ public sealed class ProjectVersionHistoryService(
     {
         if (projectId == Guid.Empty)
             throw new ArgumentException("A project ID is required.", nameof(projectId));
+    }
+
+    private Task<T> ExecuteFenceAsync<T>(
+        Guid projectId,
+        string purpose,
+        Func<CancellationToken, Task<T>> consume,
+        CancellationToken cancellationToken)
+    {
+        ValidateProjectId(projectId);
+        return authoringFence.ExecuteAsync(
+            new AuthoringFenceRequest(projectId, [], purpose),
+            (_, token) => consume(token),
+            cancellationToken);
     }
 }

@@ -32,6 +32,9 @@ public interface IDesignedPageService
     Task<DesignedPageVariant> PatchElementAsync(EditorContentTarget target, Guid projectId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch, CancellationToken cancellationToken = default);
     Task<CompositionImagePlacementResult> AddImageObjectAsync(EditorContentTarget target, Guid projectId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null, CancellationToken cancellationToken = default);
     Task<DesignedPageWorkspaceSaveResult> SaveWorkspaceAsync(EditorContentTarget target, Guid projectId, Guid contentId, long expectedContentRevision, IReadOnlyList<ManuscriptBlock> semanticBlocks, Guid variantId, long expectedVariantRevision, CompositionScene scene, CancellationToken cancellationToken = default);
+    Task<DesignedPageSemanticMutationResult> ApplyAuthoringOperationsAsync(EditorContentTarget target, Guid projectId, Guid contentId, long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default);
+    Task<DesignedPageSemanticMutationResult> ReplaceAuthoringDocumentAsync(EditorContentTarget target, Guid projectId, Guid contentId, long expectedRevision, ManuscriptDocument document, CancellationToken cancellationToken = default);
+    Task RefreshAuthoringDerivedStateAsync(EditorContentTarget target, Guid projectId, Guid contentId, CancellationToken cancellationToken = default);
     Task<CompositionMutationStage> StageVariantAsync(EditorContentTarget target, Guid projectId, Guid conversationId, Guid variantId, long expectedRevision, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<DesignedPageVariant> ApplyStageAsync(EditorContentTarget target, Guid projectId, Guid conversationId, Guid stageId, long expectedRevision, CancellationToken cancellationToken = default);
     Task<CompositionMutationStage> StageSemanticOperationsAsync(EditorContentTarget target, Guid projectId, Guid conversationId, Guid contentId, long expectedRevision, IReadOnlyList<ManuscriptOperationInput> operations, CancellationToken cancellationToken = default);
@@ -44,9 +47,6 @@ public interface IDesignedPageService
     Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
     Task<LayoutValidationView> ValidateAuthoringVariantAsync(Guid projectId, Guid variantId, CancellationToken cancellationToken = default);
     Task<LayoutValidationView> ValidateVariantAsync(Guid projectId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
-    Task<AuthoringHistoryState> GetHistoryStateAsync(Guid projectId, Guid contentId, CancellationToken cancellationToken = default);
-    Task<DesignedPageHistoryMutationResult> UndoAsync(EditorContentTarget target, Guid projectId, Guid contentId, CancellationToken cancellationToken = default);
-    Task<DesignedPageHistoryMutationResult> RedoAsync(EditorContentTarget target, Guid projectId, Guid contentId, CancellationToken cancellationToken = default);
     Task<DesignedPagePlacementMutationResult> PlaceAsync(EditorContentTarget target, Guid projectId, Guid pageId, DesignedPageContainer container, int blockIndex, long expectedRevision, string? placementId = null, CancellationToken cancellationToken = default);
     Task<DesignedPagePlacementMutationResult> RemovePlacementAsync(EditorContentTarget target, Guid projectId, string placementId, DesignedPageContainer container, long expectedRevision, CancellationToken cancellationToken = default);
     Task<DesignedPagePlacementMutationResult> MovePlacementAsync(EditorContentTarget target, Guid projectId, string placementId, DesignedPageContainer source, long expectedSourceRevision, DesignedPageContainer destination, int destinationIndex, long expectedDestinationRevision, CancellationToken cancellationToken = default);
@@ -67,8 +67,9 @@ public sealed class DesignedPageService(
     IManuscriptService manuscripts,
     IPublicationCoverService covers,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
-    IAuthoringHistoryRuntime authoringHistory,
+    IAuthoringDeltaHistoryRuntime deltaHistory,
     IAuthoringMutationContextAccessor authoringMutationContext,
+    IAuthoringGenerationService authoringGenerations,
     ICompositionCanvasPreviewService canvasPreviews,
     IEditorContestMutationGuard contestGuard) : IDesignedPageService
 {
@@ -97,115 +98,21 @@ public sealed class DesignedPageService(
         }
     }
 
-    public Task<AuthoringHistoryState> GetHistoryStateAsync(
-        Guid projectId,
-        Guid contentId,
-        CancellationToken cancellationToken = default) =>
-        authoringHistory.ReadStateAsync(DesignedPageHistoryTarget(projectId, contentId), cancellationToken);
-
-    public Task<DesignedPageHistoryMutationResult> UndoAsync(
-        EditorContentTarget target,
-        Guid projectId,
-        Guid contentId,
-        CancellationToken cancellationToken = default) =>
-        MoveHistoryAsync(target, projectId, contentId, redo: false, cancellationToken);
-
-    public Task<DesignedPageHistoryMutationResult> RedoAsync(
-        EditorContentTarget target,
-        Guid projectId,
-        Guid contentId,
-        CancellationToken cancellationToken = default) =>
-        MoveHistoryAsync(target, projectId, contentId, redo: true, cancellationToken);
-
-    private async Task<DesignedPageHistoryMutationResult> MoveHistoryAsync(
-        EditorContentTarget target,
-        Guid projectId,
-        Guid contentId,
-        bool redo,
-        CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
-        var db = databaseOperation.Db;
-        await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        var current = await AuthoringSnapshotCodec.CaptureDesignedPageAsync(db, projectId, contentId, "", cancellationToken);
-        var historyTarget = DesignedPageHistoryTarget(projectId, contentId);
-        async Task Apply(string payload, CancellationToken ct)
-        {
-            var saved = AuthoringSnapshotCodec.Deserialize<AuthoringDesignedPageContentSnapshot>(payload);
-            var composition = await db.DesignedPageContents.AsTracking()
-                .Include(item => item.Page).Include(item => item.Variants)
-                .SingleAsync(item => item.ProjectId == projectId && item.Id == contentId, ct);
-            EnsureTarget(target, composition);
-            composition.Page.Name = saved.Name;
-            composition.Revision = checked(composition.Revision + 1);
-            composition.UpdatedAt = DateTime.UtcNow;
-            var semantic = ManuscriptCodec.Deserialize(saved.SemanticManuscriptJson) with
-            {
-                ManuscriptId = composition.Id,
-                Revision = composition.Revision
-            };
-            ValidateSemanticFragment(semantic);
-            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic);
-            composition.ActiveVariantId = saved.ActiveVariantId;
-            var ids = saved.Variants.Select(item => item.Id).ToHashSet();
-            db.DesignedPageVariants.RemoveRange(composition.Variants.Where(item => !ids.Contains(item.Id)));
-            foreach (var item in saved.Variants)
-            {
-                var variant = composition.Variants.SingleOrDefault(value => value.Id == item.Id);
-                if (variant is null)
-                {
-                    variant = new DesignedPageVariant { Id = item.Id, ContentId = composition.Id, Content = composition };
-                    composition.Variants.Add(variant);
-                }
-                var scene = JsonSerializer.Deserialize<CompositionScene>(item.SceneJson, JsonOptions)
-                    ?? throw new InvalidDataException("A restored composition scene is empty.");
-                await ValidateSceneAssetsAsync(projectId, scene, ct);
-                variant.GeometryKey = item.GeometryKey;
-                variant.SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson);
-                variant.Revision = checked(variant.Revision + 1);
-                variant.UpdatedAt = DateTime.UtcNow;
-            }
-            await TouchProjectAsync(projectId, ct);
-            await db.SaveChangesAsync(ct);
-        }
-        var result = redo
-            ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
-            : await authoringHistory.UndoAsync(historyTarget, current, Apply, cancellationToken);
-        var restored = await db.DesignedPageContents.AsNoTracking()
-            .Include(item => item.Page)
-            .Include(item => item.Variants)
-            .SingleAsync(item => item.ProjectId == projectId && item.Id == contentId, cancellationToken);
-        var chapterIds = await db.DesignedPagePlacementReferences.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && item.DesignedPageId == restored.DesignedPageId
-                && item.ContainerKind == DesignedPageContainerKind.Chapter && item.EditionId == target.EditionId)
-            .Select(item => item.ContainerId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-        foreach (var chapterId in chapterIds)
-            await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
-        return new DesignedPageHistoryMutationResult(restored, result.State, result.ActionLabel, result.SelectionJson);
-    }
-
     private async Task RecordCompositionMutationAsync(
         Guid projectId,
         DesignedPageContent composition,
-        string beforeHistory,
         string label,
         CancellationToken cancellationToken)
     {
-        var afterHistory = AuthoringSnapshotCodec.CaptureDesignedPage(composition);
-        var target = DesignedPageHistoryTarget(projectId, composition.Id);
-        var context = authoringMutationContext.Current;
-        if (context?.IsAssistant == true)
-            await authoringHistory.ResetToCurrentAsync(target, afterHistory, cancellationToken);
-        else
-            await authoringHistory.RecordManualActionAsync(target, beforeHistory, afterHistory, label, cancellationToken: cancellationToken);
+        if (authoringMutationContext.IsHistorySuppressed)
+            return;
+        await authoringGenerations.InvalidateAsync(
+            projectId,
+            [composition.EditionId is Guid editionId
+                ? $"release:{editionId:D}:designed-page-content:{composition.Id:D}"
+                : $"designed-page-content:{composition.Id:D}"],
+            cancellationToken);
     }
-
-    private static AuthoringHistoryTarget DesignedPageHistoryTarget(Guid projectId, Guid contentId) =>
-        new(projectId, AuthoringHistoryDocumentKind.DesignedPageContent, contentId);
 
     public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
         EditorContentTarget target,
@@ -308,9 +215,20 @@ public sealed class DesignedPageService(
                 ManuscriptStyleRoles.DesignedPage, DesignedPageId: page.Id, BlockId: placementId)],
             cancellationToken,
             replaceContainerContent);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await RecordContainerHistoryAsync(revision, CancellationToken.None);
+        var historyStage = await StageContainerHistoryAsync(
+            db, projectId, revision, "Create and place Designed Page", cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (historyStage is not null)
+                deltaHistory.Discard(historyStage.StageId);
+            throw;
+        }
+        ConfirmContainerHistory(historyStage);
         if (container.Kind == DesignedPageContainerKind.Chapter)
             await manuscripts.RefreshDerivedStateAsync(target, container.Id, cancellationToken);
         return new DesignedPagePlacementMutationResult(new DesignedPageView(page, content, false), placementId, [revision]);
@@ -377,7 +295,7 @@ public sealed class DesignedPageService(
         composition.ActiveVariantId = activeVariantId;
         await db.SaveChangesAsync(cancellationToken);
         var container = new DesignedPageContainer(DesignedPageContainerKind.Chapter, chapterId);
-        var beforeHistory = await CaptureContainerHistoryAsync(db, target, projectId, container, cancellationToken);
+        var beforeDocument = effective.Document;
         ManuscriptMutationResult manuscript;
         using (authoringMutationContext.SuppressHistory())
         {
@@ -394,20 +312,29 @@ public sealed class DesignedPageService(
                     BlockId: identity?.PlacementId)],
                 cancellationToken);
         }
-        var afterHistory = await CaptureContainerHistoryAsync(db, target, projectId, container, cancellationToken);
-        var historyTransition = new AuthoringHistorySnapshotTransition(
-            ContainerHistoryTarget(projectId, target, container),
-            beforeHistory,
-            afterHistory);
         await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await RecordContainerHistoryAsync(
+        var historyStage = await StageContainerHistoryAsync(
+            db,
+            projectId,
             new DesignedPageContainerRevision(
                 container,
                 manuscript.Snapshot.Revision,
                 manuscript.Snapshot.Document,
-                historyTransition),
-            CancellationToken.None);
+                beforeDocument,
+                ContainerTargetId(target, container)),
+            "Create and place Designed Page",
+            cancellationToken);
+        try
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (historyStage is not null)
+                deltaHistory.Discard(historyStage.StageId);
+            throw;
+        }
+        ConfirmContainerHistory(historyStage);
         if (chapterId is Guid owningChapterId)
             await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return new DesignedPageCreationResult(page, composition, variant, manuscript.Snapshot, manuscript.ChangedBlockIds.Single());
@@ -1004,7 +931,7 @@ public sealed class DesignedPageService(
                 .SingleAsync(item => item.Id == variantId && item.Content.ProjectId == projectId, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Content, beforeHistory, "Edit page layout", CancellationToken.None);
+        await RecordCompositionMutationAsync(projectId, variant.Content, "Edit page layout", CancellationToken.None);
         return variant;
     }
 
@@ -1258,7 +1185,7 @@ public sealed class DesignedPageService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var beforeHistory = await AuthoringSnapshotCodec.CaptureDesignedPageAsync(db, projectId, contentId, "", cancellationToken);
+        AuthoringDeltaHistoryStage? historyStage = null;
         var variant = await db.DesignedPageVariants.AsTracking().Include(item => item.Content)
             .ThenInclude(item => item.Variants)
             .SingleOrDefaultAsync(item => item.Id == variantId
@@ -1272,6 +1199,12 @@ public sealed class DesignedPageService(
         if (composition.Revision != expectedContentRevision
             || variant.Revision != expectedVariantRevision)
             return new DesignedPageWorkspaceSaveResult(composition, variant, Applied: false);
+        var beforeSemantic = ManuscriptCodec.Deserialize(
+            composition.SemanticManuscriptJson,
+            composition.Id,
+            composition.Revision);
+        var beforeScene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
+            ?? throw new InvalidDataException("The Designed Page scene is empty.");
         var semantic = new ManuscriptDocument
         {
             ManuscriptId = composition.Id,
@@ -1307,8 +1240,11 @@ public sealed class DesignedPageService(
         }
         composition.ActiveVariantId = variant.Id;
         await TouchProjectAsync(projectId, cancellationToken);
-        var afterHistory = AuthoringSnapshotCodec.CaptureDesignedPage(composition);
-        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        var manuscriptDelta = AuthoringBatchReducer.CreateCanonicalDelta(beforeSemantic, semantic);
+        var canvasDelta = CompositionCanvasDeltaAdapter.Create(beforeScene, scene);
+        var forward = manuscriptDelta.Forward.Concat(canvasDelta.Forward).ToList();
+        var inverse = canvasDelta.Inverse.Concat(manuscriptDelta.Inverse).ToList();
+        if (forward.Count == 0)
         {
             db.ChangeTracker.Clear();
             var currentVariant = await db.DesignedPageVariants.AsNoTracking()
@@ -1317,11 +1253,153 @@ public sealed class DesignedPageService(
                 .SingleAsync(item => item.Id == variantId && item.ContentId == contentId, cancellationToken);
             return new DesignedPageWorkspaceSaveResult(currentVariant.Content, currentVariant);
         }
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page layout", CancellationToken.None);
+        var authoringTargetId = composition.EditionId is Guid editionId
+            ? $"release:{editionId:D}:designed-page-content:{composition.Id:D}"
+            : $"designed-page-content:{composition.Id:D}";
+        if (!authoringMutationContext.IsHistorySuppressed)
+        {
+            var generations = await AuthoringPersistence.ReadGenerationsAsync(
+                db,
+                projectId,
+                [authoringTargetId],
+                cancellationToken);
+            historyStage = deltaHistory.Stage(
+                projectId,
+                [authoringTargetId],
+                generations,
+                "Edit page",
+                forward,
+                inverse,
+                null,
+                null);
+        }
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (historyStage is not null)
+                deltaHistory.Discard(historyStage.StageId);
+            throw;
+        }
+        if (historyStage is not null)
+        {
+            try
+            {
+                _ = deltaHistory.Confirm(historyStage.StageId);
+            }
+            catch
+            {
+                deltaHistory.Clear(authoringTargetId);
+            }
+        }
         await RefreshPlacedChaptersAsync(target, projectId, composition.DesignedPageId, cancellationToken);
         return new DesignedPageWorkspaceSaveResult(composition, variant);
+    }
+
+    public async Task<DesignedPageSemanticMutationResult> ApplyAuthoringOperationsAsync(
+        EditorContentTarget target,
+        Guid projectId,
+        Guid contentId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperation> operations,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var content = await db.DesignedPageContents.AsTracking()
+            .Include(item => item.Variants)
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.Id == contentId, cancellationToken)
+            ?? throw new KeyNotFoundException("Designed Page content was not found.");
+        EnsureTarget(target, content);
+        await EnsureChapterMutationAllowedAsync(projectId, content, cancellationToken);
+        if (content.Revision != expectedRevision)
+            throw new DesignedPageRevisionConflictException(expectedRevision, content.Revision);
+        var current = ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision);
+        var applied = ManuscriptOperations.Apply(current, operations);
+        if (applied.ChangedBlockIds.Count == 0)
+            return new DesignedPageSemanticMutationResult(content, []);
+        var document = applied.Document with { Revision = checked(content.Revision + 1) };
+        var manuscriptJson = ManuscriptCodec.Serialize(document);
+        foreach (var variant in content.Variants)
+        {
+            var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
+                ?? throw new InvalidDataException("The Designed Page scene is empty.");
+            _ = SerializeAndValidate(scene, manuscriptJson);
+        }
+        content.SemanticManuscriptJson = manuscriptJson;
+        content.Revision = document.Revision;
+        content.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, content, "Edit page content", CancellationToken.None);
+        if (!authoringMutationContext.IsHistorySuppressed)
+            await RefreshPlacedChaptersAsync(target, projectId, content.DesignedPageId, cancellationToken);
+        return new DesignedPageSemanticMutationResult(content, applied.ChangedBlockIds);
+    }
+
+    public async Task<DesignedPageSemanticMutationResult> ReplaceAuthoringDocumentAsync(
+        EditorContentTarget target,
+        Guid projectId,
+        Guid contentId,
+        long expectedRevision,
+        ManuscriptDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var content = await db.DesignedPageContents.AsTracking()
+            .Include(item => item.Variants)
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.Id == contentId, cancellationToken)
+            ?? throw new KeyNotFoundException("Designed Page content was not found.");
+        EnsureTarget(target, content);
+        await EnsureChapterMutationAllowedAsync(projectId, content, cancellationToken);
+        if (content.Revision != expectedRevision)
+            throw new DesignedPageRevisionConflictException(expectedRevision, content.Revision);
+        var replacement = document with { ManuscriptId = content.Id, Revision = checked(content.Revision + 1) };
+        var manuscriptJson = ManuscriptCodec.Serialize(replacement);
+        foreach (var variant in content.Variants)
+        {
+            var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
+                ?? throw new InvalidDataException("The Designed Page scene is empty.");
+            _ = SerializeAndValidate(scene, manuscriptJson);
+        }
+        content.SemanticManuscriptJson = manuscriptJson;
+        content.Revision = replacement.Revision;
+        content.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        if (!authoringMutationContext.IsHistorySuppressed)
+        {
+            await authoringGenerations.InvalidateAsync(
+                projectId,
+                [$"designed-page-content:{content.Id:D}"],
+                cancellationToken);
+        }
+        if (!authoringMutationContext.IsHistorySuppressed)
+            await RefreshPlacedChaptersAsync(target, projectId, content.DesignedPageId, cancellationToken);
+        return new DesignedPageSemanticMutationResult(
+            content,
+            replacement.Content.Select(item => item.Id).ToList());
+    }
+
+    public async Task RefreshAuthoringDerivedStateAsync(
+        EditorContentTarget target,
+        Guid projectId,
+        Guid contentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var pageId = await operation.Db.DesignedPageContents.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.Id == contentId)
+            .Select(item => item.DesignedPageId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (pageId == Guid.Empty)
+            throw new KeyNotFoundException("Designed Page content was not found.");
+        await operation.DisposeAsync();
+        await RefreshPlacedChaptersAsync(target, projectId, pageId, cancellationToken);
     }
 
     public async Task<CompositionMutationStage> StageVariantAsync(
@@ -1446,7 +1524,7 @@ public sealed class DesignedPageService(
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Content, beforeHistory, "Edit page layout", CancellationToken.None);
+        await RecordCompositionMutationAsync(projectId, variant.Content, "Edit page layout", CancellationToken.None);
         await RefreshPlacedChaptersAsync(target, projectId, pageId, cancellationToken);
         return variant;
     }
@@ -1574,7 +1652,7 @@ public sealed class DesignedPageService(
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page text", CancellationToken.None);
+        await RecordCompositionMutationAsync(projectId, composition, "Edit page text", CancellationToken.None);
         await RefreshPlacedChaptersAsync(target, projectId, pageId, cancellationToken);
         return new DesignedPageSemanticMutationResult(composition, applied.ChangedBlockIds);
     }
@@ -1742,7 +1820,7 @@ public sealed class DesignedPageService(
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Content, beforeHistory, "Edit page layout", CancellationToken.None);
+        await RecordCompositionMutationAsync(projectId, variant.Content, "Edit page layout", CancellationToken.None);
         await RefreshPlacedChaptersAsync(target, projectId, variant.Content.DesignedPageId, cancellationToken);
         return new DesignedPageWorkspaceMutationResult(variant.Content, variant, applied.ChangedBlockIds);
     }
@@ -3017,7 +3095,7 @@ public sealed class DesignedPageService(
         page.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         if (release is not null)
-            await authoringHistory.ClearAsync(DesignedPageHistoryTarget(projectId, release.Id), CancellationToken.None);
+            deltaHistory.Clear($"release:{editionId:D}:designed-page-content:{release.Id:D}");
         await RefreshPlacedChaptersAsync(EditorContentTarget.ForEdition(editionId), projectId, pageId, cancellationToken);
         return new DesignedPageView(page, core, true);
     }
@@ -3085,20 +3163,22 @@ public sealed class DesignedPageService(
         if (page.PlacementReferences.Count != 0)
             throw new InvalidOperationException("Remove every live placement before deleting this Designed Page.");
         var contentTargets = page.Contents
-            .Select(content => DesignedPageHistoryTarget(projectId, content.Id))
+            .Select(content => content.EditionId is Guid editionId
+                ? $"release:{editionId:D}:designed-page-content:{content.Id:D}"
+                : $"designed-page-content:{content.Id:D}")
             .ToList();
-        var ownHistory = new List<AuthoringHistoryTarget>();
+        var ownHistory = new List<string>();
         foreach (var target in contentTargets)
         {
-            var state = await authoringHistory.ReadStateAsync(target, cancellationToken);
+            var state = deltaHistory.Read(target).State;
             if (state.CanUndo || state.CanRedo)
                 ownHistory.Add(target);
         }
-        var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
-            projectId, AuthoringHistoryDependencyKind.DesignedPage, pageId, cancellationToken);
+        var dependentHistory = deltaHistory.FindDependentTargets(
+            projectId, AuthoringHistoryDependencyKind.DesignedPage, pageId);
         var affectedHistoryCount = ownHistory
             .Concat(dependentHistory)
-            .DistinctBy(target => target.RegistryKey)
+            .Distinct(StringComparer.Ordinal)
             .Count();
         if (affectedHistoryCount > 0 && !clearAffectedHistory)
         {
@@ -3108,12 +3188,9 @@ public sealed class DesignedPageService(
         db.DesignedPages.Remove(page);
         await db.SaveChangesAsync(cancellationToken);
         foreach (var target in contentTargets)
-            await authoringHistory.ClearAsync(target, CancellationToken.None);
+            deltaHistory.Clear(target);
         if (dependentHistory.Count > 0)
-        {
-            await authoringHistory.ClearDependentStreamsAsync(
-                projectId, AuthoringHistoryDependencyKind.DesignedPage, pageId, CancellationToken.None);
-        }
+            deltaHistory.ClearDependentTargets(projectId, AuthoringHistoryDependencyKind.DesignedPage, pageId);
     }
 
     public async Task<DesignedPagePlacementMutationResult> PlaceAsync(
@@ -3153,9 +3230,20 @@ public sealed class DesignedPageService(
             [new InsertManuscriptBlock(blockIndex, ManuscriptBlockType.DesignedPage, string.Empty,
                 ManuscriptStyleRoles.DesignedPage, DesignedPageId: pageId, BlockId: actualPlacementId)],
             cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await RecordContainerHistoryAsync(revision, CancellationToken.None);
+        var historyStage = await StageContainerHistoryAsync(
+            db, projectId, revision, "Place Designed Page", cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (historyStage is not null)
+                deltaHistory.Discard(historyStage.StageId);
+            throw;
+        }
+        ConfirmContainerHistory(historyStage);
         if (container.Kind == DesignedPageContainerKind.Chapter)
             await manuscripts.RefreshDerivedStateAsync(target, container.Id, cancellationToken);
         return new DesignedPagePlacementMutationResult(view, actualPlacementId, [revision]);
@@ -3185,9 +3273,20 @@ public sealed class DesignedPageService(
         var revision = await ApplyContainerOperationsAsync(db, target, projectId, container, expectedRevision,
             [new DeleteManuscriptBlock(placementId)], cancellationToken);
         var view = await RequireEffectiveViewAsync(db, projectId, reference.DesignedPageId, target, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await RecordContainerHistoryAsync(revision, CancellationToken.None);
+        var historyStage = await StageContainerHistoryAsync(
+            db, projectId, revision, "Remove Designed Page placement", cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (historyStage is not null)
+                deltaHistory.Discard(historyStage.StageId);
+            throw;
+        }
+        ConfirmContainerHistory(historyStage);
         if (container.Kind == DesignedPageContainerKind.Chapter)
             await manuscripts.RefreshDerivedStateAsync(target, container.Id, cancellationToken);
         return new DesignedPagePlacementMutationResult(view, placementId, [revision]);
@@ -3219,18 +3318,27 @@ public sealed class DesignedPageService(
         EnsurePlacementContainer(reference, target, source);
         var movedPageId = reference.DesignedPageId;
         var revisions = new List<DesignedPageContainerRevision>();
-        IReadOnlyList<AuthoringHistorySnapshotTransition>? compoundHistory = null;
+        AuthoringDeltaHistoryStage? compoundHistory = null;
         if (source == destination)
         {
             revisions.Add(await ApplyContainerOperationsAsync(db, target, projectId, source, expectedSourceRevision,
                 [new MoveManuscriptBlock(placementId, destinationIndex)], cancellationToken));
+            compoundHistory = await StageContainerHistoryAsync(
+                db,
+                projectId,
+                revisions.Single(),
+                "Move Designed Page placement",
+                cancellationToken);
         }
         else
         {
-            var sourceHistoryTarget = ContainerHistoryTarget(projectId, target, source);
-            var destinationHistoryTarget = ContainerHistoryTarget(projectId, target, destination);
-            var beforeSource = await CaptureContainerHistoryAsync(db, target, projectId, source, cancellationToken);
-            var beforeDestination = await CaptureContainerHistoryAsync(db, target, projectId, destination, cancellationToken);
+            var sourceTargetId = ContainerTargetId(target, source);
+            var destinationTargetId = ContainerTargetId(target, destination);
+            var sourceDocument = await ReadContainerDocumentAsync(db, target, projectId, source, cancellationToken);
+            var movedBlockIndex = sourceDocument.Content.FindIndex(item => item.Id == placementId);
+            if (movedBlockIndex < 0)
+                throw new KeyNotFoundException("The Designed Page placement block was not found in its container.");
+            var movedBlock = sourceDocument.Content[movedBlockIndex];
             using (authoringMutationContext.SuppressHistory())
             {
                 revisions.Add(await ApplyContainerOperationsAsync(db, target, projectId, source, expectedSourceRevision,
@@ -3239,28 +3347,44 @@ public sealed class DesignedPageService(
                     [new InsertManuscriptBlock(destinationIndex, ManuscriptBlockType.DesignedPage, string.Empty,
                         ManuscriptStyleRoles.DesignedPage, DesignedPageId: movedPageId, BlockId: placementId)], cancellationToken));
             }
-            var afterSource = await CaptureContainerHistoryAsync(db, target, projectId, source, cancellationToken);
-            var afterDestination = await CaptureContainerHistoryAsync(db, target, projectId, destination, cancellationToken);
-            compoundHistory =
-            [
-                new AuthoringHistorySnapshotTransition(sourceHistoryTarget, beforeSource, afterSource),
-                new AuthoringHistorySnapshotTransition(destinationHistoryTarget, beforeDestination, afterDestination),
-            ];
+            var targetIds = new[] { sourceTargetId, destinationTargetId };
+            var generations = await AuthoringPersistence.ReadGenerationsAsync(
+                db,
+                projectId,
+                targetIds,
+                cancellationToken);
+            compoundHistory = deltaHistory.Stage(
+                projectId,
+                targetIds,
+                generations,
+                "Move Designed Page placement",
+                [
+                    new(0, "deleteBlock", BlockId: placementId,
+                        ExpectedElementFingerprint: AuthoringBatchReducer.Fingerprint(movedBlock)),
+                    new(1, "insertDesignedPagePlacement", PlacementBlockId: placementId, Index: destinationIndex,
+                        PageId: movedPageId),
+                ],
+                [
+                    new(0, "restoreBlock", BlockId: placementId, Index: movedBlockIndex,
+                        CanonicalBlock: movedBlock),
+                    new(1, "deleteBlock", BlockId: placementId),
+                ],
+                null,
+                null);
         }
         var view = await RequireEffectiveViewAsync(db, projectId, movedPageId, target, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        if (compoundHistory is null)
+        try
         {
-            await RecordContainerHistoryAsync(revisions.Single(), CancellationToken.None);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
-        else
+        catch
         {
-            await authoringHistory.RecordCompoundManualActionAsync(
-                compoundHistory,
-                "Move Designed Page placement",
-                CancellationToken.None);
+            if (compoundHistory is not null)
+                deltaHistory.Discard(compoundHistory.StageId);
+            throw;
         }
+        ConfirmContainerHistory(compoundHistory);
         if (source.Kind == DesignedPageContainerKind.Chapter)
             await manuscripts.RefreshDerivedStateAsync(target, source.Id, cancellationToken);
         if (destination.Kind == DesignedPageContainerKind.Chapter && destination != source)
@@ -3268,59 +3392,37 @@ public sealed class DesignedPageService(
         return new DesignedPagePlacementMutationResult(view, placementId, revisions);
     }
 
-    private static AuthoringHistoryTarget ContainerHistoryTarget(
-        Guid projectId,
+    private static string ContainerTargetId(
         EditorContentTarget target,
         DesignedPageContainer container) => container.Kind switch
         {
             DesignedPageContainerKind.Chapter when target.EditionId is Guid editionId =>
-                new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.EditionChapter, container.Id, editionId),
-            DesignedPageContainerKind.Chapter =>
-                new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.CoreChapter, container.Id),
-            DesignedPageContainerKind.PublicationSection =>
-                new AuthoringHistoryTarget(projectId, AuthoringHistoryDocumentKind.PublicationSection, container.Id, target.EditionId),
+                $"release:{editionId:D}:chapter:{container.Id:D}",
+            DesignedPageContainerKind.Chapter => $"chapter:{container.Id:D}",
+            DesignedPageContainerKind.PublicationSection when target.EditionId is Guid editionId =>
+                $"release:{editionId:D}:section:{container.Id:D}",
+            DesignedPageContainerKind.PublicationSection => $"publication-section:{container.Id:D}",
             _ => throw new ArgumentOutOfRangeException(nameof(container)),
         };
 
-    private async Task<string> CaptureContainerHistoryAsync(
+    private async Task<ManuscriptDocument> ReadContainerDocumentAsync(
         AppDbContext db,
         EditorContentTarget target,
         Guid projectId,
         DesignedPageContainer container,
         CancellationToken cancellationToken)
     {
-        ManuscriptDocument document;
-        var inherited = false;
         if (container.Kind == DesignedPageContainerKind.Chapter)
         {
-            var snapshot = await manuscripts.GetManuscriptAsync(target, container.Id, cancellationToken)
-                ?? throw new KeyNotFoundException("The Designed Page chapter container was not found.");
-            document = snapshot.Document;
-            if (target.EditionId is Guid editionId)
-            {
-                inherited = !await db.PublicationEditionChapterOverrides.AnyAsync(
-                    item => item.EditionId == editionId && item.ChapterId == container.Id,
-                    cancellationToken);
-            }
+            return (await manuscripts.GetManuscriptAsync(target, container.Id, cancellationToken)
+                ?? throw new KeyNotFoundException("The Designed Page chapter container was not found.")).Document;
         }
-        else
-        {
-            var section = await db.PublicationSections.SingleOrDefaultAsync(
-                item => item.ProjectId == projectId
-                    && item.Id == container.Id
-                    && item.EditionId == target.EditionId,
-                cancellationToken) ?? throw new KeyNotFoundException("The Designed Page publication-section container was not found.");
-            document = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
-        }
-        return await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-            db,
-            document,
-            projectId,
-            container.Kind == DesignedPageContainerKind.Chapter ? container.Id : null,
-            container.Kind == DesignedPageContainerKind.PublicationSection ? container.Id : null,
-            target.EditionId,
-            cancellationToken,
-            inherited);
+        var section = await db.PublicationSections.AsNoTracking().SingleOrDefaultAsync(
+            item => item.ProjectId == projectId
+                && item.Id == container.Id
+                && item.EditionId == target.EditionId,
+            cancellationToken) ?? throw new KeyNotFoundException("The Designed Page publication-section container was not found.");
+        return ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
     }
 
     private async Task<DesignedPageContainerRevision> ApplyContainerOperationsAsync(
@@ -3337,7 +3439,7 @@ public sealed class DesignedPageService(
             throw new ArgumentException("A Designed Page container ID is required.", nameof(container));
         if (container.Kind == DesignedPageContainerKind.Chapter)
         {
-            var chapterBeforeHistory = await CaptureContainerHistoryAsync(
+            var chapterBeforeDocument = await ReadContainerDocumentAsync(
                 db, target, projectId, container, cancellationToken);
             ManuscriptMutationResult mutation;
             using (authoringMutationContext.SuppressHistory())
@@ -3345,16 +3447,12 @@ public sealed class DesignedPageService(
                 mutation = await manuscripts.ApplyPersistedUnderProjectMutationLeaseAsync(
                     target, container.Id, expectedRevision, operations, cancellationToken);
             }
-            var chapterAfterHistory = await CaptureContainerHistoryAsync(
-                db, target, projectId, container, cancellationToken);
             return new DesignedPageContainerRevision(
                 container,
                 mutation.Snapshot.Revision,
                 mutation.Snapshot.Document,
-                new AuthoringHistorySnapshotTransition(
-                    ContainerHistoryTarget(projectId, target, container),
-                    chapterBeforeHistory,
-                    chapterAfterHistory));
+                chapterBeforeDocument,
+                ContainerTargetId(target, container));
         }
         var section = await db.PublicationSections.SingleOrDefaultAsync(
             item => item.ProjectId == projectId && item.Id == container.Id,
@@ -3364,8 +3462,7 @@ public sealed class DesignedPageService(
         if (section.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, section.Revision);
         var document = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
-        var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-            db, document, projectId, null, section.Id, target.EditionId, cancellationToken);
+        var beforeDocument = document;
         if (replaceContainerContent)
             document = document with { Content = [] };
         var applied = ManuscriptOperations.Apply(document, operations);
@@ -3373,39 +3470,43 @@ public sealed class DesignedPageService(
         section.Revision = applied.Document.Revision;
         section.UpdatedAt = DateTime.UtcNow;
         await SyncPublicationSectionPlacementsAsync(db, section, applied.Document, cancellationToken);
-        var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
-            db, applied.Document, projectId, null, section.Id, target.EditionId, cancellationToken);
         return new DesignedPageContainerRevision(
             container,
             section.Revision,
             applied.Document,
-            new AuthoringHistorySnapshotTransition(
-                ContainerHistoryTarget(projectId, target, container),
-                beforeHistory,
-                afterHistory));
+            beforeDocument,
+            ContainerTargetId(target, container));
     }
 
-    private async Task RecordContainerHistoryAsync(
+    private async Task<AuthoringDeltaHistoryStage?> StageContainerHistoryAsync(
+        AppDbContext db,
+        Guid projectId,
         DesignedPageContainerRevision revision,
+        string actionLabel,
         CancellationToken cancellationToken)
     {
-        if (revision.HistoryTransition is not { } transition || authoringMutationContext.IsHistorySuppressed)
-            return;
-        if (authoringMutationContext.Current?.IsAssistant == true)
-        {
-            await authoringHistory.ResetToCurrentAsync(
-                transition.Target,
-                transition.AfterSnapshot,
-                cancellationToken);
-            return;
-        }
-        await authoringHistory.RecordManualActionAsync(
-            transition.Target,
-            transition.BeforeSnapshot,
-            transition.AfterSnapshot,
-            "Edit Designed Page placement",
-            transition.SelectionJson,
-            cancellationToken);
+        if (authoringMutationContext.IsHistorySuppressed)
+            return null;
+        var delta = AuthoringBatchReducer.CreateCanonicalDelta(revision.BeforeDocument, revision.Document);
+        if (delta.Forward.Count == 0)
+            return null;
+        var generations = await AuthoringPersistence.ReadGenerationsAsync(
+            db, projectId, [revision.TargetId], cancellationToken);
+        return deltaHistory.Stage(
+            projectId,
+            [revision.TargetId],
+            generations,
+            actionLabel,
+            delta.Forward,
+            delta.Inverse,
+            null,
+            null);
+    }
+
+    private void ConfirmContainerHistory(AuthoringDeltaHistoryStage? stage)
+    {
+        if (stage is not null)
+            _ = deltaHistory.Confirm(stage.StageId);
     }
 
     private static async Task SyncPublicationSectionPlacementsAsync(
@@ -3672,7 +3773,8 @@ public sealed record DesignedPageContainerRevision(
     DesignedPageContainer Container,
     long Revision,
     ManuscriptDocument Document,
-    AuthoringHistorySnapshotTransition? HistoryTransition = null);
+    ManuscriptDocument BeforeDocument,
+    string TargetId);
 
 public sealed record DesignedPagePlacementMutationResult(
     DesignedPageView Page,

@@ -3,10 +3,15 @@ import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "pros
 import {Decoration, DecorationSet, EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
 import {GapCursor, gapCursor} from "prosemirror-gapcursor";
+import {closeHistory} from "prosemirror-history";
 import {keymap} from "prosemirror-keymap";
 
 const idsKey = new PluginKey("lorekeeper-block-ids");
 const annotationsKey = new PluginKey("lorekeeper-review-annotations");
+// This is deliberately not ProseMirror's history() plugin. The process-owned
+// AuthoringBatch cursor is the only Undo/Redo authority; this key merely makes
+// transaction boundaries visible to its adapter.
+const authoringHistoryAdapterKey = new PluginKey("lorekeeper-authoring-history-adapter");
 const blockTypeToNode = {
     paragraph: "paragraph",
     heading: "heading",
@@ -2205,12 +2210,411 @@ function hydrateDesignedPageSummaries(document, designedPageById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}", allowAnnotations = true, performanceTraceEnabled = false) {
+const authoringJournalDatabase = "LorekeeperAuthoringJournalV1";
+const authoringJournalStore = "batches";
+
+function authoringId() {
+    return crypto.randomUUID();
+}
+
+function canonicalJson(value) {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (!value || typeof value !== "object") return JSON.stringify(value);
+    return `{${Object.keys(value).filter(key => value[key] !== null && value[key] !== undefined)
+        .sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+}
+
+async function sha256(value) {
+    const bytes = new TextEncoder().encode(value);
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    return `sha256:${[...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// A rejected batch never advances the server session. Once its local journal
+// entry is explicitly discarded, all client watermarks must return to the
+// server's next value; otherwise the next local batch skips a sequence and the
+// fence can wait forever for a receipt that cannot exist.
+export function authoringSequenceWatermarks(nextSequence) {
+    if (!Number.isSafeInteger(nextSequence) || nextSequence <= 0)
+        throw new Error("The authoring session did not provide a valid next sequence.");
+    return {
+        nextSequence,
+        highestLocalSequence: nextSequence - 1,
+        lastDispatchedSequence: nextSequence - 1,
+        lastAcknowledgedSequence: nextSequence - 1
+    };
+}
+
+// The editor is made read-only while a persistent Undo/Redo move waits for
+// its receipt. Its already-authorized local inverse is the one exception: it
+// is dispatched synchronously under applyingHistory, whereas every external
+// document-changing transaction remains blocked.
+export function shouldApplyAuthoringTransaction(transaction, {readOnly, hasUnresolvedHistory, applyingHistory}) {
+    return !transaction.docChanged || applyingHistory || (!readOnly && !hasUnresolvedHistory);
+}
+
+class AuthoringJournalV1 {
+    constructor(projectId, targetId, sessionId, onFailure) {
+        this.projectId = projectId;
+        this.targetId = targetId;
+        this.sessionId = sessionId;
+        this.onFailure = onFailure;
+        this.recoverable = true;
+    }
+
+    async database() {
+        if (this.db) return this.db;
+        this.db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open(authoringJournalDatabase, 1);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                const store = db.createObjectStore(authoringJournalStore, {keyPath: "key"});
+                store.createIndex("byTarget", ["projectId", "targetId", "sequence"]);
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error("The local authoring journal could not open."));
+        });
+        return this.db;
+    }
+
+    async write(entry) {
+        try {
+            const db = await this.database();
+            await new Promise((resolve, reject) => {
+                const transaction = db.transaction(authoringJournalStore, "readwrite");
+                transaction.objectStore(authoringJournalStore).put(entry);
+                transaction.oncomplete = resolve;
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
+            return true;
+        } catch (error) {
+            this.recoverable = false;
+            this.onFailure(error);
+            return false;
+        }
+    }
+
+    async remove(key) {
+        try {
+            const db = await this.database();
+            await new Promise((resolve, reject) => {
+                const transaction = db.transaction(authoringJournalStore, "readwrite");
+                transaction.objectStore(authoringJournalStore).delete(key);
+                transaction.oncomplete = resolve;
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
+            return true;
+        } catch (error) {
+            this.recoverable = false;
+            this.onFailure(error);
+            return false;
+        }
+    }
+
+    async pending() {
+        try {
+            const db = await this.database();
+            return await new Promise((resolve, reject) => {
+                const request = db.transaction(authoringJournalStore, "readonly")
+                    .objectStore(authoringJournalStore)
+                    .index("byTarget")
+                    .getAll(IDBKeyRange.bound(
+                        [this.projectId, this.targetId, Number.MIN_SAFE_INTEGER],
+                        [this.projectId, this.targetId, Number.MAX_SAFE_INTEGER]));
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            });
+        } catch (error) {
+            this.recoverable = false;
+            this.onFailure(error);
+            return [];
+        }
+    }
+}
+
+function blockText(block) {
+    return (block.content || []).map(inline => inline.text || "").join("");
+}
+
+function sameJson(left, right) {
+    return canonicalJson(left ?? null) === canonicalJson(right ?? null);
+}
+
+function markOperations(block) {
+    const operations = [];
+    let offset = 0;
+    for (const inline of block.content || []) {
+        const endOffset = offset + (inline.text || "").length;
+        for (const mark of inline.marks || []) {
+            operations.push({
+                kind: "setInlineMark",
+                blockId: block.id,
+                startOffset: offset,
+                endOffset,
+                mark: mark.type,
+                enabled: true,
+                value: mark.value ?? null
+            });
+        }
+        offset = endOffset;
+    }
+    return operations;
+}
+
+function wireBlockProperties(block) {
+    return {
+        styleRole: block.styleRole,
+        imageId: block.imageId ?? null,
+        altText: block.altText ?? null,
+        headingLevel: block.headingLevel ?? null,
+        decorative: block.decorative === true,
+        language: block.language ?? null,
+        accessibilityRole: block.accessibilityRole ?? null,
+        figurePresentation: block.figurePresentation ?? null,
+        designedPageId: block.designedPageId ?? null
+    };
+}
+
+function sameInlineContent(left, right) {
+    return sameJson(left?.content || [], right?.content || []);
+}
+
+function sameFigureProperties(left, right) {
+    return left.imageId === right.imageId
+        && left.altText === right.altText
+        && left.decorative === right.decorative
+        && left.language === right.language
+        && left.accessibilityRole === right.accessibilityRole
+        && sameJson(left.figurePresentation, right.figurePresentation);
+}
+
+// Translate the ProseMirror semantic document, never its DOM or HTML. The
+// server validates these operations against its pre-state and derives inverses.
+export function authoringOperations(before, after) {
+    const operations = [];
+    const beforeById = new Map((before.content || []).map((block, index) => [block.id, {block, index}]));
+    const afterById = new Map((after.content || []).map((block, index) => [block.id, {block, index}]));
+
+    for (const block of before.content || []) {
+        if (!afterById.has(block.id)) operations.push({kind: "deleteBlock", blockId: block.id});
+    }
+    for (let index = 0; index < (after.content || []).length; index++) {
+        const afterBlock = after.content[index];
+        const existing = beforeById.get(afterBlock.id)?.block;
+        if (!existing) {
+            operations.push({
+                kind: "insertBlock",
+                blockId: afterBlock.id,
+                index,
+                blockType: afterBlock.type,
+                text: blockText(afterBlock),
+                ...wireBlockProperties(afterBlock)
+            });
+            if (afterBlock.paragraphPresentation)
+                operations.push({kind: "setParagraphPresentation", blockId: afterBlock.id, paragraphPresentation: afterBlock.paragraphPresentation});
+            operations.push(...markOperations(afterBlock));
+            continue;
+        }
+        if (existing.type !== afterBlock.type) operations.push({
+            kind: "setBlockType", blockId: afterBlock.id, blockType: afterBlock.type,
+            ...wireBlockProperties(afterBlock)
+        });
+        else if (existing.styleRole !== afterBlock.styleRole)
+            operations.push({kind: "setBlockStyle", blockId: afterBlock.id, styleRole: afterBlock.styleRole});
+        // Replace before reapplying every desired mark run. This deliberately
+        // handles mark-only edits and removed marks: AddMark-only deltas cannot
+        // express a deterministic removal when a valued mark changed.
+        if (!sameInlineContent(existing, afterBlock)) {
+            operations.push({kind: "replaceBlockText", blockId: afterBlock.id, text: blockText(afterBlock)});
+            operations.push(...markOperations(afterBlock));
+        }
+        if (afterBlock.type === "figure" && existing.type === "figure"
+            && !sameFigureProperties(existing, afterBlock))
+            operations.push({
+                kind: "setFigurePresentation",
+                blockId: afterBlock.id,
+                imageId: afterBlock.imageId ?? null,
+                altText: afterBlock.altText ?? null,
+                decorative: afterBlock.decorative === true,
+                language: afterBlock.language ?? null,
+                accessibilityRole: afterBlock.accessibilityRole ?? "figure",
+                figurePresentation: afterBlock.figurePresentation ?? {...defaultFigurePresentation}
+            });
+        if (!sameJson(existing.paragraphPresentation, afterBlock.paragraphPresentation))
+            operations.push({kind: "setParagraphPresentation", blockId: afterBlock.id, paragraphPresentation: afterBlock.paragraphPresentation ?? null});
+        if (beforeById.get(afterBlock.id).index !== index)
+            operations.push({kind: "moveBlock", blockId: afterBlock.id, index});
+    }
+    return operations;
+}
+
+function baseOrderPrecondition(beforeById, afterBlocks, blockId) {
+    const index = afterBlocks.findIndex(block => block.id === blockId);
+    if (index < 0) return null;
+    let previous = null;
+    for (let cursor = index - 1; cursor >= 0; cursor--) {
+        const candidate = afterBlocks[cursor];
+        if (candidate.id !== blockId && beforeById.has(candidate.id)) {
+            previous = candidate;
+            break;
+        }
+    }
+    let next = null;
+    for (let cursor = index + 1; cursor < afterBlocks.length; cursor++) {
+        const candidate = afterBlocks[cursor];
+        if (candidate.id !== blockId && beforeById.has(candidate.id)) {
+            next = candidate;
+            break;
+        }
+    }
+    return {
+        previousBlockId: previous?.id ?? null,
+        previousBlockFingerprint: previous ? beforeById.get(previous.id).fingerprint : null,
+        nextBlockId: next?.id ?? null,
+        nextBlockFingerprint: next ? beforeById.get(next.id).fingerprint : null
+    };
+}
+
+export function addAuthoringPreconditions(operations, before, after, fingerprints) {
+    const beforeBlocks = before.content || [];
+    const afterBlocks = after.content || [];
+    const beforeById = new Map(beforeBlocks.map(block => [block.id, {
+        block,
+        fingerprint: fingerprints.get(block.id) || null
+    }]));
+    for (const operation of operations) {
+        const kind = String(operation.kind || "").toLowerCase();
+        const blockId = operation.blockId || operation.placementBlockId;
+        if (blockId && beforeById.has(blockId))
+            operation.expectedElementFingerprint = beforeById.get(blockId).fingerprint;
+        if (kind === "mergeblocks" && operation.secondBlockId && beforeById.has(operation.secondBlockId))
+            operation.expectedSecondElementFingerprint = beforeById.get(operation.secondBlockId).fingerprint;
+        if (kind !== "insertblock" && kind !== "insertdesignedpageplacement" && kind !== "moveblock")
+            continue;
+        const targetId = kind === "insertdesignedpageplacement" ? operation.placementBlockId : operation.blockId;
+        const order = baseOrderPrecondition(beforeById, afterBlocks, targetId);
+        if (!order)
+            continue;
+        operation.expectedOrder = order;
+        const anchorId = order.nextBlockId || order.previousBlockId;
+        if (anchorId) {
+            operation.insertAt = order.nextBlockId
+                ? {beforeBlockId: order.nextBlockId}
+                : {afterBlockId: order.previousBlockId};
+            operation.expectedAnchorFingerprint = beforeById.get(anchorId).fingerprint;
+            if (kind === "insertblock" || kind === "insertdesignedpageplacement")
+                delete operation.index;
+        }
+    }
+}
+
+export function operationsForTarget(operations, ordinal = 0) {
+    return (operations || []).filter(operation => Number(
+        operation.targetOrdinal ?? operation.TargetOrdinal ?? 0) === ordinal);
+}
+
+function applyAuthoringOperations(view, operations) {
+    const positionForIndex = (doc, index) => {
+        let position = 0;
+        for (let current = 0; current < Math.max(0, Math.min(index, doc.childCount)); current++)
+            position += doc.child(current).nodeSize;
+        return position;
+    };
+    const nodeFromWire = operation => documentFromDomain({content: [operation.canonicalBlock]}).firstChild;
+    const insertNodeFromWire = operation => documentFromDomain({content: [
+        String(operation.kind).toLowerCase() === "insertdesignedpageplacement"
+            ? {id: operation.placementBlockId, type: "designedPage", styleRole: "designed-page", designedPageId: operation.pageId, content: []}
+            : {
+                id: operation.blockId,
+                type: operation.blockType,
+                ...wireBlockProperties(operation),
+                content: operation.text ? [{text: operation.text, marks: []}] : []
+            }
+    ]}).firstChild;
+    for (const operation of operations || []) {
+        const kind = String(operation.kind || "").toLowerCase();
+        const blockId = operation.blockId || operation.placementBlockId;
+        const position = blockId ? blockPositionById(view.state.doc, blockId) : null;
+        let transaction = view.state.tr;
+        if (kind === "restoreblock") {
+            const existing = blockPositionById(view.state.doc, operation.canonicalBlock.id);
+            const replacement = nodeFromWire(operation);
+            transaction = Number.isInteger(existing)
+                ? transaction.replaceWith(existing, existing + view.state.doc.nodeAt(existing).nodeSize, replacement)
+                : transaction.insert(positionForIndex(view.state.doc, operation.index), replacement);
+        } else if (kind === "deleteblock" || kind === "removedesignedpageplacement") {
+            if (!Number.isInteger(position)) continue;
+            transaction = transaction.delete(position, position + view.state.doc.nodeAt(position).nodeSize);
+        } else if (kind === "insertblock" || kind === "insertdesignedpageplacement") {
+            transaction = transaction.insert(positionForIndex(view.state.doc, operation.index), insertNodeFromWire(operation));
+        } else if (!Number.isInteger(position)) {
+            continue;
+        } else if (kind === "replaceblocktext") {
+            const node = view.state.doc.nodeAt(position);
+            if (!node.inlineContent) continue;
+            const replacement = documentFromDomain({content: [{id: blockId, type: nodeToBlockType[node.type.name], styleRole: node.attrs.styleRole, headingLevel: node.attrs.level, content: operation.text ? [{text: operation.text, marks: []}] : []}]}).firstChild.content;
+            transaction = transaction.replaceWith(position + 1, position + 1 + node.content.size, replacement);
+        } else if (kind === "moveblock") {
+            const node = view.state.doc.nodeAt(position);
+            transaction = transaction.delete(position, position + node.nodeSize);
+            const destination = positionForIndex(transaction.doc, operation.index);
+            transaction = transaction.insert(destination, node);
+        } else if (kind === "setblockstyle" || kind === "setparagraphpresentation" || kind === "setblocktype") {
+            const node = view.state.doc.nodeAt(position);
+            const attrs = {...node.attrs};
+            if (kind === "setblockstyle") attrs.styleRole = operation.styleRole;
+            if (kind === "setparagraphpresentation") attrs.paragraphPresentation = operation.paragraphPresentation;
+            if (kind === "setblocktype") {
+                attrs.styleRole = operation.styleRole;
+                attrs.imageId = operation.imageId ?? null;
+                attrs.altText = operation.altText ?? null;
+                attrs.level = operation.headingLevel ?? attrs.level;
+                attrs.decorative = operation.decorative === true;
+                attrs.language = operation.language ?? null;
+                attrs.accessibilityRole = operation.accessibilityRole ?? null;
+                attrs.presentation = operation.figurePresentation ?? null;
+                attrs.designedPageId = operation.designedPageId ?? null;
+            }
+            const type = kind === "setblocktype"
+                ? schema.nodes[blockTypeToNode[operation.blockType]]
+                : node.type;
+            transaction = transaction.setNodeMarkup(position, type, attrs);
+        } else if (kind === "setinlinemark") {
+            const node = view.state.doc.nodeAt(position);
+            const markType = schema.marks[markTypeToName[operation.mark]];
+            if (!node?.inlineContent || !markType) continue;
+            const from = position + 1 + Math.max(0, Math.min(operation.startOffset, node.content.size));
+            const to = position + 1 + Math.max(0, Math.min(operation.endOffset, node.content.size));
+            const mark = markType.create(operation.value ? {value: operation.value} : null);
+            transaction = operation.enabled ? transaction.addMark(from, to, mark) : transaction.removeMark(from, to, markType);
+        } else if (kind === "setfigurepresentation") {
+            const node = view.state.doc.nodeAt(position);
+            if (node?.type.name !== "figure") continue;
+            transaction = transaction.setNodeMarkup(position, node.type, {
+                ...node.attrs,
+                imageId: operation.imageId ?? null,
+                altText: operation.altText ?? null,
+                decorative: operation.decorative === true,
+                language: operation.language ?? null,
+                accessibilityRole: operation.accessibilityRole ?? "figure",
+                presentation: operation.figurePresentation ?? {...defaultFigurePresentation}
+            });
+        } else {
+            continue;
+        }
+        view.dispatch(transaction);
+    }
+}
+
+export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}", allowAnnotations = true, performanceTraceEnabled = false, authoringTargetJson = "{}") {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
     const attachmentStartedAt = performance.now();
-    const initial = JSON.parse(initialJson);
+    let initial = JSON.parse(initialJson);
+    const authoringTarget = JSON.parse(authoringTargetJson);
     const namedStyles = JSON.parse(stylesJson);
     const projectImages = JSON.parse(imagesJson);
     JSON.parse(editionsJson);
@@ -2234,15 +2638,114 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     hydrateDesignedPageSummaries(initial, designedPageById);
     let manuscriptId = initial.manuscriptId;
     let revision = initial.revision;
+    const sessionStorageKey = `lorekeeper-authoring-session-v1:${authoringTarget.projectId}:${authoringTarget.targetId}`;
+    let sessionId = sessionStorage.getItem(sessionStorageKey);
+    if (!sessionId) {
+        sessionId = authoringId();
+        sessionStorage.setItem(sessionStorageKey, sessionId);
+    }
+    let authoringSession = null;
+    let nextSequence = 0;
+    let highestLocalSequence = -1;
+    let lastDispatchedSequence = -1;
+    let lastAcknowledgedSequence = -1;
+    let requestedReadOnly = false;
+    let targetVersion = {generation: 0, fingerprint: ""};
+    let elementFingerprints = new Map();
+    let pendingActionLabel = "Edit manuscript";
+    let releaseWriterLease = null;
+    let applyingAuthoringHistory = false;
+    let pendingLocalTransition = null;
+    // A locally visible Undo/Redo may be waiting for the batch it reverses to
+    // receive its receipt. It is deliberately distinct from an unresolved
+    // history RPC: this keeps the writer dirty during the short compensation
+    // window between those two durable operations.
+    let pendingVisibleHistoryMove = false;
+    let historyMoveInFlight = false;
+    let fenceFrozen = false;
+    // This is a view cache of the process-owned cursor, never an authority or
+    // persistence mechanism. It is rebuilt from the server cursor on remount.
+    let confirmedHistory = [];
+    let confirmedHistoryCursor = 0;
+    let confirmedDocument = structuredClone(initial);
+    let queuedDocument = structuredClone(initial);
+    let dispatchPaused = false;
+    let journalFailure = null;
+    let pendingJournalCount = 0;
+    const journal = new AuthoringJournalV1(authoringTarget.projectId, authoringTarget.targetId, sessionId, error => {
+        dispatchPaused = true;
+        journalFailure = error?.message || "The browser could not safely store this edit for recovery.";
+        requestedReadOnly = true;
+        void dotNetRef.invokeMethodAsync("OnAuthoringJournalState", false, journalFailure).catch(() => {});
+    });
+    try {
+        authoringSession = await dotNetRef.invokeMethodAsync("InitializeAuthoringSession", {
+            protocolId: "AuthoringBatchProtocolV1",
+            projectId: authoringTarget.projectId,
+            sessionId,
+            targets: [{targetId: authoringTarget.targetId}]
+        });
+        ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence}
+            = authoringSequenceWatermarks(Number(authoringSession?.nextSequence || 0)));
+        const target = authoringSession?.targets?.find(item => item.targetId === authoringTarget.targetId);
+        if (target?.manuscriptJson) {
+            initial = JSON.parse(target.manuscriptJson);
+            manuscriptId = initial.manuscriptId;
+            revision = initial.revision;
+            confirmedDocument = structuredClone(initial);
+            queuedDocument = structuredClone(initial);
+            targetVersion = {generation: target.generation, fingerprint: target.fingerprint};
+            elementFingerprints = new Map(Object.entries(target.elementFingerprints || {}));
+        }
+        const pending = await journal.pending();
+        pendingJournalCount = pending.length;
+        if (pending.length > 0) {
+            // The server's next sequence reflects only acknowledged/replayed
+            // work. Reserve every recovered journal sequence before a new
+            // local edit can enter the serialized queue.
+            nextSequence = Math.max(nextSequence, ...pending.map(entry => Number(entry.sequence) + 1));
+            highestLocalSequence = Math.max(highestLocalSequence, nextSequence - 1);
+            const recovery = pending[pending.length - 1];
+            if (recovery.afterJson) {
+                initial = JSON.parse(recovery.afterJson);
+                manuscriptId = initial.manuscriptId;
+                revision = initial.revision;
+                queuedDocument = structuredClone(initial);
+            }
+        }
+    } catch (error) {
+        dispatchPaused = true;
+        journalFailure = error?.message || "The authoring session could not open.";
+    }
+    if (navigator.locks?.request && authoringTarget.targetId) {
+        let acquired;
+        const acquiredPromise = new Promise(resolve => { acquired = resolve; });
+        void navigator.locks.request(
+            `lorekeeper-authoring-writer:${authoringTarget.projectId}:${authoringTarget.targetId}`,
+            {mode: "exclusive", ifAvailable: true},
+            async lock => {
+                acquired(!!lock);
+                if (!lock) return;
+                await new Promise(resolve => { releaseWriterLease = resolve; });
+            });
+        if (!await acquiredPromise) {
+            requestedReadOnly = true;
+            journalFailure = "This manuscript is being edited in another window. Flush or close that editor to take over.";
+        }
+    }
     let timer = null;
     let saveChain = Promise.resolve(true);
     let changeGeneration = 0;
     let savedGeneration = 0;
-    let requestedReadOnly = false;
     let readOnly = false;
     let updateFormattingControls = () => {};
     let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
     let performPersistentHistory = async () => false;
+    // A history RPC can commit before its response is lost. Hold its exact
+    // idempotency identity until the canonical replay response is available;
+    // no later mutation may use pre-history revision/generation metadata.
+    let unresolvedHistoryRequest = null;
+    let reconcileUnresolvedHistory = async () => true;
     let traceSequence = 0;
     const recordVisibleFrame = (metric, startedAt) => {
         if (!performanceTraceEnabled || !Number.isFinite(startedAt)) return;
@@ -2257,12 +2760,35 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         });
     };
     const applyEffectiveReadOnly = () => {
-        readOnly = requestedReadOnly;
+        readOnly = requestedReadOnly || fenceFrozen || historyMoveInFlight;
         if (!view) return;
         view.setProps({editable: () => !readOnly});
         for (const control of root.querySelectorAll("button, select, input"))
             control.disabled = readOnly;
         root.classList.toggle("semantic-editor--readonly", readOnly);
+    };
+    const notifyWriterState = () => {
+        // A failed IndexedDB operation makes even an otherwise acknowledged
+        // view unsafe to claim as flushable. Keep the fence conservative until
+        // the author resolves the local recovery failure.
+        const dirty = savedGeneration < changeGeneration
+            || pendingJournalCount > 0
+            || pendingVisibleHistoryMove
+            || unresolvedHistoryRequest !== null
+            || !journal.recoverable
+            || !!journalFailure;
+        return dotNetRef.invokeMethodAsync(
+            "OnAuthoringWriterState",
+            targetVersion.generation || 0,
+            highestLocalSequence,
+            lastDispatchedSequence,
+            lastAcknowledgedSequence,
+            dirty,
+            journal.recoverable && !journalFailure,
+            // Paused dispatch (conflict, receipt uncertainty, or quota) is a
+            // recoverability state, not a disconnected browser. Disposal is
+            // the only path that reports this writer as unreachable.
+            true).catch(() => {});
     };
 
     const toolbar = document.createElement("div");
@@ -2280,8 +2806,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const status = document.createElement("div");
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
+    const conflictPanel = document.createElement("section");
+    conflictPanel.className = "semantic-editor-conflict";
+    conflictPanel.hidden = true;
     root.classList.add("semantic-editor-root");
-    root.replaceChildren(editorChrome, surface, status);
+    root.replaceChildren(editorChrome, surface, status, conflictPanel);
     installEditorFontRules(root, fontFamilies);
     const typographyRules = installTypographyRules(root, typography);
     const namedStyleRules = installNamedStyleRules(root, namedStyles);
@@ -2323,6 +2852,124 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             view.dispatch(view.state.tr.setMeta(annotationsKey, true));
         } catch {}
     };
+    const authoringSelection = stable => ({
+        kind: "manuscript",
+        targets: [{
+            targetId: authoringTarget.targetId,
+            blockId: stable?.blockId ?? null,
+            offset: stable?.headOffset ?? 0,
+            affinity: "forward"
+        }]
+    });
+    const showConflict = (result, entry) => {
+        const conflict = result?.conflicts?.[0];
+        const canonical = conflict?.canonical?.manuscriptJson;
+        conflictPanel.hidden = false;
+        conflictPanel.replaceChildren();
+        const heading = document.createElement("strong");
+        heading.textContent = "This edit conflicts with a newer manuscript change";
+        const details = document.createElement("p");
+        details.textContent = `${conflict?.message || "Both versions were retained."} Local batch ${entry.batch.batchId}.`;
+        const summary = document.createElement("p");
+        try {
+            const localText = editorialText(documentFromDomain(JSON.parse(entry.afterJson)), manuscriptId, revision);
+            const canonicalText = canonical
+                ? editorialText(documentFromDomain(JSON.parse(canonical)), manuscriptId, revision)
+                : "";
+            summary.textContent = `Local version: ${localText.length.toLocaleString()} characters. Newer version: ${canonicalText.length.toLocaleString()} characters.`;
+        } catch {
+            summary.textContent = "Both the local and newer manuscript variants are retained for your decision.";
+        }
+        const retry = button("Retry", "Retry this unchanged local batch", async () => {
+            try {
+                const retryResult = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
+                const retryCanonical = retryResult?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+                if (!["committed", "replayed"].includes(String(retryResult?.status || "").toLowerCase()) || !retryCanonical) {
+                    showConflict(retryResult, entry);
+                    return;
+                }
+                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                    projectId: authoringTarget.projectId, sessionId, receiptId: retryResult.receiptId,
+                    batchId: entry.batch.batchId, requestHash: entry.batch.requestHash
+                });
+                if (!await journal.remove(entry.key))
+                    throw new Error("The saved edit could not be cleared from the local recovery journal.");
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                revision = retryCanonical.afterRevision;
+                targetVersion = {generation: retryCanonical.generation, fingerprint: retryCanonical.fingerprint};
+                const retryTarget = retryResult.targets?.find(item => item.targetId === authoringTarget.targetId);
+                if (retryTarget?.elementFingerprints)
+                    elementFingerprints = new Map(Object.entries(retryTarget.elementFingerprints));
+                confirmedDocument = JSON.parse(entry.afterJson);
+                confirmedHistory.splice(confirmedHistoryCursor);
+                confirmedHistory.push({
+                    inverse: retryResult.inverse?.operations || [],
+                    forward: entry.batch.operations,
+                    beforeSelection: entry.batch.selection?.before || null,
+                    afterSelection: entry.batch.selection?.after || null
+                });
+                confirmedHistoryCursor = confirmedHistory.length;
+                lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, Number(entry.batch.sequence));
+                if (sameJson(
+                    domainFromDocument(view.state.doc, manuscriptId, confirmedDocument.revision),
+                    confirmedDocument)) {
+                    queuedDocument = structuredClone(confirmedDocument);
+                    pendingLocalTransition = null;
+                    savedGeneration = changeGeneration;
+                }
+                conflictPanel.hidden = true;
+                dispatchPaused = false;
+                notifyWriterState();
+                status.textContent = "The local edit was saved.";
+            } catch (error) {
+                dispatchPaused = true;
+                notifyWriterState();
+                status.textContent = error?.message || "The local batch could not be retried.";
+            }
+        });
+        const discard = button("Use newer version", "Discard this local batch and use the newer canonical manuscript", async () => {
+            if (!canonical) return;
+            // This is an explicit author decision, never a conflict-side effect.
+            try {
+                // A rejected dispatch rolls back on the server. Re-open the
+                // same durable session before dropping its journal entry so
+                // the next batch reuses the server's expected sequence rather
+                // than skipping the rejected one.
+                const reopened = await dotNetRef.invokeMethodAsync("InitializeAuthoringSession", {
+                    protocolId: "AuthoringBatchProtocolV1",
+                    projectId: authoringTarget.projectId,
+                    sessionId,
+                    targets: [{targetId: authoringTarget.targetId}]
+                });
+                const reopenedTarget = reopened?.targets?.find(item => item.targetId === authoringTarget.targetId);
+                if (!reopenedTarget?.manuscriptJson)
+                    throw new Error("The current canonical manuscript could not be loaded for this conflict.");
+                const watermarks = authoringSequenceWatermarks(Number(reopened.nextSequence));
+                if (!await journal.remove(entry.key))
+                    throw new Error("The discarded local batch could not be cleared from the recovery journal.");
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                authoringSession = reopened;
+                ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence} = watermarks);
+                replaceDocument(reopenedTarget.manuscriptJson);
+                confirmedDocument = JSON.parse(reopenedTarget.manuscriptJson);
+                queuedDocument = structuredClone(confirmedDocument);
+                revision = reopenedTarget.revision;
+                targetVersion = {generation: reopenedTarget.generation, fingerprint: reopenedTarget.fingerprint};
+                elementFingerprints = new Map(Object.entries(reopenedTarget.elementFingerprints || {}));
+                pendingLocalTransition = null;
+                savedGeneration = changeGeneration;
+                dispatchPaused = false;
+                conflictPanel.hidden = true;
+                notifyWriterState();
+                status.textContent = "The newer manuscript version is now shown.";
+            } catch (error) {
+                dispatchPaused = true;
+                notifyWriterState();
+                status.textContent = error?.message || "The local batch could not be discarded.";
+            }
+        });
+        conflictPanel.append(heading, details, summary, retry, discard);
+    };
     const saveNow = () => {
         if (timer) {
             clearTimeout(timer);
@@ -2330,43 +2977,119 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         }
         const targetGeneration = changeGeneration;
         const saveStartedAt = performance.now();
-        const snapshotJson = JSON.stringify(
-            domainFromDocument(view.state.doc, manuscriptId, revision));
-        const selectionJson = JSON.stringify(captureStableSelection(view));
+        const after = domainFromDocument(view.state.doc, manuscriptId, revision);
+        const selection = captureStableSelection(view);
         saveChain = saveChain.catch(() => false).then(async () => {
-            if (savedGeneration >= targetGeneration)
-                return true;
-            const payload = JSON.parse(snapshotJson);
-            payload.revision = revision;
-            const json = JSON.stringify(payload);
-            try {
-                const result = await dotNetRef.invokeMethodAsync(
-                    "OnDocumentDebounced",
-                    revision,
-                    json,
-                    selectionJson);
-                if (result?.currentManuscriptJson) {
-                    replaceDocument(result.currentManuscriptJson);
-                    await refreshReviewAnnotations();
-                    persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
-                    updateFormattingControls();
-                    recordVisibleFrame("save-acknowledgment", saveStartedAt);
-                    return true;
-                }
-                if (!result?.saved) return false;
-                revision = result.revision;
+            if (!await reconcileUnresolvedHistory()) return false;
+            if (savedGeneration >= targetGeneration) return !dispatchPaused;
+            if (dispatchPaused || !journal.recoverable || !authoringSession) return false;
+            const before = queuedDocument;
+            const operations = authoringOperations(before, after);
+            addAuthoringPreconditions(operations, before, after, elementFingerprints);
+            if (operations.length === 0) {
                 savedGeneration = Math.max(savedGeneration, targetGeneration);
+                return true;
+            }
+            const batch = {
+                protocolId: "AuthoringBatchProtocolV1",
+                projectId: authoringTarget.projectId,
+                sessionId,
+                batchId: authoringId(),
+                sequence: nextSequence++,
+                actionLabel: pendingActionLabel,
+                targets: [{
+                    ordinal: 0,
+                    targetId: authoringTarget.targetId,
+                    expectedRevision: revision,
+                    expectedGeneration: targetVersion.generation,
+                    baseFingerprint: targetVersion.fingerprint
+                }],
+                operations: operations.map(operation => ({targetOrdinal: 0, ...operation})),
+                selection: {
+                    before: authoringSelection(pendingLocalTransition?.beforeSelection),
+                    after: authoringSelection(selection)
+                }
+            };
+            batch.requestHash = await sha256(canonicalJson({
+                protocolId: batch.protocolId, projectId: batch.projectId, sessionId: batch.sessionId,
+                batchId: batch.batchId, sequence: batch.sequence, actionLabel: batch.actionLabel,
+                targets: batch.targets, operations: batch.operations, selection: batch.selection
+            }));
+            const entry = {
+                key: `${authoringTarget.projectId}|${authoringTarget.targetId}|${batch.batchId}`,
+                projectId: authoringTarget.projectId,
+                targetId: authoringTarget.targetId,
+                sequence: batch.sequence,
+                batch,
+                beforeJson: JSON.stringify(before),
+                afterJson: JSON.stringify(after),
+                createdAt: Date.now()
+            };
+            if (!await journal.write(entry)) return false;
+            pendingJournalCount++;
+            queuedDocument = structuredClone(after);
+            lastDispatchedSequence = batch.sequence;
+            highestLocalSequence = Math.max(highestLocalSequence, batch.sequence);
+            notifyWriterState();
+            try {
+                const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", batch);
+                const applied = ["committed", "replayed"].includes(String(result?.status || "").toLowerCase());
+                const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+                if (!applied || !canonical) {
+                    dispatchPaused = true;
+                    status.textContent = result?.conflicts?.[0]?.message || "The edit needs resolution before it can be saved.";
+                    showConflict(result, entry);
+                    return false;
+                }
+                revision = canonical.afterRevision;
+                targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
+                const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
+                if (canonicalTarget?.elementFingerprints)
+                    elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
+                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                    projectId: authoringTarget.projectId,
+                    sessionId,
+                    receiptId: result.receiptId,
+                    batchId: batch.batchId,
+                    requestHash: batch.requestHash
+                });
+                if (!await journal.remove(entry.key))
+                    throw new Error("The saved edit could not be cleared from the local recovery journal.");
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                confirmedDocument = structuredClone(after);
+                confirmedHistory.splice(confirmedHistoryCursor);
+                confirmedHistory.push({
+                    inverse: result.inverse?.operations || [],
+                    forward: batch.operations,
+                    beforeSelection: entry.batch.selection.before,
+                    afterSelection: batch.selection.after,
+                });
+                confirmedHistoryCursor = confirmedHistory.length;
+                // Typing can continue while the batch is in flight. Only clear
+                // the coalesced local transition if this acknowledgement is
+                // still describing the visible document.
+                if (changeGeneration === targetGeneration) {
+                    pendingLocalTransition = null;
+                }
+                savedGeneration = Math.max(savedGeneration, targetGeneration);
+                persistentHistoryState = result.history?.state || persistentHistoryState;
+                lastAcknowledgedSequence = batch.sequence;
+                notifyWriterState();
                 await refreshReviewAnnotations();
-                try {
-                    persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
-                    updateFormattingControls();
-                } catch {}
+                updateFormattingControls();
                 updateStatus();
                 recordVisibleFrame("save-acknowledgment", saveStartedAt);
-            } catch {
+                return true;
+            } catch (error) {
+                // The batch/receipt remains journaled. Do not report a clean
+                // save or fabricate a new batch over an uncertain receipt;
+                // remount recovery will replay the idempotent batch and retry
+                // the acknowledgement.
+                dispatchPaused = true;
+                notifyWriterState();
+                status.textContent = error?.message || "The edit is waiting to be saved.";
                 return false;
             }
-            return true;
         });
         return saveChain;
     };
@@ -2398,6 +3121,14 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     };
 
     const initialDocument = documentFromDomain(initial);
+    let forceAuthoringBoundary = false;
+    const authoringHistoryAdapter = new Plugin({
+        key: authoringHistoryAdapterKey,
+        state: {
+            init: () => 0,
+            apply: (transaction, value) => transaction.getMeta(authoringHistoryAdapterKey)?.boundary ? value + 1 : value
+        }
+    });
     const annotationsPlugin = new Plugin({
         key: annotationsKey,
         state: {
@@ -2413,6 +3144,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         selection: initialEditorSelection(initialDocument),
         plugins: [
             blockIdPlugin(),
+            authoringHistoryAdapter,
             annotationsPlugin,
             gapCursor(),
             keymap({
@@ -2433,14 +3165,49 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         state,
         editable: () => !readOnly,
         dispatchTransaction(transaction) {
-            if (readOnly && transaction.docChanged)
+            if (!shouldApplyAuthoringTransaction(transaction, {
+                readOnly,
+                hasUnresolvedHistory: unresolvedHistoryRequest !== null,
+                applyingHistory: applyingAuthoringHistory
+            })) {
+                // Reconcile the exact idempotent history request before a new
+                // local mutation can form a batch against stale metadata.
+                if (unresolvedHistoryRequest)
+                    void reconcileUnresolvedHistory();
                 return;
+            }
+            const beforeDocument = view.state.doc;
+            const isPaste = transaction.getMeta("uiEvent") === "paste";
+            const structural = transaction.docChanged
+                && beforeDocument.childCount !== transaction.doc.childCount;
+            const boundary = forceAuthoringBoundary || isPaste || structural;
+            forceAuthoringBoundary = false;
+            if (boundary) {
+                // closeHistory is only a boundary marker for the adapter; we do
+                // not install history(), so ProseMirror cannot own Undo/Redo.
+                transaction = closeHistory(transaction);
+                transaction.setMeta(authoringHistoryAdapterKey, {boundary: true});
+            }
+            const selectionBeforeTransaction = captureStableSelection(view);
             const inputStartedAt = transaction.docChanged ? performance.now() : null;
             const next = view.state.apply(transaction);
             view.updateState(next);
-            if (transaction.docChanged) {
+            if (transaction.docChanged && !applyingAuthoringHistory) {
                 changeGeneration++;
+                highestLocalSequence = Math.max(highestLocalSequence, nextSequence);
+                const base = pendingLocalTransition?.base
+                    || domainFromDocument(beforeDocument, manuscriptId, revision);
+                const current = domainFromDocument(next.doc, manuscriptId, revision);
+                pendingLocalTransition = {
+                    base,
+                    forward: authoringOperations(base, current),
+                    inverse: authoringOperations(current, base),
+                    beforeSelection: pendingLocalTransition?.beforeSelection || selectionBeforeTransaction,
+                    afterSelection: captureStableSelection(view)
+                };
+                pendingActionLabel = isPaste ? "Paste" : structural ? "Change manuscript structure" : "Edit manuscript";
                 scheduleSave();
+                notifyWriterState();
             }
             findPanel.update();
             outline.update();
@@ -2488,6 +3255,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             }
         },
         handlePaste(_view, event) {
+            forceAuthoringBoundary = true;
             void saveNow();
             // The first save closes any typing group before the paste. The queued save
             // records the pasted document before later typing can join that action.
@@ -2530,7 +3298,14 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const updateStatus = () => {
         const text = editorialText(view.state.doc, manuscriptId, revision);
         const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
-        status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision}`;
+        const saveState = journalFailure
+            ? "not locally recoverable"
+            : dispatchPaused
+                ? "save paused"
+                : savedGeneration < changeGeneration || pendingVisibleHistoryMove
+                    ? "saving"
+                    : "saved";
+        status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision} · ${saveState}`;
     };
 
     const typographyControls = buildTypographyControls(view, namedStyles, fontFamilies, root);
@@ -2898,46 +3673,305 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     if (undoControl) undoControl.dataset.historyDirection = "undo";
     if (redoControl) redoControl.dataset.historyDirection = "redo";
     updateFormattingControls();
-    performPersistentHistory = async redoDirection => {
-        if (readOnly) return false;
+    performPersistentHistory = async (redoDirection, visibleAlreadyApplied = false) => {
+        if (readOnly && !visibleAlreadyApplied) return false;
+        if (!await reconcileUnresolvedHistory()) return false;
         const historyStartedAt = performance.now();
-        const flushed = await saveNow();
-        if (!flushed) return false;
-        try {
-            const result = await dotNetRef.invokeMethodAsync(
-                redoDirection ? "OnRedoAuthoring" : "OnUndoAuthoring");
-            if (!result?.applied) {
-                if (result) {
-                    persistentHistoryState = result;
-                    updateFormattingControls();
-                }
-                status.textContent = result?.error || (redoDirection ? "Nothing to redo." : "Nothing to undo.");
+        // Undo is client-first even while its edit is in flight. Capture and
+        // dispatch that exact transition, immediately show its inverse, then
+        // advance the server-owned cursor after the receipt. Keeping the flag
+        // set prevents the pre-undo acknowledgement from claiming a clean
+        // writer in the compensation window.
+        if (!visibleAlreadyApplied && savedGeneration < changeGeneration) {
+            if (redoDirection || !pendingLocalTransition) {
+                status.textContent = "Undo is waiting for the current edit to establish a durable history entry.";
                 return false;
             }
-            replaceDocument(result.manuscriptJson);
-            await refreshReviewAnnotations();
-            restoreStableSelection(view, result.selectionJson);
-            persistentHistoryState = result;
+            const transition = pendingLocalTransition;
+            const dispatch = saveNow();
+            pendingVisibleHistoryMove = true;
+            historyMoveInFlight = true;
+            applyEffectiveReadOnly();
+            applyingAuthoringHistory = true;
+            try { applyAuthoringOperations(view, transition.inverse); }
+            finally { applyingAuthoringHistory = false; }
+            const selectionPoint = transition.beforeSelection?.targets?.[0];
+            if (selectionPoint?.blockId)
+                restoreStableSelection(view, {blockId: selectionPoint.blockId, anchorOffset: selectionPoint.offset, headOffset: selectionPoint.offset});
             updateFormattingControls();
-            view.focus();
+            recordVisibleFrame("undo-to-visible-frame", historyStartedAt);
+            notifyWriterState();
+            if (!await dispatch || savedGeneration < changeGeneration) {
+                status.textContent = "Undo is visible locally and will be reconciled after the current edit saves.";
+                historyMoveInFlight = false;
+                applyEffectiveReadOnly();
+                notifyWriterState();
+                return false;
+            }
+            return await performPersistentHistory(false, true);
+        }
+        const nextCursor = redoDirection ? confirmedHistoryCursor + 1 : confirmedHistoryCursor - 1;
+        const transition = confirmedHistory[redoDirection ? confirmedHistoryCursor : nextCursor];
+        if (!transition) {
+            status.textContent = redoDirection ? "Nothing to redo." : "Nothing to undo.";
+            return false;
+        }
+        // Apply the authoritative cursor mirror immediately. The following
+        // request validates and advances the process cursor; it is a
+        // reconciliation, not the source of visible Undo/Redo.
+        const visibleOperations = redoDirection ? transition.forward : transition.inverse;
+        if (!historyMoveInFlight) {
+            historyMoveInFlight = true;
+            applyEffectiveReadOnly();
+        }
+        if (!visibleAlreadyApplied) {
+            applyingAuthoringHistory = true;
+            try { applyAuthoringOperations(view, visibleOperations); }
+            finally { applyingAuthoringHistory = false; }
+        }
+        confirmedHistoryCursor = nextCursor;
+        const selection = redoDirection ? transition.afterSelection : transition.beforeSelection;
+        const selectionPoint = selection?.targets?.[0];
+        if (selectionPoint?.blockId)
+            restoreStableSelection(view, {blockId: selectionPoint.blockId, anchorOffset: selectionPoint.offset, headOffset: selectionPoint.offset});
+        updateFormattingControls();
+        if (!visibleAlreadyApplied) {
             recordVisibleFrame(
                 redoDirection ? "redo-to-visible-frame" : "undo-to-visible-frame",
                 historyStartedAt);
+        }
+        try {
+            // A history move is visible before its RPC returns. Reuse one
+            // identity if that response is lost so the process cursor cannot
+            // advance twice on retry.
+            const historyRequest = {
+                projectId: authoringTarget.projectId,
+                sessionId,
+                historyRequestId: authoringId(),
+                targetId: authoringTarget.targetId,
+                expectedGeneration: targetVersion.generation
+            };
+            const invokeHistory = () => dotNetRef.invokeMethodAsync(
+                redoDirection ? "OnRedoAuthoringBatch" : "OnUndoAuthoringBatch",
+                historyRequest);
+            let historyResult;
+            try {
+                historyResult = await invokeHistory();
+            } catch {
+                try {
+                    historyResult = await invokeHistory();
+                } catch (retryError) {
+                    // Do not blindly reverse a local action after transport
+                    // loss: first observe the process-owned cursor. If it
+                    // reached our target position, retain the already-visible
+                    // local delta and wait for normal metadata refresh.
+                    try {
+                        const observed = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
+                        if (Number(observed?.cursor?.position) === nextCursor) {
+                            unresolvedHistoryRequest = {
+                                request: historyRequest,
+                                redoDirection,
+                                nextCursor
+                            };
+                            historyMoveInFlight = false;
+                            applyEffectiveReadOnly();
+                            adoptHistoryCursor(observed);
+                            updateFormattingControls();
+                            notifyWriterState();
+                            status.textContent = "History was applied; reconnecting to refresh its canonical state before the next edit.";
+                            return true;
+                        }
+                    } catch {}
+                    throw retryError;
+                }
+            }
+            const result = historyResult?.batch;
+            const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+            if (!result || !["committed", "replayed"].includes(String(result.status || "").toLowerCase()) || !canonical) {
+                // The server cursor rejected the request. Restore the pre-click
+                // visible state instead of silently adopting another document.
+                applyingAuthoringHistory = true;
+                try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward); }
+                finally { applyingAuthoringHistory = false; }
+                confirmedHistoryCursor = redoDirection ? confirmedHistoryCursor - 1 : confirmedHistoryCursor + 1;
+                pendingVisibleHistoryMove = false;
+                historyMoveInFlight = false;
+                applyEffectiveReadOnly();
+                adoptHistoryCursor(historyResult);
+                updateFormattingControls();
+                status.textContent = result?.conflicts?.[0]?.message || (redoDirection ? "Nothing to redo." : "Nothing to undo.");
+                return false;
+            }
+            const target = result.targets?.find(item => item.targetId === authoringTarget.targetId);
+            if (!target?.manuscriptJson)
+                throw new Error("The authoring service did not return its canonical target state.");
+            await adoptCanonicalHistoryBatch(historyResult, historyRequest, redoDirection);
+            view.focus();
             return true;
         } catch (error) {
+            applyingAuthoringHistory = true;
+            try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward); }
+            finally { applyingAuthoringHistory = false; }
+            confirmedHistoryCursor = redoDirection ? confirmedHistoryCursor - 1 : confirmedHistoryCursor + 1;
+            pendingVisibleHistoryMove = false;
+            historyMoveInFlight = false;
+            applyEffectiveReadOnly();
             status.textContent = error?.message || "History could not be applied.";
+            notifyWriterState();
             return false;
         }
     };
     toolbar.addEventListener("pointerdown", event => {
         const control = event.target instanceof Element ? event.target.closest("button, select, input") : null;
         if (!control || control.dataset.historyDirection) return;
+        forceAuthoringBoundary = true;
+        pendingActionLabel = "Format manuscript";
         void saveNow();
     }, true);
+    const adoptHistoryCursor = projection => {
+        if (!projection) return;
+        persistentHistoryState = projection.state || projection;
+        const cursor = projection.cursor;
+        if (!cursor) return;
+        confirmedHistory = (cursor.actions || [])
+            .filter(action => !(action.targetIds || []).length || action.targetIds.includes(authoringTarget.targetId))
+            .map(action => {
+            const ordinal = (action.targetIds || []).findIndex(targetId => targetId === authoringTarget.targetId);
+            return {
+                inverse: operationsForTarget(action.inverse, ordinal < 0 ? 0 : ordinal),
+                forward: operationsForTarget(action.forward, ordinal < 0 ? 0 : ordinal),
+                beforeSelection: action.beforeSelection || null,
+                afterSelection: action.afterSelection || null
+            };
+        });
+        confirmedHistoryCursor = Number(cursor.position || 0);
+    };
+    const adoptCanonicalHistoryBatch = async (historyResult, historyRequest, redoDirection) => {
+        const result = historyResult?.batch;
+        const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+        const target = result?.targets?.find(item => item.targetId === authoringTarget.targetId);
+        const sequence = Number(result?.sequence);
+        if (!result
+            || !["committed", "replayed"].includes(String(result.status || "").toLowerCase())
+            || !canonical
+            || !target?.manuscriptJson
+            || !Number.isSafeInteger(sequence)
+            || sequence < 0
+            || !result.receiptId) {
+            throw new Error("The authoring service did not return a complete canonical history result.");
+        }
+
+        // A history move consumes a normal session sequence. Reserve it before
+        // acknowledgement so a subsequent save cannot reuse the server batch.
+        nextSequence = Math.max(nextSequence, sequence + 1);
+        highestLocalSequence = Math.max(highestLocalSequence, sequence);
+        lastDispatchedSequence = Math.max(lastDispatchedSequence, sequence);
+        revision = canonical.afterRevision;
+        targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
+        elementFingerprints = new Map(Object.entries(target.elementFingerprints || {}));
+        confirmedDocument = JSON.parse(target.manuscriptJson);
+        queuedDocument = structuredClone(confirmedDocument);
+        replaceDocument(target.manuscriptJson);
+        if (target.selectionJson)
+            restoreStableSelection(view, target.selectionJson);
+        adoptHistoryCursor(historyResult);
+        unresolvedHistoryRequest = {request: historyRequest, redoDirection};
+        notifyWriterState();
+        try {
+            await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                projectId: authoringTarget.projectId,
+                sessionId,
+                receiptId: result.receiptId,
+                batchId: result.batchId,
+                requestHash: result.requestHash
+            });
+            lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, sequence);
+            unresolvedHistoryRequest = null;
+            pendingVisibleHistoryMove = false;
+            historyMoveInFlight = false;
+            applyEffectiveReadOnly();
+            savedGeneration = changeGeneration;
+        } catch (error) {
+            // The committed move stays visible but blocks all later dispatch
+            // until the same idempotent request can acknowledge its receipt.
+            status.textContent = error?.message || "History was applied and is waiting for receipt acknowledgement.";
+        }
+        await refreshReviewAnnotations();
+        notifyWriterState();
+        updateFormattingControls();
+        updateStatus();
+        return unresolvedHistoryRequest === null;
+    };
+    reconcileUnresolvedHistory = async () => {
+        const unresolved = unresolvedHistoryRequest;
+        if (!unresolved) return true;
+        try {
+            const historyResult = await dotNetRef.invokeMethodAsync(
+                unresolved.redoDirection ? "OnRedoAuthoringBatch" : "OnUndoAuthoringBatch",
+                unresolved.request);
+            return await adoptCanonicalHistoryBatch(historyResult, unresolved.request, unresolved.redoDirection);
+        } catch (error) {
+            status.textContent = error?.message || "History is waiting to reconcile before the next edit can be saved.";
+            notifyWriterState();
+            return false;
+        }
+    };
+    notifyWriterState();
     void dotNetRef.invokeMethodAsync("GetAuthoringHistoryState").then(state => {
-        persistentHistoryState = state;
+        adoptHistoryCursor(state);
         updateFormattingControls();
     }).catch(() => {});
+    // A reload first renders the server-confirmed base and replays only
+    // unacknowledged journal batches. Confirmed history remains process-owned.
+    saveChain = saveChain.then(async () => {
+        if (dispatchPaused || !journal.recoverable) return;
+        for (const entry of await journal.pending()) {
+            try {
+                const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
+                const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+                if (!["committed", "replayed"].includes(String(result?.status || "").toLowerCase()) || !canonical) {
+                    dispatchPaused = true;
+                    status.textContent = result?.conflicts?.[0]?.message || "Recovered edits need resolution before they can be saved.";
+                    showConflict(result, entry);
+                    notifyWriterState();
+                    return;
+                }
+                revision = canonical.afterRevision;
+                targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
+                const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
+                if (canonicalTarget?.elementFingerprints)
+                    elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
+                confirmedDocument = JSON.parse(entry.afterJson);
+                queuedDocument = structuredClone(confirmedDocument);
+                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                    projectId: authoringTarget.projectId,
+                    sessionId, receiptId: result.receiptId, batchId: entry.batch.batchId,
+                    requestHash: entry.batch.requestHash
+                });
+                if (!await journal.remove(entry.key))
+                    throw new Error("The recovered edit could not be cleared from the local recovery journal.");
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                confirmedHistory.splice(confirmedHistoryCursor);
+                confirmedHistory.push({
+                    inverse: result.inverse?.operations || [],
+                    forward: entry.batch.operations,
+                    beforeSelection: entry.batch.selection?.before || null,
+                    afterSelection: entry.batch.selection?.after || null
+                });
+                confirmedHistoryCursor = confirmedHistory.length;
+                lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, Number(entry.batch.sequence));
+                lastDispatchedSequence = Math.max(lastDispatchedSequence, Number(entry.batch.sequence));
+                highestLocalSequence = Math.max(highestLocalSequence, Number(entry.batch.sequence));
+            } catch (error) {
+                dispatchPaused = true;
+                status.textContent = error?.message || "The recovered edit is waiting to be acknowledged.";
+                notifyWriterState();
+                return;
+            }
+        }
+        notifyWriterState();
+        updateStatus();
+    });
     updateStatus();
     outline.update();
     recordVisibleFrame("editor-ready-after-navigation", attachmentStartedAt);
@@ -2945,6 +3979,38 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     return {
         flush: saveNow,
         waitForSaves() { return saveChain.catch(() => false); },
+        async freezeAndFlush(sequence) {
+            fenceFrozen = true;
+            applyEffectiveReadOnly();
+            const flushed = await saveNow();
+            const dirty = savedGeneration < changeGeneration
+                || pendingJournalCount > 0
+                || pendingVisibleHistoryMove
+                || unresolvedHistoryRequest !== null
+                || !journal.recoverable
+                || !!journalFailure;
+            notifyWriterState();
+            return {
+                // This is always the actual acknowledgement watermark; the
+                // fence compares it with its captured highest-local sequence.
+                flushedSequence: lastAcknowledgedSequence,
+                isDirty: dirty,
+                isRecoverable: journal.recoverable && !journalFailure,
+                isReachable: true,
+                errorCode: flushed ? null : "AUTHORING_FLUSH_INCOMPLETE",
+                errorMessage: flushed ? null : status.textContent
+            };
+        },
+        async resumeAfterFence() {
+            fenceFrozen = false;
+            applyEffectiveReadOnly();
+            await reconcileUnresolvedHistory();
+            notifyWriterState();
+        },
+        // Registration awaits this call. That matters for a same-session
+        // reattach: the fence retains the unreachable dirty state until this
+        // recovered handle has supplied its actual queue/journal state.
+        reportWriterState() { return notifyWriterState(); },
         setReadOnly(value) {
             requestedReadOnly = !!value;
             applyEffectiveReadOnly();
@@ -2953,7 +4019,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         setDocument(json) {
             replaceDocument(json);
             return dotNetRef.invokeMethodAsync("GetAuthoringHistoryState").then(state => {
-                persistentHistoryState = state;
+                adoptHistoryCursor(state);
                 updateFormattingControls();
             }).catch(() => {});
         },
@@ -3009,6 +4075,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         },
         dispose() {
             if (timer) clearTimeout(timer);
+            if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);
             caretResizeObserver.disconnect();
             view.destroy();

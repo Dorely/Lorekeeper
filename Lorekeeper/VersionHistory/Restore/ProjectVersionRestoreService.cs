@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
 using Lorekeeper.ImportExport;
@@ -37,9 +38,26 @@ public sealed class ProjectVersionRestoreService(
     IProjectSearchIndex searchIndex,
     IGitRepositoryStore? git = null,
     ProjectVersionHistoryService? historyService = null,
-    ProjectVersionHistoryUiEvents? historyEvents = null) : IProjectVersionRestoreService
+    ProjectVersionHistoryUiEvents? historyEvents = null,
+    IAuthoringMutationFence? authoringFence = null) : IProjectVersionRestoreService
 {
     public async Task RestoreReviewOtherAsync(
+        Guid projectId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await FenceAsync(
+            projectId,
+            "restore approved non-manuscript Review Edits state",
+            async token =>
+            {
+                await RestoreReviewOtherCoreAsync(projectId, expectedToken, token);
+                return true;
+            },
+            cancellationToken);
+    }
+
+    private async Task RestoreReviewOtherCoreAsync(
         Guid projectId,
         ProjectVersionReviewConcurrencyToken expectedToken,
         CancellationToken cancellationToken = default)
@@ -82,7 +100,7 @@ public sealed class ProjectVersionRestoreService(
         (historyEvents ?? throw new InvalidOperationException("Scoped review restore requires the review event publisher.")).PublishReviewStateChanged(projectId);
     }
 
-    public Task RestoreReviewDesignedPageAsync(
+    public async Task RestoreReviewDesignedPageAsync(
         Guid projectId,
         Guid designedPageId,
         ProjectVersionReviewConcurrencyToken expectedToken,
@@ -94,15 +112,18 @@ public sealed class ProjectVersionRestoreService(
             throw new ArgumentException("A Designed Page ID is required.", nameof(designedPageId));
         ArgumentNullException.ThrowIfNull(expectedToken);
 
-        return RestoreDesignedPageAsync(
+        _ = await FenceAsync(
             projectId,
-            designedPageId,
-            expectedToken,
-            historicalCommitSha: null,
+            "restore an approved Designed Page",
+            async token =>
+            {
+                await RestoreDesignedPageAsync(projectId, designedPageId, expectedToken, historicalCommitSha: null, token);
+                return true;
+            },
             cancellationToken);
     }
 
-    public Task RestoreHistoricalDesignedPageAsync(
+    public async Task RestoreHistoricalDesignedPageAsync(
         Guid projectId,
         Guid designedPageId,
         string historicalCommitSha,
@@ -117,11 +138,14 @@ public sealed class ProjectVersionRestoreService(
             throw new ArgumentException("A historical parent commit SHA is required.", nameof(historicalCommitSha));
         ArgumentNullException.ThrowIfNull(expectedToken);
 
-        return RestoreDesignedPageAsync(
+        _ = await FenceAsync(
             projectId,
-            designedPageId,
-            expectedToken,
-            historicalCommitSha,
+            "restore a historical Designed Page",
+            async token =>
+            {
+                await RestoreDesignedPageAsync(projectId, designedPageId, expectedToken, historicalCommitSha, token);
+                return true;
+            },
             cancellationToken);
     }
 
@@ -193,7 +217,20 @@ public sealed class ProjectVersionRestoreService(
         (historyEvents ?? throw new InvalidOperationException("Scoped review restore requires the review event publisher.")).PublishReviewStateChanged(projectId);
     }
 
-    public async Task<VersionHistoryRestoreResult> RestoreAsync(
+    public Task<VersionHistoryRestoreResult> RestoreAsync(
+        Guid projectId,
+        string targetCommitSha,
+        VersionHistoryRestoreSelection selection,
+        string? safetyMessage = null,
+        bool discardQueuedWork = false,
+        CancellationToken cancellationToken = default) =>
+        FenceAsync(
+            projectId,
+            "restore canonical project state from version history",
+            token => RestoreCoreAsync(projectId, targetCommitSha, selection, safetyMessage, discardQueuedWork, token),
+            cancellationToken);
+
+    private async Task<VersionHistoryRestoreResult> RestoreCoreAsync(
         Guid projectId,
         string targetCommitSha,
         VersionHistoryRestoreSelection selection,
@@ -377,7 +414,19 @@ public sealed class ProjectVersionRestoreService(
         return result;
     }
 
-    public async Task<VersionHistoryCheckoutResult> CheckoutValidatedSnapshotAsync(
+    public Task<VersionHistoryCheckoutResult> CheckoutValidatedSnapshotAsync(
+        VersionHistoryValidatedProjectCheckout checkout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkout);
+        return FenceAsync(
+            checkout.ProjectId,
+            "apply a synchronized version-history checkout",
+            token => CheckoutValidatedSnapshotCoreAsync(checkout, token),
+            cancellationToken);
+    }
+
+    private async Task<VersionHistoryCheckoutResult> CheckoutValidatedSnapshotCoreAsync(
         VersionHistoryValidatedProjectCheckout checkout,
         CancellationToken cancellationToken = default)
     {
@@ -2190,4 +2239,18 @@ public sealed class ProjectVersionRestoreService(
         };
     }
 
+    private Task<T> FenceAsync<T>(
+        Guid projectId,
+        string purpose,
+        Func<CancellationToken, Task<T>> consume,
+        CancellationToken cancellationToken)
+    {
+        if (projectId == Guid.Empty)
+            throw new VersionHistoryRestoreException("InvalidProjectIdentity", "A project identity is required for a version-history operation.");
+        var fence = authoringFence ?? throw new InvalidOperationException("The authoring mutation fence is required for version-history restore operations.");
+        return fence.ExecuteAsync(
+            new AuthoringFenceRequest(projectId, [], purpose),
+            (_, token) => consume(token),
+            cancellationToken);
+    }
 }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
@@ -953,7 +954,8 @@ public sealed class ProjectVersionRestoreTests
                 null!,
                 null!,
                 null!,
-                null!);
+                null!,
+                authoringFence: new PassthroughAuthoringMutationFence());
 
             var exception = await Assert.ThrowsAsync<VersionHistoryRestoreException>(
                 () => service.RestoreAsync(
@@ -1109,7 +1111,8 @@ public sealed class ProjectVersionRestoreTests
                 new NoopIngestGraphSync(),
                 new NoopGraphStore(),
                 new NoopGraphAutoLinkService(),
-                new NoopProjectSearchIndex());
+                new NoopProjectSearchIndex(),
+                authoringFence: new PassthroughAuthoringMutationFence());
 
             var exception = await Assert.ThrowsAsync<VersionHistoryRestoreException>(
                 () => service.RestoreAsync(
@@ -1249,7 +1252,8 @@ public sealed class ProjectVersionRestoreTests
                 new NoopIngestGraphSync(),
                 new NoopGraphStore(),
                 new NoopGraphAutoLinkService(),
-                new NoopProjectSearchIndex());
+                new NoopProjectSearchIndex(),
+                authoringFence: new PassthroughAuthoringMutationFence());
             var checkout = new VersionHistoryValidatedProjectCheckout(
                 projectId,
                 artifact,
@@ -1388,7 +1392,8 @@ public sealed class ProjectVersionRestoreTests
                 new NoopIngestGraphSync(),
                 new NoopGraphStore(),
                 new NoopGraphAutoLinkService(),
-                new NoopProjectSearchIndex());
+                new NoopProjectSearchIndex(),
+                authoringFence: new PassthroughAuthoringMutationFence());
             var import = new VersionHistoryValidatedSnapshotImport(
                 artifact,
                 new string('a', 40),
@@ -1642,6 +1647,25 @@ public sealed class ProjectVersionRestoreTests
 
         public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(CreateDbContext());
+    }
+
+    private sealed class PassthroughAuthoringMutationFence : IAuthoringMutationFence
+    {
+        public Guid ProcessIncarnationId { get; } = Guid.NewGuid();
+
+        public ValueTask<IAsyncDisposable> RegisterWriterAsync(
+            AuthoringWriterRegistration registration,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public void UpdateWriterState(AuthoringWriterState state) =>
+            throw new NotSupportedException();
+
+        public Task<T> ExecuteAsync<T>(
+            AuthoringFenceRequest request,
+            Func<AuthoringFenceContext, CancellationToken, Task<T>> consume,
+            CancellationToken cancellationToken = default) =>
+            consume(new AuthoringFenceContext(ProcessIncarnationId, []), cancellationToken);
     }
 
     private sealed class NoopOutlineGraphSync : IOutlineGraphSync

@@ -194,10 +194,12 @@ infer undocumented JSON patches or persist the bounded read projection.
 
 The chapter editor is an exact-pinned ProseMirror bundle built from
 `tools/semantic-editor/package-lock.json`. Its owned schema/adapter converts
-browser transactions to manuscript JSON and crosses
-`IManuscriptService.ReplaceDocumentAsync` with an expected revision. Paste is
-constrained to the owned schema and reports removed content. The DOM, HTML, and
-ProseMirror local-history plugin are not persistence mechanisms.
+browser transactions to ordered `AuthoringBatchProtocolV1` semantic operations.
+It never persists browser JSON, HTML, DOM, or an aggregate document replacement.
+Paste is constrained to the owned schema and reports removed content.
+`prosemirror-history` is exact-pinned only for its `closeHistory` transaction
+boundary marker; its local history plugin is not installed and cannot own
+Undo/Redo.
 
 `ChapterBodyEditor` is shared by Editor and Publish prose sections. It owns the
 component/JavaScript bridge, visible-mode focus, stable selection restoration,
@@ -242,13 +244,18 @@ Visible links inherit the surrounding text color and remain underlined.
 Switching back to Edit refreshes page-setup typography without remounting or
 replacing the manuscript document.
 
-On revision conflict, the service returns the latest persisted document and
-revision. The adapter adopts that authoritative snapshot, refreshes history,
-and continues without a browser/Electron copy or conflict dialog. Out-of-order
-autosaves similarly adopt the authoritative current result and cannot overwrite
-newer state. JavaScript attachment validates that the target element still
-exists, and asynchronous component work rechecks disposal so navigation cannot
-turn stale element references into circuit-ending errors.
+The bridge opens one target-scoped authoring session and serializes batches.
+Visible edits apply locally first; a 500 ms typing window coalesces one action,
+while paste, formatting, and structure changes force a boundary. The editor
+journals only unacknowledged batches and recovery base data in IndexedDB before
+dispatch. Quota or journal-write failure keeps visible edits but marks them not
+locally recoverable, pauses dispatch, and blocks save claims. A target writer
+lease makes another browser window read-only until flush or handoff. Conflicts
+preserve the local variant for the application-owned conflict surface rather
+than silently replacing visible content. JavaScript attachment validates that
+the target element still exists, and asynchronous component work rechecks
+disposal so navigation cannot turn stale element references into circuit-ending
+errors.
 
 For an explicitly authorized local M0.3 baseline only, the editor bridge may
 emit a timestamp-only diagnostic event after the next visible frame for accepted
@@ -363,23 +370,25 @@ target.
 
 ### In-process manual history and Git-backed assistant review
 
-The singleton `IAuthoringHistoryRuntime` owns process-lifetime Undo/Redo for Core
-and release chapters, publication prose sections, complete Designed Page
-aggregates, and Core/release covers. It has no EF or SQLite dependency. Each
-target-isolated stream stores Brotli-fast compressed snapshots, retains at most
-100 manual actions, and participates in a 128 MiB process-wide budget. Navigation
-and page reloads retain streams while Lorekeeper is running; a full process exit
-clears them. This process-lifetime history is never exported; the separate
-version-history system captures selected canonical manuscript/style state in
-deterministic Git snapshots.
+M3 uses the singleton `IAuthoringDeltaHistoryRuntime` as the one process-wide
+owner of current authoring Undo/Redo. Canvas and cover actions are compact
+object/property operations (`setCanvasObjectProperties`, insert, remove, and
+move), never complete scene snapshots. The owning persistence boundary derives
+canonical inverses from its saved pre-state, stages the action before durable
+commit, confirms it only after that commit, and discards it on failure. A
+registered writable workspace reports its sequence, generation, reachability,
+and recoverability to `IAuthoringMutationFence`; a dependent read or mutation
+freezes and flushes it before acquiring the project lease. A dirty workspace
+that cannot be durably recovered remains registered and blocks dependent work.
 
-The owning domain service first commits the live document with its next revision,
-then records the successful manual before/after pair in memory. Undo and Redo
-restore through that same domain boundary and move the in-memory cursor only
-after the live commit succeeds. If the current live snapshot no longer matches
-the cursor, the live document wins: the runtime clears the stale stream, adopts
-the authoritative state, and treats the stale request as a no-op. New manual
-work after Undo deletes the Redo branch.
+There is no parallel snapshot Undo runtime. Each target-isolated delta stream
+retains at most 100 confirmed actions and participates in the 128 MiB
+process-wide budget. Navigation and page reloads retain streams while Lorekeeper
+is running; a full process exit clears them. This process-lifetime history is
+never exported; the separate version-history system captures selected canonical
+manuscript/style state in deterministic Git snapshots. Undo and Redo reserve a
+cursor transition, persist the canonical inverse or forward delta through the
+same domain boundary, and confirm the cursor only after the live commit succeeds.
 
 Adjacent typing and IME activity within 500 ms coalesce into one action. Paste,
 formatting, block conversion, Figure changes, and structural mutations force a
@@ -414,14 +423,15 @@ asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
-### Current M2 and accepted M3-M5 implementation contract
+### Current M2-M3 and accepted M4-M5 implementation contract
 
 The reusable Designed Page identity and placement contract above is current.
 The remaining guidance in this section describes accepted next-version work and
-does not claim M3-M5 are already live. `AuthoringBatchProtocolV1` and
+does not claim M4-M5 are already live. `AuthoringBatchProtocolV1` and
 `AuthoringJournalV1` are the sole manual-edit transport and recovery contracts.
 A batch has an ordered target set, expected version/generation per target,
-session, batch identity/sequence, action label, operations, and selections.
+session, batch identity/sequence, action label, operations, and explicit
+before/after selections.
 Server results carry canonical versions, generation, receipt, and conflict data.
 A cross-container Designed Page move is one multi-target batch and one Undo
 action. The process-wide history owner keeps confirmed deltas only (100 per
@@ -433,11 +443,38 @@ The browser journal holds recoverable unacknowledged batches/base state in
 IndexedDB. The server derives inverses from validated pre-state and inserts its
 session sequence, mutation, and idempotency receipt in one transaction. A
 same-identity/different-hash replay fails closed. Exact-precondition rebasing is
-the only automatic merge: same-element changes, moved anchors, overlapping
-properties, or ordering ambiguity preserve both variants for an
+the only automatic merge: each touched element (including both sides of a
+merge) must retain its fingerprint, and insertion/move preconditions name the
+fingerprinted neighbors at the exact destination after virtual removal.
+Same-element changes, moved anchors, overlapping properties, or ordering
+ambiguity preserve both variants for an
 application-owned conflict surface. State consumers use a mutation fence that
 freezes edits, flushes a captured sequence, takes the project lease, revalidates
-generations, consumes state, then resumes editing.
+generations, consumes state, then resumes editing. The fence shares that
+physical project lease explicitly with nested same-project operations; nested
+cross-project acquisition fails closed. Per-writer freeze/resume transitions
+are serialized: a fence that starts while an earlier resume is pending cannot
+freeze until that resume finishes, so an older resume can never unfreeze a
+newer consumer. Derived chapter, search, link, page,
+and Review Edits projections refresh only after the batch transaction and its
+database operation have released their write resources.
+The browser and server share the canonical request-hash golden vector at
+[`tools/semantic-editor/authoring-batch-hash-v1.json`](../../tools/semantic-editor/authoring-batch-hash-v1.json): it sorts object keys ordinally, preserves array order,
+omits null/request-hash fields, and prefixes the lowercase SHA-256 digest.
+
+An unreachable dirty writer remains registered as a dependent-operation blocker.
+A remount may atomically reattach only when it proves the same target and
+session identity; the fence preserves the retained state until the recovered
+browser journal reports its actual sequence, acknowledgement, reachability, and
+recoverability. A different session remains read-only. Undo/Redo has a distinct
+history-request identity: the browser retries a lost response with that same
+identity, which is also the durable batch/receipt identity; replay does not
+depend on the bounded process history cache. It then reads the process cursor
+before deciding whether to reverse its
+already-visible local delta. If the cursor proves the action applied but its
+canonical response was lost, the browser retains that identity and blocks the
+next local mutation until its idempotent replay refreshes revision, generation,
+fingerprints, confirmed base, and cursor metadata.
 
 The next manuscript schema adds recursive stable identities for tables, rows,
 cells, notes, and inline atoms. `ManuscriptPosition` is the shared UTF-16

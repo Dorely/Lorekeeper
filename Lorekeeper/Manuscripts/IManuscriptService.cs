@@ -2,18 +2,6 @@ namespace Lorekeeper.Manuscripts;
 
 public interface IManuscriptService
 {
-    Task<ManuscriptHistoryMutationResult> UndoAsync(
-        EditorContentTarget target,
-        Guid chapterId,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Manuscript history is unavailable.");
-
-    Task<ManuscriptHistoryMutationResult> RedoAsync(
-        EditorContentTarget target,
-        Guid chapterId,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Manuscript history is unavailable.");
-
     Task<ManuscriptSnapshot?> GetManuscriptAsync(
         EditorContentTarget target,
         Guid chapterId,
