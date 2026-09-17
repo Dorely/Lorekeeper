@@ -88,8 +88,13 @@ worker reclaims pending or interrupted intents through fresh scopes; its
 process-local queue is only a wake-up and never replaces the journal or a
 database migration.
 
-Credential/API-key rows, OAuth token rows, and provider configuration remain
-within the provider persistence boundary. The local database is not an
+Credential/API-key rows, OpenAI account/token rows, and provider configuration
+remain within the provider persistence boundary. `OpenAiAccount` owns OpenAI
+OAuth tokens; account-backed `LlmProvider` rows retain their stable IDs for
+conversation and job selection. The account-ownership migration re-parents the
+legacy root and direct credential-sharing children atomically, preserves token
+rows and duplicate model IDs, and fails closed on ambiguous legacy ownership.
+The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
 unrelated feature entities, project exports, assistant tool payloads, or logs.
@@ -378,7 +383,7 @@ physical jobs are not recovered into the v12 queue.
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v26 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |
 | `Lorekeeper.Tests/ScopedPublicationRenderingMigrationTests.cs` | Combined-physical legacy classification, artifact byte/hash preservation, and unaffected Digital PDF Book-link migration. |
-| `Lorekeeper/Models/OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs` | Credential/configuration persistence; secrets remain in provider-owned rows. |
+| `Lorekeeper/Models/OpenAiAccount.cs`, `OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs` | Credential/configuration persistence; OpenAI tokens are account-owned, while API/search secrets remain in their owning provider rows. |
 | `.gitignore` | Ignored local databases, migration backups, verification databases, temporary output, and repository-root publish artifacts. |
 
 ## Related chapters

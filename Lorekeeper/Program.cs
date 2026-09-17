@@ -166,6 +166,7 @@ builder.Services.AddScoped<IEmbeddingConfigurationService, EmbeddingConfiguratio
 builder.Services.AddScoped<IEmbeddingService, ProviderEmbeddingService>();
 builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
+builder.Services.AddScoped<IOpenAiAccountService, OpenAiAccountService>();
 builder.Services.AddScoped<ISystemPromptComposer, SystemPromptComposer>();
 builder.Services.AddScoped<ICodexAuthService, CodexAuthService>();
 builder.Services.AddHostedService<EmbeddingRebuildWorker>();

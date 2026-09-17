@@ -47,7 +47,7 @@ public sealed class VisionModelClientFactory(
         var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromMinutes(5);
 
-        if (effectiveAuthType == AuthType.OAuth && apiKey is not null && IsJwt(apiKey))
+        if (provider.OpenAiAccountId is not null && apiKey is not null)
         {
             return await ReadCodexImageAsync(
                 httpClient,
@@ -445,9 +445,6 @@ public sealed class VisionModelClientFactory(
 
         return null;
     }
-
-    private static bool IsJwt(string token) =>
-        !token.StartsWith("sk-", StringComparison.Ordinal) && token.Split('.').Length == 3;
 
     private static string Truncate(string? value, int max)
     {

@@ -34,6 +34,7 @@ public interface ILlmProviderService
     /// Follows <see cref="LlmProvider.CredentialSourceId"/> for child model rows.
     /// </summary>
     Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default);
+    Task<string?> GetOpenAiAccountTokenAsync(int accountId, CancellationToken cancellationToken = default);
 }
 
 public sealed record LlmConnectionUpdate(

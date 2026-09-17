@@ -119,7 +119,7 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
         }
         if (provider.CredentialSourceId is not null)
             throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
-        if (!CodexProvider.IsCodex(provider))
+        if (!CodexProvider.IsAccountBacked(provider))
             throw new InvalidOperationException("Automatic Codex embeddings can only be configured for the OpenAI Codex provider.");
 
         var test = await TestAsync(
@@ -205,7 +205,7 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
 
     private static void ValidateProviderApiKind(LlmProvider provider, EmbeddingApiKind apiKind)
     {
-        if (CodexProvider.IsCodex(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
+        if (CodexProvider.IsAccountBacked(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
             throw new InvalidOperationException("OpenAI Codex embeddings only support the OpenAI-compatible embedding API.");
     }
 }

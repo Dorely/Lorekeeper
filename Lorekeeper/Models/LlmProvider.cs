@@ -33,6 +33,13 @@ public class LlmProvider
 
     public AuthType AuthType { get; set; }
     public string? ApiKey { get; set; }
+    public int? OpenAiAccountId { get; set; }
+    public OpenAiAccount? OpenAiAccount { get; set; }
+    public LlmModelOrigin ModelOrigin { get; set; } = LlmModelOrigin.Manual;
+    public AccountModelAvailability AccountAvailability { get; set; } = AccountModelAvailability.Unknown;
+    public DateTime? AccountAvailabilityCheckedAt { get; set; }
+    public string? AccountAvailabilityError { get; set; }
+    public int? DiscoveredContextWindowTokens { get; set; }
     public bool IsDefault { get; set; }
     public bool LastChatTestSucceeded { get; set; }
     public DateTime? LastChatTestedAt { get; set; }
@@ -62,8 +69,6 @@ public class LlmProvider
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-
-    public ICollection<OAuthToken> OAuthTokens { get; set; } = [];
 
     /// <summary>
     /// Returns the provider ID whose credentials should be used (follows CredentialSourceId if set).

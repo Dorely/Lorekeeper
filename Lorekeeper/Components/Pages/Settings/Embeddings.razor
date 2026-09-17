@@ -106,7 +106,7 @@
     private LlmProvider? SelectedConnection =>
         _connections.FirstOrDefault(connection => connection.Id == _providerId);
     private bool SelectedConnectionIsCodex =>
-        SelectedConnection is { } selected && CodexProvider.IsCodex(selected);
+        SelectedConnection is { } selected && CodexProvider.IsAccountBacked(selected);
     private string ModelPlaceholder =>
         SelectedConnectionIsCodex
             ? CodexProvider.DefaultEmbeddingModel
@@ -322,7 +322,7 @@
 
     private static EmbeddingApiKind GuessDefaultApiKind(LlmProvider provider)
     {
-        if (CodexProvider.IsCodex(provider))
+        if (CodexProvider.IsAccountBacked(provider))
             return EmbeddingApiKind.OpenAICompatible;
 
         var endpoint = provider.EndpointUrl.TrimEnd('/');
@@ -335,7 +335,7 @@
     {
         _apiKind = GuessDefaultApiKind(provider);
         if (defaultModelWhenEmpty
-            && CodexProvider.IsCodex(provider)
+            && CodexProvider.IsAccountBacked(provider)
             && string.IsNullOrWhiteSpace(_modelId))
         {
             _modelId = CodexProvider.DefaultEmbeddingModel;
@@ -344,7 +344,7 @@
 
     private void NormalizeSelectedProviderDraft()
     {
-        if (SelectedConnection is { } selected && CodexProvider.IsCodex(selected))
+        if (SelectedConnection is { } selected && CodexProvider.IsAccountBacked(selected))
             ApplyProviderDefaults(selected, defaultModelWhenEmpty: true);
     }
 

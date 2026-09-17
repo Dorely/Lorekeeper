@@ -10,9 +10,9 @@ public static class CodexOAuthEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapCodexOAuth(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/auth/start/{providerId:int}", (int providerId, ICodexAuthService authService) =>
+        endpoints.MapGet("/auth/start/{accountId:int}", (int accountId, ICodexAuthService authService) =>
         {
-            var (url, _) = authService.StartPkceFlow(providerId);
+            var (url, _) = authService.StartPkceFlow(accountId);
             return Results.Redirect(url);
         });
 
@@ -20,6 +20,7 @@ public static class CodexOAuthEndpoints
             string? code,
             string? state,
             ICodexAuthService authService,
+            ILlmProviderService providerService,
             IEmbeddingConfigurationService embeddingConfiguration,
             CancellationToken cancellationToken) =>
         {
@@ -28,9 +29,15 @@ public static class CodexOAuthEndpoints
 
             try
             {
-                var providerId = await authService.HandleCallbackAsync(code, state, cancellationToken);
+                var accountId = await authService.HandleCallbackAsync(code, state, cancellationToken);
                 try
                 {
+                    var accountModels = (await providerService.GetAllAsync(cancellationToken))
+                        .Where(provider => provider.OpenAiAccountId == accountId)
+                        .ToList();
+                    var providerId = accountModels.FirstOrDefault(provider => provider.IsDefault)?.Id
+                        ?? accountModels.FirstOrDefault()?.Id
+                        ?? throw new InvalidOperationException("The connected OpenAI account has no saved model.");
                     var configured = await embeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(providerId, cancellationToken);
                     return configured
                         ? RedirectToProviders($"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}.", "success")

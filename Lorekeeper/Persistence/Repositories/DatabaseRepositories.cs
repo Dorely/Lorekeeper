@@ -15,6 +15,7 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
     public IIngestRepository Ingest { get; } = new IngestRepository(operation);
     public ILlmProviderRepository LlmProviders { get; } = new LlmProviderRepository(operation);
     public IOAuthTokenRepository OAuthTokens { get; } = new OAuthTokenRepository(operation);
+    public IOpenAiAccountRepository OpenAiAccounts { get; } = new OpenAiAccountRepository(operation);
     public IOutlineConversationRepository OutlineConversations { get; } = new OutlineConversationRepository(operation);
     public IProjectImageConversationRepository ProjectImageConversations { get; } = new ProjectImageConversationRepository(operation);
     public IProjectImportRepository ProjectImports { get; } = new ProjectImportRepository(operation);

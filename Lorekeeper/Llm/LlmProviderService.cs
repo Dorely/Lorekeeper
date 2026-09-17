@@ -305,13 +305,13 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
     {
-        var provider = await GetByNameAsync(CodexProvider.Name, cancellationToken);
-        if (provider is null || !CodexProvider.IsCodex(provider))
+        var provider = (await GetAllAsync(cancellationToken)).FirstOrDefault(CodexProvider.IsAccountBacked);
+        if (provider?.OpenAiAccountId is not int accountId)
             return false;
 
         try
         {
-            return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(provider.Id, cancellationToken));
+            return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(accountId, cancellationToken));
         }
         catch
         {
@@ -496,14 +496,17 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
         if (credentialProvider is null) return null;
 
+        if (credentialProvider.OpenAiAccountId is int accountId)
+            return await codexAuth.GetValidTokenAsync(accountId, cancellationToken);
+
         if (credentialProvider.AuthType == AuthType.ApiKey)
             return credentialProvider.ApiKey;
 
-        if (credentialProvider.AuthType == AuthType.OAuth)
-            return await codexAuth.GetValidTokenAsync(credentialProvider.Id, cancellationToken);
-
         return null;
     }
+
+    public Task<string?> GetOpenAiAccountTokenAsync(int accountId, CancellationToken cancellationToken = default) =>
+        codexAuth.GetValidTokenAsync(accountId, cancellationToken);
 
     private async Task<bool> IsChatProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
@@ -573,6 +576,20 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         if (credentialProvider is null)
             return new CredentialStatus(false, "The credential source for this provider no longer exists.");
 
+        if (provider.OpenAiAccountId is int accountId)
+        {
+            try
+            {
+                return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(accountId, cancellationToken))
+                    ? new CredentialStatus(true, string.Empty)
+                    : new CredentialStatus(false, "Connect your OpenAI account in Settings > Providers.");
+            }
+            catch (Exception ex)
+            {
+                return new CredentialStatus(false, $"Reconnect your OpenAI account in Settings > Providers. {ex.Message}");
+            }
+        }
+
         if (credentialProvider.AuthType == AuthType.None)
             return new CredentialStatus(true, string.Empty);
 
@@ -581,20 +598,6 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
             return !string.IsNullOrWhiteSpace(credentialProvider.ApiKey)
                 ? new CredentialStatus(true, string.Empty)
                 : new CredentialStatus(false, "Add an API key and run Test successfully in Settings > Providers.");
-        }
-
-        if (credentialProvider.AuthType == AuthType.OAuth)
-        {
-            try
-            {
-                return !string.IsNullOrWhiteSpace(await codexAuth.GetValidTokenAsync(credentialProvider.Id, cancellationToken))
-                    ? new CredentialStatus(true, string.Empty)
-                    : new CredentialStatus(false, "Connect OpenAI Codex and run Test successfully in Settings > Providers.");
-            }
-            catch (Exception ex)
-            {
-                return new CredentialStatus(false, $"Reconnect OpenAI Codex and run Test successfully in Settings > Providers. {ex.Message}");
-            }
         }
 
         return new CredentialStatus(false, "Provider credentials are not configured.");

@@ -32,7 +32,7 @@ public sealed class EmbeddingClient(
         if (texts.Count == 0) return [];
         if (string.IsNullOrWhiteSpace(modelId))
             throw new InvalidOperationException("Embedding model id is required.");
-        if (CodexProvider.IsCodex(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
+        if (CodexProvider.IsAccountBacked(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
             throw new InvalidOperationException("OpenAI Codex embeddings only support the OpenAI-compatible embedding API.");
 
         return apiKind switch
@@ -83,7 +83,7 @@ public sealed class EmbeddingClient(
         };
 
         var endpointUrl = OpenAICompatibleEmbeddingEndpointUrl(provider);
-        var isCodex = CodexProvider.IsCodex(provider);
+        var isCodex = CodexProvider.IsAccountBacked(provider);
 
         logger.LogDebug(
             "Generating {Count} embedding(s) through OpenAI-compatible API ({Model}) at {Endpoint}",
@@ -123,7 +123,7 @@ public sealed class EmbeddingClient(
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            if (CodexProvider.IsCodex(provider))
+            if (CodexProvider.IsAccountBacked(provider))
             {
                 client.DefaultRequestHeaders.TryAddWithoutValidation("chatgpt-account-id", CodexProvider.ExtractAccountId(apiKey));
                 client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Lorekeeper");
@@ -176,7 +176,7 @@ public sealed class EmbeddingClient(
     }
 
     private static string OpenAICompatibleEmbeddingEndpointUrl(LlmProvider provider) =>
-        CodexProvider.IsCodex(provider)
+        CodexProvider.IsAccountBacked(provider)
             ? CodexProvider.PlatformEmbeddingsEndpoint
             : EmbeddingEndpointUrl(provider.EndpointUrl);
 

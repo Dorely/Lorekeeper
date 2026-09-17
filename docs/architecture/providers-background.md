@@ -58,6 +58,13 @@ chat/vision readiness. A conversation's model selection is a soft provider
 reference: deletion can make a selection unavailable without cascading away the
 transcript.
 
+OpenAI-account credentials are the exception to provider-row ownership:
+`OpenAiAccount` owns the OAuth tokens, while each account-backed `LlmProvider`
+remains the stable selectable model identity. Account-backed rows resolve by
+`OpenAiAccountId`, never by the historical `openai-codex` row name or by guessing
+from token shape. Manual/API-key connection groups continue using
+`CredentialSourceId` and provider-owned keys.
+
 Model discovery uses OpenAI-compatible `GET /models`, the Codex platform models
 endpoint, or Ollama `GET /api/tags`. It degrades to code-owned seeded suggestions
 or manual entry when an endpoint cannot provide a usable catalog. Discovery is
@@ -133,8 +140,9 @@ Codex uses a PKCE OAuth flow with application endpoints at
 an accepted OAuth redirect update. OAuth success may best-effort configure a
 default Codex embedding model when embedding configuration is still unset.
 
-LLM and search API keys are persisted on their provider rows. Codex access and
-refresh tokens are stored in dedicated SQLite rows. This local persistence is not
+LLM and search API keys are persisted on their provider rows. OpenAI-account
+access and refresh tokens are stored in dedicated SQLite rows owned by
+`OpenAiAccount`; model rows never copy them. This local persistence is not
 an operating-system credential vault and does not imply encryption at rest. Never
 log API keys, authorization codes, access tokens, refresh tokens, or sensitive
 provider payloads, and never copy credentials onto unrelated feature entities or

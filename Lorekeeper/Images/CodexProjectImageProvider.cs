@@ -42,7 +42,7 @@ public sealed class CodexProjectImageProvider(
 
         return new ProjectImageProviderResult(
             images,
-            CodexProvider.Name,
+            CodexProvider.AccountProviderKey,
             mainlineModel,
             imageModel,
             JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
@@ -75,7 +75,7 @@ public sealed class CodexProjectImageProvider(
 
         return new ProjectImageProviderResult(
             images,
-            CodexProvider.Name,
+            CodexProvider.AccountProviderKey,
             mainlineModel,
             imageModel,
             JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
@@ -83,11 +83,12 @@ public sealed class CodexProjectImageProvider(
 
     private async Task<CodexImageConnection> ResolveConnectionAsync(CancellationToken cancellationToken)
     {
-        var provider = await providerService.GetByNameAsync(CodexProvider.Name, cancellationToken);
-        if (provider is null || !CodexProvider.IsCodex(provider))
+        var provider = (await providerService.GetAllAsync(cancellationToken))
+            .FirstOrDefault(CodexProvider.IsAccountBacked);
+        if (provider?.OpenAiAccountId is not int accountId)
             throw new InvalidOperationException("No OpenAI Codex OAuth provider is configured. Connect OpenAI Codex in Settings first.");
 
-        var token = await codexAuth.GetValidTokenAsync(provider.Id, cancellationToken);
+        var token = await codexAuth.GetValidTokenAsync(accountId, cancellationToken);
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("Connect OpenAI Codex in Settings before generating images.");
 

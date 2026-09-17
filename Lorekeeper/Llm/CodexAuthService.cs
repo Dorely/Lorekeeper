@@ -32,9 +32,9 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> _providerLocks = new();
     private static readonly ConcurrentDictionary<RejectedRefreshToken, byte> _rejectedRefreshTokens = new();
 
-    private sealed record PkceState(int ProviderId, string CodeVerifier, DateTime CreatedAt);
+    private sealed record PkceState(int AccountId, string CodeVerifier, DateTime CreatedAt);
     private sealed record RejectedRefreshToken(
-        int ProviderId,
+        int AccountId,
         int TokenId,
         DateTime CreatedAt,
         DateTime ExpiresAt,
@@ -42,20 +42,20 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
     {
         public static RejectedRefreshToken From(OAuthToken token) =>
             new(
-                token.ProviderId,
+                token.OpenAiAccountId,
                 token.Id,
                 token.CreatedAt,
                 token.ExpiresAt,
                 Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token.RefreshToken!))));
     }
 
-    public (string AuthorizationUrl, string State) StartPkceFlow(int providerId)
+    public (string AuthorizationUrl, string State) StartPkceFlow(int accountId)
     {
         var codeVerifier = GenerateCodeVerifier();
         var codeChallenge = GenerateCodeChallenge(codeVerifier);
         var state = Guid.NewGuid().ToString("N");
 
-        _pendingFlows[state] = new PkceState(providerId, codeVerifier, DateTime.UtcNow);
+        _pendingFlows[state] = new PkceState(accountId, codeVerifier, DateTime.UtcNow);
 
         var url = $"{AuthEndpoint}?" +
             $"response_type=code&" +
@@ -80,7 +80,7 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
         if (DateTime.UtcNow - pkce.CreatedAt > TimeSpan.FromMinutes(10))
             throw new InvalidOperationException("OAuth flow has expired.");
 
-        var providerLock = _providerLocks.GetOrAdd(pkce.ProviderId, _ => new SemaphoreSlim(1, 1));
+        var providerLock = _providerLocks.GetOrAdd(pkce.AccountId, _ => new SemaphoreSlim(1, 1));
         await providerLock.WaitAsync(cancellationToken);
         try
         {
@@ -107,18 +107,18 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
 
             await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
             var tokens = databaseOperation.Repositories.OAuthTokens;
-            await tokens.ReplaceForProviderAsync(pkce.ProviderId, new OAuthToken
+            await tokens.ReplaceForAccountAsync(pkce.AccountId, new OAuthToken
             {
-                ProviderId = pkce.ProviderId,
+                OpenAiAccountId = pkce.AccountId,
                 AccessToken = accessToken,
                 RefreshToken = refreshToken,
                 ExpiresAt = DateTime.UtcNow.AddSeconds(expiresIn),
                 Scope = scope
             }, cancellationToken);
             await databaseOperation.SaveChangesAsync(cancellationToken);
-            ClearRejectedRefreshTokens(pkce.ProviderId);
+            ClearRejectedRefreshTokens(pkce.AccountId);
 
-            return pkce.ProviderId;
+            return pkce.AccountId;
         }
         finally
         {
@@ -126,16 +126,16 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
         }
     }
 
-    public async Task<string?> GetValidTokenAsync(int providerId, CancellationToken cancellationToken = default)
+    public async Task<string?> GetValidTokenAsync(int accountId, CancellationToken cancellationToken = default)
     {
-        var providerLock = _providerLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
+        var providerLock = _providerLocks.GetOrAdd(accountId, _ => new SemaphoreSlim(1, 1));
         await providerLock.WaitAsync(cancellationToken);
         try
         {
             OAuthToken? token;
             await using (var readOperation = await database.OpenReadAsync(cancellationToken))
             {
-                token = await readOperation.Repositories.OAuthTokens.GetLatestForProviderAsync(providerId, cancellationToken);
+                token = await readOperation.Repositories.OAuthTokens.GetLatestForAccountAsync(accountId, cancellationToken);
             }
             if (token is null)
                 return null;
@@ -145,7 +145,7 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
                 return null;
 
             var rejected = RejectedRefreshToken.From(token);
-            ClearRejectedRefreshTokens(providerId, rejected);
+            ClearRejectedRefreshTokens(accountId, rejected);
             if (_rejectedRefreshTokens.ContainsKey(rejected))
                 return null;
 
@@ -165,18 +165,18 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
         }
     }
 
-    public async Task RevokeTokenAsync(int providerId, CancellationToken cancellationToken = default)
+    public async Task RevokeTokenAsync(int accountId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var tokens = databaseOperation.Repositories.OAuthTokens;
-        var providerLock = _providerLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
+        var providerLock = _providerLocks.GetOrAdd(accountId, _ => new SemaphoreSlim(1, 1));
         await providerLock.WaitAsync(cancellationToken);
         try
         {
-            await tokens.DeleteForProviderAsync(providerId, cancellationToken);
+            await tokens.DeleteForAccountAsync(accountId, cancellationToken);
             await databaseOperation.SaveChangesAsync(cancellationToken);
-            ClearRejectedRefreshTokens(providerId);
+            ClearRejectedRefreshTokens(accountId);
         }
         finally
         {
@@ -204,8 +204,8 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
                     && errorCode is "invalid_grant" or "invalid_token"))
             {
                 logger.LogWarning(
-                    "Codex OAuth refresh was rejected for provider {ProviderId}; reconnect is required. StatusCode={StatusCode}, OAuthError={OAuthError}",
-                    token.ProviderId,
+                    "OpenAI account OAuth refresh was rejected for account {AccountId}; reconnect is required. StatusCode={StatusCode}, OAuthError={OAuthError}",
+                    token.OpenAiAccountId,
                     (int)response.StatusCode,
                     errorCode ?? "unavailable");
                 return null;
@@ -225,7 +225,7 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
 
         var refreshed = new OAuthToken
         {
-            ProviderId = token.ProviderId,
+            OpenAiAccountId = token.OpenAiAccountId,
             AccessToken = json.GetProperty("access_token").GetString()!,
             RefreshToken = refreshToken,
             ExpiresAt = DateTime.UtcNow.AddSeconds(json.GetProperty("expires_in").GetInt32()),
@@ -238,17 +238,17 @@ IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
         };
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         var tokens = databaseOperation.Repositories.OAuthTokens;
-        await tokens.ReplaceForProviderAsync(token.ProviderId, refreshed, cancellationToken);
+        await tokens.ReplaceForAccountAsync(token.OpenAiAccountId, refreshed, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         return refreshed;
     }
 
     private static void ClearRejectedRefreshTokens(
-        int providerId,
+        int accountId,
         RejectedRefreshToken? except = null)
     {
         foreach (var rejected in _rejectedRefreshTokens.Keys.Where(item =>
-            item.ProviderId == providerId && item != except))
+            item.AccountId == accountId && item != except))
         {
             _rejectedRefreshTokens.TryRemove(rejected, out _);
         }

@@ -4,11 +4,11 @@ namespace Lorekeeper.Persistence.Repositories;
 
 public interface IOAuthTokenRepository
 {
-    Task<OAuthToken?> GetLatestForProviderAsync(int providerId, CancellationToken cancellationToken = default);
-    Task<OAuthToken?> GetLatestValidForProviderAsync(int providerId, CancellationToken cancellationToken = default);
+    Task<OAuthToken?> GetLatestForAccountAsync(int accountId, CancellationToken cancellationToken = default);
+    Task<OAuthToken?> GetLatestValidForAccountAsync(int accountId, CancellationToken cancellationToken = default);
 
-    /// <summary>Removes any existing tokens for the provider and adds the new one.</summary>
-    Task ReplaceForProviderAsync(int providerId, OAuthToken newToken, CancellationToken cancellationToken = default);
+    /// <summary>Removes any existing tokens for the account and adds the new one.</summary>
+    Task ReplaceForAccountAsync(int accountId, OAuthToken newToken, CancellationToken cancellationToken = default);
 
-    Task DeleteForProviderAsync(int providerId, CancellationToken cancellationToken = default);
+    Task DeleteForAccountAsync(int accountId, CancellationToken cancellationToken = default);
 }

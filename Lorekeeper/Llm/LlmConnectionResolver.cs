@@ -14,6 +14,13 @@ internal static class LlmConnectionResolver
         LlmProvider provider,
         CancellationToken cancellationToken)
     {
+        if (provider.OpenAiAccountId is not null)
+        {
+            return provider.Id == 0
+                ? (await providerService.GetOpenAiAccountTokenAsync(provider.OpenAiAccountId.Value, cancellationToken), AuthType.OAuth)
+                : (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), AuthType.OAuth);
+        }
+
         if (provider.CredentialSourceId is int sourceId)
         {
             var credentialSource = await providerService.GetByIdAsync(sourceId, cancellationToken)

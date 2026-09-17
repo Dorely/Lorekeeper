@@ -5,6 +5,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @rendermode InteractiveServer
 @inject ILlmProviderService ProviderService
+@inject IOpenAiAccountService OpenAiAccounts
 @inject ICodexAuthService CodexAuth
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
@@ -314,6 +315,7 @@
     private Dictionary<int, bool> _chatReadyStatus = [];
     private Dictionary<int, bool> _visionReadyStatus = [];
     private LlmProvider? _codexProvider;
+    private OpenAiAccount? _openAiAccount;
     private bool _codexConnected;
     private bool _hasWorkingChatProvider;
 
@@ -362,8 +364,10 @@
     ];
 
     private bool AnyTestRunning => _testingProviderId is not null || _isTestingNewProvider || _listingNewProviderModels || _listingRowModelId is not null || _listingChildModelParentId is not null;
-    private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsCodex(provider));
-    private IReadOnlyList<LlmProvider> CodexModels => _codexProvider is null ? [] : ModelsFor(_codexProvider);
+    private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsAccountBacked(provider));
+    private IReadOnlyList<LlmProvider> CodexModels => _openAiAccount is null
+        ? []
+        : _parents.Where(provider => provider.OpenAiAccountId == _openAiAccount.Id).OrderBy(provider => provider.ModelId).ToList();
 
     private bool CanAddNewProvider =>
         !_isTestingNewProvider
@@ -410,6 +414,7 @@
     private async Task ReloadAsync()
     {
         var all = await ProviderService.GetAllAsync();
+        _openAiAccount = (await OpenAiAccounts.GetAllAsync()).FirstOrDefault();
         _parents = all.Where(p => p.CredentialSourceId is null).ToList();
         _children = all
             .Where(p => p.CredentialSourceId is int)
@@ -417,12 +422,12 @@
             .ToDictionary(g => g.Key, g => g.OrderBy(c => c.ModelId).ToList());
 
         _oauthStatus = new Dictionary<int, bool>();
-        foreach (var p in _parents.Where(p => p.AuthType == AuthType.OAuth))
+        foreach (var account in await OpenAiAccounts.GetAllAsync())
         {
             try
             {
-                var token = await CodexAuth.GetValidTokenAsync(p.Id);
-                _oauthStatus[p.Id] = token is not null;
+                var token = await CodexAuth.GetValidTokenAsync(account.Id);
+                _oauthStatus[account.Id] = token is not null;
             }
             catch (OperationCanceledException)
             {
@@ -430,8 +435,8 @@
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Unable to validate OAuth connection {ProviderId}", p.Id);
-                _oauthStatus[p.Id] = false;
+                Logger.LogWarning(ex, "Unable to validate OpenAI account {AccountId}", account.Id);
+                _oauthStatus[account.Id] = false;
                 if (_statusMessage is null)
                 {
                     _statusMessage = "An OAuth connection could not be checked. Retry or reconnect the account.";
@@ -449,9 +454,11 @@
         foreach (var provider in all)
             _visionReadyStatus[provider.Id] = await ProviderService.IsVisionProviderWorkingAsync(provider.Id);
 
-        _codexProvider = _parents.FirstOrDefault(p => p.Name == CodexProvider.Name);
-        _codexConnected = _codexProvider is not null
-            && _oauthStatus.TryGetValue(_codexProvider.Id, out var c) && c;
+        _codexProvider = _openAiAccount is null
+            ? null
+            : _parents.FirstOrDefault(provider => provider.OpenAiAccountId == _openAiAccount.Id);
+        _codexConnected = _openAiAccount is not null
+            && _oauthStatus.TryGetValue(_openAiAccount.Id, out var c) && c;
     }
 
     private async Task CreateProviderAsync()
@@ -739,7 +746,8 @@
             MaxInputTokens = draft.MaxInputTokens,
             MaxTokensField = draft.MaxTokensField,
             AuthType = parent.AuthType,
-            CredentialSourceId = parent.Id
+            OpenAiAccountId = parent.OpenAiAccountId,
+            CredentialSourceId = parent.OpenAiAccountId is null ? parent.Id : null,
         };
 
         try
@@ -773,28 +781,30 @@
 
     private async Task ConnectCodexAsync()
     {
+        var account = _openAiAccount ?? await OpenAiAccounts.CreateAsync();
         var codex = _codexProvider;
         if (codex is null)
         {
             codex = new LlmProvider
             {
-                Name = CodexProvider.Name,
+                Name = CodexProvider.LegacyProviderName,
                 DisplayName = "OpenAI (Codex)",
                 EndpointUrl = CodexProvider.ResponsesEndpoint,
                 ModelId = LlmProviderCatalog.OpenAiDefaultMainlineModel,
                 AuthType = AuthType.OAuth,
+                OpenAiAccountId = account.Id,
                 IsDefault = false
             };
             await ProviderService.CreateAsync(codex);
         }
 
-        Nav.NavigateTo($"/auth/start/{codex.Id}", forceLoad: true);
+        Nav.NavigateTo($"/auth/start/{account.Id}", forceLoad: true);
     }
 
     private async Task DisconnectCodexAsync()
     {
-        if (_codexProvider is null) return;
-        await CodexAuth.RevokeTokenAsync(_codexProvider.Id);
+        if (_openAiAccount is null) return;
+        await CodexAuth.RevokeTokenAsync(_openAiAccount.Id);
         SetStatus("Codex disconnected.", "success");
         await ReloadAsync();
     }

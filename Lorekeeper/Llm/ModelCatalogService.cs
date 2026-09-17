@@ -12,7 +12,7 @@ public sealed class ModelCatalogService(
 {
     public async Task<IReadOnlyList<LlmDiscoveredModel>> ListChatModelsAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
-        var endpoint = CodexProvider.IsCodex(provider)
+        var endpoint = CodexProvider.IsAccountBacked(provider)
             ? CodexProvider.PlatformModelsEndpoint
             : BuildModelsEndpointUrl(provider.EndpointUrl);
         return await QueryModelsAsync(provider, endpoint, ParseOpenAiChatModels, cancellationToken);
@@ -29,7 +29,7 @@ public sealed class ModelCatalogService(
                 cancellationToken);
         }
 
-        var endpoint = CodexProvider.IsCodex(provider)
+        var endpoint = CodexProvider.IsAccountBacked(provider)
             ? CodexProvider.PlatformModelsEndpoint
             : BuildModelsEndpointUrl(provider.EndpointUrl);
         return await QueryModelsAsync(provider, endpoint, ParseOpenAiModelIds, cancellationToken);
@@ -52,7 +52,7 @@ public sealed class ModelCatalogService(
         if (effectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(apiKey))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            if (CodexProvider.IsCodex(provider))
+            if (CodexProvider.IsAccountBacked(provider))
             {
                 request.Headers.TryAddWithoutValidation("chatgpt-account-id", CodexProvider.ExtractAccountId(apiKey));
                 request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");

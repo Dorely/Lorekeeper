@@ -15,6 +15,7 @@ public class AppDbContext(
     private const int _maxLockedSaveAttempts = 6;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
+    public DbSet<OpenAiAccount> OpenAiAccounts => Set<OpenAiAccount>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
@@ -742,6 +743,12 @@ public class AppDbContext(
             entity.Property(e => e.AuthType).HasConversion<string>();
             entity.Property(e => e.ReasoningEffort).HasConversion<string>();
             entity.Property(e => e.MaxTokensField).HasConversion<string>();
+            entity.Property(e => e.ModelOrigin)
+                .HasConversion<string>()
+                .HasDefaultValue(LlmModelOrigin.Manual);
+            entity.Property(e => e.AccountAvailability)
+                .HasConversion<string>()
+                .HasDefaultValue(AccountModelAvailability.Unknown);
             entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
             entity.Property(e => e.LastChatTestReasoningEffort).HasConversion<string>();
             entity.Property(e => e.LastVisionTestAuthType).HasConversion<string>();
@@ -751,6 +758,16 @@ public class AppDbContext(
                 .WithMany(e => e.ChildModels)
                 .HasForeignKey(e => e.CredentialSourceId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.OpenAiAccount)
+                .WithMany(e => e.Models)
+                .HasForeignKey(e => e.OpenAiAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OpenAiAccount>(entity =>
+        {
+            entity.HasIndex(e => e.DisplayName);
         });
 
         modelBuilder.Entity<EmbeddingConfiguration>(entity =>
@@ -774,12 +791,12 @@ public class AppDbContext(
 
         modelBuilder.Entity<OAuthToken>(entity =>
         {
-            entity.HasOne(e => e.Provider)
+            entity.HasOne(e => e.OpenAiAccount)
                 .WithMany(p => p.OAuthTokens)
-                .HasForeignKey(e => e.ProviderId)
+                .HasForeignKey(e => e.OpenAiAccountId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasIndex(e => e.ProviderId);
+            entity.HasIndex(e => e.OpenAiAccountId);
         });
 
         modelBuilder.Entity<GraphNode>(entity =>

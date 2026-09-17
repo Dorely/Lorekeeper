@@ -5,35 +5,35 @@ namespace Lorekeeper.Persistence.Repositories;
 
 public class OAuthTokenRepository(AppDatabaseReadOperation operation) : IOAuthTokenRepository
 {
-    public Task<OAuthToken?> GetLatestForProviderAsync(int providerId, CancellationToken cancellationToken = default) =>
+    public Task<OAuthToken?> GetLatestForAccountAsync(int accountId, CancellationToken cancellationToken = default) =>
         operation.Db.OAuthTokens
             .AsNoTracking()
-            .Where(t => t.ProviderId == providerId)
+            .Where(t => t.OpenAiAccountId == accountId)
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-    public Task<OAuthToken?> GetLatestValidForProviderAsync(int providerId, CancellationToken cancellationToken = default) =>
+    public Task<OAuthToken?> GetLatestValidForAccountAsync(int accountId, CancellationToken cancellationToken = default) =>
         operation.Db.OAuthTokens
             .AsNoTracking()
-            .Where(t => t.ProviderId == providerId && t.ExpiresAt > DateTime.UtcNow)
+            .Where(t => t.OpenAiAccountId == accountId && t.ExpiresAt > DateTime.UtcNow)
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-    public async Task ReplaceForProviderAsync(int providerId, OAuthToken newToken, CancellationToken cancellationToken = default)
+    public async Task ReplaceForAccountAsync(int accountId, OAuthToken newToken, CancellationToken cancellationToken = default)
     {
         var existing = await operation.Db.OAuthTokens
-            .Where(t => t.ProviderId == providerId)
+            .Where(t => t.OpenAiAccountId == accountId)
             .ToListAsync(cancellationToken);
         operation.Db.OAuthTokens.RemoveRange(existing);
 
-        newToken.ProviderId = providerId;
+        newToken.OpenAiAccountId = accountId;
         await operation.Db.OAuthTokens.AddAsync(newToken, cancellationToken);
     }
 
-    public async Task DeleteForProviderAsync(int providerId, CancellationToken cancellationToken = default)
+    public async Task DeleteForAccountAsync(int accountId, CancellationToken cancellationToken = default)
     {
         var existing = await operation.Db.OAuthTokens
-            .Where(t => t.ProviderId == providerId)
+            .Where(t => t.OpenAiAccountId == accountId)
             .ToListAsync(cancellationToken);
         operation.Db.OAuthTokens.RemoveRange(existing);
     }

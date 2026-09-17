@@ -67,8 +67,7 @@ public class ChatClientFactory(
 
     private IChatClient CreateChatClient(LlmProvider provider, string? apiKey, AuthType effectiveAuthType)
     {
-        // OAuth tokens are JWTs (3 dot-separated parts) → route to Codex Responses API.
-        if (effectiveAuthType == AuthType.OAuth && apiKey is not null && IsJwt(apiKey))
+        if (provider.OpenAiAccountId is not null && apiKey is not null)
         {
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
@@ -187,6 +186,4 @@ public class ChatClientFactory(
         };
     }
 
-    private static bool IsJwt(string token) =>
-        !token.StartsWith("sk-") && token.Split('.').Length == 3;
 }
