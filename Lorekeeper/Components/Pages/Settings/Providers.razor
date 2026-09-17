@@ -6,6 +6,7 @@
 @rendermode InteractiveServer
 @inject ILlmProviderService ProviderService
 @inject IOpenAiAccountService OpenAiAccounts
+@inject IOpenAiAccountModelCatalogService OpenAiCatalog
 @inject ICodexAuthService CodexAuth
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
@@ -26,8 +27,8 @@
     }
 
     <section class="provider-overview" aria-label="Provider readiness">
-        <div><span class="lk-section-kicker">Connections</span><strong>@_parents.Count</strong><small>credential sources</small></div>
-        <div><span class="lk-section-kicker">Chat ready</span><strong>@_chatReadyStatus.Count(item => item.Value)</strong><small>verified models</small></div>
+        <div><span class="lk-section-kicker">Connections</span><strong>@(OtherParents.Count() + (_openAiAccount is null ? 0 : 1))</strong><small>credential sources</small></div>
+        <div><span class="lk-section-kicker">Chat ready</span><strong>@_chatReadyStatus.Count(item => item.Value)</strong><small>usable models</small></div>
         <div><span class="lk-section-kicker">Vision ready</span><strong>@_visionReadyStatus.Count(item => item.Value)</strong><small>image-capable models</small></div>
         <div class="provider-overview-action">
             <button type="button" class="btn btn-primary" @onclick="ToggleAddConnection">@(_addingConnection ? "Close form" : "Add connection")</button>
@@ -36,7 +37,7 @@
 
     @if (!_hasWorkingChatProvider)
     {
-        <div class="alert alert-warning"><strong>LLM features are not ready.</strong> Connect a provider and pass a Chat test to enable them.</div>
+        <div class="alert alert-warning"><strong>LLM features are not ready.</strong> Connect an OpenAI account, or add and verify a manual provider.</div>
     }
 
     @if (_addingConnection)
@@ -139,12 +140,13 @@
             <header class="connection-header">
                 <div class="connection-identity">
                     <span class="connection-mark">AI</span>
-                    <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI Codex</h2><p>Use your OpenAI account without managing an API key.</p></div>
+                    <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI account</h2><p>Use the bundled model catalog without managing an API key or running manual model tests.</p></div>
                 </div>
                 <div class="connection-actions">
                     @if (_codexConnected)
                     {
                         <span class="lk-status-pill is-success">Connected</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_refreshingOpenAiCatalog" @onclick="RefreshOpenAiCatalogAsync">@(_refreshingOpenAiCatalog ? "Refreshing…" : "Refresh models")</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
                     }
                     else
@@ -154,6 +156,10 @@
                     }
                 </div>
             </header>
+            @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastCatalogRefreshError))
+            {
+                <div class="alert alert-warning">@_openAiAccount.LastCatalogRefreshError</div>
+            }
             @if (_codexProvider is not null)
             {
                 <div class="model-list">
@@ -162,12 +168,15 @@
                         <div class="model-row">
                             <div class="model-row-main">
                                 <div class="model-fields">
-                                    <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
+                                    <label><span>Display name · @(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog" : "Manual")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" /></label>
                                     <label>
                                         <span>Model ID</span>
                                         <div class="model-id-field">
-                                            <input class="form-control form-control-sm" @bind="model.ModelId" />
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                            <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" />
+                                            @if (model.ModelOrigin == LlmModelOrigin.Manual)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                            }
                                         </div>
                                         @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
                                         {
@@ -184,13 +193,13 @@
                                     <label>
                                         <span>Thinking effort</span>
                                         <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
-                                            <option value="">Provider default</option>
-                                            @foreach (var choice in ReasoningEffortChoices)
+                                            <option value="">@ReasoningDefaultLabel(model)</option>
+                                            @foreach (var choice in ReasoningChoicesFor(model))
                                             {
                                                 <option value="@choice.Value">@choice.Label</option>
                                             }
                                         </select>
-                                        <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
+                                        <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Only efforts supported by this catalog model are offered." : "Higher levels use more time and tokens; model support varies.")</small>
                                     </label>
                                     @RenderMaxTokenControls(model)
                                 </div>
@@ -199,9 +208,12 @@
                                     @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
                                     <div class="model-actions">
                                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                        <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
+                                        @if (model.ModelOrigin == LlmModelOrigin.Manual)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
+                                        }
                                         @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
-                                        @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
+                                        @if (model.ModelOrigin == LlmModelOrigin.Manual){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
                                     </div>
                                 </div>
                             </div>
@@ -209,7 +221,7 @@
                         </div>
                     }
                 </div>
-                <div class="connection-footer"><button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(_codexProvider.Id)">Add model</button></div>
+                <div class="connection-footer"><button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(_codexProvider.Id)">Advanced: add manual model</button></div>
                 @RenderChildForm(_codexProvider)
             }
         </article>
@@ -317,6 +329,7 @@
     private LlmProvider? _codexProvider;
     private OpenAiAccount? _openAiAccount;
     private bool _codexConnected;
+    private bool _refreshingOpenAiCatalog;
     private bool _hasWorkingChatProvider;
 
     private readonly Dictionary<int, ChildDraft> _childForms = [];
@@ -367,7 +380,14 @@
     private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsAccountBacked(provider));
     private IReadOnlyList<LlmProvider> CodexModels => _openAiAccount is null
         ? []
-        : _parents.Where(provider => provider.OpenAiAccountId == _openAiAccount.Id).OrderBy(provider => provider.ModelId).ToList();
+        : _parents
+            .Where(provider => provider.OpenAiAccountId == _openAiAccount.Id)
+            .OrderByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+                && OpenAiAccountModelCatalog.Find(provider.ModelId)?.IsPreferred == true)
+            .ThenByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+            .ThenBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(provider => provider.Id)
+            .ToList();
 
     private bool CanAddNewProvider =>
         !_isTestingNewProvider
@@ -413,8 +433,20 @@
 
     private async Task ReloadAsync()
     {
-        var all = await ProviderService.GetAllAsync();
         _openAiAccount = (await OpenAiAccounts.GetAllAsync()).FirstOrDefault();
+        if (_openAiAccount is not null)
+        {
+            try
+            {
+                await OpenAiCatalog.EnsureCatalogAsync(_openAiAccount.Id);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Unable to reconcile OpenAI catalog {AccountId}", _openAiAccount.Id);
+                SetStatus($"OpenAI catalog setup failed: {ex.Message}", "danger");
+            }
+        }
+        var all = await ProviderService.GetAllAsync();
         _parents = all.Where(p => p.CredentialSourceId is null).ToList();
         _children = all
             .Where(p => p.CredentialSourceId is int)
@@ -454,9 +486,7 @@
         foreach (var provider in all)
             _visionReadyStatus[provider.Id] = await ProviderService.IsVisionProviderWorkingAsync(provider.Id);
 
-        _codexProvider = _openAiAccount is null
-            ? null
-            : _parents.FirstOrDefault(provider => provider.OpenAiAccountId == _openAiAccount.Id);
+        _codexProvider = CodexModels.FirstOrDefault();
         _codexConnected = _openAiAccount is not null
             && _oauthStatus.TryGetValue(_openAiAccount.Id, out var c) && c;
     }
@@ -782,23 +812,32 @@
     private async Task ConnectCodexAsync()
     {
         var account = _openAiAccount ?? await OpenAiAccounts.CreateAsync();
-        var codex = _codexProvider;
-        if (codex is null)
-        {
-            codex = new LlmProvider
-            {
-                Name = CodexProvider.LegacyProviderName,
-                DisplayName = "OpenAI (Codex)",
-                EndpointUrl = CodexProvider.ResponsesEndpoint,
-                ModelId = LlmProviderCatalog.OpenAiDefaultMainlineModel,
-                AuthType = AuthType.OAuth,
-                OpenAiAccountId = account.Id,
-                IsDefault = false
-            };
-            await ProviderService.CreateAsync(codex);
-        }
+        await OpenAiCatalog.EnsureCatalogAsync(account.Id);
 
         Nav.NavigateTo($"/auth/start/{account.Id}", forceLoad: true);
+    }
+
+    private async Task RefreshOpenAiCatalogAsync()
+    {
+        if (_openAiAccount is null)
+            return;
+
+        _refreshingOpenAiCatalog = true;
+        try
+        {
+            var result = await OpenAiCatalog.RefreshAvailabilityAsync(_openAiAccount.Id);
+            SetStatus(result.Message, result.Succeeded ? "success" : "warning");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to refresh OpenAI catalog {AccountId}", _openAiAccount.Id);
+            SetStatus("Model availability could not be refreshed. Retry after checking the account connection.", "warning");
+        }
+        finally
+        {
+            _refreshingOpenAiCatalog = false;
+            await ReloadAsync();
+        }
     }
 
     private async Task DisconnectCodexAsync()
@@ -813,25 +852,40 @@
 
 
     private bool IsChatReady(LlmProvider provider) =>
-        provider.HasCurrentChatTestSnapshot
+        (provider.ModelOrigin == LlmModelOrigin.BundledCatalog || provider.HasCurrentChatTestSnapshot)
         && _chatReadyStatus.TryGetValue(provider.Id, out var ready)
         && ready;
 
     private bool IsVisionReady(LlmProvider provider) =>
-        provider.HasCurrentVisionTestSnapshot
+        (provider.ModelOrigin == LlmModelOrigin.BundledCatalog || provider.HasCurrentVisionTestSnapshot)
         && _visionReadyStatus.TryGetValue(provider.Id, out var ready)
         && ready;
 
     private string DefaultButtonTitle(LlmProvider provider) =>
         IsChatReady(provider)
             ? "Set as the default chat provider"
-            : "Run Test successfully before setting this provider as default.";
+            : provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+                ? "Connect the account and refresh availability before setting this model as default."
+                : "Run Test successfully before setting this provider as default.";
 
     private RenderFragment RenderChatStatus(LlmProvider provider) => __builder =>
     {
         if (IsChatReady(provider))
         {
             <span class="lk-status-pill is-success" title="This model is ready for LLM chat features.">Ready</span>
+            return;
+        }
+
+        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+        {
+            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
+            {
+                <span class="lk-status-pill is-danger" title="Refresh model availability or choose another model.">Unavailable</span>
+            }
+            else
+            {
+                <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
+            }
             return;
         }
 
@@ -855,6 +909,19 @@
         if (IsVisionReady(provider))
         {
             <span class="lk-status-pill is-success" title="This model is ready for image-reading and PDF ingestion.">Ready</span>
+            return;
+        }
+
+        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+        {
+            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
+            {
+                <span class="lk-status-pill is-danger" title="Refresh model availability or choose another model.">Unavailable</span>
+            }
+            else
+            {
+                <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
+            }
             return;
         }
 
@@ -890,8 +957,8 @@
         </label>
         <label>
             <span>Max input tokens</span>
-            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="model.MaxInputTokens" />
-            <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog default (272,000)" : "Auto (model/default)")" @bind="model.MaxInputTokens" />
+            <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Blank uses the catalog's 272,000-token usable input budget; advertised context is tracked separately." : "Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.")</small>
         </label>
         <label>
             <span>Max tokens field</span>
@@ -970,6 +1037,19 @@
 
     private string? ModelReadinessDetail(LlmProvider provider)
     {
+        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+        {
+            if (!string.IsNullOrWhiteSpace(provider.AccountAvailabilityError))
+                return provider.AccountAvailabilityError;
+            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
+                return "This model was not advertised for the connected account. Retry availability or choose another saved model.";
+
+            var advertised = provider.DiscoveredContextWindowTokens is int advertisedTokens
+                ? $" Advertised context: {advertisedTokens:N0} tokens."
+                : string.Empty;
+            return $"Catalog v{OpenAiAccountModelCatalog.SchemaVersion}; usable input budget {provider.EffectiveMaxInputTokens:N0} tokens.{advertised}";
+        }
+
         if (!string.IsNullOrWhiteSpace(provider.LastChatTestError) && !IsChatReady(provider))
             return $"Chat: {provider.LastChatTestError}";
         if (!string.IsNullOrWhiteSpace(provider.LastVisionTestError) && !IsVisionReady(provider))
@@ -981,6 +1061,31 @@
         }
         return null;
     }
+
+    private static IEnumerable<(LlmReasoningEffort Value, string Label)> ReasoningChoicesFor(LlmProvider provider)
+    {
+        var supported = provider.ResolvedMetadata?.SupportedEfforts;
+        return provider.ModelOrigin == LlmModelOrigin.BundledCatalog && supported is { Count: > 0 }
+            ? ReasoningEffortChoices.Where(choice => supported.Contains(choice.Value))
+            : ReasoningEffortChoices;
+    }
+
+    private static string ReasoningDefaultLabel(LlmProvider provider)
+    {
+        var entry = provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+            ? OpenAiAccountModelCatalog.Find(provider.ModelId)
+            : null;
+        return entry is null
+            ? "Provider default"
+            : $"Catalog default ({ReasoningLabel(entry.DefaultEffort)})";
+    }
+
+    private static string ReasoningLabel(LlmReasoningEffort effort) => effort switch
+    {
+        LlmReasoningEffort.ExtraHigh => "Extra high",
+        LlmReasoningEffort.Maximum => "Maximum",
+        _ => effort.ToString(),
+    };
 
     private static string ConnectionInitial(LlmProvider connection) =>
         (connection.DisplayName ?? connection.Name).Trim().FirstOrDefault().ToString().ToUpperInvariant();

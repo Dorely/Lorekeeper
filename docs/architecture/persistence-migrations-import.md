@@ -94,6 +94,10 @@ OAuth tokens; account-backed `LlmProvider` rows retain their stable IDs for
 conversation and job selection. The account-ownership migration re-parents the
 legacy root and direct credential-sharing children atomically, preserves token
 rows and duplicate model IDs, and fails closed on ambiguous legacy ownership.
+Account-backed model rows persist catalog/manual origin, entitlement state,
+availability check time/error, and last-known advertised context. Bundled effort,
+capability, and usable-budget metadata remains versioned code-owned catalog data,
+so discovery cannot silently rewrite the compaction contract.
 The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
@@ -383,7 +387,7 @@ physical jobs are not recovered into the v12 queue.
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v26 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |
 | `Lorekeeper.Tests/ScopedPublicationRenderingMigrationTests.cs` | Combined-physical legacy classification, artifact byte/hash preservation, and unaffected Digital PDF Book-link migration. |
-| `Lorekeeper/Models/OpenAiAccount.cs`, `OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs` | Credential/configuration persistence; OpenAI tokens are account-owned, while API/search secrets remain in their owning provider rows. |
+| `Lorekeeper/Models/OpenAiAccount.cs`, `OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs`, `Lorekeeper/Llm/OpenAiAccountModelCatalog.cs` | Credential/configuration persistence and the versioned account-model authority; OpenAI tokens are account-owned, while API/search secrets remain in their owning provider rows. |
 | `.gitignore` | Ignored local databases, migration backups, verification databases, temporary output, and repository-root publish artifacts. |
 
 ## Related chapters

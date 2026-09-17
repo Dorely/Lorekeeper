@@ -65,10 +65,24 @@ remains the stable selectable model identity. Account-backed rows resolve by
 from token shape. Manual/API-key connection groups continue using
 `CredentialSourceId` and provider-owned keys.
 
+`OpenAiAccountModelCatalog` is the versioned metadata authority for bundled
+account models. Schema version 1 was validated on 2026-09-16 against the
+[official Codex model catalog](https://learn.chatgpt.com/docs/models) and contains
+only `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Sol is
+preferred. Defaults are Astra/Medium, Sol/Low, Terra/Medium, and Luna/Medium;
+each permits Low, Medium, High, Extra high, and Maximum and declares text plus
+image input. Catalog rows retain nullable explicit effort and input-budget
+overrides; runtime resolution supplies catalog defaults only when an override is
+absent. Unsupported saved effort values fail closed.
+
 Model discovery uses OpenAI-compatible `GET /models`, the Codex platform models
-endpoint, or Ollama `GET /api/tags`. It degrades to code-owned seeded suggestions
-or manual entry when an endpoint cannot provide a usable catalog. Discovery is
-advisory and never invents a successful connection state.
+endpoint, or Ollama `GET /api/tags`. For an OpenAI account, the authorized
+`/v1/models` response is only an entitlement/availability signal: it may update
+availability and last-known advertised context, but never replaces bundled
+efforts, capabilities, or usable budgets. Failure preserves bundled and
+last-known rows, records a sanitized Retry message, and leaves never-observed
+availability unknown. Generic connections still degrade to code-owned seeded
+suggestions or manual entry when discovery is unavailable.
 
 Provider verification performs a protocol-safe chat probe without a constrained
 output budget and, after chat succeeds, a non-blocking vision probe. Saving is
@@ -79,22 +93,28 @@ Direct OpenAI presets and OpenAI-account chat, vision, and image-mainline
 fallbacks use `gpt-5.6-sol` as the code-owned default; existing persisted model
 selections remain authoritative until the user changes them.
 
+Bundled account rows need valid account credentials and must not be explicitly
+unavailable, but they do not require a manual chat or vision Test. Manual account
+rows retain the explicit Test workflow under Advanced configuration. A new,
+empty account receives the stable four and makes Sol the global default only
+when no default already exists. An unavailable explicit global or conversation
+selection remains selected and returns an actionable error; it is never replaced
+with another usable model.
+
 ### Input-context budgets
 
 Each chat model row carries an optional `MaxInputTokens` advisory input-context
-budget used only for assistant context compaction decisions and panel token
-projection; it never changes the wire request. Resolution prefers an explicit
-row value, then a matching `ChatTokens:ModelMaxInputTokens` configuration entry,
-then `ChatTokens:DefaultMaxInputTokens`. Chat-model discovery also reads
-provider-advertised context metadata (`context_length` / `context_window`) from
-catalog responses; selecting a discovered model prefills the row value when it
-is not already set, and a manually entered value always wins over harvested
-metadata. The budget is captured in each turn's model snapshot so an active turn
-keeps one stable limit even if settings change mid-turn.
-The shipped configuration assigns the OpenAI account path's effective 272,000-
-token window to `gpt-5.4`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and
-`gpt-5.6-luna`; unknown models retain the general 200,000-token fallback unless
-a row or deployment override supplies a different value.
+override used only for assistant context compaction decisions and panel token
+projection; it never changes the wire request. Bundled account models resolve an
+absent override to the catalog's 272,000-token usable input budget. Their
+provider-advertised context (`DiscoveredContextWindowTokens`) is separate,
+nullable last-known metadata and is never used for compaction. Other connections
+resolve an absent row value through `ChatTokens:ModelMaxInputTokens`, then
+`ChatTokens:DefaultMaxInputTokens`; their interactive discovery picker may still
+prefill the editable row value. The resolved budget and catalog metadata are
+captured in each turn's model snapshot so a running turn remains stable if
+Settings changes. Unknown manual models retain the general 200,000-token fallback
+unless a row or deployment override supplies a different value.
 
 ### Chat and vision wire compatibility
 
@@ -135,7 +155,7 @@ preserved and restored on the correlated assistant/tool-result request.
 ### OAuth and credential security
 
 Codex uses a PKCE OAuth flow with application endpoints at
-`/auth/start/{providerId}` and `/auth/callback`. The configured redirect is
+`/auth/start/{accountId}` and `/auth/callback`. The configured redirect is
 `http://localhost:1455/auth/callback`, so changing the desktop/HTTP port requires
 an accepted OAuth redirect update. OAuth success may best-effort configure a
 default Codex embedding model when embedding configuration is still unset.
@@ -148,7 +168,7 @@ log API keys, authorization codes, access tokens, refresh tokens, or sensitive
 provider payloads, and never copy credentials onto unrelated feature entities or
 assistant tool payloads.
 
-Refresh, callback replacement, and revoke operations are serialized per provider
+Refresh, callback replacement, and revoke operations are serialized per account
 for the whole application process and start from a fresh persisted-token read. A
 token endpoint `401`, `invalid_grant`, or `invalid_token` response marks that exact
 persisted token unusable in memory and presents the connection as disconnected;

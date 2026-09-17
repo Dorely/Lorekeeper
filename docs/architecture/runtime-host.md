@@ -54,6 +54,8 @@ OAuth and media endpoints, installs the startup gate, and creates the desktop
 window. Keep provider-specific transport behavior behind provider-neutral
 contracts and keep feature behavior in injected services; the composition root
 should wire those owners rather than reproduce their logic.
+The scoped OpenAI account-catalog reconciler is one such owner: Settings and the
+authorization boundary invoke it, while the host only registers the contract.
 
 Razor pages and components own interaction and presentation state. Domain services
 own validation, persistence, graph/index maintenance, provider resolution, image

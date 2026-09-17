@@ -343,7 +343,7 @@ its planned features are not claims about current capabilities.
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
-- Configurable Codex/OpenAI-compatible chat and embedding providers — with GPT-5.6 Sol as the OpenAI default, explicit context budgets for `gpt-5.4`, `gpt-5.5`, and the GPT-5.6 Sol/Terra/Luna tiers, provider presets, model discovery, combined chat+vision verification, per-model reasoning effort, output-token budget, and endpoint-aware wire compatibility — configurable web search, and local SQLite persistence.
+- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a versioned stable catalog for Astra, Sol, Terra, and Luna; Sol is preferred, catalog models are ready without manual Test when credentials and entitlement permit, and the 272,000-token usable input budget stays separate from advertised context. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Credentials and configuration remain in local SQLite.
 
 ## Version history and optional synchronization
 

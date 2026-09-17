@@ -11,25 +11,25 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var providers = databaseOperation.Repositories.LlmProviders;
-        return await providers.GetAllAsync(cancellationToken);
+        return Resolve(await providers.GetAllAsync(cancellationToken));
     }
     public async Task<LlmProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var providers = databaseOperation.Repositories.LlmProviders;
-        return await providers.GetByIdAsync(id, cancellationToken);
+        return Resolve(await providers.GetByIdAsync(id, cancellationToken));
     }
     public async Task<LlmProvider?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var providers = databaseOperation.Repositories.LlmProviders;
-        return await providers.GetByNameAsync(name, cancellationToken);
+        return Resolve(await providers.GetByNameAsync(name, cancellationToken));
     }
     public async Task<LlmProvider?> GetDefaultAsync(CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var providers = databaseOperation.Repositories.LlmProviders;
-        return await providers.GetDefaultAsync(cancellationToken);
+        return Resolve(await providers.GetDefaultAsync(cancellationToken));
     }
     public async Task<ChatProviderAvailability> GetDefaultChatProviderAvailabilityAsync(CancellationToken cancellationToken = default)
     {
@@ -44,16 +44,23 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
             return VisionProviderAvailability.Unavailable("Configure and test a vision-capable provider in Settings > Providers to enable PDF image reading.");
 
         var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
-        if (explicitDefault is not null && await IsVisionProviderWorkingAsync(explicitDefault, cancellationToken))
-            return VisionProviderAvailability.Available(explicitDefault);
+        if (explicitDefault is not null)
+        {
+            if (await IsVisionProviderWorkingAsync(explicitDefault, cancellationToken))
+                return VisionProviderAvailability.Available(explicitDefault);
 
-        foreach (var provider in all.Where(provider => !provider.IsDefault))
+            return VisionProviderAvailability.Unavailable(
+                await GetVisionUnavailableReasonAsync(explicitDefault, cancellationToken),
+                explicitDefault);
+        }
+
+        foreach (var provider in all)
         {
             if (await IsVisionProviderWorkingAsync(provider, cancellationToken))
                 return VisionProviderAvailability.Available(provider);
         }
 
-        var candidate = explicitDefault ?? all.FirstOrDefault();
+        var candidate = all.FirstOrDefault();
         var reason = candidate is null
             ? "Configure and test a vision-capable provider in Settings > Providers to enable PDF image reading."
             : await GetVisionUnavailableReasonAsync(candidate, cancellationToken);
@@ -215,16 +222,23 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
             return ChatProviderAvailability.Unavailable("Configure and test a chat provider in Settings > Providers to enable LLM features.");
 
         var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
-        if (explicitDefault is not null && await IsChatProviderWorkingAsync(explicitDefault, cancellationToken))
-            return ChatProviderAvailability.Available(explicitDefault);
+        if (explicitDefault is not null)
+        {
+            if (await IsChatProviderWorkingAsync(explicitDefault, cancellationToken))
+                return ChatProviderAvailability.Available(explicitDefault);
 
-        foreach (var provider in all.Where(provider => !provider.IsDefault))
+            return ChatProviderAvailability.Unavailable(
+                await GetUnavailableReasonAsync(explicitDefault, cancellationToken),
+                explicitDefault);
+        }
+
+        foreach (var provider in all)
         {
             if (await IsChatProviderWorkingAsync(provider, cancellationToken))
                 return ChatProviderAvailability.Available(provider);
         }
 
-        var candidate = explicitDefault ?? all.FirstOrDefault();
+        var candidate = all.FirstOrDefault();
         var reason = candidate is null
             ? "Configure and test a chat provider in Settings > Providers to enable LLM features."
             : await GetUnavailableReasonAsync(candidate, cancellationToken);
@@ -235,10 +249,14 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         LlmProvider provider,
         IReadOnlyList<LlmProvider> all)
     {
-        var connection = provider.CredentialSourceId is int sourceId
+        var connection = provider.OpenAiAccountId is not null
+            ? provider
+            : provider.CredentialSourceId is int sourceId
             ? all.FirstOrDefault(candidate => candidate.Id == sourceId) ?? provider
             : provider;
-        var connectionLabel = BuildConnectionLabel(connection);
+        var connectionLabel = provider.OpenAiAccountId is not null
+            ? "OpenAI account"
+            : BuildConnectionLabel(connection);
         var modelLabel = BuildModelLabel(provider);
         return new ChatModelLabels(connectionLabel, modelLabel, $"{connectionLabel} · {modelLabel}");
     }
@@ -259,7 +277,9 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         // display name is the connection name rather than a distinct model
         // label. Use the actual model ID for that row to avoid repeating the
         // optgroup label; child rows retain their model display names.
-        var displayName = provider.CredentialSourceId is null
+        var displayName = provider.OpenAiAccountId is not null
+            ? FirstNonEmpty(provider.DisplayName, provider.ModelId, "Model")
+            : provider.CredentialSourceId is null
             ? FirstNonEmpty(null, provider.ModelId, "Model")
             : FirstNonEmpty(provider.DisplayName, provider.ModelId, "Model");
         var modelId = provider.ModelId?.Trim();
@@ -321,6 +341,7 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     public async Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        ValidateProvider(provider);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var providers = databaseOperation.Repositories.LlmProviders;
@@ -328,18 +349,19 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         provider.UpdatedAt = DateTime.UtcNow;
         await providers.AddAsync(provider, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        return provider;
+        return Resolve(provider)!;
     }
 
     public async Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        ValidateProvider(provider);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var providers = databaseOperation.Repositories.LlmProviders;
         provider.UpdatedAt = DateTime.UtcNow;
         providers.Update(provider);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        return provider;
+        return Resolve(provider)!;
     }
 
     public async Task UpdateConnectionAsync(LlmConnectionUpdate update, CancellationToken cancellationToken = default)
@@ -510,8 +532,22 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     private async Task<bool> IsChatProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (!provider.HasCurrentChatTestSnapshot)
+        if (IsBundledAccountModel(provider))
+        {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _)
+                || provider.AccountAvailability == AccountModelAvailability.Unavailable)
+            {
+                return false;
+            }
+
+            var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
+            if (!metadata.Capabilities.HasFlag(LlmModelCapabilities.TextInput))
+                return false;
+        }
+        else if (!provider.HasCurrentChatTestSnapshot)
+        {
             return false;
+        }
 
         var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
         return credentials.Available;
@@ -519,8 +555,22 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     private async Task<bool> IsVisionProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (!provider.HasCurrentVisionTestSnapshot)
+        if (IsBundledAccountModel(provider))
+        {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _)
+                || provider.AccountAvailability == AccountModelAvailability.Unavailable)
+            {
+                return false;
+            }
+
+            var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
+            if (!metadata.Capabilities.HasFlag(LlmModelCapabilities.ImageInput))
+                return false;
+        }
+        else if (!provider.HasCurrentVisionTestSnapshot)
+        {
             return false;
+        }
 
         var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
         return credentials.Available;
@@ -528,6 +578,17 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     private async Task<string> GetUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
+        if (IsBundledAccountModel(provider))
+        {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
+                return effortError!;
+            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
+                return "The selected model is not available to this OpenAI account. Refresh model availability or choose another saved model.";
+
+            var catalogCredentials = await GetCredentialStatusAsync(provider, cancellationToken);
+            return catalogCredentials.Available ? string.Empty : catalogCredentials.Message;
+        }
+
         if (!provider.LastChatTestSucceeded)
         {
             return string.IsNullOrWhiteSpace(provider.LastChatTestError)
@@ -546,6 +607,17 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     private async Task<string> GetVisionUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
+        if (IsBundledAccountModel(provider))
+        {
+            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
+                return effortError!;
+            if (provider.AccountAvailability == AccountModelAvailability.Unavailable)
+                return "The selected model is not available to this OpenAI account. Refresh model availability or choose another saved model.";
+
+            var catalogCredentials = await GetCredentialStatusAsync(provider, cancellationToken);
+            return catalogCredentials.Available ? string.Empty : catalogCredentials.Message;
+        }
+
         if (!provider.LastVisionTestSucceeded)
         {
             return string.IsNullOrWhiteSpace(provider.LastVisionTestError)
@@ -628,6 +700,36 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         target.ApiKey = source.ApiKey;
         target.IsDefault = source.IsDefault;
         target.CredentialSourceId = source.CredentialSourceId;
+    }
+
+    private static bool IsBundledAccountModel(LlmProvider provider) =>
+        provider.OpenAiAccountId is not null
+        && provider.ModelOrigin == LlmModelOrigin.BundledCatalog;
+
+    private static void ValidateProvider(LlmProvider provider)
+    {
+        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+            && provider.OpenAiAccountId is null)
+        {
+            throw new InvalidOperationException("Bundled catalog models must belong to an OpenAI account.");
+        }
+
+        if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var error))
+            throw new InvalidOperationException(error);
+    }
+
+    private static List<LlmProvider> Resolve(List<LlmProvider> providers)
+    {
+        foreach (var provider in providers)
+            provider.ResolvedMetadata = OpenAiAccountModelCatalog.Resolve(provider);
+        return providers;
+    }
+
+    private static LlmProvider? Resolve(LlmProvider? provider)
+    {
+        if (provider is not null)
+            provider.ResolvedMetadata = OpenAiAccountModelCatalog.Resolve(provider);
+        return provider;
     }
 
     private sealed record CredentialStatus(bool Available, string Message);

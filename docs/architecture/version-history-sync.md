@@ -134,7 +134,7 @@ The captured canonical areas are:
   identifier and cover-submission modes, and cover spine direction.
 
 Chats, conversations, messages and composer drafts; provider connections,
-OAuth tokens and credentials; the Review Edits workflow toggle, contests,
+OpenAI account/catalog rows, OAuth tokens, and credentials; the Review Edits workflow toggle, contests,
 candidate drafts, revision jobs, ingest/image/publication jobs and other
 operational staging; FTS5, sqlite-vec, context,
 auto-link and other projections; visual candidates; render artifacts, page

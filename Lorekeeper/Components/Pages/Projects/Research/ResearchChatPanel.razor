@@ -90,7 +90,7 @@
 
     private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
     private int? PickerSelectedProviderId => _activeTurnModel?.ProviderId ?? _selectedProviderId ?? _chatSelection?.ProviderId;
-    private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.MaxInputTokens;
+    private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.EffectiveMaxInputTokens;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveMaxInputTokens, ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
@@ -404,7 +404,7 @@
     }
 
     private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
-        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.MaxInputTokens);
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.EffectiveMaxInputTokens, provider.ResolvedMetadata);
 
     private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {

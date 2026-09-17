@@ -520,7 +520,7 @@ public sealed class ResearchService(
                 }
             }
 
-            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.MaxInputTokens) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
             {
                 yield return new ResearchContextTrimmed(compaction);
                 if (compaction.LimitExceeded)

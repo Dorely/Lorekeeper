@@ -4,8 +4,9 @@ namespace Lorekeeper.Llm;
 
 /// <summary>
 /// One model advertised by a provider catalog. <see cref="ContextLengthTokens"/>
-/// carries provider-advertised input-context metadata when available and is used
-/// only to prefill the advisory per-model compaction budget.
+/// carries provider-advertised input-context metadata when available. Generic
+/// manual connections may use it as an editable prefill; OpenAI account rows
+/// persist it separately and never use it as the compaction budget.
 /// </summary>
 public sealed record LlmDiscoveredModel(string Id, long? ContextLengthTokens);
 

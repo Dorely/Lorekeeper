@@ -76,7 +76,7 @@ public class ChatClientFactory(
                 httpClient,
                 apiKey,
                 provider.ModelId,
-                provider.ReasoningEffort,
+                provider.EffectiveReasoningEffort,
                 loggerFactory.CreateLogger<CodexChatClient>());
         }
 
@@ -127,7 +127,7 @@ public class ChatClientFactory(
         var pipeline = chatClient.AsBuilder();
         if (maxOutputTokens is { } budget)
             pipeline.ConfigureOptions(options => options.MaxOutputTokens = budget);
-        return ConfigureReasoningEffort(pipeline.Build(), provider.ReasoningEffort);
+        return ConfigureReasoningEffort(pipeline.Build(), provider.EffectiveReasoningEffort);
     }
 
     private static HttpMessageHandler LegacyFieldHandler() =>

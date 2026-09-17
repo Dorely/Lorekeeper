@@ -156,7 +156,7 @@
     private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
     private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
-    private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.MaxInputTokens;
+    private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.EffectiveMaxInputTokens;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveMaxInputTokens, ActiveModelId);
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
     private bool HasRunningContest => _contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running);
@@ -947,7 +947,7 @@
     }
 
     private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
-        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.MaxInputTokens);
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.EffectiveMaxInputTokens, provider.ResolvedMetadata);
 
     private void UpdateConversationTokenCount()
     {

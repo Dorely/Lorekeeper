@@ -27,10 +27,9 @@ public static class LlmProviderCatalog
         new("openai", "OpenAI", "https://api.openai.com/v1", AuthType.ApiKey,
         [
             OpenAiDefaultMainlineModel,
+            "gpt-6-astra",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
-            "gpt-5.5",
-            "gpt-5.4",
         ],
             KeyManagementUrl: "https://platform.openai.com/api-keys"),
         // OpenAI first-party is resolved as OpenAiFirstParty: no auto budget, standard field.
@@ -109,7 +108,6 @@ public static class LlmProviderCatalog
         [
             "deepseek/deepseek-v4-flash",
             "claude-sonnet-5",
-            "gpt-5.5",
             "google/gemini-3.7-flash",
             "moonshotai/Kimi-K3",
             "xiaomi/mimo-v2.5",

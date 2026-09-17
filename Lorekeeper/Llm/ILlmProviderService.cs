@@ -30,8 +30,10 @@ public interface ILlmProviderService
     Task<LlmProvider> MarkVisionTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the API key (or OAuth access token) that should be used to call <paramref name="providerId"/>.
-    /// Follows <see cref="LlmProvider.CredentialSourceId"/> for child model rows.
+    /// Returns the API key (or account-owned OAuth access token) used to call
+    /// <paramref name="providerId"/>. Manual connection children follow
+    /// <see cref="LlmProvider.CredentialSourceId"/>; account rows use
+    /// <see cref="LlmProvider.OpenAiAccountId"/>.
     /// </summary>
     Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default);
     Task<string?> GetOpenAiAccountTokenAsync(int accountId, CancellationToken cancellationToken = default);
@@ -57,9 +59,10 @@ public sealed record ChatProviderAvailability(
 }
 
 /// <summary>
-/// A saved provider/model row that currently has a successful, credential-valid
-/// chat-readiness snapshot. The connection and model labels are kept separate so
-/// the picker can identify both parts of a shared connection.
+/// A saved provider/model row that is currently usable for chat. Manual rows
+/// require a successful credential-valid readiness snapshot; bundled OpenAI
+/// account rows derive readiness from credentials, catalog validation, and
+/// entitlement. The labels identify both the connection and model.
 /// </summary>
 public sealed record ChatModelOption(
     int ProviderId,

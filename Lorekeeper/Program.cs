@@ -214,6 +214,7 @@ builder.Services.AddScoped<IBookBriefService, BookBriefService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
 builder.Services.AddScoped<IModelCatalogService, ModelCatalogService>();
+builder.Services.AddScoped<IOpenAiAccountModelCatalogService, OpenAiAccountModelCatalogService>();
 
 // Chapters
 builder.Services.AddScoped<ChapterService>();

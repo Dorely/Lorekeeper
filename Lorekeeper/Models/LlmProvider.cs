@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace Lorekeeper.Models;
 
 public class LlmProvider
@@ -70,8 +72,20 @@ public class LlmProvider
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    [NotMapped]
+    public LlmProviderResolvedMetadata? ResolvedMetadata { get; set; }
+
+    [NotMapped]
+    public LlmReasoningEffort? EffectiveReasoningEffort =>
+        ResolvedMetadata?.ReasoningEffort ?? ReasoningEffort;
+
+    [NotMapped]
+    public int? EffectiveMaxInputTokens =>
+        ResolvedMetadata?.UsableInputBudgetTokens ?? MaxInputTokens;
+
     /// <summary>
-    /// Returns the provider ID whose credentials should be used (follows CredentialSourceId if set).
+    /// Returns the owning provider row for manual connection credentials. OpenAI
+    /// account rows resolve credentials through <see cref="OpenAiAccountId"/>.
     /// </summary>
     public int EffectiveCredentialProviderId => CredentialSourceId ?? Id;
 

@@ -398,7 +398,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
             }
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.MaxInputTokens) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
             {
                 yield return new WritingCoachContextTrimmed(compaction);
                 if (compaction.LimitExceeded)

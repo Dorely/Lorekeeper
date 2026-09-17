@@ -213,7 +213,9 @@ dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj --no-restore -c Release --f
 Tests in this project cover manuscript/page/composition/Core/release migrations,
 annotation and chat preservation, source-evidence and project-reference cutovers,
 protected backup/recovery, current/legacy import adaptation, identifier remapping,
-warning behavior, foreign keys, and whole-import rollback. It is also the current
+warning behavior, foreign keys, whole-import rollback, guarded OpenAI credential
+migration, and deterministic account-catalog manifest/reconciliation/readiness.
+It is also the current
 home for the approved v1 focused contracts. It is not a home for broad assistant,
 UI, ordinary service, or provider behavior suites, and no permitted test may
 substitute a simulated external integration for target-specific evidence.
@@ -414,6 +416,7 @@ target-specific evidence.
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
 | [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary for migration/import preservation and fail-closed fixtures plus the approved deterministic, headless v1 contract regressions. |
+| [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs) / [`OpenAiAccountModelCatalogTests.cs`](../../Lorekeeper.Tests/OpenAiAccountModelCatalogTests.cs) | Account/token migration rollback and catalog manifest, reconciliation, usable-budget separation, zero-Test readiness, and fail-closed selection evidence without external OAuth/provider simulation. |
 | [`eng/ReleaseDependencyAudit.ps1`](../../eng/ReleaseDependencyAudit.ps1) | Shared fail-closed shipped Electron dependency policy and its narrowly bounded dormant-splash advisory exception. |
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared repository gate/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |

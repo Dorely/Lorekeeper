@@ -654,7 +654,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     }
                 }
 
-                if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.MaxInputTokens) is { } compaction)
+                if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
                 {
                     yield return new PublishContextTrimmed(compaction);
                     if (compaction.LimitExceeded)

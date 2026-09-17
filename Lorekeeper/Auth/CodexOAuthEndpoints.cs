@@ -21,6 +21,7 @@ public static class CodexOAuthEndpoints
             string? state,
             ICodexAuthService authService,
             ILlmProviderService providerService,
+            IOpenAiAccountModelCatalogService accountCatalog,
             IEmbeddingConfigurationService embeddingConfiguration,
             CancellationToken cancellationToken) =>
         {
@@ -32,6 +33,7 @@ public static class CodexOAuthEndpoints
                 var accountId = await authService.HandleCallbackAsync(code, state, cancellationToken);
                 try
                 {
+                    var refresh = await accountCatalog.RefreshAvailabilityAsync(accountId, cancellationToken);
                     var accountModels = (await providerService.GetAllAsync(cancellationToken))
                         .Where(provider => provider.OpenAiAccountId == accountId)
                         .ToList();
@@ -39,9 +41,12 @@ public static class CodexOAuthEndpoints
                         ?? accountModels.FirstOrDefault()?.Id
                         ?? throw new InvalidOperationException("The connected OpenAI account has no saved model.");
                     var configured = await embeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(providerId, cancellationToken);
-                    return configured
-                        ? RedirectToProviders($"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}.", "success")
-                        : RedirectToProviders("OpenAI account connected. Existing embedding model kept.", "info");
+                    var message = configured
+                        ? $"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}."
+                        : "OpenAI account connected. Existing embedding model kept.";
+                    if (!refresh.Succeeded)
+                        message += " Model availability could not be refreshed; the bundled catalog remains usable and can be retried in Settings.";
+                    return RedirectToProviders(message, refresh.Succeeded ? "success" : "warning");
                 }
                 catch (Exception ex)
                 {

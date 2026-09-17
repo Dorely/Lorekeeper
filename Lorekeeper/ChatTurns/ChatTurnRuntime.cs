@@ -18,7 +18,8 @@ public sealed record ChatTurnModelSnapshot(
     int ProviderId,
     string ModelId,
     string Label,
-    int? MaxInputTokens);
+    int? MaxInputTokens,
+    Lorekeeper.Models.LlmProviderResolvedMetadata? ResolvedMetadata = null);
 
 public sealed record ChatTurnSnapshot(
     Guid TurnId,

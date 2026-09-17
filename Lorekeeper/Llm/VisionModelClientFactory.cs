@@ -53,7 +53,7 @@ public sealed class VisionModelClientFactory(
                 httpClient,
                 apiKey,
                 provider.ModelId,
-                provider.ReasoningEffort,
+                provider.EffectiveReasoningEffort,
                 imageBytes,
                 mediaType,
                 prompt,
@@ -299,7 +299,7 @@ public sealed class VisionModelClientFactory(
         };
 
         var clampedMaxOutputTokens = Math.Clamp(maxOutputTokens, 1, 32_000);
-        if (provider.ReasoningEffort is { } reasoningEffort)
+        if (provider.EffectiveReasoningEffort is { } reasoningEffort)
         {
             body["reasoning_effort"] = reasoningEffort.ToWireValue();
             body["max_completion_tokens"] = clampedMaxOutputTokens;
