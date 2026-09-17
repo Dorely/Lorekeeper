@@ -130,15 +130,20 @@ public sealed class ProjectImportRepository(AppDatabaseReadOperation operation) 
             reportItems);
     }
 
-    public Task<List<ProjectImportJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default) =>
+    public Task<List<ProjectImportJob>> ListRunnableJobsAsync(CancellationToken cancellationToken = default) =>
         operation.Db.ProjectImportJobs
-            .Where(job => job.Status == ProjectImportJobStatus.Queued)
+            .Where(job => job.Status == ProjectImportJobStatus.Staged
+                || job.Status == ProjectImportJobStatus.Validated
+                || job.Status == ProjectImportJobStatus.Committed
+                || job.Status == ProjectImportJobStatus.Indexing)
             .OrderBy(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<ProjectImportJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default) =>
         operation.Db.ProjectImportJobs
-            .Where(job => job.Status == ProjectImportJobStatus.Running)
+            .Where(job => job.Status == ProjectImportJobStatus.Applying
+                || job.Status == ProjectImportJobStatus.Committed
+                || job.Status == ProjectImportJobStatus.Indexing)
             .OrderBy(job => job.UpdatedAt)
             .ToListAsync(cancellationToken);
 

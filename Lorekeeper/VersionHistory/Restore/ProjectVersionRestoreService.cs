@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using Lorekeeper.Authoring;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
@@ -243,7 +244,8 @@ public sealed class ProjectVersionRestoreService(
         if (string.IsNullOrWhiteSpace(targetCommitSha))
             throw new ArgumentException("A target checkpoint commit SHA is required.", nameof(targetCommitSha));
         ArgumentNullException.ThrowIfNull(selection);
-        var target = await history.LoadCheckpointAsync(projectId, targetCommitSha, cancellationToken);
+        using var targetLease = await history.LoadCheckpointForRestoreAsync(projectId, targetCommitSha, cancellationToken);
+        var target = targetLease.Checkpoint;
         if (target.Manifest.ProjectId != projectId
             || target.Payload.ProjectId != projectId
             || target.Manifest.RepositoryId != target.Payload.RepositoryId)
@@ -258,7 +260,8 @@ public sealed class ProjectVersionRestoreService(
         var status = await history.GetStatusAsync(projectId, includeCurrentSnapshotHash: false, cancellationToken);
         if (status?.Repository.HeadCommitSha is null)
             throw new VersionHistoryRestoreException("MissingCurrentHead", "The current project has no version-history head to restore from.");
-        var current = await history.LoadCheckpointAsync(projectId, status.Repository.HeadCommitSha, cancellationToken);
+        using var currentLease = await history.LoadCheckpointForRestoreAsync(projectId, status.Repository.HeadCommitSha, cancellationToken);
+        var current = currentLease.Checkpoint;
         if (current.Payload.ProjectId != projectId
             || current.Manifest.ProjectId != projectId
             || current.Manifest.RepositoryId != current.Payload.RepositoryId
@@ -448,7 +451,7 @@ public sealed class ProjectVersionRestoreService(
         ProjectVersionLoadedCheckpoint localHead;
         try
         {
-            localHead = await history.LoadCheckpointAsync(
+            localHead = await history.LoadCheckpointForComparisonAsync(
                 checkout.ProjectId,
                 checkout.HeadCommitSha,
                 cancellationToken);
@@ -675,6 +678,7 @@ public sealed class ProjectVersionRestoreService(
             {
                 ImageData = current.ImageData,
                 FontFaceData = current.FontFaceData,
+                SourceOriginalBlobs = current.SourceOriginalBlobs,
             };
         }
 
@@ -701,6 +705,9 @@ public sealed class ProjectVersionRestoreService(
         {
             ImageData = selectedAreas.Contains("assets", StringComparer.Ordinal) ? target.ImageData : current.ImageData,
             FontFaceData = selectedAreas.Contains("assets", StringComparer.Ordinal) ? target.FontFaceData : current.FontFaceData,
+            SourceOriginalBlobs = selectedAreas.Contains("sources", StringComparer.Ordinal)
+                ? target.SourceOriginalBlobs
+                : current.SourceOriginalBlobs,
         };
     }
 
@@ -1248,8 +1255,11 @@ public sealed class ProjectVersionRestoreService(
         var blockers = new List<VersionHistoryRestoreBlocker>();
         AddBlocker(blockers, "Ingest job queued, running, or stop requested", await db.IngestJobs.CountAsync(item => item.ProjectId == projectId
             && (item.Status == IngestJobStatus.Queued || item.Status == IngestJobStatus.Running || item.Status == IngestJobStatus.StopRequested), cancellationToken));
-        AddBlocker(blockers, "Project import job queued or running", await db.ProjectImportJobs.CountAsync(item => item.ProjectId == projectId
-            && (item.Status == ProjectImportJobStatus.Queued || item.Status == ProjectImportJobStatus.Running), cancellationToken));
+        AddBlocker(blockers, "Project import job has staged, applying, or indexing work", await db.ProjectImportJobs.CountAsync(item => item.ProjectId == projectId
+            && (item.Status == ProjectImportJobStatus.Staged
+                || item.Status == ProjectImportJobStatus.Validated
+                || item.Status == ProjectImportJobStatus.Applying
+                || item.Status == ProjectImportJobStatus.Indexing), cancellationToken));
         AddBlocker(blockers, "Editor revision job queued or running", await db.EditorRevisionJobs.CountAsync(item => item.ProjectId == projectId
             && (item.Status == EditorRevisionJobStatus.Queued || item.Status == EditorRevisionJobStatus.Running), cancellationToken));
         AddBlocker(blockers, "Contest batch awaiting resolution", await db.ContestBatches.CountAsync(item => item.ProjectId == projectId
@@ -1385,6 +1395,14 @@ public sealed class ProjectVersionRestoreService(
         await db.Chapters.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.Acts.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.BookBriefs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.SourceLocations.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.BibliographicRecords.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.IngestSourceBlocks.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.IngestSourcePages.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.IngestSourceChunks.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.SourceExtractionVersions.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.SourceOriginalChunks.Where(item => item.SourceOriginal.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.SourceOriginals.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.IngestSources.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.PublishAssets.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
 
@@ -1472,7 +1490,14 @@ public sealed class ProjectVersionRestoreService(
                 ContextBefore = annotation.ContextBefore,
                 ContextAfter = annotation.ContextAfter,
             });
-        AddSources(db, projectId, payload.Sources.Sources);
+        var retainedSourceBytes = await AddSourcesAsync(
+            db,
+            projectId,
+            payload.Sources,
+            payload.SourceOriginalBlobs,
+            cancellationToken);
+        if (retainedSourceBytes.NewBytes > 0 || retainedSourceBytes.ReusedBytes > 0)
+            warnings.Add($"Retained source originals restored: {retainedSourceBytes.NewBytes} new bytes; {retainedSourceBytes.ReusedBytes} reused bytes.");
         AddAssets(db, projectId, payload);
         foreach (var style in payload.Manuscript.Styles)
             db.ManuscriptStyleDefinitions.Add(new ManuscriptStyleDefinition
@@ -1536,9 +1561,24 @@ public sealed class ProjectVersionRestoreService(
         db.BookBriefs.Add(brief);
     }
 
-    private static void AddSources(AppDbContext db, Guid projectId, IReadOnlyList<ProjectExportIngestSource> sources)
+    private static async Task<RetainedSourceBytes> AddSourcesAsync(
+        AppDbContext db,
+        Guid projectId,
+        VersionHistorySnapshotSourcesArea sources,
+        IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> sourceOriginalBlobs,
+        CancellationToken cancellationToken)
     {
-        foreach (var source in sources)
+        if (sources.RetainedSources.Count > 0)
+        {
+            return await AddRetainedSourcesAsync(
+                db,
+                projectId,
+                sources,
+                sourceOriginalBlobs,
+                cancellationToken);
+        }
+
+        foreach (var source in sources.Sources)
         {
             var entity = new IngestSource
             {
@@ -1549,8 +1589,6 @@ public sealed class ProjectVersionRestoreService(
                 Description = source.Description,
                 Synopsis = source.Synopsis,
                 UserInstructions = source.UserInstructions,
-                SourceText = source.SourceText,
-                SourceHash = source.SourceHash,
                 SourceUrl = source.SourceUrl,
                 FinalUrl = source.FinalUrl,
                 CanonicalUrl = source.CanonicalUrl,
@@ -1560,11 +1598,35 @@ public sealed class ProjectVersionRestoreService(
                 ContentType = source.ContentType,
                 SourceMetadataJson = source.SourceMetadataJson,
                 VectorIndexState = VectorIndexState.Stale,
+                ActiveExtractionVersionId = source.Id,
             };
+            entity.Original = new SourceOriginal
+            {
+                SourceId = entity.Id,
+                State = SourceOriginalState.OriginalUnavailable,
+                FileName = source.Title,
+                MediaType = source.ContentType,
+                Length = 0,
+                Sha256 = null,
+            };
+            var legacyExtraction = new SourceExtractionVersion
+            {
+                Id = source.Id,
+                SourceId = entity.Id,
+                Ordinal = 0,
+                Extractor = "legacy-history",
+                ExtractorVersion = "pre-v8",
+                ContentHash = source.SourceHash,
+                Status = SourceExtractionStatus.LegacyImmutable,
+                Diagnostics = "Adapted from legacy history snapshot.",
+                NormalizedText = source.SourceText,
+            };
+            entity.ExtractionVersions.Add(legacyExtraction);
             entity.SourceChunks = source.Chunks.Select(chunk => new IngestSourceChunk
             {
                 Id = chunk.Id,
                 Source = entity,
+                SourceExtractionVersionId = legacyExtraction.Id,
                 Index = chunk.Index,
                 Title = chunk.Title,
                 HeadingPath = chunk.HeadingPath,
@@ -1582,6 +1644,7 @@ public sealed class ProjectVersionRestoreService(
             {
                 Id = page.Id,
                 Source = entity,
+                SourceExtractionVersionId = legacyExtraction.Id,
                 PageNumber = page.PageNumber,
                 Text = page.Text,
                 StartChar = page.StartChar,
@@ -1598,6 +1661,7 @@ public sealed class ProjectVersionRestoreService(
             {
                 Id = block.Id,
                 Source = entity,
+                SourceExtractionVersionId = legacyExtraction.Id,
                 SourcePageId = block.SourcePageId,
                 Index = block.Index,
                 Kind = block.Kind,
@@ -1610,7 +1674,173 @@ public sealed class ProjectVersionRestoreService(
             }).ToList();
             db.IngestSources.Add(entity);
         }
+        return new RetainedSourceBytes(0, 0);
     }
+
+    private static async Task<RetainedSourceBytes> AddRetainedSourcesAsync(
+        AppDbContext db,
+        Guid projectId,
+        VersionHistorySnapshotSourcesArea sources,
+        IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> sourceOriginalBlobs,
+        CancellationToken cancellationToken)
+    {
+        var existingBlobHashes = (await db.SourceOriginalBlobs.AsNoTracking()
+            .Select(blob => blob.Sha256)
+            .ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        long newBytes = 0;
+        long reusedBytes = 0;
+        foreach (var source in sources.RetainedSources)
+        {
+            var activeExtraction = source.Extractions.SingleOrDefault(extraction => extraction.Id == source.ActiveExtractionVersionId)
+                ?? throw new VersionHistoryRestoreException("InvalidActiveSourceExtraction", $"Source '{source.Id:N}' has no active extraction.");
+            var entity = new IngestSource
+            {
+                Id = source.Id, ProjectId = projectId, Title = source.Title, SourceKind = source.SourceKind,
+                Description = source.Description, Synopsis = source.Synopsis, UserInstructions = source.UserInstructions,
+                SourceUrl = source.SourceUrl, FinalUrl = source.FinalUrl, CanonicalUrl = source.CanonicalUrl,
+                ContentType = source.ContentType, SourceMetadataJson = source.SourceMetadataJson,
+                ActiveExtractionVersionId = source.ActiveExtractionVersionId, VectorIndexState = VectorIndexState.Stale,
+            };
+            var original = new SourceOriginal
+            {
+                SourceId = source.Id, Source = entity, State = source.Original.State,
+                FileName = source.Original.FileName, MediaType = source.Original.MediaType,
+                Length = source.Original.Length, Sha256 = source.Original.Sha256,
+            };
+            using var originalHash = source.Original.State == SourceOriginalState.Available
+                ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+                : null;
+            long originalLength = 0;
+            foreach (var reference in source.Original.Chunks.OrderBy(chunk => chunk.Index))
+            {
+                var data = await ReadSourceOriginalBlobAsync(
+                    db,
+                    reference,
+                    sourceOriginalBlobs,
+                    cancellationToken);
+                originalHash!.AppendData(data);
+                originalLength += data.Length;
+                if (existingBlobHashes.Add(reference.BlobSha256))
+                {
+                    var inserted = await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"INSERT OR IGNORE INTO \"SourceOriginalBlobs\" (\"Sha256\", \"Length\", \"Data\") VALUES ({reference.BlobSha256}, {data.Length}, {data})",
+                        cancellationToken);
+                    if (inserted == 1)
+                        newBytes += data.LongLength;
+                    else
+                        reusedBytes += reference.ByteLength;
+                }
+                else
+                    reusedBytes += reference.ByteLength;
+                original.Chunks.Add(new SourceOriginalChunk
+                {
+                    Id = reference.Id, SourceId = source.Id, Index = reference.Index,
+                    BlobSha256 = reference.BlobSha256, ByteLength = reference.ByteLength,
+                });
+            }
+            if (source.Original.State == SourceOriginalState.Available
+                && (originalLength != source.Original.Length
+                    || !string.Equals(Convert.ToHexStringLower(originalHash!.GetHashAndReset()), source.Original.Sha256, StringComparison.Ordinal)))
+            {
+                throw new VersionHistoryRestoreException("InvalidSourceOriginal", $"Source original '{source.Id:N}' failed length or full SHA-256 validation.");
+            }
+            if (source.Original.State == SourceOriginalState.Available)
+                SourceRetentionValidator.MarkExternallyVerifiedOriginal(original);
+            entity.Original = original;
+            foreach (var extraction in source.Extractions)
+            {
+                var version = new SourceExtractionVersion
+                {
+                    Id = extraction.Id, SourceId = source.Id, Source = entity, Ordinal = extraction.Ordinal,
+                    Extractor = extraction.Extractor, ExtractorVersion = extraction.ExtractorVersion,
+                    OptionsJson = extraction.OptionsJson, ContentHash = extraction.ContentHash,
+                    Status = extraction.Status, Diagnostics = extraction.Diagnostics,
+                    NormalizedText = extraction.NormalizedText,
+                };
+                foreach (var chunk in extraction.Chunks)
+                    version.SourceChunks.Add(new IngestSourceChunk { Id = chunk.Id, SourceId = source.Id, Source = entity,
+                        SourceExtractionVersionId = version.Id, SourceExtractionVersion = version, Index = chunk.Index,
+                        Title = chunk.Title, HeadingPath = chunk.HeadingPath, StartChar = chunk.StartChar, EndChar = chunk.EndChar,
+                        EstimatedTokenCount = chunk.EstimatedTokenCount, TokenCountMethod = chunk.TokenCountMethod,
+                        TokenEncodingName = chunk.TokenEncodingName, TokenCountIsExact = chunk.TokenCountIsExact,
+                        Summary = chunk.Summary, AgentNotes = chunk.AgentNotes, StructureStatus = chunk.StructureStatus });
+                foreach (var page in extraction.Pages)
+                    version.SourcePages.Add(new IngestSourcePage { Id = page.Id, SourceId = source.Id, Source = entity,
+                        SourceExtractionVersionId = version.Id, SourceExtractionVersion = version, PageNumber = page.PageNumber,
+                        Text = page.Text, StartChar = page.StartChar, EndChar = page.EndChar, ExtractionMethod = page.ExtractionMethod,
+                        Width = page.Width, Height = page.Height, ImageHash = page.ImageHash, RenderSettingsJson = page.RenderSettingsJson,
+                        VisionModelName = page.VisionModelName, Diagnostics = page.Diagnostics });
+                foreach (var block in extraction.Blocks)
+                    version.SourceBlocks.Add(new IngestSourceBlock { Id = block.Id, SourceId = source.Id, Source = entity,
+                        SourceExtractionVersionId = version.Id, SourceExtractionVersion = version, SourcePageId = block.SourcePageId,
+                        Index = block.Index, Kind = block.Kind, Title = block.Title, Locator = block.Locator, PageNumber = block.PageNumber,
+                        StartChar = block.StartChar, EndChar = block.EndChar, NormalizedText = block.NormalizedText,
+                        ContentHash = block.ContentHash, MetadataJson = block.MetadataJson });
+                entity.ExtractionVersions.Add(version);
+            }
+            db.IngestSources.Add(entity);
+            foreach (var bibliography in source.BibliographicRecords)
+                AddBibliographicRecord(db, projectId, bibliography);
+            foreach (var location in source.Locations)
+                db.SourceLocations.Add(new SourceLocation { Id = location.Id, ProjectId = projectId, SourceId = location.SourceId,
+                    ExtractionVersionId = location.ExtractionVersionId, SourceBlockId = location.SourceBlockId, PageNumber = location.PageNumber,
+                    NormalizedStart = location.NormalizedStart, NormalizedLength = location.NormalizedLength, Locator = location.Locator,
+                    Quote = location.Quote, VerificationHash = location.VerificationHash, ResolutionState = location.ResolutionState });
+        }
+        foreach (var bibliography in sources.UnlinkedBibliographicRecords)
+            AddBibliographicRecord(db, projectId, bibliography);
+        return new RetainedSourceBytes(newBytes, reusedBytes);
+    }
+
+    private static async Task<byte[]> ReadSourceOriginalBlobAsync(
+        AppDbContext db,
+        VersionHistorySourceOriginalChunk reference,
+        IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> sourceOriginalBlobs,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        byte[]? data;
+        if (sourceOriginalBlobs.TryGetValue(reference.BlobSha256, out var descriptor))
+        {
+            if (descriptor.Length != reference.ByteLength
+                || descriptor.Length > SourceOriginal.MaximumChunkBytes)
+            {
+                throw new VersionHistoryRestoreException("InvalidSourceBlob", $"Source blob '{reference.BlobSha256}' has invalid restore metadata.");
+            }
+
+            await using var source = descriptor.OpenRead();
+            data = new byte[checked((int)descriptor.Length)];
+            await source.ReadExactlyAsync(data, cancellationToken);
+            if (source.ReadByte() != -1)
+                throw new VersionHistoryRestoreException("InvalidSourceBlob", $"Source blob '{reference.BlobSha256}' changed during restore.");
+        }
+        else
+        {
+            data = await db.SourceOriginalBlobs.AsNoTracking()
+                .Where(blob => blob.Sha256 == reference.BlobSha256)
+                .Select(blob => blob.Data)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
+        if (data is null)
+            throw new VersionHistoryRestoreException("MissingSourceBlob", $"Source blob '{reference.BlobSha256}' was not available for restore.");
+
+        if (data.Length != reference.ByteLength
+            || !string.Equals(VersionHistoryCanonicalJson.Sha256Hex(data), reference.BlobSha256, StringComparison.Ordinal))
+        {
+            throw new VersionHistoryRestoreException("InvalidSourceBlob", $"Source blob '{reference.BlobSha256}' failed restore validation.");
+        }
+        return data;
+    }
+
+    private sealed record RetainedSourceBytes(long NewBytes, long ReusedBytes);
+
+    private static void AddBibliographicRecord(AppDbContext db, Guid projectId, VersionHistoryBibliographicRecord record) =>
+        db.BibliographicRecords.Add(new BibliographicRecord { Id = record.Id, ProjectId = projectId, SourceId = record.SourceId,
+            Kind = record.Kind, Title = record.Title, ContainerTitle = record.ContainerTitle, AuthorsJson = record.AuthorsJson,
+            EditorsJson = record.EditorsJson, IssuedYear = record.IssuedYear, Publisher = record.Publisher,
+            PublisherPlace = record.PublisherPlace, Volume = record.Volume, Issue = record.Issue, Pages = record.Pages,
+            Doi = record.Doi, Url = record.Url, AccessedAt = record.AccessedAt, Isbn = record.Isbn, Notes = record.Notes });
 
     private static void AddAssets(AppDbContext db, Guid projectId, VersionHistorySnapshotPayload payload)
     {

@@ -19,17 +19,21 @@ IAppDatabaseOperationFactory database, IVectorStore vectors,
     {
         IReadOnlyList<IngestVectorFragment> existingFragments;
         IReadOnlyList<IngestSourceBlock> sourceBlocks;
+        string sourceText;
         await using (var readOperation = await database.OpenReadAsync(cancellationToken))
         {
             var ingest = readOperation.Repositories.Ingest;
             existingFragments = await ingest.ListVectorFragmentsAsync(source.Id, cancellationToken);
             sourceBlocks = await ingest.ListSourceBlocksAsync(source.Id, cancellationToken);
+            sourceText = (await ingest.GetActiveExtractionAsync(source.Id, cancellationToken))?.NormalizedText
+                ?? throw new InvalidOperationException(
+                    $"Source {source.Id} cannot be indexed without a ready active extraction.");
         }
         if (!force && source.VectorIndexState == VectorIndexState.UpToDate && existingFragments.Count > 0)
             return;
 
         await DeleteExistingVectorRowsAsync(source, existingFragments, cancellationToken);
-        await StoreLexicalFragmentsAsync(source, cancellationToken);
+        await StoreLexicalFragmentsAsync(source, sourceText, cancellationToken);
         await autoLinks.RefreshSourceAsync(source.ProjectId, ProjectSearchSourceTypes.RawIngestSource, source.Id, cancellationToken);
 
         if (!await embeddings.IsAvailableAsync(cancellationToken))
@@ -44,7 +48,7 @@ IAppDatabaseOperationFactory database, IVectorStore vectors,
 
         try
         {
-            var chunks = chunker.Chunk(source.SourceText);
+            var chunks = chunker.Chunk(sourceText);
             var fragments = new List<IngestVectorFragment>();
             if (chunks.Count > 0)
             {
@@ -54,9 +58,9 @@ IAppDatabaseOperationFactory database, IVectorStore vectors,
                 for (var index = 0; index < chunks.Count; index++)
                 {
                     var text = chunks[index].Content;
-                    var start = FindFragmentStart(source.SourceText, text, cursor);
-                    var end = Math.Min(source.SourceText.Length, start + text.Length);
-                    cursor = Math.Min(source.SourceText.Length, Math.Max(start + 1, end - 200));
+                    var start = FindFragmentStart(sourceText, text, cursor);
+                    var end = Math.Min(sourceText.Length, start + text.Length);
+                    cursor = Math.Min(sourceText.Length, Math.Max(start + 1, end - 200));
                     var metadata = BuildFragmentMetadata(source, sourceBlocks, index, chunks.Count, start, end);
                     var rowId = await vectors.StoreAsync(
                         content: text,
@@ -128,11 +132,14 @@ IAppDatabaseOperationFactory database, IVectorStore vectors,
         await operation.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task StoreLexicalFragmentsAsync(IngestSource source, CancellationToken cancellationToken)
+    private async Task StoreLexicalFragmentsAsync(
+        IngestSource source,
+        string sourceText,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(source.SourceText)) return;
+        if (string.IsNullOrWhiteSpace(sourceText)) return;
 
-        var chunks = chunker.Chunk(source.SourceText);
+        var chunks = chunker.Chunk(sourceText);
         if (chunks.Count == 0) return;
 
         await projectSearch.StoreManyAsync(chunks.Select(chunk => new ProjectSearchIndexChunk(

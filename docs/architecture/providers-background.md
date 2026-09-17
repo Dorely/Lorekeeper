@@ -410,8 +410,13 @@ use, provider payload diagnosis lives in these Development logs, not in
 database rows.
 
 Ingest uses an in-process queue, notifier, hosted worker, and scoped processor;
-restart/delete additionally clean source-owned graph/index state. Import uses a
-durable queued upload, notifier, hosted worker, and atomic processor. Embedding
+restart/delete additionally clean source-owned graph/index state without deleting
+retained source material merely because an ingest job is terminal. Import stages
+and hashes uploads outside SQLite, then uses a durable queued job, notifier,
+hosted worker, and atomic creative transaction. Interrupted pre-commit imports
+fail closed; `Committed` and `Indexing` imports resume only retryable projection
+work and finish with warnings when an index cannot be rebuilt. Terminal import
+jobs clean their application-owned staged files. Embedding
 rebuild coalesces and cancels generations. Image runtime resumes queued work but
 marks interrupted active work failed. Editor revision and assistant turn runners
 keep live work independent from a component lifetime. Publication queue and

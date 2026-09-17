@@ -8,7 +8,7 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 7;
+    public const int SchemaVersion = 8;
     public const int ImageUpscaleSchemaVersion = 5;
     public const int CoverDescriptionSchemaVersion = 6;
     public const int DesignedPagesSchemaVersion = 7;
@@ -156,7 +156,17 @@ public sealed record VersionHistorySnapshotGraphArea(
     IReadOnlyList<ProjectExportEdge> Edges);
 
 public sealed record VersionHistorySnapshotSourcesArea(
-    IReadOnlyList<ProjectExportIngestSource> Sources);
+    IReadOnlyList<ProjectExportIngestSource> Sources)
+{
+    /// <summary>
+    /// Schema-v8 retained-source records. The legacy projection remains an
+    /// in-memory compatibility view for old restore and compare consumers; it
+    /// is never written as a sources.json aggregate by v8 writers.
+    /// </summary>
+    public IReadOnlyList<VersionHistoryRetainedSource> RetainedSources { get; init; } = [];
+
+    public IReadOnlyList<VersionHistoryBibliographicRecord> UnlinkedBibliographicRecords { get; init; } = [];
+}
 
 public sealed record VersionHistorySnapshotAssetsArea(
     IReadOnlyList<VersionHistoryImageAsset> Images,
@@ -264,6 +274,10 @@ public sealed record VersionHistorySnapshotPayload(
 
     public IReadOnlyDictionary<Guid, byte[]> FontFaceData { get; init; } = new Dictionary<Guid, byte[]>();
 
+    /// <summary>Validated original-blob descriptors, populated only for restore/import reads.</summary>
+    public IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> SourceOriginalBlobs { get; init; }
+        = new Dictionary<string, VersionHistorySourceBlobDescriptor>(StringComparer.Ordinal);
+
     public ProjectExportDocument ToProjectExportDocument() => new()
     {
         ExportKind = ProjectExportKind.Full,
@@ -305,6 +319,41 @@ public sealed record VersionHistorySnapshotPayload(
         Nodes = Graph.Nodes.ToList(),
         Edges = Graph.Edges.ToList(),
     };
+}
+
+/// <summary>
+/// A validated, bounded source chunk held on stable local storage. The owner of
+/// the containing snapshot keeps that storage alive for the complete restore.
+/// </summary>
+public sealed class VersionHistorySourceBlobDescriptor
+{
+    internal VersionHistorySourceBlobDescriptor(string sha256, long length, string localPath)
+    {
+        Sha256 = sha256;
+        Length = length;
+        LocalPath = Path.GetFullPath(localPath);
+    }
+
+    public string Sha256 { get; }
+
+    public long Length { get; }
+
+    internal string LocalPath { get; }
+
+    public Stream OpenRead()
+    {
+        var file = new FileInfo(LocalPath);
+        if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) || file.Length != Length)
+            throw new InvalidDataException($"Source blob '{Sha256}' changed after snapshot validation.");
+
+        return new FileStream(
+            LocalPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            81_920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+    }
 }
 
 internal static class VersionHistorySnapshotConversions

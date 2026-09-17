@@ -6,6 +6,8 @@ public class IngestSourceChunk
 
     public Guid SourceId { get; set; }
     public IngestSource Source { get; set; } = null!;
+    public Guid SourceExtractionVersionId { get; set; }
+    public SourceExtractionVersion SourceExtractionVersion { get; set; } = null!;
 
     public int Index { get; set; }
     public string Title { get; set; } = string.Empty;

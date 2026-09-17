@@ -3,6 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.IO.Compression;
+using System.Xml;
+using System.Xml.Linq;
+using DocumentFormat.OpenXml.Packaging;
 using Docnet.Core;
 using Docnet.Core.Models;
 using Lorekeeper.Llm;
@@ -10,6 +14,7 @@ using Microsoft.Extensions.Options;
 using SkiaSharp;
 using UglyToad.PdfPig;
 using VersOne.Epub;
+using W = DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Lorekeeper.Ingest;
 
@@ -31,11 +36,232 @@ public sealed partial class BookArtifactPreprocessor(
         return extension switch
         {
             ".epub" => await PreprocessEpubAsync(request, cancellationToken),
+            ".docx" => PreprocessDocx(request, cancellationToken),
             ".pdf" => await PreprocessPdfAsync(request, cancellationToken),
             ".png" or ".jpg" or ".jpeg" or ".webp" => await PreprocessImageAsync(request, cancellationToken),
             ".txt" or ".md" or ".markdown" => PreprocessPlainText(request),
-            _ => throw new InvalidOperationException("Unsupported source file type. Use .txt, .md, .epub, .pdf, .png, .jpg, .jpeg, or .webp."),
+            _ => throw new InvalidOperationException("Unsupported source file type. Use .txt, .md, .docx, .epub, .pdf, .png, .jpg, .jpeg, or .webp."),
         };
+    }
+
+    private static BookArtifactPreprocessResult PreprocessDocx(
+        BookArtifactPreprocessRequest request,
+        CancellationToken cancellationToken)
+    {
+        ValidateDocxPackage(request.Bytes, cancellationToken);
+        using var package = new MemoryStream(request.Bytes, writable: false);
+        using var document = WordprocessingDocument.Open(package, false, new OpenSettings
+        {
+            AutoSave = false,
+            MaxCharactersInPart = 64L * 1024 * 1024,
+        });
+        var main = document.MainDocumentPart
+            ?? throw new InvalidOperationException("The DOCX package has no main document part.");
+        var wordDocument = main.Document
+            ?? throw new InvalidOperationException("The DOCX package has no main document XML.");
+        var body = wordDocument.Body
+            ?? throw new InvalidOperationException("The DOCX package has no document body.");
+        var output = new StringBuilder();
+        var blocks = new List<IngestSourceBlockDraft>();
+
+        foreach (var child in body.ChildElements)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (child)
+            {
+                case W.Paragraph paragraph:
+                    AppendDocxParagraph(output, blocks, paragraph, "document", cancellationToken);
+                    break;
+                case W.Table table:
+                    AppendDocxTable(output, blocks, table, cancellationToken);
+                    break;
+            }
+        }
+
+        AppendDocxNotes<W.Footnote>(output, blocks, main.FootnotesPart?.Footnotes, "Footnote", cancellationToken);
+        AppendDocxNotes<W.Endnote>(output, blocks, main.EndnotesPart?.Endnotes, "Endnote", cancellationToken);
+        if (output.Length == 0)
+            throw new InvalidOperationException("The DOCX did not contain readable text.");
+
+        var visuals = new List<IngestVisualCandidateDraft>();
+        foreach (var image in main.ImageParts.OrderBy(part => part.Uri.OriginalString, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var source = image.GetStream(FileMode.Open, FileAccess.Read);
+            if (source.Length is <= 0 or > 64L * 1024 * 1024)
+                continue;
+            using var bytes = new MemoryStream(checked((int)source.Length));
+            source.CopyTo(bytes);
+            var name = Path.GetFileName(image.Uri.OriginalString);
+            if (TryVisualDraft(name, image.ContentType, bytes.ToArray(), image.Uri.OriginalString, null, null, out var visual))
+                visuals.Add(visual!);
+        }
+
+        return new BookArtifactPreprocessResult(
+            output.ToString(),
+            "Word document",
+            request.ContentType ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            JsonSerializer.Serialize(new
+            {
+                artifact = "docx",
+                request.FileName,
+                request.ExtractionProfile,
+                sourceHash = ComputeHash(request.Bytes),
+                blockCount = blocks.Count,
+            }),
+            Pages: [],
+            Blocks: blocks,
+            Visuals: DeduplicateVisuals(visuals),
+            UsedVision: false,
+            Diagnostics: $"Read {blocks.Count:N0} DOCX content block(s); Word pagination is not inferred.");
+    }
+
+    private static void AppendDocxParagraph(
+        StringBuilder output,
+        ICollection<IngestSourceBlockDraft> blocks,
+        W.Paragraph paragraph,
+        string locator,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var text = NormalizeText(paragraph.InnerText);
+        if (text.Length == 0)
+            return;
+        if (output.Length > 0)
+            output.AppendLine().AppendLine();
+        var start = output.Length;
+        var style = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value ?? string.Empty;
+        var headingLevel = ParseDocxHeadingLevel(style);
+        if (headingLevel is { } level)
+            output.Append('#', level).Append(' ');
+        output.Append(text);
+        var end = output.Length;
+        blocks.Add(new IngestSourceBlockDraft(
+            Guid.NewGuid(), null, blocks.Count,
+            headingLevel is null ? "DocxParagraph" : "DocxHeading",
+            headingLevel is null ? string.Empty : text,
+            locator, null, start, end,
+            JsonSerializer.Serialize(new { style, headingLevel })));
+    }
+
+    private static void AppendDocxTable(
+        StringBuilder output,
+        ICollection<IngestSourceBlockDraft> blocks,
+        W.Table table,
+        CancellationToken cancellationToken)
+    {
+        var rows = table.Elements<W.TableRow>()
+            .Select(row => string.Join(" | ", row.Elements<W.TableCell>()
+                .Select(cell => NormalizeText(cell.InnerText))))
+            .Where(text => text.Length > 0)
+            .ToArray();
+        if (rows.Length == 0)
+            return;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (output.Length > 0)
+            output.AppendLine().AppendLine();
+        var start = output.Length;
+        output.AppendJoin(Environment.NewLine, rows);
+        var end = output.Length;
+        blocks.Add(new IngestSourceBlockDraft(
+            Guid.NewGuid(), null, blocks.Count, "DocxTable", string.Empty,
+            $"table {blocks.Count + 1}", null, start, end,
+            JsonSerializer.Serialize(new { rowCount = rows.Length })));
+    }
+
+    private static void AppendDocxNotes<TNote>(
+        StringBuilder output,
+        ICollection<IngestSourceBlockDraft> blocks,
+        DocumentFormat.OpenXml.OpenXmlCompositeElement? notes,
+        string kind,
+        CancellationToken cancellationToken)
+        where TNote : DocumentFormat.OpenXml.OpenXmlCompositeElement
+    {
+        if (notes is null)
+            return;
+        foreach (var note in notes.Elements<TNote>())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var text = NormalizeText(note.InnerText);
+            if (text.Length == 0)
+                continue;
+            if (output.Length > 0)
+                output.AppendLine().AppendLine();
+            var start = output.Length;
+            output.Append('[').Append(kind).Append("] ").Append(text);
+            var end = output.Length;
+            blocks.Add(new IngestSourceBlockDraft(
+                Guid.NewGuid(), null, blocks.Count, $"Docx{kind}", string.Empty,
+                kind.ToLowerInvariant(), null, start, end, "{}"));
+        }
+    }
+
+    private static int? ParseDocxHeadingLevel(string style)
+    {
+        if (style.StartsWith("Heading", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(style.AsSpan("Heading".Length), out var level))
+        {
+            return Math.Clamp(level, 1, 6);
+        }
+        return null;
+    }
+
+    private static void ValidateDocxPackage(byte[] bytes, CancellationToken cancellationToken)
+    {
+        const long maximumExpandedBytes = 512L * 1024 * 1024;
+        const long maximumPartBytes = 64L * 1024 * 1024;
+        using var input = new MemoryStream(bytes, writable: false);
+        using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
+        if (zip.Entries.Count is 0 or > 10_000)
+            throw new InvalidOperationException("The DOCX package has an invalid entry count.");
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long expanded = 0;
+        foreach (var entry in zip.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = entry.FullName;
+            if (string.IsNullOrWhiteSpace(path)
+                || path.Contains('\\')
+                || path.StartsWith("/", StringComparison.Ordinal)
+                || path.Split('/').Any(segment => segment is "." or "..")
+                || !names.Add(path.Normalize(NormalizationForm.FormC)))
+            {
+                throw new InvalidOperationException("The DOCX package contains an unsafe or duplicate entry path.");
+            }
+            if ((entry.ExternalAttributes >> 16 & 0xF000) == 0xA000)
+                throw new InvalidOperationException("The DOCX package contains a symbolic link entry.");
+            expanded = checked(expanded + entry.Length);
+            if (entry.Length > maximumPartBytes || expanded > maximumExpandedBytes)
+                throw new InvalidOperationException("The DOCX package exceeds the extraction size limit.");
+            if (path.Contains("/embeddings/", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("/activeX/", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith("vbaProject.bin", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The DOCX package contains executable or embedded object content.");
+            }
+            if (path.EndsWith(".rels", StringComparison.OrdinalIgnoreCase))
+                ValidateDocxRelationships(entry);
+        }
+    }
+
+    private static void ValidateDocxRelationships(ZipArchiveEntry entry)
+    {
+        using var source = entry.Open();
+        using var reader = XmlReader.Create(source, new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersInDocument = 8L * 1024 * 1024,
+        });
+        var document = XDocument.Load(reader, LoadOptions.None);
+        foreach (var relationship in document.Descendants().Where(element => element.Name.LocalName == "Relationship"))
+        {
+            if (!string.Equals((string?)relationship.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var type = (string?)relationship.Attribute("Type") ?? string.Empty;
+            if (!type.EndsWith("/hyperlink", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The DOCX package contains an unsafe external relationship.");
+        }
     }
 
     private async Task<BookArtifactPreprocessResult> PreprocessImageAsync(BookArtifactPreprocessRequest request, CancellationToken cancellationToken)

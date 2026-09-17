@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
@@ -17,6 +18,7 @@ using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Publish;
+using Lorekeeper.ProjectArchive;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -132,6 +134,8 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.True(
             completed.Status == ProjectImportJobStatus.Completed,
             completed.ErrorMessage);
+        Assert.Throws<InvalidDataException>(() =>
+            new ProjectImportFileStore().OpenRead(new ProjectImportJobFileKey(job.StagedFileKey)));
         var images = await db.PublishAssets.AsNoTracking().ToListAsync();
         var converted = await db.PublicationEditions.AsNoTracking().SingleAsync(edition => edition.Name == "Converted");
         var ambiguous = await db.PublicationEditions.AsNoTracking().SingleAsync(edition => edition.Name == "Ambiguous");
@@ -503,14 +507,7 @@ public sealed class ProjectImportJobIntegrationTests
                 },
             ],
         };
-        var job = new ProjectImportJob
-        {
-            ProjectId = project.Id,
-            FileName = "atomic-fixture.lorekeeper.json",
-            ContentJson = JsonSerializer.Serialize(
-                export,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-        };
+        var job = CreateStagedLegacyImportJob(project.Id, "atomic-fixture.lorekeeper.json", export);
         db.ProjectImportJobs.Add(job);
         await db.SaveChangesAsync();
         var mutations = new ProjectMutationCoordinator();
@@ -678,14 +675,7 @@ public sealed class ProjectImportJobIntegrationTests
                 },
             ],
         };
-        var job = new ProjectImportJob
-        {
-            ProjectId = project.Id,
-            FileName = "fixture.lorekeeper.json",
-            ContentJson = JsonSerializer.Serialize(
-                export,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-        };
+        var job = CreateStagedLegacyImportJob(project.Id, "fixture.lorekeeper.json", export);
         db.ProjectImportJobs.Add(job);
         await db.SaveChangesAsync();
 
@@ -719,7 +709,7 @@ public sealed class ProjectImportJobIntegrationTests
         db.ChangeTracker.Clear();
         var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
         Assert.True(
-            completed.Status == ProjectImportJobStatus.Completed,
+            completed.Status == ProjectImportJobStatus.CompletedWithWarnings,
             completed.ErrorMessage);
         Assert.True(completed.WarningCount > 0);
         Assert.True(contextIndexing.ExecutionCount > 0);
@@ -894,7 +884,8 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.Equal(file.Warnings, document.Warnings);
         Assert.Contains(warning, document.Warnings);
 
-        var import = await exporter.CreateImportJobAsync(destination.Id, file.FileName, json);
+        await using var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var import = await exporter.CreateImportJobAsync(destination.Id, file.FileName, jsonStream);
         var processor = await CreateProcessorAsync(db, destination);
         await processor.RunAsync(import.Id);
 
@@ -981,6 +972,197 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.Equal(upscale.Id, Assert.Single(document.EntityVisualExamples).ImageId);
     }
 
+    [Fact]
+    public async Task FullArchiveRoundTripPreservesRetainedSourceClosureAndEvidence()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var sourceProject = new Project { Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
+        var destination = new Project { Name = "Archive destination", Slug = $"archive-destination-{Guid.NewGuid():N}" };
+        db.Projects.AddRange(sourceProject, destination);
+        db.PublicationBooks.Add(new PublicationBook { Project = sourceProject });
+
+        var originalBytes = Encoding.UTF8.GetBytes("Retained source original bytes.");
+        var originalHash = SourceRetentionValidator.Sha256(originalBytes);
+        var normalizedText = "Retained source original bytes.";
+        var extraction = new SourceExtractionVersion
+        {
+            Ordinal = 0,
+            Extractor = "test",
+            ExtractorVersion = "1",
+            ContentHash = SourceRetentionValidator.Sha256(normalizedText),
+            Status = SourceExtractionStatus.Ready,
+            NormalizedText = normalizedText,
+        };
+        var retainedSource = new IngestSource
+        {
+            Project = sourceProject,
+            Title = "Primary source",
+            SourceKind = "artifact",
+            UserInstructions = string.Empty,
+            ContentType = "text/plain",
+            ActiveExtractionVersionId = extraction.Id,
+            Original = new SourceOriginal
+            {
+                State = SourceOriginalState.Available,
+                FileName = "source.txt",
+                MediaType = "text/plain",
+                Length = originalBytes.Length,
+                Sha256 = originalHash,
+            },
+        };
+        extraction.Source = retainedSource;
+        retainedSource.ExtractionVersions.Add(extraction);
+        var blob = new SourceOriginalBlob
+        {
+            Sha256 = originalHash,
+            Length = originalBytes.Length,
+            Data = originalBytes,
+        };
+        retainedSource.Original.Chunks.Add(new SourceOriginalChunk
+        {
+            Index = 0,
+            BlobSha256 = originalHash,
+            Blob = blob,
+            ByteLength = originalBytes.Length,
+        });
+        var block = new IngestSourceBlock
+        {
+            Source = retainedSource,
+            SourceExtractionVersion = extraction,
+            Index = 0,
+            Kind = "paragraph",
+            StartChar = 0,
+            EndChar = normalizedText.Length,
+            NormalizedText = normalizedText,
+            ContentHash = SourceRetentionValidator.Sha256(normalizedText),
+        };
+        extraction.SourceBlocks.Add(block);
+        var location = new SourceLocation
+        {
+            Project = sourceProject,
+            Source = retainedSource,
+            ExtractionVersion = extraction,
+            SourceBlock = block,
+            NormalizedStart = 0,
+            NormalizedLength = 8,
+            Quote = "Retained",
+            VerificationHash = SourceRetentionValidator.Sha256("Retained"),
+        };
+        var bibliography = new BibliographicRecord
+        {
+            Project = sourceProject,
+            Source = retainedSource,
+            Kind = BibliographicRecordKind.Book,
+            Title = "Primary source",
+            AuthorsJson = "[]",
+            EditorsJson = "[]",
+        };
+        db.IngestSources.Add(retainedSource);
+        db.SourceOriginalBlobs.Add(blob);
+        db.SourceLocations.Add(location);
+        db.BibliographicRecords.Add(bibliography);
+        await db.SaveChangesAsync();
+
+        var database = Database(db);
+        var exporter = new ProjectImportExportService(
+            database,
+            new EntityTypeService(database),
+            new ProjectImportJobQueue(),
+            new ProjectImportJobNotifier());
+        var traversal = new ProjectDependencyTraversalService(
+            new PassthroughAuthoringMutationFence(),
+            database,
+            exporter);
+        var archives = new ProjectArchiveService(traversal);
+        await using var archive = new MemoryStream();
+        var written = await archives.WriteAsync(
+            sourceProject.Id,
+            ProjectDependencyTraversalPolicy.FullArchive,
+            archive);
+
+        archive.Position = 0;
+        var import = await exporter.CreateImportJobAsync(destination.Id, written.FileName, archive);
+        var processor = await CreateProcessorAsync(db, destination);
+        await processor.RunAsync(import.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(job => job.Id == import.Id);
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var restored = await db.IngestSources.AsNoTracking()
+            .Include(item => item.Original).ThenInclude(original => original!.Chunks).ThenInclude(chunk => chunk.Blob)
+            .Include(item => item.ExtractionVersions).ThenInclude(version => version.SourceBlocks)
+            .SingleAsync(item => item.ProjectId == destination.Id);
+        var restoredExtraction = Assert.Single(restored.ExtractionVersions);
+        var restoredChunk = Assert.Single(restored.Original!.Chunks);
+        Assert.Equal(originalBytes, restoredChunk.Blob.Data);
+        Assert.Equal(normalizedText, restoredExtraction.NormalizedText);
+        Assert.Equal(restoredExtraction.Id, restored.ActiveExtractionVersionId);
+        Assert.Single(await db.SourceLocations.AsNoTracking()
+            .Where(item => item.ProjectId == destination.Id && item.SourceId == restored.Id)
+            .ToListAsync());
+        Assert.Single(await db.BibliographicRecords.AsNoTracking()
+            .Where(item => item.ProjectId == destination.Id && item.SourceId == restored.Id)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task V31JsonSourceImportsAsImmutableLegacyExtractionWithoutFabricatingOriginalBytes()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var project = new Project { Name = "Legacy source destination", Slug = $"legacy-source-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+        var exportedSourceId = Guid.NewGuid();
+        const string normalizedText = "Legacy retained text.";
+        var now = DateTime.UtcNow;
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 31,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Legacy source", "legacy-source", string.Empty, true, true),
+            PublicationBook = EmptyPublicationBook(),
+            IngestSources =
+            [
+                new ProjectExportIngestSource(
+                    exportedSourceId, "Legacy notes", "Text", string.Empty, string.Empty, string.Empty,
+                    normalizedText, "legacy-source-hash", string.Empty, string.Empty, string.Empty, null,
+                    "text/plain", "{}", now, now, [], [], []),
+            ],
+            BookBriefCanonSourceIds = [exportedSourceId],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(item => item.Id == job.Id);
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var imported = await db.IngestSources.AsNoTracking().SingleAsync(item => item.ProjectId == project.Id);
+        var original = await db.SourceOriginals.AsNoTracking().SingleAsync(item => item.SourceId == imported.Id);
+        var extraction = await db.SourceExtractionVersions.AsNoTracking().SingleAsync(item => item.SourceId == imported.Id);
+        Assert.Equal(SourceOriginalState.OriginalUnavailable, original.State);
+        Assert.Equal(0, original.Length);
+        Assert.Null(original.Sha256);
+        Assert.Equal(SourceExtractionStatus.LegacyImmutable, extraction.Status);
+        Assert.Equal(normalizedText, extraction.NormalizedText);
+        Assert.Equal("legacy-source-hash", extraction.ContentHash);
+        Assert.Equal(extraction.Id, imported.ActiveExtractionVersionId);
+    }
+
     private static T DefaultProxy<T>() where T : class =>
         DispatchProxy.Create<T, DefaultDispatchProxy>();
 
@@ -1015,14 +1197,29 @@ public sealed class ProjectImportJobIntegrationTests
         Guid projectId,
         ProjectExportDocument document)
     {
-        var job = new ProjectImportJob
-        {
-            ProjectId = projectId,
-            FileName = "cover-fixture.lorekeeper.json",
-            ContentJson = JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-        };
+        var job = CreateStagedLegacyImportJob(projectId, "cover-fixture.lorekeeper.json", document);
         db.ProjectImportJobs.Add(job);
         return job;
+    }
+
+    private static ProjectImportJob CreateStagedLegacyImportJob(Guid projectId, string fileName, ProjectExportDocument document)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(document, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var stream = new MemoryStream(bytes, writable: false);
+        var staged = new ProjectImportFileStore().StageAsync(
+            stream,
+            fileName,
+            ProjectImportExportService.MaximumImportBytes).GetAwaiter().GetResult();
+        return new ProjectImportJob
+        {
+            ProjectId = projectId,
+            FileName = fileName,
+            StagedFileKey = staged.Key.Value,
+            StagedLength = staged.Length,
+            StagedSha256 = staged.Sha256,
+            InputKind = ProjectImportInputKind.LegacyJson,
+            Status = ProjectImportJobStatus.Staged,
+        };
     }
 
     private static ProjectExportImage ExportImage(Guid id, string fileName, byte[] data) =>
@@ -1249,6 +1446,25 @@ public sealed class ProjectImportJobIntegrationTests
             }
             return returnType.IsValueType ? Activator.CreateInstance(returnType) : null;
         }
+    }
+
+    private sealed class PassthroughAuthoringMutationFence : IAuthoringMutationFence
+    {
+        public Guid ProcessIncarnationId { get; } = Guid.NewGuid();
+
+        public ValueTask<IAsyncDisposable> RegisterWriterAsync(
+            AuthoringWriterRegistration registration,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public void UpdateWriterState(AuthoringWriterState state) =>
+            throw new NotSupportedException();
+
+        public Task<T> ExecuteAsync<T>(
+            AuthoringFenceRequest request,
+            Func<AuthoringFenceContext, CancellationToken, Task<T>> consume,
+            CancellationToken cancellationToken = default) =>
+            consume(new AuthoringFenceContext(ProcessIncarnationId, []), cancellationToken);
     }
 
     private sealed class ImportChapterService(

@@ -6,6 +6,8 @@ public class IngestSourcePage
 
     public Guid SourceId { get; set; }
     public IngestSource Source { get; set; } = null!;
+    public Guid SourceExtractionVersionId { get; set; }
+    public SourceExtractionVersion SourceExtractionVersion { get; set; } = null!;
 
     public int PageNumber { get; set; }
     public string Text { get; set; } = string.Empty;

@@ -71,8 +71,8 @@ projection repair do not retain an EF context across that client flush.
 
 ### Snapshot contract
 
-Schema v1 uses format ID `lorekeeper.version-history-snapshot`. Every checkpoint
-tree has this stable layout:
+The format ID remains `lorekeeper.version-history-snapshot`. Current schema v8
+uses this stable layout:
 
 ```text
 manifest.json
@@ -81,7 +81,9 @@ narrative/narrative.json
 narrative/chapters/<chapter-id>/chapter.json
 narrative/chapters/<chapter-id>/manuscript.json
 graph/graph.json
-sources/sources.json
+sources/index.json
+sources/<source-id>/source.json
+sources/blobs/<sha256>.bin
 assets/assets.json
 assets/images/<image-id>/content.<extension>
 assets/fonts/<family-id>/faces/<face-id>/content.<extension>
@@ -103,11 +105,10 @@ canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
-`N` format. Writers emit the exact canonical schema-v3 file set; undeclared
-files and noncanonical paths or encodings fail closed. Readers retain a bounded
-schema-v1/v2 adapters for historical publication payloads, applying the same
-for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults as
-pre-v27 project import.
+`N` format. Writers emit the exact canonical schema-v8 file set; undeclared
+files and noncanonical paths or encodings fail closed. Readers route every
+predecessor from schema v1 through v7 through an explicit adapter only after
+validating the predecessor's original manifest and file hashes.
 
 The manifest records repository/project identity, schema and included areas,
 the sorted path/length/SHA-256 list, a content hash over path/length/bytes, and
@@ -134,7 +135,9 @@ The captured canonical areas are:
   writing samples, editor context preferences, and manuscript annotations;
 - `graph`: canonical graph nodes and edges, excluding structural and derived
   projection edges;
-- `sources`: ingest sources and their source chunks, pages, and blocks, with
+- `sources`: a small source index, one immutable retained-source manifest per
+  source, versioned extraction chunks/pages/blocks and source locations,
+  bibliography records, and reusable content-addressed original chunks, with
   fetch/job timestamps and provider diagnostics removed;
 - `assets`: project images, entity visual examples, and imported font families;
 - `manuscript`: project Book Text Styles in `manuscript/styles.json`;
@@ -143,21 +146,22 @@ The captured canonical areas are:
 - `publication`: Core Book, editions, publication sections, print project use,
   identifier and cover-submission modes, and cover spine direction.
 
-### Accepted M4 archive/history traversal contract
+### Archive/history traversal contract
 
-This is accepted next-contract guidance, not a claim that the current snapshot
-schema already includes it. One dependency traversal implementation serves three
+One dependency traversal implementation serves three
 distinct policies: `FullArchive`, `NonStructuralArchive`, and `HistorySnapshot`.
 Their inclusion, external-project-reference, workflow-setting, and warning rules
 remain policy-specific; common code must not flatten them into one scope.
 
-New history source capture stores a source index, per-source manifests,
+History source capture stores a source index, per-source manifests,
 extraction blocks, and reusable content-addressed chunks. Metadata comparison is
 lazy, restore streams and validates data, and results report new/reused bytes.
 The capture boundary freezes canonical mutation and reads stable bounded
 descriptors, then releases the project lease before compression, Git transport,
 or download. Archive/history/Git/restore interfaces exchange declared files or
-streams rather than complete byte arrays.
+streams rather than complete byte arrays. A full historical restore owns a
+scoped materialization lease until its transaction has consumed every validated
+source descriptor; comparison reads do not materialize source originals.
 
 Chats, conversations, messages and composer drafts; provider connections,
 OpenAI account/catalog rows, OAuth tokens, and credentials; the Review Edits workflow toggle, contests,
@@ -167,8 +171,8 @@ auto-link and other projections; visual candidates; render artifacts, page
 maps, packages, audits and migration journals; process-lifetime Undo/Redo; and
 other operational or derived state are deliberately excluded. Restore rebuilds
 the derived projections through their owning services and leaves render
-artifacts absent. Portable export v28 remains a separate boundary with its own
-scope and warnings.
+artifacts absent. Portable `.lorekeeper` archive policy remains a separate
+boundary with its own scope and warnings even though traversal is shared.
 
 ### Checkpoints and restore
 
@@ -420,7 +424,9 @@ The forward identifier-normalization migration preserves EF Core SQLite Guid
 lookups for repository and reference identities created by SQL backfill during
 the cutover.
 
-Snapshot schema v6 removes the duplicate cover-owned back-copy value and stores
+Snapshot schema v8 replaces the aggregate source file with the retained-source
+index/manifests/chunks described above. Schema v7 introduced independent
+Designed Pages. Schema v6 removes the duplicate cover-owned back-copy value and stores
 cover layouts against the effective publication Description. The v1-v5 reader
 rewrites retired bindings in primary and exact-surface cover scenes while keeping
 the visible saved Description authoritative. Schema v5 introduced image parent
@@ -435,7 +441,7 @@ in deterministic checkpoints, comparisons, restore, and clone import.
 
 | Path or family | Architectural role |
 |---|---|
-| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v6 payloads, canonical JSON, deterministic writer, strict reader, compatibility adapters, and manifest/blob validation. |
+| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v8 payloads, canonical JSON, deterministic writer, strict reader, explicit predecessor adapters, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
 | `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, and assistant checkpoint adapter. |
 | `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |

@@ -558,6 +558,57 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void Schema8RetainedSourceUsesPerSourceManifestAndOpensOriginalOnlyWhenRequested()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var repositoryId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var sourceId = Guid.NewGuid();
+            var extractionId = Guid.NewGuid();
+            var bytes = Encoding.UTF8.GetBytes("retained source bytes");
+            var hash = VersionHistoryCanonicalJson.Sha256Hex(bytes);
+            var retained = new VersionHistoryRetainedSource(
+                sourceId, "Source", "artifact", string.Empty, string.Empty, string.Empty,
+                string.Empty, string.Empty, string.Empty, "text/plain", "{}",
+                extractionId,
+                new VersionHistorySourceOriginal(SourceOriginalState.Available, "source.txt", "text/plain",
+                    bytes.Length, hash, [new VersionHistorySourceOriginalChunk(Guid.NewGuid(), 0, hash, bytes.Length)]),
+                [new VersionHistorySourceExtraction(extractionId, 0, "test", "1", "{}", SourceRetentionValidator.Sha256("normalized"),
+                    SourceExtractionStatus.Ready, string.Empty, "normalized", [], [], [])],
+                [], []);
+            var payload = CreatePayload(repositoryId, projectId) with
+            {
+                Sources = new VersionHistorySnapshotSourcesArea([]) { RetainedSources = [retained] },
+            };
+            WriteSnapshotTree(
+                root,
+                payload,
+                schemaVersion: 8,
+                sourceOriginalData: new Dictionary<string, byte[]>(StringComparer.Ordinal) { [hash] = bytes });
+
+            var lightweight = new VersionHistorySnapshotReader().Read(root, repositoryId, projectId);
+            Assert.False(File.Exists(Path.Combine(root, "sources", "sources.json")));
+            Assert.Single(lightweight.Payload.Sources.RetainedSources);
+            Assert.Empty(lightweight.Payload.SourceOriginalBlobs);
+
+            var restore = new VersionHistorySnapshotReader().Read(root, repositoryId, projectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
+            using var source = restore.Payload.SourceOriginalBlobs[hash].OpenRead();
+            using var copy = new MemoryStream();
+            source.CopyTo(copy);
+            Assert.Equal(bytes, copy.ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Schema7DesignedPageRestoreSelectsCurrentDataWithoutLegacyCompositionData()
     {
         var repositoryId = Guid.NewGuid();
@@ -1015,7 +1066,28 @@ public sealed class ProjectVersionRestoreTests
                     ProjectId = projectId,
                     Title = "Blocked source",
                     UserInstructions = "Ingest instructions",
-                    SourceText = "Source text",
+                };
+                var extraction = new SourceExtractionVersion
+                {
+                    Id = source.Id,
+                    SourceId = source.Id,
+                    Source = source,
+                    Ordinal = 0,
+                    Extractor = "test",
+                    ExtractorVersion = "1",
+                    ContentHash = SourceRetentionValidator.Sha256("Source text"),
+                    Status = SourceExtractionStatus.LegacyImmutable,
+                    NormalizedText = "Source text",
+                };
+                source.ActiveExtractionVersionId = extraction.Id;
+                source.ExtractionVersions.Add(extraction);
+                source.Original = new SourceOriginal
+                {
+                    SourceId = source.Id,
+                    Source = source,
+                    State = SourceOriginalState.OriginalUnavailable,
+                    FileName = "source.txt",
+                    MediaType = "text/plain",
                 };
                 setup.IngestSources.Add(source);
                 setup.IngestJobs.Add(new IngestJob
@@ -1445,20 +1517,36 @@ public sealed class ProjectVersionRestoreTests
         string root,
         VersionHistorySnapshotPayload payload,
         Func<string, byte[], byte[]>? transform = null,
-        int? schemaVersion = null)
+        int? schemaVersion = null,
+        IReadOnlyDictionary<string, byte[]>? sourceOriginalData = null)
     {
+        var effectiveSchemaVersion = schemaVersion ?? 7;
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
             ["project/project.json"] = VersionHistoryCanonicalJson.Serialize(payload.Project),
             ["narrative/narrative.json"] = VersionHistoryCanonicalJson.Serialize(
                 VersionHistorySnapshotNarrativeFile.FromArea(payload.Narrative)),
             ["graph/graph.json"] = VersionHistoryCanonicalJson.Serialize(payload.Graph),
-            ["sources/sources.json"] = VersionHistoryCanonicalJson.Serialize(payload.Sources),
             ["assets/assets.json"] = VersionHistoryCanonicalJson.Serialize(payload.Assets),
             ["manuscript/styles.json"] = VersionHistoryCanonicalJson.Serialize(payload.Manuscript),
             ["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(payload.Composition),
             ["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(payload.Publication),
         };
+        if (effectiveSchemaVersion >= 8)
+        {
+            files["sources/index.json"] = VersionHistoryCanonicalJson.Serialize(new VersionHistorySourceIndex(
+                payload.Sources.RetainedSources.Select(source => source.Id).OrderBy(id => id).ToList(),
+                payload.Sources.UnlinkedBibliographicRecords));
+            foreach (var source in payload.Sources.RetainedSources)
+            {
+                files[$"sources/{source.Id:N}/source.json"] = VersionHistoryCanonicalJson.Serialize(source);
+                foreach (var reference in source.Original.Chunks)
+                    files[$"sources/blobs/{reference.BlobSha256}.bin"] = sourceOriginalData?[reference.BlobSha256]
+                        ?? throw new InvalidOperationException("Schema-8 retained-source fixtures require explicit source bytes.");
+            }
+        }
+        else
+            files["sources/sources.json"] = VersionHistoryCanonicalJson.Serialize(payload.Sources);
         foreach (var chapter in payload.Narrative.Chapters)
         {
             var chapterDirectory = $"narrative/chapters/{chapter.Id:N}";
@@ -1481,7 +1569,7 @@ public sealed class ProjectVersionRestoreTests
         var contentHash = VersionHistoryCanonicalJson.Sha256Hex(files.Select(item => (item.Key, item.Value)));
         var manifest = new VersionHistorySnapshotManifest(
             VersionHistorySnapshotContract.FormatId,
-            schemaVersion ?? VersionHistorySnapshotContract.SchemaVersion,
+            effectiveSchemaVersion,
             payload.RepositoryId,
             payload.ProjectId,
             VersionHistorySnapshotContract.IncludedAreas,
@@ -1635,6 +1723,8 @@ public sealed class ProjectVersionRestoreTests
         public Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockAsync(Guid projectId, ProjectVersionReviewTarget target, string blockId, string text, ProjectVersionReviewConcurrencyToken expectedToken, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
+
+        public Task<ProjectVersionLoadedCheckpointLease> LoadCheckpointForRestoreAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(new ProjectVersionLoadedCheckpointLease(checkpoint));
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
 

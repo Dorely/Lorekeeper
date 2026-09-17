@@ -1,0 +1,512 @@
+@using Lorekeeper.Components.Pages.Projects
+@using Lorekeeper.Models
+@using Lorekeeper.Sources
+@inject IProjectSourcesService Sources
+
+@if (Project is null || _loading)
+{
+    <p class="text-muted"><em>Loading sources…</em></p>
+}
+else if (_showAddSource)
+{
+    <section class="sources-add">
+        <header class="sources-header">
+            <div>
+                <span class="sources-kicker">Sources</span>
+                <h2>Add retained source</h2>
+                <p>The existing upload boundary creates the immutable original and its extraction.</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAddSource">Back to library</button>
+        </header>
+        <Lorekeeper.Components.Pages.Projects.Ingest.IngestContent />
+    </section>
+}
+else
+{
+    <section class="sources-workspace">
+        <header class="sources-header">
+            <div>
+                <span class="sources-kicker">Evidence library</span>
+                <h2>Sources</h2>
+                <p>Retained originals, immutable extractions, reading evidence, and enrichment activity.</p>
+            </div>
+            <div class="sources-header-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadAsync">Refresh</button>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="OpenAddSource">Add source</button>
+            </div>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-danger py-2">@_error</div>
+        }
+
+        <div class="sources-grid">
+            <aside class="sources-library" aria-label="Source library">
+                <form class="sources-search" @onsubmit="SearchAsync" @onsubmit:preventDefault="true">
+                    <label for="source-search">Lexical search</label>
+                    <div>
+                        <input id="source-search" class="form-control form-control-sm" @bind="_searchQuery" placeholder="Exact words or phrase" />
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Search</button>
+                    </div>
+                </form>
+
+                @if (_searchHits.Count > 0)
+                {
+                    <section class="sources-search-results" aria-live="polite">
+                        <div class="sources-section-heading">Exact matches</div>
+                        @foreach (var hit in _searchHits)
+                        {
+                            <button type="button" class="sources-search-hit" @onclick="() => SelectSearchHitAsync(hit)">
+                                <strong>@hit.SourceTitle</strong>
+                                <span>@BlockLabel(hit.BlockTitle, hit.Locator, hit.PageNumber)</span>
+                                <span class="sources-search-excerpt">@foreach (var segment in hit.Excerpt) { @if (segment.IsMatch) { <mark>@segment.Text</mark> } else { @segment.Text } }</span>
+                            </button>
+                        }
+                    </section>
+                }
+                else if (_searched)
+                {
+                    <p class="small text-muted">No exact lexical match was found in the active extractions.</p>
+                }
+
+                <div class="sources-section-heading">Retained sources <span>@_workspace.Sources.Count</span></div>
+                @if (_workspace.Sources.Count == 0)
+                {
+                    <p class="small text-muted">No sources have been retained yet.</p>
+                }
+                else
+                {
+                    <div class="sources-list">
+                        @foreach (var source in _workspace.Sources)
+                        {
+                            <button type="button" class="sources-list-item @(_selectedSourceId == source.Id ? "selected" : null)" @onclick="() => SelectSourceAsync(source.Id)">
+                                <strong>@source.Title</strong>
+                                <span>@SourceKindLabel(source)</span>
+                                <span class="sources-meta">@source.BlockCount block(s) · @source.PageCount page(s)</span>
+                                <span class="sources-status @OriginalStateClass(source.OriginalState)">@OriginalStateLabel(source.OriginalState)</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </aside>
+
+            <main class="sources-reader" aria-live="polite">
+                @if (_reading is null)
+                {
+                    <div class="sources-empty-reader">
+                        <h3>Select a source</h3>
+                        <p>Choose a retained source to browse its active normalized extraction.</p>
+                    </div>
+                }
+                else
+                {
+                    <header class="sources-reading-header">
+                        <div>
+                            <span class="sources-kicker">@_reading.SourceKind</span>
+                            <h3>@_reading.Title</h3>
+                            <p>Extraction: @_reading.Extractor @_reading.ExtractorVersion · @ExtractionStatusLabel(_reading.ExtractionStatus)</p>
+                        </div>
+                        @if (SelectedSource is { OriginalState: SourceOriginalState.Available } source)
+                        {
+                            <a class="btn btn-sm btn-outline-primary" href="@OriginalUrl(source.Id)" download>Download original</a>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => RequestReextraction(source)">Re-extract</button>
+                        }
+                        else
+                        {
+                            <span class="sources-unavailable-note">Original unavailable; extracted text is not a reconstructed original.</span>
+                        }
+                    </header>
+
+                    @if (!string.IsNullOrWhiteSpace(_reading.Diagnostics))
+                    {
+                        <p class="sources-diagnostics">@_reading.Diagnostics</p>
+                    }
+
+                    <div class="sources-reader-body">
+                        <nav class="sources-contents" aria-label="Source contents">
+                            <div class="sources-section-heading">Contents</div>
+                            @foreach (var item in _reading.Contents)
+                            {
+                                <button type="button" class="@(_reading.SelectedBlock?.Id == item.BlockId ? "selected" : null)" @onclick="() => SelectBlockAsync(item.BlockId)">
+                                    <span>@(item.Index + 1).</span> @BlockLabel(item.Title, item.Locator, item.PageNumber)
+                                </button>
+                            }
+                            @if (_reading.ContentsTruncated)
+                            {
+                                <p class="sources-truncated">Only the first 1,000 content blocks are shown.</p>
+                            }
+                        </nav>
+
+                        <article class="sources-reading-text">
+                            @if (_reading.SelectedBlock is { } block)
+                            {
+                                <header>
+                                    <span class="sources-kicker">@block.Kind</span>
+                                    <h4>@BlockLabel(block.Title, block.Locator, block.PageNumber)</h4>
+                                </header>
+                                @if (block.PageNumber is int pageNumber && SelectedSource is { OriginalState: SourceOriginalState.Available } pdfSource && IsPdf(pdfSource))
+                                {
+                                    <img class="sources-pdf-page" src="@PdfPageUrl(pdfSource.Id, pageNumber)" alt="Rendered PDF page @pageNumber" />
+                                }
+                                <div class="sources-normalized-text">@foreach (var segment in block.Segments) { @if (segment.EvidenceState is { } state) { <mark class="sources-evidence-highlight @EvidenceStateClass(state)" title="@segment.EvidenceLocator">@segment.Text</mark> } else { @segment.Text } }</div>
+                                @if (block.IsTruncated)
+                                {
+                                    <p class="sources-truncated">This reader intentionally shows the first 64 KiB of this normalized block.</p>
+                                }
+                            }
+                            else
+                            {
+                                <p class="text-muted">This extraction has no readable blocks.</p>
+                            }
+                        </article>
+                    </div>
+                }
+            </main>
+
+            <aside class="sources-details" aria-label="Source details">
+                <section>
+                    <div class="sources-section-heading">Enrichment jobs <span>@_workspace.Jobs.Count</span></div>
+                    @if (_workspace.Jobs.Count == 0)
+                    {
+                        <p class="small text-muted">No enrichment jobs.</p>
+                    }
+                    else
+                    {
+                        @foreach (var job in _workspace.Jobs.Take(16))
+                        {
+                            <article class="sources-job">
+                                <strong>@job.SourceTitle</strong>
+                                <span class="sources-status @JobStatusClass(job.Status)">@job.Status</span>
+                                <span>@job.CompletedChunks / @job.TotalChunks chunks</span>
+                                @if (!string.IsNullOrWhiteSpace(job.Error)) { <small class="text-danger">@job.Error</small> }
+                                else if (!string.IsNullOrWhiteSpace(job.Message)) { <small>@job.Message</small> }
+                            </article>
+                        }
+                    }
+                </section>
+
+                <section>
+                    <div class="sources-section-heading">Evidence states</div>
+                    <div class="sources-evidence-legend" aria-label="Evidence resolution states">
+                        @foreach (var state in Enum.GetValues<SourceLocationResolutionState>())
+                        {
+                            <span class="sources-status @EvidenceStateClass(state)">@state</span>
+                        }
+                    </div>
+                    @if (_reading is not null && _reading.Evidence.Count > 0)
+                    {
+                        @foreach (var evidence in _reading.Evidence)
+                        {
+                            <article class="sources-evidence">
+                                <span class="sources-status @EvidenceStateClass(evidence.State)">@evidence.State</span>
+                                <strong>@evidence.Locator</strong>
+                                @if (_reading.ExtractionVersionId != evidence.ExtractionVersionId)
+                                {
+                                    <small>Prior extraction</small>
+                                }
+                                @if (evidence.PageNumber is int page) { <small>@($"Page {page}")</small> }
+                                @if (!string.IsNullOrWhiteSpace(evidence.Quote)) { <p>“@evidence.Quote”</p> }
+                            </article>
+                        }
+                    }
+                    else
+                    {
+                        <p class="small text-muted">No durable evidence anchors for this extraction.</p>
+                    }
+                </section>
+
+                <section>
+                    <div class="sources-section-heading">Bibliography <span>@_workspace.Bibliography.Count</span></div>
+                    @if (_workspace.Bibliography.Count == 0)
+                    {
+                        <p class="small text-muted">Bibliographic records may exist without a source.</p>
+                    }
+                    else
+                    {
+                        @foreach (var record in _workspace.Bibliography.Take(24))
+                        {
+                            <article class="sources-bibliography">
+                                <strong>@record.Title</strong>
+                                <span>@record.Kind@(record.IssuedYear is int year ? $" · {year}" : string.Empty)</span>
+                                @if (record.SourceId is Guid sourceId)
+                                {
+                                    <button type="button" class="btn btn-link btn-sm" @onclick="() => RequestDetachBibliography(record)">Detach from source</button>
+                                }
+                                else
+                                {
+                                    <small>Independent record</small>
+                                }
+                            </article>
+                        }
+                    }
+                </section>
+
+                @if (SelectedSource is { } selectedSource)
+                {
+                    <section class="sources-danger-zone">
+                        <div class="sources-section-heading">Source removal</div>
+                        <p>Deletion is blocked until every reported usage is resolved. Detaching a bibliography record preserves it as independent metadata.</p>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDeleteAsync(selectedSource)">Review deletion usage</button>
+                        @if (_deleteUsage is not null && _deleteUsage.SourceId == selectedSource.Id)
+                        {
+                            <dl class="sources-usage-report">
+                                <dt>Canonical selections</dt><dd>@_deleteUsage.CanonicalSelectionCount</dd>
+                                <dt>Bibliography links</dt><dd>@_deleteUsage.BibliographicRecordCount</dd>
+                                <dt>Jobs</dt><dd>@_deleteUsage.JobCount</dd>
+                                <dt>Active jobs</dt><dd>@_deleteUsage.OperationalJobCount</dd>
+                                <dt>Visual candidates</dt><dd>@_deleteUsage.SourceVisualCount</dd>
+                                <dt>Graph evidence</dt><dd>@_deleteUsage.GraphEvidenceCount</dd>
+                                <dt>Evidence locations</dt><dd>@_deleteUsage.SourceLocationCount</dd>
+                            </dl>
+                            @if (_deleteUsage.HasLiveUsages)
+                            {
+                                <p class="small text-warning">Resolve or detach these usages through their owning surfaces before deletion can be confirmed.</p>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-danger" @onclick="OpenDeleteConfirmation">Delete source</button>
+                            }
+                        }
+                    </section>
+                }
+            </aside>
+        </div>
+    </section>
+}
+
+<ConfirmationDialog IsOpen="@(_detachBibliography is not null)"
+                    Title="Detach bibliography record?"
+                    Message="The bibliographic record will remain in this project but will no longer be linked to its source."
+                    ConfirmLabel="Detach record"
+                    Busy="_confirmationBusy"
+                    OnConfirm="DetachBibliographyAsync"
+                    OnCancel="CancelConfirmation" />
+
+<ConfirmationDialog IsOpen="@(_deleteConfirmationSourceId is not null)"
+                    Title="Delete retained source?"
+                    Message="This permanently removes the retained original and extraction after the usage report confirmed no remaining dependencies."
+                    ConfirmLabel="Delete source"
+                    Destructive="true"
+                    Busy="_confirmationBusy"
+                    OnConfirm="DeleteSourceAsync"
+                    OnCancel="CancelConfirmation" />
+
+<ConfirmationDialog IsOpen="@(_reextractConfirmationSourceId is not null)"
+                    Title="Re-extract retained source?"
+                    Message="This creates a new immutable local extraction from the retained original. Existing evidence stays pinned to its prior extraction and may be shown as outdated. No AI enrichment will run."
+                    ConfirmLabel="Re-extract source"
+                    Busy="_confirmationBusy"
+                    OnConfirm="ReextractSourceAsync"
+                    OnCancel="CancelConfirmation" />
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private ProjectSourcesWorkspace _workspace = new([], [], []);
+    private ProjectSourceReading? _reading;
+    private Guid? _selectedSourceId;
+    private string _searchQuery = string.Empty;
+    private bool _searched;
+    private bool _loading = true;
+    private bool _showAddSource;
+    private bool _confirmationBusy;
+    private string? _error;
+    private List<ProjectSourceSearchHit> _searchHits = [];
+    private SourceDeletionUsageReport? _deleteUsage;
+    private ProjectBibliographicRecordItem? _detachBibliography;
+    private Guid? _deleteConfirmationSourceId;
+    private Guid? _reextractConfirmationSourceId;
+
+    private ProjectSourceListItem? SelectedSource => _selectedSourceId is Guid id
+        ? _workspace.Sources.FirstOrDefault(source => source.Id == id)
+        : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is not null && _loading)
+            await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (Project is null) return;
+        _loading = true;
+        _error = null;
+        try
+        {
+            _workspace = await Sources.GetWorkspaceAsync(Project.Id);
+            if (_selectedSourceId is Guid selected && _workspace.Sources.Any(source => source.Id == selected))
+                await SelectSourceAsync(selected);
+            else if (_workspace.Sources.FirstOrDefault() is { } first)
+                await SelectSourceAsync(first.Id);
+            else
+            {
+                _selectedSourceId = null;
+                _reading = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectSourceAsync(Guid sourceId)
+    {
+        if (Project is null) return;
+        _selectedSourceId = sourceId;
+        _deleteUsage = null;
+        _error = null;
+        try
+        {
+            _reading = await Sources.GetReadingAsync(Project.Id, sourceId);
+        }
+        catch (Exception ex)
+        {
+            _reading = null;
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SelectBlockAsync(Guid blockId)
+    {
+        if (Project is null || _selectedSourceId is not Guid sourceId) return;
+        _reading = await Sources.GetReadingAsync(Project.Id, sourceId, blockId);
+    }
+
+    private async Task SearchAsync()
+    {
+        if (Project is null) return;
+        _error = null;
+        _searched = true;
+        try
+        {
+            _searchHits = (await Sources.SearchAsync(Project.Id, _searchQuery)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _searchHits = [];
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SelectSearchHitAsync(ProjectSourceSearchHit hit)
+    {
+        if (Project is null) return;
+        _selectedSourceId = hit.SourceId;
+        _reading = await Sources.GetReadingAsync(Project.Id, hit.SourceId, hit.BlockId);
+    }
+
+    private async Task RequestDeleteAsync(ProjectSourceListItem source)
+    {
+        if (Project is null) return;
+        _error = null;
+        try
+        {
+            _deleteUsage = await Sources.GetDeletionUsageAsync(Project.Id, source.Id);
+            if (_deleteUsage is null)
+                _error = "Source not found.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void RequestDetachBibliography(ProjectBibliographicRecordItem record) => _detachBibliography = record;
+    private void RequestReextraction(ProjectSourceListItem source) => _reextractConfirmationSourceId = source.Id;
+
+    private void OpenDeleteConfirmation()
+    {
+        if (_deleteUsage is { HasLiveUsages: false })
+            _deleteConfirmationSourceId = _deleteUsage.SourceId;
+    }
+
+    private async Task DetachBibliographyAsync()
+    {
+        if (Project is null || _detachBibliography is null) return;
+        _confirmationBusy = true;
+        try
+        {
+            await Sources.DetachBibliographicRecordAsync(Project.Id, _detachBibliography.Id);
+            _detachBibliography = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
+    private async Task DeleteSourceAsync()
+    {
+        if (Project is null || _deleteConfirmationSourceId is not Guid sourceId) return;
+        _confirmationBusy = true;
+        try
+        {
+            await Sources.DeleteSourceAsync(Project.Id, sourceId);
+            _deleteConfirmationSourceId = null;
+            _deleteUsage = null;
+            _selectedSourceId = null;
+            _reading = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
+    private async Task ReextractSourceAsync()
+    {
+        if (Project is null || _reextractConfirmationSourceId is not Guid sourceId) return;
+        _confirmationBusy = true;
+        try
+        {
+            await Sources.ReextractSourceAsync(Project.Id, sourceId);
+            _reextractConfirmationSourceId = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
+    private void OpenAddSource() => _showAddSource = true;
+    private void CloseAddSource() => _showAddSource = false;
+    private void CancelConfirmation()
+    {
+        _detachBibliography = null;
+        _deleteConfirmationSourceId = null;
+        _reextractConfirmationSourceId = null;
+    }
+
+    private string OriginalUrl(Guid sourceId) => $"/projects/{Project!.Id:N}/sources/{sourceId:N}/original";
+    private string PdfPageUrl(Guid sourceId, int pageNumber) => $"/projects/{Project!.Id:N}/sources/{sourceId:N}/pdf-pages/{pageNumber}.png?maxEdge=1280";
+    private static bool IsPdf(ProjectSourceListItem source) => source.MediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase);
+    private static string SourceKindLabel(ProjectSourceListItem source) => string.IsNullOrWhiteSpace(source.SourceKind) ? source.MediaType : source.SourceKind;
+    private static string BlockLabel(string title, string locator, int? page) => string.IsNullOrWhiteSpace(title) ? locator : $"{title}{(page is int number ? $" · p. {number}" : string.Empty)}";
+    private static string OriginalStateLabel(SourceOriginalState state) => state == SourceOriginalState.Available ? "Original retained" : "Original unavailable";
+    private static string OriginalStateClass(SourceOriginalState state) => state == SourceOriginalState.Available ? "available" : "unavailable";
+    private static string ExtractionStatusLabel(SourceExtractionStatus status) => status switch { SourceExtractionStatus.Ready => "Ready", SourceExtractionStatus.LegacyImmutable => "Legacy immutable", SourceExtractionStatus.Extracting => "Extracting", _ => "Failed" };
+    private static string JobStatusClass(IngestJobStatus status) => status switch { IngestJobStatus.Completed => "resolved", IngestJobStatus.Failed => "unavailable", IngestJobStatus.Running or IngestJobStatus.Queued => "outdated", _ => "ambiguous" };
+    private static string EvidenceStateClass(SourceLocationResolutionState state) => state.ToString().ToLowerInvariant();
+}

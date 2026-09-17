@@ -13,7 +13,7 @@
     ],
     "gateStatus": "unresolved",
     "admissionSummary": {
-      "admitted": 185,
+      "admitted": 188,
       "unresolved": 40,
       "blocked": 0
     }
@@ -26,7 +26,7 @@
   ],
   "summary": {
     "satisfied": 26,
-    "needs-inclusion": 160,
+    "needs-inclusion": 163,
     "blocked": 0,
     "unresolved-provenance": 39
   },
@@ -75,8 +75,8 @@
     },
     {
       "dependencyCategory": "NuGet",
-      "entries": 65,
-      "admitted": 62,
+      "entries": 68,
+      "admitted": 65,
       "unresolved": 3,
       "blocked": 0
     }
@@ -4950,6 +4950,56 @@
     },
     {
       "kind": "nuget-package",
+      "name": "DocumentFormat.OpenXml",
+      "version": "3.5.1",
+      "dependencyCategory": "NuGet",
+      "status": "needs-inclusion",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (DocumentFormat.OpenXml/3.5.1).",
+      "attributionAction": "Retain the selected license evidence and include the required notice before distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:DocumentFormat.OpenXml/3.5.1"
+      ],
+      "admissionStatus": "admitted",
+      "licenseExpression": "MIT",
+      "selectedLicenseExpression": "MIT",
+      "selectedOrBranches": [],
+      "restrictionClasses": [],
+      "policyDiagnostics": []
+    },
+    {
+      "kind": "nuget-package",
+      "name": "DocumentFormat.OpenXml.Framework",
+      "version": "3.5.1",
+      "dependencyCategory": "NuGet",
+      "status": "needs-inclusion",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (DocumentFormat.OpenXml.Framework/3.5.1).",
+      "attributionAction": "Retain the selected license evidence and include the required notice before distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:DocumentFormat.OpenXml.Framework/3.5.1"
+      ],
+      "admissionStatus": "admitted",
+      "licenseExpression": "MIT",
+      "selectedLicenseExpression": "MIT",
+      "selectedOrBranches": [],
+      "restrictionClasses": [],
+      "policyDiagnostics": []
+    },
+    {
+      "kind": "nuget-package",
       "name": "ElectronNET.Core",
       "version": "0.5.1",
       "dependencyCategory": "NuGet",
@@ -6471,6 +6521,31 @@
       "sources": [
         "Lorekeeper/obj/project.assets.json",
         "nuget:System.Drawing.Common/8.0.22"
+      ],
+      "admissionStatus": "admitted",
+      "licenseExpression": "MIT",
+      "selectedLicenseExpression": "MIT",
+      "selectedOrBranches": [],
+      "restrictionClasses": [],
+      "policyDiagnostics": []
+    },
+    {
+      "kind": "nuget-package",
+      "name": "System.IO.Packaging",
+      "version": "10.0.2",
+      "dependencyCategory": "NuGet",
+      "status": "needs-inclusion",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (System.IO.Packaging/10.0.2).",
+      "attributionAction": "Retain the selected license evidence and include the required notice before distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:System.IO.Packaging/10.0.2"
       ],
       "admissionStatus": "admitted",
       "licenseExpression": "MIT",

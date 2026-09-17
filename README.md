@@ -101,21 +101,22 @@ its planned features are not claims about current capabilities.
   entity/link reads when needed.
   Reworked outline fields are written as standalone current canon without
   language that compares them with an earlier draft.
-- Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
-  canon extraction, graph synchronization, and combined lexical/semantic
-  retrieval. File ingest accepts up to 50 files together, creates one durable
-  job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v30 preserves artifact-only print settings, manuscript review annotations, image-upscale provenance, cover Description bindings, and only the Book Brief's selected
-  canonical ingest sources (source text, chunks, pages, blocks, metadata, and
-  selection mapping), remaps their provenance on import, and rebuilds retrieval
-  indexes without rerunning extraction. Project-reference links are intentionally
-  omitted from v27 exports; exports with outgoing links warn that imports never infer
-  links. Non-structural exports omit source bodies, selections, and evidence and
-  report that omission.
-- Local version history captures deterministic checkpoints of the creative
+- A project Sources workspace for PDF, EPUB, DOCX, text/Markdown, image, and
+  saved-webpage material. It retains immutable originals when available,
+  preserves versioned extraction and stable evidence, supports contents and
+  lexical navigation, bounded PDF-page viewing, original download, and explicit
+  re-extraction without silently moving citations. File ingest accepts up to 50
+  files together and keeps per-file progress visible.
+- Streamed `.lorekeeper` project archives preserve the complete retained-source
+  closure for full exports and use a separate non-structural dependency policy
+  with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
+  Imports validate the staged file and archive closure before one creative-state
+  transaction, then rebuild derived indexes as retryable post-commit work.
+- Local version history schema v8 captures deterministic checkpoints of the creative
   project in an app-managed Git repository. History includes canonical project,
   narrative, graph, source, asset, manuscript, composition, and publication
-  state; it excludes chats, credentials, jobs, search/vector projections,
+  state, including per-source manifests and reusable content-addressed original
+  chunks; it excludes chats, credentials, jobs, search/vector projections,
   render artifacts, and other operational state. Images and fonts are ordinary
   Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
@@ -344,10 +345,11 @@ its planned features are not claims about current capabilities.
   The owned B&N profile emits inspected PDF 1.4 with PDF/A-1b identification,
   embedded fonts, output intent, flattened transparency, and exact imported
   template geometry.
-- Versioned project import/export (current v31 manuscript-v5/page-setup/
-  Designed Page model, Core Book, sparse release overlays, edition chapter
-  snapshots/page overrides, exact-target review annotations, selected canonical source bodies/evidence, covers, custom-font binaries,
-  and isolated older structured/text adapters) plus TXT, Markdown,
+- Streamed `.lorekeeper` project import/export (archive-envelope v1,
+  archive-record v1, manuscript-v5/page-setup/Designed Page model, Core Book,
+  sparse release overlays, edition chapter snapshots/page overrides,
+  exact-target review annotations, complete retained-source closure, covers,
+  custom-font binaries, and isolated legacy JSON v1-v31 import adapters) plus TXT, Markdown,
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.

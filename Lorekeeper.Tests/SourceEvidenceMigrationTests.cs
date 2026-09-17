@@ -35,14 +35,15 @@ public sealed class SourceEvidenceMigrationTests
                     "Migration fixture",
                     $"fixture-{projectId:N}");
                 db.BookBriefs.Add(new BookBrief { ProjectId = projectId });
-                db.IngestSources.Add(new IngestSource
-                {
-                    Id = sourceId,
-                    ProjectId = projectId,
-                    Title = "Canon notes",
-                    UserInstructions = string.Empty,
-                    SourceText = "Preserve me.",
-                });
+                var now = DateTime.UtcNow;
+                await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                    INSERT INTO IngestSources
+                        (Id, ProjectId, Title, SourceKind, Description, UserInstructions,
+                         SourceText, SourceHash, VectorIndexState, CreatedAt, UpdatedAt)
+                    VALUES
+                        ({{sourceId}}, {{projectId}}, {{"Canon notes"}}, {{string.Empty}}, {{string.Empty}}, {{string.Empty}},
+                         {{"Preserve me."}}, {{"legacy-hash"}}, {{"Stale"}}, {{now}}, {{now}})
+                    """);
                 var chapter = new GraphNode
                 {
                     ProjectId = projectId,

@@ -25,9 +25,11 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
+using Lorekeeper.ProjectArchive;
 using Lorekeeper.Publish;
 using Lorekeeper.Research;
 using Lorekeeper.Search;
+using Lorekeeper.Sources;
 using Lorekeeper.Startup;
 using Lorekeeper.Tokens;
 using Lorekeeper.VersionHistory.Compare;
@@ -306,6 +308,10 @@ builder.Services.AddScoped<IngestJobProcessor>();
 builder.Services.AddScoped<IIngestService, IngestService>();
 builder.Services.AddHostedService<IngestJobWorker>();
 
+// Sources is the retained-source reader and binary delivery boundary. Ingest
+// continues to own extraction, jobs, and source deletion semantics.
+builder.Services.AddScoped<IProjectSourcesService, ProjectSourcesService>();
+
 // Research
 builder.Services.Configure<WebResearchOptions>(builder.Configuration.GetSection(WebResearchOptions.SectionName));
 builder.Services.AddSingleton<IWebFetchCoordinator, WebFetchCoordinator>();
@@ -322,9 +328,12 @@ builder.Services.AddSingleton<IResearchChatTurnRunner, ResearchChatTurnRunner>()
 // Import / export
 builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
 builder.Services.AddSingleton<IProjectImportJobNotifier, ProjectImportJobNotifier>();
+builder.Services.AddSingleton<IProjectImportFileStore, ProjectImportFileStore>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
 builder.Services.AddScoped<ProjectImportJobProcessor>();
 builder.Services.AddHostedService<ProjectImportJobWorker>();
+builder.Services.AddScoped<IProjectDependencyTraversalService, ProjectDependencyTraversalService>();
+builder.Services.AddScoped<IProjectArchiveService, ProjectArchiveService>();
 
 // Publish
 builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>();
@@ -434,6 +443,8 @@ app.MapRazorComponents<Lorekeeper.Components.App>()
 app.MapCodexOAuth();
 app.MapProjectImages();
 app.MapProjectFonts();
+app.MapProjectSources();
+app.MapProjectArchiveEndpoints();
 app.MapPublishEndpoints();
 app.MapPrintingEndpoints();
 

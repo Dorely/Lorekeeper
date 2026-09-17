@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using System.Collections.ObjectModel;
 using LibGit2Sharp;
+using Lorekeeper.ProjectArchive;
 
 namespace Lorekeeper.VersionHistory.Git;
 
@@ -342,7 +342,7 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
 
     public GitCommitWriteResult WriteSnapshot(
         Guid repositoryId,
-        IReadOnlyDictionary<string, byte[]> files,
+        IReadOnlyCollection<ProjectArchiveFileDescriptor> files,
         string semanticMessage,
         DateTimeOffset authoredAt)
     {
@@ -377,22 +377,6 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
             UpdateMainReference(repository, commit.Id);
             EnsureMainHeadReference(repository);
             return new GitCommitWriteResult(Created: true, ToMetadata(commit)!);
-        }
-    }
-
-    public IReadOnlyDictionary<string, byte[]> ReadTree(Guid repositoryId, string? commitSha = null)
-    {
-        var repositoryPath = GetRepositoryPath(repositoryId);
-        lock (GetRepositoryLock(repositoryPath))
-        {
-            using var repository = OpenRepository(repositoryPath);
-            var commit = ResolveCommit(repository, commitSha);
-            if (commit is null)
-                throw new InvalidOperationException("The repository has no commit at the requested revision.");
-
-            var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-            ReadTree(repository, commit.Tree, prefix: string.Empty, files);
-            return new ReadOnlyDictionary<string, byte[]>(files);
         }
     }
 
@@ -663,50 +647,17 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
             ?? throw new InvalidOperationException($"The commit was not found: {commitSha}");
     }
 
-    private static Tree CreateTree(Repository repository, IReadOnlyList<KeyValuePair<string, byte[]>> entries)
+    private static Tree CreateTree(Repository repository, IReadOnlyList<ProjectArchiveFileDescriptor> entries)
     {
         var definition = new TreeDefinition();
         foreach (var entry in entries)
         {
-            using var stream = new MemoryStream(entry.Value, writable: false);
+            using var stream = entry.OpenRead();
             var blob = repository.ObjectDatabase.CreateBlob(stream);
-            definition.Add(entry.Key, blob, Mode.NonExecutableFile);
+            definition.Add(entry.ArchivePath, blob, Mode.NonExecutableFile);
         }
 
         return repository.ObjectDatabase.CreateTree(definition);
-    }
-
-    private static void ReadTree(
-        Repository repository,
-        Tree tree,
-        string prefix,
-        SortedDictionary<string, byte[]> files)
-    {
-        foreach (var entry in tree)
-        {
-            ValidateTreeSegment(entry.Name);
-            var path = string.IsNullOrEmpty(prefix) ? entry.Name : $"{prefix}/{entry.Name}";
-            ValidateGitPath(path);
-
-            switch (entry.TargetType)
-            {
-                case TreeEntryTargetType.Tree:
-                    if (entry.Mode != Mode.Directory || entry.Target is not Tree subtree)
-                        throw new InvalidDataException($"The Git tree contains an invalid directory entry: {path}");
-                    ReadTree(repository, subtree, path, files);
-                    break;
-
-                case TreeEntryTargetType.Blob:
-                    if (entry.Mode != Mode.NonExecutableFile || entry.Target is not Blob blob)
-                        throw new InvalidDataException($"The Git tree contains a non-regular file entry: {path}");
-                    if (!files.TryAdd(path, ReadBlob(blob)))
-                        throw new InvalidDataException($"The Git tree contains a duplicate path: {path}");
-                    break;
-
-                default:
-                    throw new InvalidDataException($"The Git tree contains an unsupported entry: {path}");
-            }
-        }
     }
 
     private static void MaterializeTree(
@@ -774,37 +725,28 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
         return destination;
     }
 
-    private static byte[] ReadBlob(Blob blob)
-    {
-        using var source = blob.GetContentStream();
-        using var destination = new MemoryStream();
-        source.CopyTo(destination);
-        return destination.ToArray();
-    }
-
-    private static IReadOnlyList<KeyValuePair<string, byte[]>> NormalizeFiles(
-        IReadOnlyDictionary<string, byte[]> files)
+    private static IReadOnlyList<ProjectArchiveFileDescriptor> NormalizeFiles(
+        IReadOnlyCollection<ProjectArchiveFileDescriptor> files)
     {
         var entries = files
-            .Select(entry => new KeyValuePair<string, byte[]>(entry.Key, entry.Value?.ToArray()
-                ?? throw new ArgumentException("Snapshot file contents cannot be null.", nameof(files))))
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .Select(entry => entry ?? throw new ArgumentException("Snapshot file descriptors cannot be null.", nameof(files)))
+            .OrderBy(entry => entry.ArchivePath, StringComparer.Ordinal)
             .ToArray();
 
         var knownPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
-            ValidateGitPath(entry.Key);
-            if (!knownPaths.Add(entry.Key))
-                throw new ArgumentException($"The snapshot contains a duplicate path: {entry.Key}", nameof(files));
+            ValidateGitPath(entry.ArchivePath);
+            if (!knownPaths.Add(entry.ArchivePath))
+                throw new ArgumentException($"The snapshot contains a duplicate path: {entry.ArchivePath}", nameof(files));
 
-            var separator = entry.Key.IndexOf('/');
+            var separator = entry.ArchivePath.IndexOf('/');
             while (separator > 0)
             {
-                var parent = entry.Key[..separator];
+                var parent = entry.ArchivePath[..separator];
                 if (knownPaths.Contains(parent))
-                    throw new ArgumentException($"A snapshot file conflicts with a directory path: {entry.Key}", nameof(files));
-                separator = entry.Key.IndexOf('/', separator + 1);
+                    throw new ArgumentException($"A snapshot file conflicts with a directory path: {entry.ArchivePath}", nameof(files));
+                separator = entry.ArchivePath.IndexOf('/', separator + 1);
             }
         }
 

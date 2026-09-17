@@ -184,8 +184,20 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
     public Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
         operation.Db.IngestSources.FirstOrDefaultAsync(source => source.Id == sourceId, cancellationToken);
 
+    public Task<SourceExtractionVersion?> GetActiveExtractionAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
+        operation.Db.SourceExtractionVersions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(extraction => extraction.SourceId == sourceId
+                && extraction.Id == extraction.Source.ActiveExtractionVersionId
+                && (extraction.Status == SourceExtractionStatus.Ready
+                    || extraction.Status == SourceExtractionStatus.LegacyImmutable),
+                cancellationToken);
+
     public Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default) =>
-        operation.Db.IngestSourceChunks.FirstOrDefaultAsync(chunk => chunk.Id == sourceChunkId, cancellationToken);
+        operation.Db.IngestSourceChunks.FirstOrDefaultAsync(chunk =>
+            chunk.Id == sourceChunkId
+            && chunk.SourceExtractionVersionId == chunk.Source.ActiveExtractionVersionId,
+            cancellationToken);
 
     public Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         operation.Db.IngestSources
@@ -196,13 +208,15 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
 
     public Task<List<IngestSourcePage>> ListSourcePagesAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
         operation.Db.IngestSourcePages
-            .Where(page => page.SourceId == sourceId)
+            .Where(page => page.SourceId == sourceId
+                && page.SourceExtractionVersionId == page.Source.ActiveExtractionVersionId)
             .OrderBy(page => page.PageNumber)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestSourceBlock>> ListSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
         operation.Db.IngestSourceBlocks
-            .Where(block => block.SourceId == sourceId)
+            .Where(block => block.SourceId == sourceId
+                && block.SourceExtractionVersionId == block.Source.ActiveExtractionVersionId)
             .OrderBy(block => block.Index)
             .ToListAsync(cancellationToken);
 
@@ -218,13 +232,14 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
         maxChars = Math.Clamp(maxChars, 1, 100_000);
         var excerpt = await operation.Db.IngestSourceChunks
             .AsNoTracking()
-            .Where(chunk => chunk.Id == sourceChunkId)
+            .Where(chunk => chunk.Id == sourceChunkId
+                && chunk.SourceExtractionVersionId == chunk.Source.ActiveExtractionVersionId)
             .Select(chunk => new
             {
                 chunk.Id,
-                Text = chunk.Source.SourceText.Substring(
+                Text = chunk.SourceExtractionVersion.NormalizedText.Substring(
                     chunk.StartChar,
-                    chunk.EndChar - chunk.StartChar > maxChars ? maxChars : chunk.EndChar - chunk.StartChar),
+                    Math.Min(maxChars, Math.Min(chunk.EndChar, chunk.SourceExtractionVersion.NormalizedText.Length) - chunk.StartChar)),
                 IsTruncated = chunk.EndChar - chunk.StartChar > maxChars,
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -242,7 +257,8 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
 
     public Task<List<IngestSourceChunk>> ListSourceChunksAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
         operation.Db.IngestSourceChunks
-            .Where(chunk => chunk.SourceId == sourceId)
+            .Where(chunk => chunk.SourceId == sourceId
+                && chunk.SourceExtractionVersionId == chunk.Source.ActiveExtractionVersionId)
             .OrderBy(chunk => chunk.Index)
             .ToListAsync(cancellationToken);
 

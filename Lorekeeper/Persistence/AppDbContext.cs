@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Legacy;
@@ -73,6 +74,12 @@ public class AppDbContext(
     public DbSet<IngestReportItem> IngestReportItems => Set<IngestReportItem>();
     public DbSet<IngestStagingRecord> IngestStagingRecords => Set<IngestStagingRecord>();
     public DbSet<IngestJobEvent> IngestJobEvents => Set<IngestJobEvent>();
+    public DbSet<SourceOriginal> SourceOriginals => Set<SourceOriginal>();
+    public DbSet<SourceOriginalBlob> SourceOriginalBlobs => Set<SourceOriginalBlob>();
+    public DbSet<SourceOriginalChunk> SourceOriginalChunks => Set<SourceOriginalChunk>();
+    public DbSet<SourceExtractionVersion> SourceExtractionVersions => Set<SourceExtractionVersion>();
+    public DbSet<SourceLocation> SourceLocations => Set<SourceLocation>();
+    public DbSet<BibliographicRecord> BibliographicRecords => Set<BibliographicRecord>();
     public DbSet<WebIngestCandidate> WebIngestCandidates => Set<WebIngestCandidate>();
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
@@ -136,6 +143,7 @@ public class AppDbContext(
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         NormalizePublicationTargetOwnership();
+        ValidateSourceRetentionMutations();
         try
         {
             return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -158,6 +166,7 @@ public class AppDbContext(
     private async Task<int> SaveChangesWithLockRetryAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
         NormalizePublicationTargetOwnership();
+        ValidateSourceRetentionMutations();
         var delay = TimeSpan.FromMilliseconds(100);
         try
         {
@@ -187,6 +196,119 @@ public class AppDbContext(
             throw new DbUpdateConcurrencyException(
                 "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
                 exception);
+        }
+    }
+
+    private void ValidateSourceRetentionMutations()
+    {
+        ValidateNewSourceRetentionRows();
+        ValidateTrackedActiveExtractions();
+        foreach (var entry in ChangeTracker.Entries<SourceOriginal>())
+        {
+            if (entry.State == EntityState.Modified)
+                throw new InvalidOperationException("Retained source originals are immutable.");
+        }
+        foreach (var entry in ChangeTracker.Entries<SourceOriginalBlob>())
+        {
+            if (entry.State == EntityState.Modified)
+                throw new InvalidOperationException("Content-addressed source blobs are immutable.");
+        }
+        foreach (var entry in ChangeTracker.Entries<SourceOriginalChunk>())
+        {
+            if (entry.State == EntityState.Modified)
+                throw new InvalidOperationException("Retained source chunk references are immutable.");
+        }
+        foreach (var entry in ChangeTracker.Entries<SourceExtractionVersion>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+            if (entry.OriginalValues.GetValue<SourceExtractionStatus>(nameof(SourceExtractionVersion.Status)) != SourceExtractionStatus.Extracting
+                || entry.Property(nameof(SourceExtractionVersion.SourceId)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.Ordinal)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.Extractor)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.ExtractorVersion)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.OptionsJson)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.ContentHash)).IsModified
+                || entry.Property(nameof(SourceExtractionVersion.NormalizedText)).IsModified)
+            {
+                throw new InvalidOperationException("Completed source extraction versions are immutable; create a new extraction instead.");
+            }
+        }
+
+        RejectExtractionContentMutation<IngestSourceChunk>("SourceExtractionVersionId", "SourceId", "StartChar", "EndChar");
+        RejectExtractionContentMutation<IngestSourcePage>("SourceExtractionVersionId", "SourceId", "PageNumber", "Text", "StartChar", "EndChar", "ExtractionMethod");
+        RejectExtractionContentMutation<IngestSourceBlock>("SourceExtractionVersionId", "SourceId", "SourcePageId", "Index", "StartChar", "EndChar", "NormalizedText", "ContentHash");
+        RejectExtractionContentMutation<SourceLocation>("ProjectId", "SourceId", "ExtractionVersionId", "SourceBlockId", "PageNumber", "NormalizedStart", "NormalizedLength", "Locator", "Quote", "VerificationHash");
+    }
+
+    private void ValidateNewSourceRetentionRows()
+    {
+        foreach (var entry in ChangeTracker.Entries<SourceOriginal>().Where(entry => entry.State == EntityState.Added))
+            SourceRetentionValidator.ValidateOriginalForPersistence(entry.Entity);
+
+        foreach (var entry in ChangeTracker.Entries<SourceOriginalBlob>().Where(entry => entry.State == EntityState.Added))
+        {
+            var blob = entry.Entity;
+            if (blob.Length != blob.Data.Length
+                || !string.Equals(blob.Sha256, SourceRetentionValidator.Sha256(blob.Data), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("A retained source blob does not match its content address.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<SourceExtractionVersion>().Where(entry => entry.State == EntityState.Added))
+        {
+            var extraction = entry.Entity;
+            if (extraction.Ordinal < 0
+                || string.IsNullOrWhiteSpace(extraction.Extractor)
+                || string.IsNullOrWhiteSpace(extraction.ExtractorVersion)
+                || string.IsNullOrWhiteSpace(extraction.ContentHash))
+            {
+                throw new InvalidOperationException("A source extraction version is incomplete.");
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<IngestSourceBlock>().Where(entry => entry.State == EntityState.Added))
+        {
+            var block = entry.Entity;
+            if (block.NormalizedText.Length > IngestSourceBlock.MaximumNormalizedTextLength
+                || block.StartChar < 0
+                || block.EndChar < block.StartChar)
+            {
+                throw new InvalidOperationException("A retained source block is outside the supported bounds.");
+            }
+        }
+    }
+
+    private void ValidateTrackedActiveExtractions()
+    {
+        var trackedExtractions = ChangeTracker.Entries<SourceExtractionVersion>()
+            .Where(entry => entry.State is not EntityState.Detached and not EntityState.Deleted)
+            .Select(entry => entry.Entity)
+            .ToDictionary(extraction => extraction.Id);
+        foreach (var source in ChangeTracker.Entries<IngestSource>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
+            .Select(entry => entry.Entity))
+        {
+            if (source.ActiveExtractionVersionId is not Guid activeExtractionId
+                || !trackedExtractions.TryGetValue(activeExtractionId, out var extraction))
+            {
+                continue;
+            }
+            if (extraction.SourceId != source.Id
+                || extraction.Status is not (SourceExtractionStatus.Ready or SourceExtractionStatus.LegacyImmutable))
+            {
+                throw new InvalidOperationException("An active source extraction must be a ready extraction owned by that source.");
+            }
+        }
+    }
+
+    private void RejectExtractionContentMutation<TEntity>(params string[] propertyNames)
+        where TEntity : class
+    {
+        foreach (var entry in ChangeTracker.Entries<TEntity>().Where(entry => entry.State == EntityState.Modified))
+        {
+            if (propertyNames.Any(propertyName => entry.Property(propertyName).IsModified))
+                throw new InvalidOperationException("Completed source extraction content is immutable; create a new extraction instead.");
         }
     }
 
@@ -937,6 +1059,7 @@ public class AppDbContext(
         modelBuilder.Entity<IngestSource>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.CreatedAt });
+            entity.HasIndex(e => e.ActiveExtractionVersionId);
             entity.Property(e => e.VectorIndexState).HasConversion<string>();
 
             entity.HasOne(e => e.Project)
@@ -945,38 +1068,138 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<IngestSourceChunk>(entity =>
+        modelBuilder.Entity<SourceOriginal>(entity =>
+        {
+            entity.HasKey(e => e.SourceId);
+            entity.Property(e => e.State).HasConversion<string>();
+            entity.HasIndex(e => e.Sha256);
+            entity.HasOne(e => e.Source)
+                .WithOne(source => source.Original)
+                .HasForeignKey<SourceOriginal>(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SourceOriginalBlob>(entity =>
+        {
+            entity.HasKey(e => e.Sha256);
+            entity.Property(e => e.Data).HasColumnType("BLOB");
+            entity.ToTable(table => table.HasCheckConstraint("CK_SourceOriginalBlobs_Length", "Length >= 0"));
+        });
+
+        modelBuilder.Entity<SourceOriginalChunk>(entity =>
         {
             entity.HasIndex(e => new { e.SourceId, e.Index }).IsUnique();
+            entity.ToTable(table => table.HasCheckConstraint("CK_SourceOriginalChunks_ByteLength", $"ByteLength > 0 AND ByteLength <= {SourceOriginal.MaximumChunkBytes}"));
+            entity.HasOne(e => e.SourceOriginal)
+                .WithMany(original => original.Chunks)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Blob)
+                .WithMany(blob => blob.Chunks)
+                .HasForeignKey(e => e.BlobSha256)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SourceExtractionVersion>(entity =>
+        {
+            entity.HasIndex(e => new { e.SourceId, e.Ordinal }).IsUnique();
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.HasOne(e => e.Source)
+                .WithMany(source => source.ExtractionVersions)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BibliographicRecord>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Title });
+            entity.HasIndex(e => e.SourceId);
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.HasOne(e => e.Project)
+                .WithMany(project => project.BibliographicRecords)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Source)
+                .WithMany(source => source.BibliographicRecords)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<SourceLocation>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.SourceId, e.ExtractionVersionId });
+            entity.HasIndex(e => e.SourceBlockId);
+            entity.Property(e => e.ResolutionState).HasConversion<string>();
+            entity.ToTable(table => table.HasCheckConstraint("CK_SourceLocations_NormalizedRange", "NormalizedStart >= 0 AND NormalizedLength >= 0"));
+            entity.HasOne(e => e.Project)
+                .WithMany(project => project.SourceLocations)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Source)
+                .WithMany(source => source.Locations)
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ExtractionVersion)
+                .WithMany(extraction => extraction.Locations)
+                .HasForeignKey(e => e.ExtractionVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SourceBlock)
+                .WithMany(block => block.Locations)
+                .HasForeignKey(e => e.SourceBlockId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<IngestSourceChunk>(entity =>
+        {
+            entity.HasIndex(e => e.SourceId);
+            entity.HasIndex(e => new { e.SourceExtractionVersionId, e.Index }).IsUnique();
             entity.Property(e => e.StructureStatus).HasConversion<string>();
 
             entity.HasOne(e => e.Source)
                 .WithMany(s => s.SourceChunks)
                 .HasForeignKey(e => e.SourceId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceExtractionVersion)
+                .WithMany(extraction => extraction.SourceChunks)
+                .HasForeignKey(e => e.SourceExtractionVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<IngestSourcePage>(entity =>
         {
-            entity.HasIndex(e => new { e.SourceId, e.PageNumber }).IsUnique();
-            entity.HasIndex(e => new { e.SourceId, e.StartChar });
+            entity.HasIndex(e => e.SourceId);
+            entity.HasIndex(e => new { e.SourceExtractionVersionId, e.PageNumber }).IsUnique();
+            entity.HasIndex(e => new { e.SourceExtractionVersionId, e.StartChar });
 
             entity.HasOne(e => e.Source)
                 .WithMany(s => s.SourcePages)
                 .HasForeignKey(e => e.SourceId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceExtractionVersion)
+                .WithMany(extraction => extraction.SourcePages)
+                .HasForeignKey(e => e.SourceExtractionVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<IngestSourceBlock>(entity =>
         {
-            entity.HasIndex(e => new { e.SourceId, e.Index }).IsUnique();
-            entity.HasIndex(e => new { e.SourceId, e.StartChar });
+            entity.HasIndex(e => e.SourceId);
+            entity.HasIndex(e => new { e.SourceExtractionVersionId, e.StartChar });
             entity.HasIndex(e => e.SourcePageId);
+            entity.HasIndex(e => new { e.SourceExtractionVersionId, e.Index }).IsUnique();
+            entity.ToTable(table => table.HasCheckConstraint("CK_IngestSourceBlocks_NormalizedText", $"length(NormalizedText) <= {IngestSourceBlock.MaximumNormalizedTextLength}"));
 
             entity.HasOne(e => e.Source)
                 .WithMany(s => s.SourceBlocks)
                 .HasForeignKey(e => e.SourceId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceExtractionVersion)
+                .WithMany(extraction => extraction.SourceBlocks)
+                .HasForeignKey(e => e.SourceExtractionVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.SourcePage)
                 .WithMany(p => p.Blocks)
@@ -1110,6 +1333,9 @@ public class AppDbContext(
         {
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.InputKind).HasConversion<string>();
+            entity.Property(e => e.StagedFileKey).HasMaxLength(80);
+            entity.Property(e => e.StagedSha256).HasMaxLength(64);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.ProjectImportJobs)

@@ -122,7 +122,7 @@ else
             }
             <div class="mb-2">
                 <label class="form-label small text-muted">Source text</label>
-                <InputFile OnChange="OnFileSelectedAsync" multiple class="form-control form-control-sm mb-2" accept=".txt,.md,.markdown,.epub,.pdf,.png,.jpg,.jpeg,.webp" />
+                <InputFile OnChange="OnFileSelectedAsync" multiple class="form-control form-control-sm mb-2" accept=".txt,.md,.markdown,.epub,.pdf,.docx,.png,.jpg,.jpeg,.webp" />
                 @if (_selectedFiles.Count == 1)
                 {
                     <div class="ingest-artifact-status">
@@ -670,6 +670,8 @@ else
     private string ArtifactModeLabel =>
         IsSelectedPdfArtifact
             ? "PDF artifact"
+            : string.Equals(Path.GetExtension(_selectedFiles.FirstOrDefault()?.Name), ".docx", StringComparison.OrdinalIgnoreCase)
+                ? "Word document"
             : string.Equals(Path.GetExtension(_selectedFiles.FirstOrDefault()?.Name), ".epub", StringComparison.OrdinalIgnoreCase)
                 ? "EPUB artifact"
                 : Path.GetExtension(_selectedFiles.FirstOrDefault()?.Name ?? string.Empty).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp"
@@ -1470,6 +1472,7 @@ else
         Path.GetExtension(fileName).ToLowerInvariant() switch
         {
             ".pdf" => "PDF book",
+            ".docx" => "Word document",
             ".epub" => "EPUB book",
             ".png" or ".jpg" or ".jpeg" or ".webp" => "Image source",
             ".md" or ".markdown" => "Markdown source",

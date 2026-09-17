@@ -150,6 +150,95 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("AuthoringTargetGenerations");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.BibliographicRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AccessedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContainerTitle")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Doi")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EditorsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Isbn")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Issue")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("IssuedYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Pages")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Publisher")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublisherPlace")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Volume")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("ProjectId", "Title");
+
+                    b.ToTable("BibliographicRecords");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1663,6 +1752,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ActiveExtractionVersionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CanonicalUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1688,19 +1780,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SourceHash")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("SourceKind")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SourceMetadataJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SourceText")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -1735,6 +1819,8 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActiveExtractionVersionId");
+
                     b.HasIndex("ProjectId", "CreatedAt");
 
                     b.ToTable("IngestSources");
@@ -1744,6 +1830,10 @@ namespace Lorekeeper.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1767,8 +1857,15 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("PageNumber")
                         .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceExtractionVersionId")
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid>("SourceId")
                         .HasColumnType("TEXT");
@@ -1785,14 +1882,19 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("SourceId");
+
                     b.HasIndex("SourcePageId");
 
-                    b.HasIndex("SourceId", "Index")
+                    b.HasIndex("SourceExtractionVersionId", "Index")
                         .IsUnique();
 
-                    b.HasIndex("SourceId", "StartChar");
+                    b.HasIndex("SourceExtractionVersionId", "StartChar");
 
-                    b.ToTable("IngestSourceBlocks");
+                    b.ToTable("IngestSourceBlocks", t =>
+                        {
+                            t.HasCheckConstraint("CK_IngestSourceBlocks_NormalizedText", "length(NormalizedText) <= 1048576");
+                        });
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceChunk", b =>
@@ -1820,6 +1922,9 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Property<int>("Index")
                         .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceExtractionVersionId")
+                        .HasColumnType("TEXT");
 
                     b.Property<Guid>("SourceId")
                         .HasColumnType("TEXT");
@@ -1854,7 +1959,9 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SourceId", "Index")
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("SourceExtractionVersionId", "Index")
                         .IsUnique();
 
                     b.ToTable("IngestSourceChunks");
@@ -1894,6 +2001,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("SourceExtractionVersionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("SourceId")
                         .HasColumnType("TEXT");
 
@@ -1916,10 +2026,12 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SourceId", "PageNumber")
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("SourceExtractionVersionId", "PageNumber")
                         .IsUnique();
 
-                    b.HasIndex("SourceId", "StartChar");
+                    b.HasIndex("SourceExtractionVersionId", "StartChar");
 
                     b.ToTable("IngestSourcePages");
                 });
@@ -3192,10 +3304,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<int>("CompletedSteps")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ContentJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("CreatedActCount")
                         .HasColumnType("INTEGER");
 
@@ -3235,6 +3343,10 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<int>("FormatVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("InputKind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("MergedEdgeCount")
                         .HasColumnType("INTEGER");
 
@@ -3242,6 +3354,19 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StagedFileKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("StagedLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StagedSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("StartedAt")
@@ -5183,6 +5308,204 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("SearchProviders");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.SourceExtractionVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Diagnostics")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Extractor")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtractorVersion")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OptionsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId", "Ordinal")
+                        .IsUnique();
+
+                    b.ToTable("SourceExtractionVersions");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ExtractionVersionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Locator")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("NormalizedLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NormalizedStart")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PageNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Quote")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResolutionState")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceBlockId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VerificationHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExtractionVersionId");
+
+                    b.HasIndex("SourceBlockId");
+
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("ProjectId", "SourceId", "ExtractionVersionId");
+
+                    b.ToTable("SourceLocations", t =>
+                        {
+                            t.HasCheckConstraint("CK_SourceLocations_NormalizedRange", "NormalizedStart >= 0 AND NormalizedLength >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginal", b =>
+                {
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Length")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SourceId");
+
+                    b.HasIndex("Sha256");
+
+                    b.ToTable("SourceOriginals");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginalBlob", b =>
+                {
+                    b.Property<string>("Sha256")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("Length")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Sha256");
+
+                    b.ToTable("SourceOriginalBlobs", t =>
+                        {
+                            t.HasCheckConstraint("CK_SourceOriginalBlobs_Length", "Length >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginalChunk", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BlobSha256")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ByteLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Index")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlobSha256");
+
+                    b.HasIndex("SourceId", "Index")
+                        .IsUnique();
+
+                    b.ToTable("SourceOriginalChunks", t =>
+                        {
+                            t.HasCheckConstraint("CK_SourceOriginalChunks_ByteLength", "ByteLength > 0 AND ByteLength <= 8388608");
+                        });
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5651,6 +5974,24 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.BibliographicRecord", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("BibliographicRecords")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.IngestSource", "Source")
+                        .WithMany("BibliographicRecords")
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Source");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -6082,6 +6423,12 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceBlock", b =>
                 {
+                    b.HasOne("Lorekeeper.Models.SourceExtractionVersion", "SourceExtractionVersion")
+                        .WithMany("SourceBlocks")
+                        .HasForeignKey("SourceExtractionVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Lorekeeper.Models.IngestSource", "Source")
                         .WithMany("SourceBlocks")
                         .HasForeignKey("SourceId")
@@ -6095,11 +6442,19 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("Source");
 
+                    b.Navigation("SourceExtractionVersion");
+
                     b.Navigation("SourcePage");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceChunk", b =>
                 {
+                    b.HasOne("Lorekeeper.Models.SourceExtractionVersion", "SourceExtractionVersion")
+                        .WithMany("SourceChunks")
+                        .HasForeignKey("SourceExtractionVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Lorekeeper.Models.IngestSource", "Source")
                         .WithMany("SourceChunks")
                         .HasForeignKey("SourceId")
@@ -6107,10 +6462,18 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Source");
+
+                    b.Navigation("SourceExtractionVersion");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourcePage", b =>
                 {
+                    b.HasOne("Lorekeeper.Models.SourceExtractionVersion", "SourceExtractionVersion")
+                        .WithMany("SourcePages")
+                        .HasForeignKey("SourceExtractionVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Lorekeeper.Models.IngestSource", "Source")
                         .WithMany("SourcePages")
                         .HasForeignKey("SourceId")
@@ -6118,6 +6481,8 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Source");
+
+                    b.Navigation("SourceExtractionVersion");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestStagingRecord", b =>
@@ -6936,6 +7301,81 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.SourceExtractionVersion", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.IngestSource", "Source")
+                        .WithMany("ExtractionVersions")
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Source");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceLocation", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.SourceExtractionVersion", "ExtractionVersion")
+                        .WithMany("Locations")
+                        .HasForeignKey("ExtractionVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithMany("SourceLocations")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.IngestSourceBlock", "SourceBlock")
+                        .WithMany("Locations")
+                        .HasForeignKey("SourceBlockId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Lorekeeper.Models.IngestSource", "Source")
+                        .WithMany("Locations")
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ExtractionVersion");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Source");
+
+                    b.Navigation("SourceBlock");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginal", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.IngestSource", "Source")
+                        .WithOne("Original")
+                        .HasForeignKey("Lorekeeper.Models.SourceOriginal", "SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Source");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginalChunk", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.SourceOriginalBlob", "Blob")
+                        .WithMany("Chunks")
+                        .HasForeignKey("BlobSha256")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.SourceOriginal", "SourceOriginal")
+                        .WithMany("Chunks")
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Blob");
+
+                    b.Navigation("SourceOriginal");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
                 {
                     b.HasOne("Lorekeeper.Models.IngestSource", "IngestSource")
@@ -7106,9 +7546,17 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSource", b =>
                 {
+                    b.Navigation("BibliographicRecords");
+
                     b.Navigation("BookBriefCanonSelections");
 
+                    b.Navigation("ExtractionVersions");
+
                     b.Navigation("Jobs");
+
+                    b.Navigation("Locations");
+
+                    b.Navigation("Original");
 
                     b.Navigation("SourceBlocks");
 
@@ -7121,6 +7569,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("VectorFragments");
 
                     b.Navigation("VisualCandidates");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.IngestSourceBlock", b =>
+                {
+                    b.Navigation("Locations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceChunk", b =>
@@ -7157,6 +7610,8 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("BibliographicRecords");
 
                     b.Navigation("BookBrief");
 
@@ -7229,6 +7684,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("ResearchConversations");
 
                     b.Navigation("ResolvedIncomingReferences");
+
+                    b.Navigation("SourceLocations");
 
                     b.Navigation("SourceVisualCandidates");
 
@@ -7356,6 +7813,27 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.ResearchConversation", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceExtractionVersion", b =>
+                {
+                    b.Navigation("Locations");
+
+                    b.Navigation("SourceBlocks");
+
+                    b.Navigation("SourceChunks");
+
+                    b.Navigation("SourcePages");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginal", b =>
+                {
+                    b.Navigation("Chunks");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.SourceOriginalBlob", b =>
+                {
+                    b.Navigation("Chunks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>

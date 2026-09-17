@@ -84,6 +84,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
 
             var provider = await ResolveJobProviderAsync(job, cancellationToken);
 
+            await EnsureJobChunksMatchActiveExtractionAsync(job, cancellationToken);
             await ingestVectorIndexing.EnsureVectorFragmentsAsync(job.Source, cancellationToken: cancellationToken);
             var sourceChunks = job.Chunks.Select(chunk => chunk.SourceChunk).OrderBy(chunk => chunk.Index).ToList();
             var sourceBlocks = await ReadSourceBlocksAsync(job.SourceId, cancellationToken);
@@ -1280,7 +1281,8 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         int maxAttempts,
         CancellationToken cancellationToken)
     {
-        var sourceText = job.Source.SourceText;
+        var extraction = await ReadActiveExtractionForJobChunkAsync(job, sourceChunk, cancellationToken);
+        var sourceText = extraction.NormalizedText;
         var start = Math.Clamp(sourceChunk.StartChar, 0, sourceText.Length);
         var end = Math.Clamp(sourceChunk.EndChar, start, sourceText.Length);
         var currentText = sourceText[start..end];
@@ -1363,6 +1365,54 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
             {{currentText}}
             ```
             """;
+    }
+
+    private async Task<SourceExtractionVersion> ReadActiveExtractionForJobChunkAsync(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        CancellationToken cancellationToken)
+    {
+        var extraction = await ReadActiveExtractionForJobAsync(job, cancellationToken);
+        ValidateJobChunkExtraction(job, sourceChunk, extraction);
+        return extraction;
+    }
+
+    private async Task EnsureJobChunksMatchActiveExtractionAsync(
+        IngestJob job,
+        CancellationToken cancellationToken)
+    {
+        var extraction = await ReadActiveExtractionForJobAsync(job, cancellationToken);
+        foreach (var jobChunk in job.Chunks)
+            ValidateJobChunkExtraction(job, jobChunk.SourceChunk, extraction);
+    }
+
+    private async Task<SourceExtractionVersion> ReadActiveExtractionForJobAsync(
+        IngestJob job,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var extraction = await operation.Repositories.Ingest
+            .GetActiveExtractionAsync(job.SourceId, cancellationToken);
+        return extraction ?? throw new InvalidOperationException(
+            $"Ingest job {job.Id} cannot process source {job.SourceId}: no ready active extraction is available.");
+    }
+
+    private static void ValidateJobChunkExtraction(
+        IngestJob job,
+        IngestSourceChunk sourceChunk,
+        SourceExtractionVersion extraction)
+    {
+        if (sourceChunk.SourceId != job.SourceId)
+        {
+            throw new InvalidOperationException(
+                $"Ingest job {job.Id} references source chunk {sourceChunk.Id} from another source.");
+        }
+
+        if (sourceChunk.SourceExtractionVersionId != extraction.Id)
+        {
+            throw new InvalidOperationException(
+                $"Ingest job {job.Id} references stale chunk {sourceChunk.Id}; its extraction is not the active source extraction.");
+        }
     }
 
     private async Task<IReadOnlyList<SourceVisualCandidateView>> ListRelevantVisualsAsync(

@@ -247,16 +247,16 @@ Visible source inventories and activity panels are read projections over those
 same durable records. They may summarize progress and provenance, but they must
 not introduce a second canon-selection, relationship, or job-state authority.
 
-### Accepted M4 retained-source contract
+### Retained-source contract
 
-This is accepted next-contract guidance, not a statement of current ingest
-storage. Sources become immutable project-owned material: `SourceOriginal`
+Sources are immutable project-owned material: `SourceOriginal`
 records name, media type, length, SHA-256, and ordered 8 MiB-or-smaller content
 addressed chunks; `SourceExtractionVersion` records extractor/version/options,
 content hash, status/diagnostics, and bounded reading blocks. `SourceLocation`
 is durable evidence with source, extraction, block/page, range, locator, quote,
-and verification hash. Re-extraction creates another immutable version and never
-retargets existing evidence.
+and verification hash. Re-extraction verifies an available retained original,
+normalizes it locally before a short atomic publish, creates another immutable
+version with new child identities, and never retargets existing evidence.
 
 Every legacy source migrates to an immutable legacy extraction preserving its
 source/chunk/block/page identities, normalized text, evidence, and hashes, with
@@ -265,6 +265,13 @@ a reconstructed original. Bibliographic records are project-owned and may exist
 without a source; detaching a source preserves metadata and marks dependent
 evidence unavailable. Source deletion reports bibliography, manuscript, graph,
 assistant-transcript, and job usage before an explicit resolution.
+
+The project Sources workspace owns upload, contents navigation, bounded
+normalized reading and lexical search, exact evidence-state display, original
+download, bounded PDF page rendering, deletion impact, and local re-extraction.
+PDF, EPUB, DOCX, text/Markdown, image, and saved-webpage inputs enter through the
+same retained-source boundary. DOCX extraction rejects executable or unsafe
+external relationships and does not infer Word pagination.
 
 ## Key files and file families
 
@@ -277,8 +284,9 @@ assistant-transcript, and job usage before an explicit resolution.
 | [`Lorekeeper/Search/ProjectSearchModels.cs`](../../Lorekeeper/Search/ProjectSearchModels.cs), [`ProjectSearchService.cs`](../../Lorekeeper/Search/ProjectSearchService.cs), [`ProjectSearchAgentPayload.cs`](../../Lorekeeper/Search/ProjectSearchAgentPayload.cs), and [`SqliteFtsProjectSearchIndex.cs`](../../Lorekeeper/Search/SqliteFtsProjectSearchIndex.cs) | Origin-aware lexical/vector discovery, compact assistant projections, exact narrative reads, and the project FTS5 index; external search adapters belong to providers. |
 | [`Lorekeeper/Context/`](../../Lorekeeper/Context/) | Editor context assembly, recommendations, compact projections, pagination, indexing, and direct-reference manifests. |
 | [`Lorekeeper/Ingest/IngestService.cs`](../../Lorekeeper/Ingest/IngestService.cs), [`BookArtifactPreprocessor.cs`](../../Lorekeeper/Ingest/BookArtifactPreprocessor.cs), [`IngestSourceStructureBuilder.cs`](../../Lorekeeper/Ingest/IngestSourceStructureBuilder.cs), graph/evidence/index services, and [`IngestJobProcessor.cs`](../../Lorekeeper/Ingest/IngestJobProcessor.cs) | Ingest lifecycle, artifact preprocessing, source structure, graph/evidence ownership, retrieval projections, and scoped processing; queue/worker execution belongs to providers. |
+| [`Lorekeeper/Sources/`](../../Lorekeeper/Sources/) | Retained-source workspace projection, bounded normalized reading/search/evidence display, streamed original delivery, bounded PDF-page rendering, bibliography detachment, and guarded handoffs to ingest-owned deletion and local-only re-extraction. |
 | [`Lorekeeper/Research/WebIngestCandidateService.cs`](../../Lorekeeper/Research/WebIngestCandidateService.cs), [`WebIngestCandidateModels.cs`](../../Lorekeeper/Research/WebIngestCandidateModels.cs), and [`ResearchActivityModels.cs`](../../Lorekeeper/Research/ResearchActivityModels.cs) | Cached source provenance, promotion into ingest, and read models; provider fetch policy and Research chat adapters remain in their owning chapters. |
-| [`Lorekeeper/Components/Pages/Projects/Outline/`](../../Lorekeeper/Components/Pages/Projects/Outline/) and graph/context project components | Application-owned outline, canon-source, graph, reference, and Assistant Memory interaction surfaces. |
+| [`Lorekeeper/Components/Pages/Projects/Sources/`](../../Lorekeeper/Components/Pages/Projects/Sources/), [`SourcesPage.razor`](../../Lorekeeper/Components/Pages/Projects/SourcesPage.razor), [`Outline/`](../../Lorekeeper/Components/Pages/Projects/Outline/), and graph/context project components | Application-owned source library/upload entry, outline canon-source, graph, reference, and Assistant Memory interaction surfaces. |
 
 ## Related chapters
 

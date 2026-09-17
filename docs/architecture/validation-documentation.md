@@ -407,10 +407,10 @@ exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
-### Current M2-M3 and accepted M4-M5 contract evidence
+### Current M2-M4 and accepted M5 contract evidence
 
-M2 and M3 fixtures now have implementation evidence. Before the remaining implementations land, fixtures are normative input,
-not formatter- or exporter-generated snapshots. Focused deterministic regressions
+M2-M4 fixtures now have implementation evidence. M5 fixtures remain normative
+input, not formatter- or exporter-generated snapshots. Focused deterministic regressions
 must cover Designed Page migration/placement/release isolation and occurrence
 mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,
 conflicts, and mutation fences; source legacy `OriginalUnavailable` migration,
@@ -422,8 +422,9 @@ missing metadata, repeats, and repeated Designed Page occurrences.
 Migration checks use copied representative databases and prove rollback without
 modifying developer data. Local scale tooling may measure source/archive memory
 and cancellation on the 50-source fixture, but does not establish native
-navigation evidence. These are accepted target requirements, not evidence that
-the M4-M5 implementations or platform integrations are complete. M3's native
+navigation evidence. M4's deterministic retention, archive, history, and
+fail-closed import contracts do not establish its native scale/portability gate.
+M5 remains an accepted target rather than a current capability, and M3's native
 latency gate also remains unverified.
 
 ## Key files and file families

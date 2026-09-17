@@ -10,7 +10,7 @@ public interface IProjectImportRepository
     Task<ProjectImportJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<ProjectImportJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<ProjectImportJobDetailView?> GetJobDetailViewAsync(Guid jobId, CancellationToken cancellationToken = default);
-    Task<List<ProjectImportJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default);
+    Task<List<ProjectImportJob>> ListRunnableJobsAsync(CancellationToken cancellationToken = default);
     Task<List<ProjectImportJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default);
     Task<List<ProjectImportReportItem>> ListReportItemsAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task AddJobAsync(ProjectImportJob job, CancellationToken cancellationToken = default);

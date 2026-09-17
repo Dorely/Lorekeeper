@@ -299,6 +299,32 @@ public sealed record ProjectVersionLoadedCheckpoint(
     VersionHistorySnapshotPayload Payload,
     ProjectVersionCheckpointView? RecordedCheckpoint);
 
+/// <summary>
+/// Owns the temporary materialized files behind a restore checkpoint. Dispose
+/// it only after every retained source descriptor has been consumed.
+/// </summary>
+public sealed class ProjectVersionLoadedCheckpointLease : IDisposable
+{
+    private Action? _release;
+
+    public ProjectVersionLoadedCheckpointLease(ProjectVersionLoadedCheckpoint checkpoint)
+        : this(checkpoint, null)
+    {
+    }
+
+    internal ProjectVersionLoadedCheckpointLease(
+        ProjectVersionLoadedCheckpoint checkpoint,
+        Action? release)
+    {
+        Checkpoint = checkpoint;
+        _release = release;
+    }
+
+    public ProjectVersionLoadedCheckpoint Checkpoint { get; }
+
+    public void Dispose() => Interlocked.Exchange(ref _release, null)?.Invoke();
+}
+
 public interface IProjectVersionHistoryService
 {
     Task<ProjectVersionRepositoryView?> GetRepositoryAsync(
@@ -498,6 +524,11 @@ public interface IProjectVersionHistoryService
         CancellationToken cancellationToken = default);
 
     Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(
+        Guid projectId,
+        string commitSha,
+        CancellationToken cancellationToken = default);
+
+    Task<ProjectVersionLoadedCheckpointLease> LoadCheckpointForRestoreAsync(
         Guid projectId,
         string commitSha,
         CancellationToken cancellationToken = default);

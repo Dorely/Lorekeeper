@@ -1,3 +1,5 @@
+using Lorekeeper.ProjectArchive;
+
 namespace Lorekeeper.VersionHistory.Git;
 
 /// <summary>
@@ -27,11 +29,9 @@ public interface IGitRepositoryStore
 
     GitCommitWriteResult WriteSnapshot(
         Guid repositoryId,
-        IReadOnlyDictionary<string, byte[]> files,
+        IReadOnlyCollection<ProjectArchiveFileDescriptor> files,
         string semanticMessage,
         DateTimeOffset authoredAt);
-
-    IReadOnlyDictionary<string, byte[]> ReadTree(Guid repositoryId, string? commitSha = null);
 
     void MaterializeTree(
         Guid repositoryId,

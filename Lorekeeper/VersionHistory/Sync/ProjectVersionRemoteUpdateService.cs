@@ -384,9 +384,12 @@ public sealed class ProjectVersionRemoteUpdateService(
             VersionHistorySnapshotArtifact artifact;
             try
             {
-                var files = git.ReadTree(repositoryId, headCommitSha);
-                MaterializeTree(stagingPath, files, cancellationToken);
-                artifact = snapshotReader.Read(stagingPath, repositoryId, projectId);
+                git.MaterializeTree(repositoryId, stagingPath, headCommitSha, cancellationToken);
+                artifact = snapshotReader.Read(
+                    stagingPath,
+                    repositoryId,
+                    projectId,
+                    new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
             }
             catch (OperationCanceledException)
             {
@@ -487,44 +490,6 @@ public sealed class ProjectVersionRemoteUpdateService(
         Directory.CreateDirectory(path);
         EnsureNoReparsePoints(path);
         return path;
-    }
-
-    private static void MaterializeTree(
-        string root,
-        IReadOnlyDictionary<string, byte[]> files,
-        CancellationToken cancellationToken)
-    {
-        foreach (var entry in files)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var relativePath = NormalizeRelativePath(entry.Key);
-            var fullPath = ResolveSafePath(root, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-            EnsureNoReparsePoints(Path.GetDirectoryName(fullPath)!);
-            File.WriteAllBytes(fullPath, entry.Value);
-        }
-    }
-
-    private static string NormalizeRelativePath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path)
-            || path.StartsWith('/')
-            || path.Contains('\\')
-            || path.Contains('\0')
-            || path.Split('/').Any(segment => segment is "" or "." or ".."))
-            throw new InvalidDataException("The fetched Git tree contains an unsafe snapshot path.");
-        return path;
-    }
-
-    private static string ResolveSafePath(string root, string relativePath)
-    {
-        var fullRoot = Path.GetFullPath(root);
-        var candidate = Path.GetFullPath(Path.Combine(fullRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-        var prefix = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        if (!candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("The fetched Git tree escaped its staging directory.");
-        return candidate;
     }
 
     private static void EnsureInsideHistoryRoot(string root, string path)

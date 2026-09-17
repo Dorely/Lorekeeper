@@ -3,6 +3,7 @@ using Lorekeeper.Authoring;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.ProjectArchive;
 using Lorekeeper.VersionHistory.Compare;
 using Lorekeeper.VersionHistory.Git;
 using Lorekeeper.VersionHistory.Snapshots;
@@ -112,11 +113,11 @@ public sealed class ProjectVersionHistoryService(
             requestKey,
             cancellationToken);
         string? temporaryDirectory = null;
+        SnapshotDescriptorCapture? files = null;
 
         try
         {
             VersionHistorySnapshotArtifact validated;
-            SortedDictionary<string, byte[]> files;
             if (capturedSnapshot is null)
             {
                 temporaryDirectory = CreateTemporaryDirectory();
@@ -126,13 +127,13 @@ public sealed class ProjectVersionHistoryService(
                     temporaryDirectory,
                     cancellationToken);
                 EnsureNoReparsePointsRecursively(temporaryDirectory);
-                files = ReadSnapshotFiles(temporaryDirectory, cancellationToken);
+                files = await CaptureSnapshotFilesAsync(temporaryDirectory, cancellationToken);
             }
             else
             {
                 EnsureNoReparsePointsRecursively(capturedSnapshot.RootDirectory);
                 validated = capturedSnapshot;
-                files = ReadSnapshotFiles(capturedSnapshot.RootDirectory, cancellationToken);
+                files = await CaptureSnapshotFilesAsync(capturedSnapshot.RootDirectory, cancellationToken);
             }
 
             var existingHead = ReadExistingHead(repository);
@@ -169,7 +170,7 @@ public sealed class ProjectVersionHistoryService(
 
             var write = git.WriteSnapshot(
                 repository.Id,
-                files,
+                files.Files,
                 semanticMessage,
                 authoredAt ?? DateTimeOffset.UtcNow);
             var checkpoint = await PersistCheckpointAndCompleteAsync(
@@ -203,6 +204,8 @@ public sealed class ProjectVersionHistoryService(
         }
         finally
         {
+            if (files is not null)
+                await files.DisposeAsync();
             CleanupTemporaryDirectory(temporaryDirectory);
         }
     }
@@ -908,84 +911,57 @@ public sealed class ProjectVersionHistoryService(
             target.ChapterId,
             currentChapter.ManuscriptRevision);
 
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var entry in git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha))
-            files.Add(entry.Key, entry.Value);
-
-        // Start from approved HEAD and replace only this target's complete
-        // semantic manuscript. Metadata, styles, publication settings, and
-        // every other chapter/edition stay at their approved values. Edition
-        // targets use the exact live override presence so keeping a removal
-        // does not recreate an override that merely matches Core.
-        if (target.ContentTarget.IsCore)
-        {
-            UpdateSynthesizedReviewTree(files, approved.Payload, current.Payload, target, currentDocument);
-        }
-        else
-        {
-            UpdateSynthesizedEditionTargetReviewTree(files, approved.Payload, current.Payload, target);
-        }
-
-        // Designed Pages are independently reviewed project-owned content.
-        // Approving a placement/manuscript must never approve its page.
-        RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
-
         var generatedRoot = CreateTemporaryDirectory();
-        VersionHistorySnapshotArtifact generated;
         try
         {
-            WriteTreeToTemporaryDirectory(generatedRoot, files, cancellationToken);
+            git.MaterializeTree(status.Repository.RepositoryId, generatedRoot, status.Repository.HeadCommitSha, cancellationToken);
+            var changes = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+            // Start from approved HEAD and replace only this target's complete
+            // semantic manuscript. Metadata, styles, publication settings, and
+            // every other chapter/edition stay at their approved values.
+            if (target.ContentTarget.IsCore)
+                UpdateSynthesizedReviewTree(changes, approved.Payload, current.Payload, target, currentDocument);
+            else
+                UpdateSynthesizedEditionTargetReviewTree(changes, approved.Payload, current.Payload, target);
+
+            WriteSnapshotJsonFiles(generatedRoot, changes);
+            await RebuildSnapshotManifestAsync(generatedRoot, status.Repository.RepositoryId, projectId, cancellationToken);
             EnsureNoReparsePointsRecursively(generatedRoot);
-            generated = snapshotReader.Read(
+            var generated = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
                 projectId);
-        }
-        finally
-        {
-            CleanupTemporaryDirectory(generatedRoot);
-        }
+            if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
+                throw new InvalidOperationException("There are no chapter changes to approve.");
 
-        if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
-            throw new InvalidOperationException("There are no chapter changes to approve.");
-
-        var operationId = await StartOperationAsync(
-            status.Repository.RepositoryId,
-            ProjectVersionOperationKind.Checkpoint,
-            requestKey,
-            cancellationToken);
-        try
-        {
-            var authoredAt = DateTimeOffset.UtcNow;
-            var write = git.WriteSnapshot(
+            var operationId = await StartOperationAsync(
                 status.Repository.RepositoryId,
-                files,
-                semanticMessage,
-                authoredAt);
-            var checkpoint = await PersistCheckpointAndCompleteAsync(
-                status.Repository.RepositoryId,
-                operationId,
-                write.Commit,
-                generated.Manifest,
-                ProjectVersionCheckpointKind.ReviewApproval,
-                semanticMessage,
-                authoredAt,
-                write.Created,
+                ProjectVersionOperationKind.Checkpoint,
+                requestKey,
                 cancellationToken);
-            historyEvents.PublishCheckpointCreated(projectId);
-            historyEvents.PublishReviewStateChanged(projectId);
-            return checkpoint;
+            var authoredAt = DateTimeOffset.UtcNow;
+            try
+            {
+                await using var capture = await CaptureSnapshotFilesAsync(generatedRoot, cancellationToken);
+                var write = git.WriteSnapshot(status.Repository.RepositoryId, capture.Files, semanticMessage, authoredAt);
+                var checkpoint = await PersistCheckpointAndCompleteAsync(status.Repository.RepositoryId, operationId, write.Commit,
+                    generated.Manifest, ProjectVersionCheckpointKind.ReviewApproval, semanticMessage, authoredAt, write.Created, cancellationToken);
+                historyEvents.PublishCheckpointCreated(projectId);
+                historyEvents.PublishReviewStateChanged(projectId);
+                return checkpoint;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await TryCancelOperationAsync(operationId);
+                throw;
+            }
+            catch (Exception exception)
+            {
+                await TryFailOperationAsync(operationId, exception, CancellationToken.None);
+                throw;
+            }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await TryCancelOperationAsync(operationId);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            await TryFailOperationAsync(operationId, exception, CancellationToken.None);
-            throw;
-        }
+        finally { CleanupTemporaryDirectory(generatedRoot); }
     }
 
     public async Task<ProjectVersionCheckpointView> CreateReviewApprovalForOtherAsync(
@@ -1019,96 +995,52 @@ public sealed class ProjectVersionHistoryService(
             recordedCheckpoint: null,
             projectId,
             cancellationToken);
-        var approvedFiles = git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha)
-            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         var currentRoot = CreateTemporaryDirectory();
-        VersionHistorySnapshotArtifact current;
-        SortedDictionary<string, byte[]> currentFiles;
+        var generatedRoot = CreateTemporaryDirectory();
         try
         {
-            current = await snapshotWriter.WriteAsync(
+            var current = await snapshotWriter.WriteAsync(
                 status.Repository.RepositoryId,
                 projectId,
                 currentRoot,
                 cancellationToken);
             EnsureNoReparsePointsRecursively(currentRoot);
-            currentFiles = ReadSnapshotFiles(currentRoot, cancellationToken);
-        }
-        finally
-        {
-            CleanupTemporaryDirectory(currentRoot);
-        }
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var entry in approvedFiles)
-            files.Add(entry.Key, entry.Value);
-        foreach (var entry in currentFiles)
-        {
-            if (!IsManuscriptSnapshotPath(entry.Key)
-                && !entry.Key.Equals("composition/composition.json", StringComparison.Ordinal))
-                files[entry.Key] = entry.Value;
-        }
-
-        SynthesizeOtherReviewChapterMetadata(files, approvedFiles);
-
-        files["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(
-            SynthesizeOtherReviewPublication(approved.Payload.Publication, current.Payload.Publication));
-        RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
-
-        var generatedRoot = CreateTemporaryDirectory();
-        VersionHistorySnapshotArtifact generated;
-        try
-        {
-            WriteTreeToTemporaryDirectory(generatedRoot, files, cancellationToken);
+            git.MaterializeTree(status.Repository.RepositoryId, generatedRoot, status.Repository.HeadCommitSha, cancellationToken);
+            await CopyCurrentOtherFilesAsync(currentRoot, generatedRoot, cancellationToken);
+            SynthesizeOtherReviewChapterMetadata(generatedRoot, currentRoot);
+            WriteSnapshotJsonFiles(generatedRoot, new Dictionary<string, byte[]>
+            {
+                ["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(
+                    SynthesizeOtherReviewPublication(approved.Payload.Publication, current.Payload.Publication)),
+            });
+            await RebuildSnapshotManifestAsync(generatedRoot, status.Repository.RepositoryId, projectId, cancellationToken);
             EnsureNoReparsePointsRecursively(generatedRoot);
-            generated = snapshotReader.Read(
+            var generated = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
                 projectId);
+            if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
+                throw new InvalidOperationException("There are no non-manuscript project changes to approve.");
+
+            var operationId = await StartOperationAsync(status.Repository.RepositoryId, ProjectVersionOperationKind.Checkpoint, requestKey, cancellationToken);
+            var authoredAt = DateTimeOffset.UtcNow;
+            try
+            {
+                await using var capture = await CaptureSnapshotFilesAsync(generatedRoot, cancellationToken);
+                var write = git.WriteSnapshot(status.Repository.RepositoryId, capture.Files, semanticMessage, authoredAt);
+                var checkpoint = await PersistCheckpointAndCompleteAsync(status.Repository.RepositoryId, operationId, write.Commit,
+                    generated.Manifest, ProjectVersionCheckpointKind.ReviewApproval, semanticMessage, authoredAt, write.Created, cancellationToken);
+                historyEvents.PublishCheckpointCreated(projectId);
+                historyEvents.PublishReviewStateChanged(projectId);
+                return checkpoint;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { await TryCancelOperationAsync(operationId); throw; }
+            catch (Exception exception) { await TryFailOperationAsync(operationId, exception, CancellationToken.None); throw; }
         }
         finally
         {
             CleanupTemporaryDirectory(generatedRoot);
-        }
-
-        if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
-            throw new InvalidOperationException("There are no non-manuscript project changes to approve.");
-
-        var operationId = await StartOperationAsync(
-            status.Repository.RepositoryId,
-            ProjectVersionOperationKind.Checkpoint,
-            requestKey,
-            cancellationToken);
-        try
-        {
-            var authoredAt = DateTimeOffset.UtcNow;
-            var write = git.WriteSnapshot(
-                status.Repository.RepositoryId,
-                files,
-                semanticMessage,
-                authoredAt);
-            var checkpoint = await PersistCheckpointAndCompleteAsync(
-                status.Repository.RepositoryId,
-                operationId,
-                write.Commit,
-                generated.Manifest,
-                ProjectVersionCheckpointKind.ReviewApproval,
-                semanticMessage,
-                authoredAt,
-                write.Created,
-                cancellationToken);
-            historyEvents.PublishCheckpointCreated(projectId);
-            historyEvents.PublishReviewStateChanged(projectId);
-            return checkpoint;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await TryCancelOperationAsync(operationId);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            await TryFailOperationAsync(operationId, exception, CancellationToken.None);
-            throw;
+            CleanupTemporaryDirectory(currentRoot);
         }
     }
 
@@ -1179,65 +1111,35 @@ public sealed class ProjectVersionHistoryService(
         if (ManuscriptCodec.ContentEquals(approvedDocument, synthesized))
             throw new InvalidOperationException("The selected manuscript blocks are already approved.");
 
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var entry in git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha))
-            files.Add(entry.Key, entry.Value);
-        UpdateSynthesizedReviewTree(files, approved.Payload, current.Payload, target, synthesized);
-        RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
-
         var generatedRoot = CreateTemporaryDirectory();
-        VersionHistorySnapshotManifest generatedManifest;
         try
         {
-            WriteTreeToTemporaryDirectory(generatedRoot, files, cancellationToken);
+            git.MaterializeTree(status.Repository.RepositoryId, generatedRoot, status.Repository.HeadCommitSha, cancellationToken);
+            var changes = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+            UpdateSynthesizedReviewTree(changes, approved.Payload, current.Payload, target, synthesized);
+            WriteSnapshotJsonFiles(generatedRoot, changes);
+            await RebuildSnapshotManifestAsync(generatedRoot, status.Repository.RepositoryId, projectId, cancellationToken);
             EnsureNoReparsePointsRecursively(generatedRoot);
-            generatedManifest = snapshotReader.Read(
+            var generatedManifest = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
                 projectId).Manifest;
-        }
-        finally
-        {
-            CleanupTemporaryDirectory(generatedRoot);
-        }
-
-        var operationId = await StartOperationAsync(
-            status.Repository.RepositoryId,
-            ProjectVersionOperationKind.Checkpoint,
-            requestKey,
-            cancellationToken);
-        try
-        {
+            var operationId = await StartOperationAsync(status.Repository.RepositoryId, ProjectVersionOperationKind.Checkpoint, requestKey, cancellationToken);
             var authoredAt = DateTimeOffset.UtcNow;
-            var write = git.WriteSnapshot(
-                status.Repository.RepositoryId,
-                files,
-                semanticMessage,
-                authoredAt);
-            var checkpoint = await PersistCheckpointAndCompleteAsync(
-                status.Repository.RepositoryId,
-                operationId,
-                write.Commit,
-                generatedManifest,
-                ProjectVersionCheckpointKind.ReviewApproval,
-                semanticMessage,
-                authoredAt,
-                write.Created,
-                cancellationToken);
-            historyEvents.PublishCheckpointCreated(projectId);
-            historyEvents.PublishReviewStateChanged(projectId);
-            return checkpoint;
+            try
+            {
+                await using var capture = await CaptureSnapshotFilesAsync(generatedRoot, cancellationToken);
+                var write = git.WriteSnapshot(status.Repository.RepositoryId, capture.Files, semanticMessage, authoredAt);
+                var checkpoint = await PersistCheckpointAndCompleteAsync(status.Repository.RepositoryId, operationId, write.Commit,
+                    generatedManifest, ProjectVersionCheckpointKind.ReviewApproval, semanticMessage, authoredAt, write.Created, cancellationToken);
+                historyEvents.PublishCheckpointCreated(projectId);
+                historyEvents.PublishReviewStateChanged(projectId);
+                return checkpoint;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { await TryCancelOperationAsync(operationId); throw; }
+            catch (Exception exception) { await TryFailOperationAsync(operationId, exception, CancellationToken.None); throw; }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await TryCancelOperationAsync(operationId);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            await TryFailOperationAsync(operationId, exception, CancellationToken.None);
-            throw;
-        }
+        finally { CleanupTemporaryDirectory(generatedRoot); }
     }
 
     public async Task<ProjectVersionCheckpointView> ApproveReviewDesignedPageAsync(
@@ -1283,71 +1185,42 @@ public sealed class ProjectVersionHistoryService(
         if (ProjectVersionReviewDesignedPage.SemanticallyEquals(approvedDesignedPage, currentDesignedPage))
             throw new InvalidOperationException("The Designed Page change is already approved.");
 
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var entry in git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha))
-            files.Add(entry.Key, entry.Value);
         var synthesizedDesignedPages = approved.Payload.Composition.DesignedPages
             .Where(item => item.Id != designedPageId)
             .Append(currentDesignedPage)
             .OrderBy(item => item.Id)
             .ToList();
-        files["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(
-            new VersionHistorySnapshotCompositionArea(synthesizedDesignedPages));
-        RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
-
         var generatedRoot = CreateTemporaryDirectory();
-        VersionHistorySnapshotManifest generatedManifest;
         try
         {
-            WriteTreeToTemporaryDirectory(generatedRoot, files, cancellationToken);
+            git.MaterializeTree(status.Repository.RepositoryId, generatedRoot, status.Repository.HeadCommitSha, cancellationToken);
+            WriteSnapshotJsonFiles(generatedRoot, new Dictionary<string, byte[]>
+            {
+                ["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(
+                    new VersionHistorySnapshotCompositionArea(synthesizedDesignedPages)),
+            });
+            await RebuildSnapshotManifestAsync(generatedRoot, status.Repository.RepositoryId, projectId, cancellationToken);
             EnsureNoReparsePointsRecursively(generatedRoot);
-            generatedManifest = snapshotReader.Read(
+            var generatedManifest = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
                 projectId).Manifest;
-        }
-        finally
-        {
-            CleanupTemporaryDirectory(generatedRoot);
-        }
-
-        var operationId = await StartOperationAsync(
-            status.Repository.RepositoryId,
-            ProjectVersionOperationKind.Checkpoint,
-            requestKey,
-            cancellationToken);
-        try
-        {
+            var operationId = await StartOperationAsync(status.Repository.RepositoryId, ProjectVersionOperationKind.Checkpoint, requestKey, cancellationToken);
             var authoredAt = DateTimeOffset.UtcNow;
-            var write = git.WriteSnapshot(
-                status.Repository.RepositoryId,
-                files,
-                semanticMessage,
-                authoredAt);
-            var checkpoint = await PersistCheckpointAndCompleteAsync(
-                status.Repository.RepositoryId,
-                operationId,
-                write.Commit,
-                generatedManifest,
-                ProjectVersionCheckpointKind.ReviewApproval,
-                semanticMessage,
-                authoredAt,
-                write.Created,
-                cancellationToken);
-            historyEvents.PublishCheckpointCreated(projectId);
-            historyEvents.PublishReviewStateChanged(projectId);
-            return checkpoint;
+            try
+            {
+                await using var capture = await CaptureSnapshotFilesAsync(generatedRoot, cancellationToken);
+                var write = git.WriteSnapshot(status.Repository.RepositoryId, capture.Files, semanticMessage, authoredAt);
+                var checkpoint = await PersistCheckpointAndCompleteAsync(status.Repository.RepositoryId, operationId, write.Commit,
+                    generatedManifest, ProjectVersionCheckpointKind.ReviewApproval, semanticMessage, authoredAt, write.Created, cancellationToken);
+                historyEvents.PublishCheckpointCreated(projectId);
+                historyEvents.PublishReviewStateChanged(projectId);
+                return checkpoint;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { await TryCancelOperationAsync(operationId); throw; }
+            catch (Exception exception) { await TryFailOperationAsync(operationId, exception, CancellationToken.None); throw; }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await TryCancelOperationAsync(operationId);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            await TryFailOperationAsync(operationId, exception, CancellationToken.None);
-            throw;
-        }
+        finally { CleanupTemporaryDirectory(generatedRoot); }
     }
 
     public async Task<ProjectVersionReviewBlockMutationResult> RestoreReviewBlocksAsync(
@@ -1658,20 +1531,33 @@ public sealed class ProjectVersionHistoryService(
             approved.Publication with { PublicationEditions = editions });
     }
 
-    private static void RebuildSnapshotManifest(
-        SortedDictionary<string, byte[]> files,
+    private static async Task RebuildSnapshotManifestAsync(
+        string rootDirectory,
         Guid repositoryId,
-        Guid projectId)
+        Guid projectId,
+        CancellationToken cancellationToken)
     {
-        files.Remove(VersionHistorySnapshotContract.ManifestFileName);
-        var contentHash = VersionHistoryCanonicalJson.Sha256Hex(
-            files.Select(item => (item.Key, item.Value)));
-        var entries = files
-            .Select(item => new VersionHistorySnapshotFile(
-                item.Key,
-                item.Value.LongLength,
-                VersionHistoryCanonicalJson.Sha256Hex(item.Value)))
-            .ToList();
+        var manifestPath = ResolveSnapshotPath(rootDirectory, VersionHistorySnapshotContract.ManifestFileName);
+        if (File.Exists(manifestPath))
+            File.Delete(manifestPath);
+
+        var descriptors = new List<ProjectArchiveFileDescriptor>();
+        var root = Path.GetFullPath(rootDirectory);
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var relative = GetSnapshotRelativePath(root, file);
+            descriptors.Add(await ProjectArchiveFileDescriptor.CreateAsync(
+                relative,
+                "version-history-snapshot",
+                relative.EndsWith(".json", StringComparison.Ordinal) ? "application/json" : "application/octet-stream",
+                file,
+                cancellationToken));
+        }
+
+        var contentHash = await ComputeContentHashAsync(descriptors, cancellationToken);
+        var entries = descriptors.Select(item => new VersionHistorySnapshotFile(item.ArchivePath, item.Length, item.Sha256)).ToList();
         var withoutHash = new VersionHistorySnapshotManifest(
             VersionHistorySnapshotContract.FormatId,
             VersionHistorySnapshotContract.SchemaVersion,
@@ -1683,8 +1569,56 @@ public sealed class ProjectVersionHistoryService(
             entries);
         var manifestHash = VersionHistoryCanonicalJson.Sha256Hex(
             VersionHistoryCanonicalJson.Serialize(withoutHash));
-        files[VersionHistorySnapshotContract.ManifestFileName] = VersionHistoryCanonicalJson.Serialize(
-            withoutHash with { ManifestHash = manifestHash });
+        await File.WriteAllBytesAsync(manifestPath, VersionHistoryCanonicalJson.Serialize(
+            withoutHash with { ManifestHash = manifestHash }), cancellationToken);
+    }
+
+    private static void WriteSnapshotJsonFiles(string rootDirectory, IReadOnlyDictionary<string, byte[]> files)
+    {
+        foreach (var (path, bytes) in files.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            if (!path.EndsWith(".json", StringComparison.Ordinal))
+                throw new InvalidOperationException("Review synthesis may rewrite only JSON snapshot files.");
+            var destination = ResolveSnapshotPath(rootDirectory, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.WriteAllBytes(destination, bytes);
+        }
+    }
+
+    private static string ResolveSnapshotPath(string rootDirectory, string relativePath)
+    {
+        var normalized = ProjectArchivePath.Normalize(relativePath);
+        var root = Path.GetFullPath(rootDirectory);
+        var candidate = Path.GetFullPath(Path.Combine(root, normalized.Replace('/', Path.DirectorySeparatorChar)));
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Snapshot path escaped its temporary root: {relativePath}");
+        return candidate;
+    }
+
+    private static async Task<string> ComputeContentHashAsync(
+        IReadOnlyList<ProjectArchiveFileDescriptor> files,
+        CancellationToken cancellationToken)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var buffer = new byte[81_920];
+        foreach (var file in files.OrderBy(item => item.ArchivePath, StringComparer.Ordinal))
+        {
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.ArchivePath));
+            hash.AppendData([0]);
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            hash.AppendData([0]);
+            await using var source = file.OpenRead();
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
+                if (read == 0)
+                    break;
+                hash.AppendData(buffer, 0, read);
+            }
+        }
+
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     private static bool IsManuscriptSnapshotPath(string path) =>
@@ -1698,26 +1632,48 @@ public sealed class ProjectVersionHistoryService(
     /// they remain chapter-scoped review work because their manuscript cannot
     /// be split from their identity safely.
     /// </summary>
-    private static void SynthesizeOtherReviewChapterMetadata(
-        SortedDictionary<string, byte[]> files,
-        IReadOnlyDictionary<string, byte[]> approvedFiles)
+    private static void SynthesizeOtherReviewChapterMetadata(string approvedRoot, string currentRoot)
     {
-        foreach (var path in files.Keys
-                     .Where(path => path.StartsWith("narrative/chapters/", StringComparison.OrdinalIgnoreCase)
-                         && path.EndsWith("/chapter.json", StringComparison.OrdinalIgnoreCase))
-                     .ToList())
+        foreach (var currentPath in Directory.EnumerateFiles(currentRoot, "chapter.json", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
         {
-            if (!approvedFiles.TryGetValue(path, out var approvedBytes))
+            var path = GetSnapshotRelativePath(currentRoot, currentPath);
+            if (!path.StartsWith("narrative/chapters/", StringComparison.Ordinal)
+                || !path.EndsWith("/chapter.json", StringComparison.Ordinal)
+                || !File.Exists(ResolveSnapshotPath(approvedRoot, path)))
                 continue;
 
-            var currentChapter = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotChapter>(files[path]);
-            var approvedChapter = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotChapter>(approvedBytes);
-            files[path] = VersionHistoryCanonicalJson.Serialize(
+            var currentChapter = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotChapter>(File.ReadAllBytes(currentPath));
+            var approvedChapter = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotChapter>(
+                File.ReadAllBytes(ResolveSnapshotPath(approvedRoot, path)));
+            File.WriteAllBytes(ResolveSnapshotPath(approvedRoot, path), VersionHistoryCanonicalJson.Serialize(
                 currentChapter with
                 {
                     ManuscriptRevision = approvedChapter.ManuscriptRevision,
                     Body = null,
-                });
+                }));
+        }
+    }
+
+    private static async Task CopyCurrentOtherFilesAsync(string currentRoot, string approvedRoot, CancellationToken cancellationToken)
+    {
+        foreach (var source in Directory.EnumerateFiles(currentRoot, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = GetSnapshotRelativePath(currentRoot, source);
+            if (IsManuscriptSnapshotPath(path)
+                || path.Equals("composition/composition.json", StringComparison.Ordinal)
+                || path.Equals(VersionHistorySnapshotContract.ManifestFileName, StringComparison.Ordinal))
+                continue;
+
+            var destination = ResolveSnapshotPath(approvedRoot, path);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81_920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81_920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await input.CopyToAsync(output, 81_920, cancellationToken);
         }
     }
 
@@ -1871,7 +1827,7 @@ public sealed class ProjectVersionHistoryService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
-        var loaded = LoadFullGitCheckpoint(
+        var loaded = LoadGitCheckpoint(
             repositoryId,
             commitSha,
             recordedCheckpoint: null,
@@ -1909,12 +1865,40 @@ public sealed class ProjectVersionHistoryService(
                     cancellationToken);
         }
 
-        var loaded = LoadFullGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken);
+        var loaded = LoadGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken);
         return new ProjectVersionLoadedCheckpoint(
             loaded.Commit,
             loaded.Manifest,
             loaded.Payload,
             recorded is null ? null : ToCheckpointView(recorded));
+    }
+
+    public async Task<ProjectVersionLoadedCheckpointLease> LoadCheckpointForRestoreAsync(
+        Guid projectId,
+        string commitSha,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        if (string.IsNullOrWhiteSpace(commitSha))
+            throw new ArgumentException("A checkpoint commit SHA is required.", nameof(commitSha));
+
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        ProjectVersionRepository repository;
+        ProjectVersionCheckpoint? recorded;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            repository = await read.Db.ProjectVersionRepositories
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+            recorded = await read.Db.ProjectVersionCheckpoints
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    item => item.ProjectVersionRepositoryId == repository.Id && item.CommitSha == commitSha,
+                    cancellationToken);
+        }
+
+        return LoadRestoreGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken);
     }
 
     public async Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(
@@ -2570,7 +2554,7 @@ public sealed class ProjectVersionHistoryService(
         return loaded;
     }
 
-    private LoadedGitCheckpoint LoadFullGitCheckpoint(
+    private ProjectVersionLoadedCheckpointLease LoadRestoreGitCheckpoint(
         Guid repositoryId,
         string commitSha,
         ProjectVersionCheckpoint? recordedCheckpoint,
@@ -2581,28 +2565,42 @@ public sealed class ProjectVersionHistoryService(
         var commit = git.GetCommitMetadata(repositoryId, commitSha);
         var temporaryDirectory = CreateTemporaryDirectory();
         LoadedGitCheckpoint loaded;
+        var completed = false;
         try
         {
             git.MaterializeTree(repositoryId, temporaryDirectory, commitSha, cancellationToken);
             EnsureNoReparsePointsRecursively(temporaryDirectory);
-            var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, expectedProjectId);
+            var artifact = snapshotReader.Read(
+                temporaryDirectory,
+                repositoryId,
+                expectedProjectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
             loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
+
+            if (recordedCheckpoint is not null
+                && !string.Equals(
+                    recordedCheckpoint.ContentHash,
+                    loaded.Manifest.ContentHash,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("The recorded checkpoint content hash does not match its Git payload.");
+            }
+
+            var checkpoint = new ProjectVersionLoadedCheckpoint(
+                loaded.Commit,
+                loaded.Manifest,
+                loaded.Payload,
+                recordedCheckpoint is null ? null : ToCheckpointView(recordedCheckpoint));
+            completed = true;
+            return new ProjectVersionLoadedCheckpointLease(
+                checkpoint,
+                () => CleanupTemporaryDirectory(temporaryDirectory));
         }
         finally
         {
-            CleanupTemporaryDirectory(temporaryDirectory);
+            if (!completed)
+                CleanupTemporaryDirectory(temporaryDirectory);
         }
-
-        if (recordedCheckpoint is not null
-            && !string.Equals(
-                recordedCheckpoint.ContentHash,
-                loaded.Manifest.ContentHash,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidDataException("The recorded checkpoint content hash does not match its Git payload.");
-        }
-
-        return loaded;
     }
 
     private GitHeadInfo? ReadExistingHead(ProjectVersionRepository repository)
@@ -2634,49 +2632,69 @@ public sealed class ProjectVersionHistoryService(
         }
     }
 
-    private static SortedDictionary<string, byte[]> ReadSnapshotFiles(
+    private static async Task<SnapshotDescriptorCapture> CaptureSnapshotFilesAsync(
         string rootDirectory,
         CancellationToken cancellationToken)
     {
         EnsureNoReparsePointsRecursively(rootDirectory);
         var root = Path.GetFullPath(rootDirectory);
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        var capture = ProjectArchiveTemporaryCapture.Create(VersionHistoryTemporaryPaths.GetParentDirectory());
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var info = new FileInfo(file);
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException($"Snapshot file is a reparse point: {file}");
-            var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            var full = Path.GetFullPath(file);
-            var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Snapshot file escaped its temporary root: {relative}");
-            if (!files.TryAdd(relative, File.ReadAllBytes(file)))
-                throw new InvalidDataException($"Snapshot contains duplicate path: {relative}");
-        }
+            var files = new List<ProjectArchiveFileDescriptor>();
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                         .OrderBy(path => path, StringComparer.Ordinal))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var relative = GetSnapshotRelativePath(root, file);
+                var info = new FileInfo(file);
+                await using var source = new FileStream(
+                    info.FullName,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    81_920,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                files.Add(await capture.CaptureAsync(
+                    source,
+                    relative,
+                    "version-history-snapshot",
+                    relative.EndsWith(".json", StringComparison.Ordinal) ? "application/json" : "application/octet-stream",
+                    long.MaxValue,
+                    cancellationToken));
+            }
 
-        return files;
+            return new SnapshotDescriptorCapture(capture, files);
+        }
+        catch
+        {
+            await capture.DisposeAsync();
+            throw;
+        }
     }
 
-    private static void WriteTreeToTemporaryDirectory(
-        string rootDirectory,
-        IReadOnlyDictionary<string, byte[]> files,
-        CancellationToken cancellationToken)
+    private static string GetSnapshotRelativePath(string rootDirectory, string file)
     {
-        foreach (var entry in files.OrderBy(item => item.Key, StringComparer.Ordinal))
+        var root = Path.GetFullPath(rootDirectory);
+        var full = Path.GetFullPath(file);
+        var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
+            || new FileInfo(full).Attributes.HasFlag(FileAttributes.ReparsePoint))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var relative = entry.Key.Replace('\\', '/');
-            var full = Path.GetFullPath(Path.Combine(rootDirectory, relative.Replace('/', Path.DirectorySeparatorChar)));
-            var rootPrefix = Path.GetFullPath(rootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Git tree path escaped its temporary root: {relative}");
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllBytes(full, entry.Value);
+            throw new InvalidDataException($"Snapshot file escaped its temporary root: {file}");
         }
+
+        return ProjectArchivePath.Normalize(Path.GetRelativePath(root, full).Replace('\\', '/'));
+    }
+
+    private sealed class SnapshotDescriptorCapture(
+        ProjectArchiveTemporaryCapture capture,
+        IReadOnlyList<ProjectArchiveFileDescriptor> files) : IAsyncDisposable
+    {
+        public IReadOnlyList<ProjectArchiveFileDescriptor> Files { get; } = files;
+
+        public ValueTask DisposeAsync() => capture.DisposeAsync();
     }
 
     private static string CreateTemporaryDirectory()

@@ -1,11 +1,11 @@
 @using Lorekeeper.ImportExport
 @using Lorekeeper.Models
+@using Lorekeeper.ProjectArchive
 @using Lorekeeper.Projects
 @implements IAsyncDisposable
 @inject IProjectImportExportService Transfers
 @inject IProjectImportJobNotifier Notifier
 @inject IProjectReferenceService References
-@inject IJSRuntime JS
 
 @if (Project is null)
 {
@@ -17,10 +17,6 @@ else
         <section class="transfer-column transfer-sidebar">
             <div class="transfer-card">
                 <div class="transfer-section-title">Export</div>
-                @if (!string.IsNullOrWhiteSpace(_exportError))
-                {
-                    <div class="alert alert-danger py-2 small">@_exportError</div>
-                }
                 @if (_exportWarnings.Count > 0)
                 {
                     <div class="alert alert-warning py-2 small transfer-export-warning" role="status">
@@ -34,10 +30,10 @@ else
 
                 <div class="transfer-export-group">
                     <div>
-                        <div class="transfer-export-title">Graph package</div>
+                        <div class="transfer-export-title">Portable project archive</div>
                         <div class="transfer-export-actions">
-                            <button type="button" class="btn btn-sm btn-primary" disabled="@_exporting" @onclick="() => ExportGraphAsync(ProjectExportKind.Full)">Full JSON</button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_exporting" @onclick="() => ExportGraphAsync(ProjectExportKind.NonStructural)">Non-structural JSON</button>
+                            <a class="btn btn-sm btn-primary" href="@ArchiveDownloadUrl(ProjectDependencyTraversalPolicy.FullArchive)">Full archive</a>
+                            <a class="btn btn-sm btn-outline-primary" href="@ArchiveDownloadUrl(ProjectDependencyTraversalPolicy.NonStructuralArchive)">Non-structural archive</a>
                         </div>
                     </div>
                 </div>
@@ -99,7 +95,7 @@ else
                             <div class="small text-muted">@_selectedJob.ExportKind export</div>
                         }
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_selectedJob.Status == ProjectImportJobStatus.Running)" @onclick="DeleteSelectedJobAsync">Delete</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_selectedJob.Status is ProjectImportJobStatus.Applying or ProjectImportJobStatus.Committed or ProjectImportJobStatus.Indexing)" @onclick="DeleteSelectedJobAsync">Delete</button>
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(_jobActionError))
@@ -168,29 +164,26 @@ else
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
-    private const long MaxImportBytes = 64L * 1024 * 1024;
+    private const long MaxImportBytes = ProjectImportExportService.MaximumImportBytes;
 
     private List<ProjectImportJobListItem> _jobs = [];
     private ProjectImportJobDetailView? _selectedJob;
     private Guid? _loadedProjectId;
     private bool _loadingJobs;
-    private bool _exporting;
     private bool _readingFile;
     private bool _creatingJob;
     private string _importFileName = string.Empty;
-    private string _importContent = string.Empty;
+    private IBrowserFile? _importFile;
     private string? _formError;
-    private string? _exportError;
     private IReadOnlyList<string> _exportWarnings = [];
     private string? _jobActionError;
-    private IJSObjectReference? _downloadModule;
     private IProjectImportJobUpdateSubscription? _subscription;
     private CancellationTokenSource? _subscriptionCts;
     private Task? _subscriptionTask;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private bool _refreshAgain;
 
-    private bool CanStartImport => !_readingFile && !_creatingJob && !string.IsNullOrWhiteSpace(_importContent);
+    private bool CanStartImport => !_readingFile && !_creatingJob && _importFile is not null;
 
     private string ImportButtonText =>
         _readingFile ? "Reading..." : _creatingJob ? "Queueing..." : "Start import";
@@ -208,12 +201,6 @@ else
                 references.Count,
                 string.Join(", ", references.Select(reference => reference.Name)))];
         await ReloadJobsAsync();
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-            _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
     }
 
     private void StartSubscription(Guid projectId)
@@ -313,26 +300,8 @@ else
         _selectedJob = await Transfers.GetImportJobDetailAsync(_selectedJob.Id);
     }
 
-    private async Task ExportGraphAsync(ProjectExportKind kind)
-    {
-        if (Project is null || _downloadModule is null) return;
-        _exporting = true;
-        _exportError = null;
-        try
-        {
-            var file = await Transfers.ExportProjectAsync(Project.Id, kind);
-            _exportWarnings = file.Warnings ?? [];
-            await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
-        }
-        catch (Exception ex)
-        {
-            _exportError = ex.Message;
-        }
-        finally
-        {
-            _exporting = false;
-        }
-    }
+    private string ArchiveDownloadUrl(ProjectDependencyTraversalPolicy policy) =>
+        Project is null ? "#" : $"/projects/{Project.Id:D}/archive?policy={policy}";
 
     private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
     {
@@ -341,15 +310,18 @@ else
         try
         {
             var file = e.File;
-            await using var stream = file.OpenReadStream(maxAllowedSize: MaxImportBytes);
-            using var reader = new StreamReader(stream);
-            _importContent = await reader.ReadToEndAsync();
+            if (!file.Name.EndsWith(".lorekeeper", StringComparison.OrdinalIgnoreCase)
+                && !file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Choose a .lorekeeper archive or a legacy .json project file.");
+            if (file.Size is <= 0 or > MaxImportBytes)
+                throw new InvalidDataException("The selected import file is empty or exceeds the 1 GiB limit.");
+            _importFile = file;
             _importFileName = file.Name;
         }
         catch (Exception ex)
         {
             _formError = ex.Message;
-            _importContent = string.Empty;
+            _importFile = null;
             _importFileName = string.Empty;
         }
         finally
@@ -365,9 +337,10 @@ else
         _formError = null;
         try
         {
-            var job = await Transfers.CreateImportJobAsync(Project.Id, _importFileName, _importContent);
+            await using var stream = _importFile!.OpenReadStream(maxAllowedSize: MaxImportBytes);
+            var job = await Transfers.CreateImportJobAsync(Project.Id, _importFileName, stream);
             _importFileName = string.Empty;
-            _importContent = string.Empty;
+            _importFile = null;
             await ReloadJobsAsync();
             await SelectJobAsync(job.Id);
         }
@@ -429,10 +402,6 @@ else
     public async ValueTask DisposeAsync()
     {
         await StopSubscriptionAsync();
-        if (_downloadModule is not null)
-        {
-            try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
-        }
         _refreshLock.Dispose();
     }
 }

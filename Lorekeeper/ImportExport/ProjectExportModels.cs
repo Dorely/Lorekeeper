@@ -26,6 +26,15 @@ public sealed record ProjectExportFile(
     byte[] Content,
     IReadOnlyList<string>? Warnings = null);
 
+/// <summary>
+/// No-tracking, fully materialized creative-state capture used by the portable
+/// archive traversal. It intentionally contains no write lease or defaults
+/// creation behavior.
+/// </summary>
+public sealed record ProjectArchiveDocumentCapture(
+    ProjectExportDocument Document,
+    string ProjectSlug);
+
 public static class ProjectExportWarningText
 {
     public static string OutgoingReferencesOmitted(int referenceCount, string referencedProjectNames) =>

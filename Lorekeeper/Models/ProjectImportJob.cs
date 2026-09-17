@@ -8,12 +8,15 @@ public class ProjectImportJob
     public Project Project { get; set; } = null!;
 
     public required string FileName { get; set; }
-    public required string ContentJson { get; set; }
+    public required string StagedFileKey { get; set; }
+    public long StagedLength { get; set; }
+    public required string StagedSha256 { get; set; }
+    public ProjectImportInputKind InputKind { get; set; }
     public string FormatId { get; set; } = string.Empty;
     public int FormatVersion { get; set; }
     public string ExportKind { get; set; } = string.Empty;
 
-    public ProjectImportJobStatus Status { get; set; } = ProjectImportJobStatus.Queued;
+    public ProjectImportJobStatus Status { get; set; } = ProjectImportJobStatus.Uploaded;
     public int TotalSteps { get; set; }
     public int CompletedSteps { get; set; }
     public int CreatedNodeCount { get; set; }
@@ -38,8 +41,20 @@ public class ProjectImportJob
 
 public enum ProjectImportJobStatus
 {
-    Queued,
-    Running,
+    Uploaded,
+    Staged,
+    Validated,
+    Applying,
+    Committed,
+    Indexing,
     Completed,
+    CompletedWithWarnings,
     Failed,
+    Cancelled,
+}
+
+public enum ProjectImportInputKind
+{
+    LorekeeperArchive,
+    LegacyJson,
 }

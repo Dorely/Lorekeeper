@@ -243,14 +243,15 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             {
                 if (scope.IsReferenced && !scope.CanonicalIngestSourceIds.Contains(source.Id.ToString("N")))
                     continue;
-                if (!Matches(source.Title, source.SourceKind, source.Description, source.Synopsis, source.SourceText)) continue;
+                var sourceText = (await ingest.GetActiveExtractionAsync(source.Id, cancellationToken))?.NormalizedText;
+                if (!Matches(source.Title, source.SourceKind, source.Description, source.Synopsis, sourceText)) continue;
                 results.Add(new ProjectSearchSource(
                     ProjectSearchSourceTypes.RawIngestSource,
                     source.Id,
                     source.Id,
                     source.Title,
                     string.IsNullOrWhiteSpace(source.SourceKind) ? "Ingest source" : source.SourceKind,
-                    Preview(!string.IsNullOrWhiteSpace(source.Synopsis) ? source.Synopsis : source.SourceText)));
+                    Preview(!string.IsNullOrWhiteSpace(source.Synopsis) ? source.Synopsis : sourceText)));
             }
         }
 
@@ -627,7 +628,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             {
                 var chunks = await operation.Db.IngestSourceChunks
                     .AsNoTracking()
-                    .Where(chunk => sourceIds.Contains(chunk.SourceId))
+                    .Where(chunk => sourceIds.Contains(chunk.SourceId)
+                        && chunk.SourceExtractionVersionId == chunk.Source.ActiveExtractionVersionId)
                     .Select(chunk => new { chunk.Source.ProjectId, chunk.Id })
                     .ToListAsync(cancellationToken);
                 foreach (var chunk in chunks)
@@ -856,7 +858,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         AppendOptional(sb, "Kind", source.SourceKind);
         AppendOptional(sb, "Description", source.Description);
         AppendOptional(sb, "Synopsis", source.Synopsis);
-        AppendOptional(sb, "Source text", source.SourceText);
+        var extraction = await ingest.GetActiveExtractionAsync(source.Id, cancellationToken);
+        AppendOptional(sb, "Source text", extraction?.NormalizedText);
         return (source.Title, source.Id, sb.ToString().TrimEnd());
     }
 

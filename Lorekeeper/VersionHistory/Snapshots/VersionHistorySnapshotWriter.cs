@@ -1,6 +1,7 @@
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.ProjectArchive;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.VersionHistory.Snapshots;
@@ -40,8 +41,8 @@ public sealed class VersionHistorySnapshotWriter(
         if (File.Exists(Path.Combine(fullRoot, VersionHistorySnapshotContract.ManifestFileName)))
             throw new IOException($"Snapshot directory already contains {VersionHistorySnapshotContract.ManifestFileName}.");
 
-        var exported = await projectExport.ExportProjectAsync(projectId, ProjectExportKind.Full, cancellationToken);
-        var document = exported.Document();
+        var exported = await projectExport.CaptureArchiveDocumentAsync(projectId, ProjectExportKind.Full, cancellationToken);
+        var document = exported.Document;
         // Review Edits is a local workflow setting, not canonical creative
         // content. Keep the legacy import field readable, but omit it from all
         // newly-created Git snapshots so toggling the workflow cannot dirty
@@ -51,9 +52,7 @@ public sealed class VersionHistorySnapshotWriter(
             Project = document.Project with { LegacyAiChangeApprovalEnabled = null },
         };
         var supplemental = await ReadSupplementalStateAsync(projectId, cancellationToken);
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-
-        AddJson(files, "project/project.json", new VersionHistorySnapshotProjectArea(
+        AddJson(fullRoot, "project/project.json", new VersionHistorySnapshotProjectArea(
             document.Project,
             document.PageSetup,
             supplemental.Project.ContestModeEnabled,
@@ -68,19 +67,19 @@ public sealed class VersionHistorySnapshotWriter(
             supplemental.WritingSamples,
             supplemental.ContextPreferences,
             document.ManuscriptAnnotations.OrderBy(item => item.Id).ToList());
-        AddJson(files, "narrative/narrative.json", VersionHistorySnapshotNarrativeFile.FromArea(narrative));
+        AddJson(fullRoot, "narrative/narrative.json", VersionHistorySnapshotNarrativeFile.FromArea(narrative));
         foreach (var chapter in narrative.Chapters)
         {
             var chapterDirectory = $"narrative/chapters/{chapter.Id:N}";
             AddJson(
-                files,
+                fullRoot,
                 $"{chapterDirectory}/chapter.json",
                 VersionHistorySnapshotChapter.FromProjectExportChapter(chapter));
-            files[$"{chapterDirectory}/manuscript.json"] =
-                VersionHistoryCanonicalJson.SerializeDirectManuscript(chapter.ManuscriptJson);
+            WriteFile(fullRoot, $"{chapterDirectory}/manuscript.json",
+                VersionHistoryCanonicalJson.SerializeDirectManuscript(chapter.ManuscriptJson));
         }
 
-        AddJson(files, "graph/graph.json", new VersionHistorySnapshotGraphArea(
+        AddJson(fullRoot, "graph/graph.json", new VersionHistorySnapshotGraphArea(
             document.Nodes
                 .Where(IsCanonicalGraphNode)
                 .OrderBy(item => item.NodeType, StringComparer.Ordinal)
@@ -95,15 +94,18 @@ public sealed class VersionHistorySnapshotWriter(
                 .ThenBy(item => item.To.StableKey, StringComparer.Ordinal)
                 .ToList()));
 
-        AddJson(files, "sources/sources.json", new VersionHistorySnapshotSourcesArea(
-            supplemental.Sources.OrderBy(item => item.Id).ToList()));
+        await WriteSourcesAsync(fullRoot, projectId, cancellationToken);
 
         var assetRecords = new List<VersionHistoryImageAsset>();
+        await using var assetRead = await database.OpenReadAsync(cancellationToken);
         foreach (var image in document.Images.OrderBy(item => item.Id))
         {
             var blobPath = $"assets/images/{image.Id:N}/content{SafeExtension(image.ContentType, image.FileName)}";
-            var data = image.Data ?? [];
-            AddBinary(files, blobPath, data);
+            var data = await assetRead.Db.PublishAssets.AsNoTracking()
+                .Where(item => item.ProjectId == projectId && item.Id == image.Id)
+                .Select(item => item.Data)
+                .SingleAsync(cancellationToken);
+            WriteFile(fullRoot, blobPath, data);
             assetRecords.Add(new VersionHistoryImageAsset(
                 image.Id,
                 image.FileName,
@@ -130,8 +132,11 @@ public sealed class VersionHistorySnapshotWriter(
             foreach (var face in family.Faces.OrderBy(item => item.Id))
             {
                 var blobPath = $"assets/fonts/{family.Id:N}/faces/{face.Id:N}/content{SafeExtension(face.ContentType, face.FileName)}";
-                var data = face.Data ?? [];
-                AddBinary(files, blobPath, data);
+                var data = await assetRead.Db.ProjectFontFaces.AsNoTracking()
+                    .Where(item => item.Family.ProjectId == projectId && item.Id == face.Id)
+                    .Select(item => item.Data)
+                    .SingleAsync(cancellationToken);
+                WriteFile(fullRoot, blobPath, data);
                 faces.Add(new VersionHistoryFontFace(
                     face.Id,
                     face.SubfamilyName,
@@ -152,7 +157,7 @@ public sealed class VersionHistorySnapshotWriter(
                 faces));
         }
 
-        AddJson(files, "assets/assets.json", new VersionHistorySnapshotAssetsArea(
+        AddJson(fullRoot, "assets/assets.json", new VersionHistorySnapshotAssetsArea(
             assetRecords,
             document.EntityVisualExamples
                 .OrderBy(item => item.Entity.StableKey, StringComparer.Ordinal)
@@ -161,24 +166,21 @@ public sealed class VersionHistorySnapshotWriter(
                 .ToList(),
             fontFamilies));
 
-        AddJson(files, "manuscript/styles.json", new VersionHistorySnapshotManuscriptArea(
+        AddJson(fullRoot, "manuscript/styles.json", new VersionHistorySnapshotManuscriptArea(
             document.ManuscriptStyles.OrderBy(item => item.Id).ToList()));
 
-        AddJson(files, "composition/composition.json", new VersionHistorySnapshotCompositionArea(
+        AddJson(fullRoot, "composition/composition.json", new VersionHistorySnapshotCompositionArea(
             document.DesignedPages.OrderBy(item => item.Id).ToList()));
 
-        AddJson(files, "publication/publication.json", new VersionHistorySnapshotPublicationArea(
+        AddJson(fullRoot, "publication/publication.json", new VersionHistorySnapshotPublicationArea(
             document.PublicationBook,
             document.PublicationEditions.OrderBy(item => item.Id).ToList(),
             document.PublicationSections.OrderBy(item => item.Id).ToList()));
 
-        var contentHash = VersionHistoryCanonicalJson.Sha256Hex(
-            files.Select(item => (item.Key, item.Value)));
-        var fileEntries = files
-            .Select(item => new VersionHistorySnapshotFile(
-                item.Key,
-                item.Value.LongLength,
-                VersionHistoryCanonicalJson.Sha256Hex(item.Value)))
+        var descriptors = await DescribeFilesAsync(fullRoot, cancellationToken);
+        var contentHash = await ComputeContentHashAsync(descriptors, cancellationToken);
+        var fileEntries = descriptors
+            .Select(item => new VersionHistorySnapshotFile(item.ArchivePath, item.Length, item.Sha256))
             .ToList();
         var manifestWithoutHash = new VersionHistorySnapshotManifest(
             VersionHistorySnapshotContract.FormatId,
@@ -191,15 +193,10 @@ public sealed class VersionHistorySnapshotWriter(
             fileEntries);
         var manifestHash = VersionHistoryCanonicalJson.Sha256Hex(VersionHistoryCanonicalJson.Serialize(manifestWithoutHash));
         var manifest = manifestWithoutHash with { ManifestHash = manifestHash };
-        files[VersionHistorySnapshotContract.ManifestFileName] = VersionHistoryCanonicalJson.Serialize(manifest);
-
-        foreach (var item in files)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var path = ResolveSafePath(fullRoot, item.Key);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await File.WriteAllBytesAsync(path, item.Value, cancellationToken);
-        }
+        await File.WriteAllBytesAsync(
+            ResolveSafePath(fullRoot, VersionHistorySnapshotContract.ManifestFileName),
+            VersionHistoryCanonicalJson.Serialize(manifest),
+            cancellationToken);
 
         // Read the emitted tree back through the strict schema boundary. This
         // makes the writer's returned payload exactly match what a later
@@ -220,73 +217,6 @@ public sealed class VersionHistorySnapshotWriter(
         // The shared export DTO still carries operational timestamps and
         // provider diagnostics. Populate those slots with neutral values at
         // this boundary in addition to the canonical JSON filter below.
-        var sources = await db.IngestSources.AsNoTracking()
-            .Include(item => item.SourceChunks)
-            .Include(item => item.SourcePages)
-            .Include(item => item.SourceBlocks)
-            .Where(item => item.ProjectId == projectId)
-            .Select(item => new ProjectExportIngestSource(
-                item.Id,
-                item.Title,
-                item.SourceKind,
-                item.Description,
-                item.Synopsis,
-                item.UserInstructions,
-                item.SourceText,
-                item.SourceHash,
-                item.SourceUrl,
-                item.FinalUrl,
-                item.CanonicalUrl,
-                null,
-                item.ContentType,
-                item.SourceMetadataJson,
-                default,
-                default,
-                item.SourceChunks.OrderBy(chunk => chunk.Index).Select(chunk => new ProjectExportIngestSourceChunk(
-                    chunk.Id,
-                    chunk.Index,
-                    chunk.Title,
-                    chunk.HeadingPath,
-                    chunk.StartChar,
-                    chunk.EndChar,
-                    chunk.EstimatedTokenCount,
-                    chunk.TokenCountMethod,
-                    chunk.TokenEncodingName,
-                    chunk.TokenCountIsExact,
-                    chunk.Summary,
-                    chunk.AgentNotes,
-                    chunk.StructureStatus,
-                    default,
-                    default)).ToList(),
-                item.SourcePages.OrderBy(page => page.PageNumber).Select(page => new ProjectExportIngestSourcePage(
-                    page.Id,
-                    page.PageNumber,
-                    page.Text,
-                    page.StartChar,
-                    page.EndChar,
-                    page.ExtractionMethod,
-                    page.Width,
-                    page.Height,
-                    page.ImageHash,
-                    page.RenderSettingsJson,
-                    null,
-                    page.VisionModelName,
-                    string.Empty,
-                    default)).ToList(),
-                item.SourceBlocks.OrderBy(block => block.Index).Select(block => new ProjectExportIngestSourceBlock(
-                    block.Id,
-                    block.SourcePageId,
-                    block.Index,
-                    block.Kind,
-                    block.Title,
-                    block.Locator,
-                    block.PageNumber,
-                    block.StartChar,
-                    block.EndChar,
-                    block.MetadataJson,
-                    default)).ToList()))
-            .ToListAsync(cancellationToken);
-
         var writingSamples = await db.WritingSamples.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Id)
@@ -329,11 +259,132 @@ public sealed class VersionHistorySnapshotWriter(
 
         return new SupplementalState(
             new SupplementalProject(project.ContestModeEnabled),
-            sources,
             writingSamples,
             contextPreferences,
             referenceRecords);
     }
+
+    private async Task WriteSourcesAsync(string root, Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var db = operation.Db;
+        var sourceIds = await db.IngestSources.AsNoTracking()
+            .Where(source => source.ProjectId == projectId)
+            .OrderBy(source => source.Id)
+            .Select(source => source.Id)
+            .ToListAsync(cancellationToken);
+        var unlinkedBibliography = (await db.BibliographicRecords.AsNoTracking()
+            .Where(record => record.ProjectId == projectId && record.SourceId == null)
+            .OrderBy(record => record.Id)
+            .ToListAsync(cancellationToken))
+            .Select(ToBibliographicRecord).ToList();
+        var writtenBlobs = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var sourceId in sourceIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = await db.IngestSources.AsNoTracking()
+                .Include(item => item.Original)
+                .ThenInclude(original => original!.Chunks)
+                .Include(item => item.ExtractionVersions)
+                .SingleAsync(item => item.Id == sourceId, cancellationToken);
+            var chunks = await db.IngestSourceChunks.AsNoTracking()
+                .Where(item => item.SourceId == sourceId)
+                .OrderBy(item => item.SourceExtractionVersionId).ThenBy(item => item.Index)
+                .ToListAsync(cancellationToken);
+            var pages = await db.IngestSourcePages.AsNoTracking()
+                .Where(item => item.SourceId == sourceId)
+                .OrderBy(item => item.SourceExtractionVersionId).ThenBy(item => item.PageNumber)
+                .ToListAsync(cancellationToken);
+            var blocks = await db.IngestSourceBlocks.AsNoTracking()
+                .Where(item => item.SourceId == sourceId)
+                .OrderBy(item => item.SourceExtractionVersionId).ThenBy(item => item.Index)
+                .ToListAsync(cancellationToken);
+            var bibliography = (await db.BibliographicRecords.AsNoTracking()
+                .Where(item => item.SourceId == sourceId)
+                .OrderBy(item => item.Id)
+                .ToListAsync(cancellationToken))
+                .Select(ToBibliographicRecord).ToList();
+            var locations = await db.SourceLocations.AsNoTracking()
+                .Where(item => item.SourceId == sourceId)
+                .OrderBy(item => item.Id)
+                .Select(item => new VersionHistorySourceLocation(
+                    item.Id, item.SourceId, item.ExtractionVersionId, item.SourceBlockId, item.PageNumber,
+                    item.NormalizedStart, item.NormalizedLength, item.Locator, item.Quote,
+                    item.VerificationHash, item.ResolutionState))
+                .ToListAsync(cancellationToken);
+
+            var original = source.Original is { } available
+                ? new VersionHistorySourceOriginal(
+                    available.State, available.FileName, available.MediaType, available.Length, available.Sha256,
+                    available.Chunks.OrderBy(chunk => chunk.Index)
+                        .Select(chunk => new VersionHistorySourceOriginalChunk(
+                            chunk.Id, chunk.Index, chunk.BlobSha256, chunk.ByteLength)).ToList())
+                : new VersionHistorySourceOriginal(SourceOriginalState.OriginalUnavailable, source.Title, source.ContentType, 0, null, []);
+
+            using var originalHash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            long originalLength = 0;
+            foreach (var reference in original.Chunks)
+            {
+                var blob = await db.SourceOriginalBlobs.AsNoTracking()
+                    .SingleAsync(item => item.Sha256 == reference.BlobSha256, cancellationToken);
+                if (blob.Length != reference.ByteLength
+                    || !string.Equals(VersionHistoryCanonicalJson.Sha256Hex(blob.Data), blob.Sha256, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException($"Source blob '{reference.BlobSha256}' failed retention validation.");
+                }
+                originalHash.AppendData(blob.Data);
+                originalLength += blob.Data.Length;
+                if (writtenBlobs.Add(reference.BlobSha256))
+                    WriteFile(root, SourceBlobPath(blob.Sha256), blob.Data);
+            }
+            if (original.State == SourceOriginalState.Available
+                && (originalLength != original.Length
+                    || !string.Equals(Convert.ToHexStringLower(originalHash.GetHashAndReset()), original.Sha256, StringComparison.Ordinal)))
+            {
+                throw new InvalidDataException($"Source original '{source.Id:N}' failed retention validation.");
+            }
+
+            var manifest = new VersionHistoryRetainedSource(
+                source.Id, source.Title, source.SourceKind, source.Description, source.Synopsis,
+                source.UserInstructions, source.SourceUrl,
+                source.FinalUrl, source.CanonicalUrl, source.ContentType, source.SourceMetadataJson,
+                source.ActiveExtractionVersionId, original,
+                source.ExtractionVersions.OrderBy(extraction => extraction.Ordinal).Select(extraction =>
+                    new VersionHistorySourceExtraction(
+                        extraction.Id, extraction.Ordinal, extraction.Extractor, extraction.ExtractorVersion,
+                        extraction.OptionsJson, extraction.ContentHash, extraction.Status, extraction.Diagnostics,
+                        extraction.NormalizedText,
+                        chunks.Where(chunk => chunk.SourceExtractionVersionId == extraction.Id).Select(chunk =>
+                            new VersionHistorySourceChunk(chunk.Id, chunk.Index, chunk.Title, chunk.HeadingPath,
+                                chunk.StartChar, chunk.EndChar, chunk.EstimatedTokenCount, chunk.TokenCountMethod,
+                                chunk.TokenEncodingName, chunk.TokenCountIsExact, chunk.Summary, chunk.AgentNotes,
+                                chunk.StructureStatus)).ToList(),
+                        pages.Where(page => page.SourceExtractionVersionId == extraction.Id).Select(page =>
+                            new VersionHistorySourcePage(page.Id, page.PageNumber, page.Text, page.StartChar,
+                                page.EndChar, page.ExtractionMethod, page.Width, page.Height, page.ImageHash,
+                                page.RenderSettingsJson, page.VisionModelName, page.Diagnostics)).ToList(),
+                        blocks.Where(block => block.SourceExtractionVersionId == extraction.Id).Select(block =>
+                            new VersionHistorySourceBlock(block.Id, block.SourcePageId, block.Index, block.Kind,
+                                block.Title, block.Locator, block.PageNumber, block.StartChar, block.EndChar,
+                                block.NormalizedText, block.ContentHash, block.MetadataJson)).ToList()))
+                    .ToList(),
+                bibliography,
+                locations);
+            AddJson(root, SourceManifestPath(source.Id), manifest);
+        }
+
+        AddJson(root, "sources/index.json", new VersionHistorySourceIndex(sourceIds, unlinkedBibliography));
+    }
+
+    private static VersionHistoryBibliographicRecord ToBibliographicRecord(BibliographicRecord record) => new(
+        record.Id, record.SourceId, record.Kind, record.Title, record.ContainerTitle, record.AuthorsJson,
+        record.EditorsJson, record.IssuedYear, record.Publisher, record.PublisherPlace, record.Volume,
+        record.Issue, record.Pages, record.Doi, record.Url, record.AccessedAt, record.Isbn, record.Notes);
+
+    internal static string SourceManifestPath(Guid sourceId) => $"sources/{sourceId:N}/source.json";
+
+    internal static string SourceBlobPath(string sha256) => $"sources/blobs/{sha256}.bin";
 
     private static bool IsCanonicalGraphNode(ProjectExportNode node) =>
         !string.Equals(node.NodeType, "Project", StringComparison.OrdinalIgnoreCase)
@@ -348,14 +399,60 @@ public sealed class VersionHistorySnapshotWriter(
         && !string.Equals(edge.EdgeType, "AutoMention", StringComparison.OrdinalIgnoreCase)
         && !string.Equals(edge.EdgeType, "ExtractedFrom", StringComparison.OrdinalIgnoreCase);
 
-    private static void AddJson(IDictionary<string, byte[]> files, string path, object value) =>
-        files[path] = VersionHistoryCanonicalJson.Serialize(value);
+    private static void AddJson(string root, string path, object value) =>
+        WriteFile(root, path, VersionHistoryCanonicalJson.Serialize(value));
 
-    private static void AddBinary(IDictionary<string, byte[]> files, string path, byte[] value)
+    private static void WriteFile(string root, string path, byte[] value)
     {
-        if (!IsSafeRelativePath(path))
-            throw new InvalidDataException($"Unsafe snapshot path '{path}'.");
-        files[path] = value;
+        var destination = ResolveSafePath(root, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.WriteAllBytes(destination, value);
+    }
+
+    private static async Task<IReadOnlyList<ProjectArchiveFileDescriptor>> DescribeFilesAsync(
+        string root,
+        CancellationToken cancellationToken)
+    {
+        var files = new List<ProjectArchiveFileDescriptor>();
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var relative = ProjectArchivePath.Normalize(Path.GetRelativePath(root, file).Replace('\\', '/'));
+            files.Add(await ProjectArchiveFileDescriptor.CreateAsync(
+                relative,
+                "version-history-snapshot",
+                relative.EndsWith(".json", StringComparison.Ordinal) ? "application/json" : "application/octet-stream",
+                file,
+                cancellationToken));
+        }
+
+        return files;
+    }
+
+    private static async Task<string> ComputeContentHashAsync(
+        IReadOnlyList<ProjectArchiveFileDescriptor> files,
+        CancellationToken cancellationToken)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var buffer = new byte[81_920];
+        foreach (var file in files.OrderBy(item => item.ArchivePath, StringComparer.Ordinal))
+        {
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.ArchivePath));
+            hash.AppendData([0]);
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            hash.AppendData([0]);
+            await using var source = file.OpenRead();
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
+                if (read == 0)
+                    break;
+                hash.AppendData(buffer, 0, read);
+            }
+        }
+
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     private static string ResolveSafePath(string root, string relativePath)
@@ -395,7 +492,6 @@ public sealed class VersionHistorySnapshotWriter(
 
     private sealed record SupplementalState(
         SupplementalProject Project,
-        IReadOnlyList<ProjectExportIngestSource> Sources,
         IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
         IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
         IReadOnlyList<VersionHistoryProjectReference> References);

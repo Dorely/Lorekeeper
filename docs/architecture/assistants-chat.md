@@ -590,10 +590,10 @@ managed publication model's layout math. Permanent replacements are system-owned
 invalidate Review Edits/manual history through their content owners just like
 other direct assistant-visible changes.
 
-### Current M3 and accepted M4-M5 assistant contract
+### Current M2-M4 and accepted M5 assistant contract
 
-The M3 mutation-fence contract is current. The remaining guidance is accepted
-next-contract work: assistant reads and mutations of Designed Pages use
+The M2-M4 Designed Page, mutation-fence, and durable source-evidence contracts
+are current. Assistant reads and mutations of Designed Pages use
 page identity plus protected Core/release content/variant revisions; a placement
 does not grant write ownership of shared page content. Assistant state-consuming
 operations use the same authoring mutation fence as manual consumers and must
@@ -603,7 +603,7 @@ successful committed batch.
 
 Source links in assistant-visible output carry validated durable `SourceLocation`
 data and preserve unavailable/outdated/ambiguous status rather than guessing.
-Manuscript projections and tools preserve `ManuscriptPosition`, table/note
+The following M5 guidance is not yet a current capability: manuscript projections and tools preserve `ManuscriptPosition`, table/note
 identities, citation clusters, and Designed Page citation/note atoms. An
 assistant evidence link never silently creates a manuscript citation.
 

@@ -423,11 +423,11 @@ asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
-### Current M2-M3 and accepted M4-M5 implementation contract
+### Current M2-M4 and accepted M5 implementation contract
 
 The reusable Designed Page identity and placement contract above is current.
-The remaining guidance in this section describes accepted next-version work and
-does not claim M4-M5 are already live. `AuthoringBatchProtocolV1` and
+The M3 authoring guidance in this section is current; the later rich-manuscript
+requirements remain accepted M5 work. `AuthoringBatchProtocolV1` and
 `AuthoringJournalV1` are the sole manual-edit transport and recovery contracts.
 A batch has an ordered target set, expected version/generation per target,
 session, batch identity/sequence, action label, operations, and explicit
@@ -507,11 +507,12 @@ removing obsolete runtime fields through forward migrations. Historical
 migration names and source version numbers remain accurate even though v5 is
 current.
 
-Project export v31 is the final JSON writer. It writes v5 manuscripts,
-Core/release annotation rows, page setup and Designed Page aggregates, style
-definitions, release snapshots, and current
-publication content, including linked image-upscale provenance. Older manuscript inputs are accepted only through isolated
-versioned transformers. Search, context, TXT, Markdown, EPUB, Read preview, and
+Legacy project export v31 is import-only. New `.lorekeeper` archives carry v5
+manuscripts, Core/release annotation rows, page setup and Designed Page
+aggregates, style definitions, release snapshots, and current publication
+content, including linked image-upscale provenance. Older manuscript inputs are
+accepted only through isolated versioned transformers. Search, context, TXT,
+Markdown, EPUB, Read preview, and
 Press all consume the semantic document or its explicit projection. A change to
 block meaning, reading order, styles, or direct formatting must be traced across
 every one of those consumers.

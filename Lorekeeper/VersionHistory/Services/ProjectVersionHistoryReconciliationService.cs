@@ -582,11 +582,10 @@ public sealed class ProjectVersionHistoryReconciliationService(
         foreach (var commit in commits)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var files = git.ReadTree(repositoryId, commit.Sha);
             var temporaryDirectory = CreateTemporaryDirectory();
             try
             {
-                WriteTreeToTemporaryDirectory(temporaryDirectory, files, cancellationToken);
+                git.MaterializeTree(repositoryId, temporaryDirectory, commit.Sha, cancellationToken);
                 EnsureNoReparsePointsRecursively(temporaryDirectory);
                 var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, projectId);
                 result.Add(new LoadedCommit(commit, artifact.Manifest));
@@ -613,26 +612,6 @@ public sealed class ProjectVersionHistoryReconciliationService(
         headCommitSha,
         importedCheckpointCount,
         diagnostic);
-
-    private static void WriteTreeToTemporaryDirectory(
-        string rootDirectory,
-        IReadOnlyDictionary<string, byte[]> files,
-        CancellationToken cancellationToken)
-    {
-        var root = Path.GetFullPath(rootDirectory);
-        var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        foreach (var entry in files.OrderBy(item => item.Key, StringComparer.Ordinal))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var relative = entry.Key.Replace('\\', '/');
-            var full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
-            if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Git tree path escaped its temporary root: {relative}");
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllBytes(full, entry.Value);
-        }
-    }
 
     private static string CreateTemporaryDirectory()
     {

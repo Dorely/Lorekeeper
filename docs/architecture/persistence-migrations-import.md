@@ -110,11 +110,9 @@ operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
 unrelated feature entities, project exports, assistant tool payloads, or logs.
 
-### Current M3 and accepted M4 persistence contract
+### Authoring, archive, and import persistence contract
 
-The authoring portion is current behavior; the M4 archive/import portion remains
-accepted next-contract guidance rather than a current schema claim. Authoring
-sessions and batch receipts are durable rows. One SQLite
+Authoring sessions and batch receipts are durable rows. One SQLite
 transaction validates a multi-target batch, applies all targets, advances its
 session sequence, and inserts the request-hash receipt; same identity returns
 the receipt only when the hash matches. Receipts remain until client
@@ -132,7 +130,17 @@ expanded limits, hashes, JSON/XML limits, and reference closure before one
 transactional application. Job state is Uploaded, Staged, Validated, Applying,
 Committed, Indexing, Completed, CompletedWithWarnings, Failed, or Cancelled.
 Cancellation ends at Applying; a committed import cannot later be failed or
-cancelled, while indexing may be retried and add warnings.
+cancelled, while indexing may be retried and add warnings. Uploaded content is
+hashed into an application-owned staged file before a job row is created; the
+database stores only its opaque key, declared length, and SHA-256. Terminal jobs
+remove their staged files. Startup fails interrupted pre-commit work, but resumes
+`Committed` or `Indexing` work strictly at the post-commit indexing phase so the
+creative transaction is never replayed.
+
+`SourceExtractionVersion` is the sole normalized-text/hash authority. The M4
+migration copies legacy `IngestSources.SourceText`/`SourceHash` into the
+identity-preserving legacy extraction and then removes those obsolete columns;
+JSON v1-v31 fields survive only in the import adapter and rollback path.
 
 ## Current architecture and invariants
 
@@ -285,12 +293,13 @@ through immutable models, startup supplies temporary compatibility columns at
 each such boundary, removes them immediately before the current EF boundary,
 and then lets the forward migration own the durable columns.
 
-Project export v31 is the final JSON portable writer. It retains the durable
-print registry/profile fields, removes finish, and accepts v20-v26 legacy
+Legacy project export v31 is the final JSON format and is import-only. Its
+adapter retains the durable print registry/profile fields, removes finish, and
+accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-through the import adapter. Full exports include the
-current v5 manuscript model, Core/release annotations, selected canonical
-ingest-source bodies/evidence and mappings, page setup, independent Designed
+at that boundary. New `.lorekeeper` full archives include the current v5
+manuscript model, Core/release annotations, the complete retained-source closure,
+page setup, independent Designed
 Pages with Core/release content and authored variants,
 Core Book including its paginated chapter-start policy, sparse release overlays
 including an explicit policy override when present, edition snapshots,
@@ -299,22 +308,23 @@ project-owned font families/faces with binary hashes. Version 26 adds print
 project use, identifier mode, cover submission mode, provider-neutral template
 evidence, and spine direction. Pre-v26 imports preserve existing behavior with
 for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults.
-Version 30 removes the cover-owned back-copy value and makes the visible effective
+Legacy version 30 removes the cover-owned back-copy value and makes the visible effective
 publication Description the sole descriptive-cover source. Current exports write
-only `description`/`{{description}}` bindings. The v1-v29 adapter rewrites the
+only `description`/`{{description}}` bindings. The legacy v1-v29 adapter rewrites the
 retired binding in primary and exact-surface scenes and discards its hidden value;
 it never overwrites the imported Book or release Description. Version 31
 replaces chapter/section-owned page compositions with reusable project pages;
 versions 1-30 are adapted only while importing. Import validates
 current token names and rejects unknown `{{token}}` references while continuing
 to accept exact bare canonical bindings as shorthand.
-Non-structural exports omit source bodies,
-selections, and evidence and include a warning. Jobs, operational review rows, temporary
+Non-structural archives apply their own dependency-traversal policy, omit source
+evidence outside that closure, and include explicit warnings. Jobs, operational
+review rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
 model selections, unpromoted image partials, and other operational review state
-remain working-database data and are excluded. The current export writes only
+remain working-database data and are excluded. The current archive records only
 `ReviewEditsEnabled`; a versioned legacy import may read the old preference
-field at its input boundary, but current exports never write that alias. Manual
+field at its input boundary, but current output never writes that alias. Manual
 Undo/Redo is process memory only and therefore is also absent from every export
 without adding database rows.
 
@@ -331,10 +341,12 @@ when cover editing is next attempted.
 Direct `ProjectReference` rows are deliberately omitted from both export kinds.
 When outgoing links exist, the serialized document warning and returned file
 warning must contain the same explicit omission text. Imports never infer links
-from names or slugs. Full imports include only selected canonical source
-bodies/evidence; unselected sources remain absent. Source and child IDs are
-remapped inside graph evidence/citations, selected-canon mappings are restored,
-and lexical/context indexes rebuild without rerunning extraction.
+from names or slugs. Legacy JSON full imports include only selected canonical
+source bodies/evidence; unselected sources remain absent. `FullArchive` uses its
+source index as authority and restores the complete retained-source closure.
+Source and child IDs are remapped inside graph evidence/citations, selected-canon
+mappings are restored, and lexical/context indexes rebuild without rerunning
+extraction.
 
 An import is one coherent transaction across project direction, images, fonts,
 styles, structure, editions, publication sections, graph state, and supported

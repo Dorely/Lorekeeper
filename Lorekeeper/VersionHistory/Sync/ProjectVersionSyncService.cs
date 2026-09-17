@@ -662,17 +662,15 @@ public sealed class ProjectVersionSyncService(
 
             string headCommitSha;
             string headTreeSha;
-            IReadOnlyDictionary<string, byte[]> treeFiles;
             using (var stagedRepository = OpenRepository(stagingPath))
             {
                 var head = ResolveCloneHead(stagedRepository, target.DefaultBranch);
                 headCommitSha = head.Sha;
                 headTreeSha = head.Tree.Sha;
-                treeFiles = ReadImportTree(stagedRepository, head);
+                MaterializeImportTree(head.Tree, extractionPath, string.Empty, depth: 0, cancellationToken);
             }
-            MaterializeTree(extractionPath, treeFiles, cancellationToken);
 
-            var manifest = ReadManifest(treeFiles);
+            var manifest = ReadManifest(extractionPath);
             if (manifest.RepositoryId == Guid.Empty || manifest.ProjectId == Guid.Empty)
                 throw InvalidManifest("The imported manifest did not contain valid repository and project identities.");
             installedManifest = manifest;
@@ -1308,21 +1306,12 @@ public sealed class ProjectVersionSyncService(
         throw InvalidManifest("The imported Git repository has no commit at its default branch.");
     }
 
-    private static IReadOnlyDictionary<string, byte[]> ReadImportTree(Repository repository, Commit head)
-    {
-        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-        ReadImportTree(repository, head.Tree, string.Empty, files, depth: 0);
-        if (!files.ContainsKey(VersionHistorySnapshotContract.ManifestFileName))
-            throw InvalidManifest("The imported Git repository does not contain manifest.json at its root.");
-        return files;
-    }
-
-    private static void ReadImportTree(
-        Repository repository,
+    private static void MaterializeImportTree(
         Tree tree,
+        string root,
         string prefix,
-        SortedDictionary<string, byte[]> files,
-        int depth)
+        int depth,
+        CancellationToken cancellationToken)
     {
         if (depth > 256)
             throw InvalidManifest("The imported Git tree is too deeply nested.");
@@ -1335,11 +1324,25 @@ public sealed class ProjectVersionSyncService(
             switch (entry.TargetType)
             {
                 case TreeEntryTargetType.Tree when entry.Mode == Mode.Directory && entry.Target is Tree subtree:
-                    ReadImportTree(repository, subtree, path, files, depth + 1);
+                    MaterializeImportTree(subtree, root, path, depth + 1, cancellationToken);
                     break;
                 case TreeEntryTargetType.Blob when entry.Mode == Mode.NonExecutableFile && entry.Target is Blob blob:
-                    if (!files.TryAdd(path, ReadBlob(blob)))
-                        throw InvalidManifest("The imported Git tree contains duplicate paths.");
+                    var destination = ResolveSafePath(root, path);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    EnsureNoReparsePoints(Path.GetDirectoryName(destination)!);
+                    using (var source = blob.GetContentStream())
+                    using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81_920, FileOptions.SequentialScan))
+                    {
+                        var buffer = new byte[81_920];
+                        while (true)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var read = source.Read(buffer, 0, buffer.Length);
+                            if (read == 0)
+                                break;
+                            output.Write(buffer, 0, read);
+                        }
+                    }
                     break;
                 default:
                     throw InvalidManifest("The imported Git tree contains an unsupported entry type.");
@@ -1347,20 +1350,15 @@ public sealed class ProjectVersionSyncService(
         }
     }
 
-    private static byte[] ReadBlob(Blob blob)
-    {
-        using var source = blob.GetContentStream();
-        using var destination = new MemoryStream();
-        source.CopyTo(destination);
-        return destination.ToArray();
-    }
-
-    private static VersionHistorySnapshotManifest ReadManifest(IReadOnlyDictionary<string, byte[]> files)
+    private static VersionHistorySnapshotManifest ReadManifest(string extractionPath)
     {
         try
         {
+            var manifestPath = ResolveSafePath(extractionPath, VersionHistorySnapshotContract.ManifestFileName);
+            if (!File.Exists(manifestPath))
+                throw InvalidManifest("The imported Git repository does not contain manifest.json at its root.");
             return JsonSerializer.Deserialize<VersionHistorySnapshotManifest>(
-                       files[VersionHistorySnapshotContract.ManifestFileName],
+                       File.ReadAllBytes(manifestPath),
                        ManifestJsonOptions)
                    ?? throw new InvalidDataException("The snapshot manifest is empty.");
         }
@@ -1377,7 +1375,11 @@ public sealed class ProjectVersionSyncService(
     {
         try
         {
-            return snapshotReader.Read(extractionPath, repositoryId, projectId);
+            return snapshotReader.Read(
+                extractionPath,
+                repositoryId,
+                projectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -1423,8 +1425,7 @@ public sealed class ProjectVersionSyncService(
                     ProjectVersionSyncErrorCode.RepositoryCollision,
                     "The existing orphan history has a different tree for the validated clone head.");
 
-            var files = ReadImportTree(repository, commit);
-            MaterializeTree(existingExtractionPath, files, cancellationToken);
+            MaterializeImportTree(commit.Tree, existingExtractionPath, string.Empty, depth: 0, cancellationToken);
             var existingArtifact = ReadStrictArtifact(
                 existingExtractionPath,
                 artifact.Manifest.RepositoryId,
@@ -1461,20 +1462,6 @@ public sealed class ProjectVersionSyncService(
             string.Equals(pair.First.Path, pair.Second.Path, StringComparison.Ordinal)
             && pair.First.Length == pair.Second.Length
             && string.Equals(pair.First.Sha256, pair.Second.Sha256, StringComparison.Ordinal));
-    }
-
-    private static void MaterializeTree(
-        string root,
-        IReadOnlyDictionary<string, byte[]> files,
-        CancellationToken cancellationToken)
-    {
-        foreach (var file in files)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var path = ResolveSafePath(root, file.Key);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, file.Value);
-        }
     }
 
     private string CreateStagingRepositoryPath()

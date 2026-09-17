@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
@@ -14,6 +16,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.ProjectArchive;
 using Lorekeeper.Projects;
 using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
@@ -21,9 +24,13 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportJobProcessor(
-    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IIngestVectorIndexingService ingestVectorIndexing, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger)
+    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IIngestVectorIndexingService ingestVectorIndexing, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger, IProjectImportFileStore? fileStore = null)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
+    private readonly IProjectImportFileStore _fileStore = fileStore ?? new ProjectImportFileStore();
 
     private static readonly HashSet<string> AppendStructuralNodeTypes =
     [
@@ -69,16 +76,24 @@ public sealed class ProjectImportJobProcessor(
         ProjectImportJob? job;
         await using (var readOperation = await database.OpenReadAsync(cancellationToken))
             job = await readOperation.Repositories.ProjectImports.GetJobAsync(jobId, cancellationToken);
-        if (job is null || job.Status != ProjectImportJobStatus.Queued) return;
+        if (job is null) return;
+        if (job.Status is ProjectImportJobStatus.Committed or ProjectImportJobStatus.Indexing)
+        {
+            await ResumeCommittedIndexingAsync(job, cancellationToken);
+            return;
+        }
+        if (job.Status is not (ProjectImportJobStatus.Staged or ProjectImportJobStatus.Validated)) return;
+
+        var committed = false;
 
         try
         {
-            await MarkRunningAsync(job, cancellationToken);
             var document = await ReadAndValidateAsync(job, cancellationToken);
             await ValidateManuscriptStyleCompatibilityAsync(
                 job.ProjectId,
                 document,
                 cancellationToken);
+            await MarkApplyingAsync(job, cancellationToken);
 
             var state = new ImportState();
             await using var databaseOperation = await database.OpenWriteAsync(job.ProjectId, cancellationToken);
@@ -105,7 +120,10 @@ public sealed class ProjectImportJobProcessor(
 
                 if (document.ExportKind == ProjectExportKind.Full)
                 {
-                    await ImportCanonicalIngestSourcesAsync(job, document, state, cancellationToken);
+                    if (job.InputKind == ProjectImportInputKind.LorekeeperArchive && document.ExportKind == ProjectExportKind.Full)
+                        await ImportArchiveSourceClosureAsync(job, document, state, cancellationToken);
+                    else
+                        await ImportCanonicalIngestSourcesAsync(job, document, state, cancellationToken);
                     await ImportProjectImagesAsync(job, document, state, cancellationToken);
                     await StepAsync(job, "Imported project images.", cancellationToken);
                     await ImportProjectFontsAsync(job, document, state, cancellationToken);
@@ -185,17 +203,27 @@ public sealed class ProjectImportJobProcessor(
 
                 await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
                 await StepAsync(job, "Repaired graph outline links.", cancellationToken);
-                job.Status = ProjectImportJobStatus.Completed;
-                job.CurrentMessage = "Import completed.";
-                job.CompletedAt = DateTime.UtcNow;
+                job.Status = ProjectImportJobStatus.Committed;
+                job.CurrentMessage = "Import committed; rebuilding indexes.";
                 job.UpdatedAt = DateTime.UtcNow;
                 imports.UpdateJob(job);
                 await databaseOperation.SaveChangesAsync(cancellationToken);
                 await importTransaction.CommitAsync(cancellationToken);
+                committed = true;
             }
 
-            Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Completed);
-            await ReindexBestEffortAsync(job, state, cancellationToken);
+            await MarkIndexingAsync(job, CancellationToken.None);
+            var indexedWithoutWarnings = await ReindexBestEffortAsync(job, state, CancellationToken.None);
+            await MarkCompletedAsync(job, indexedWithoutWarnings, CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (!committed)
+        {
+            await MarkCancelledAsync(job, CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (committed)
+        {
+            await AddWarningAsync(job, "Indexing interrupted", "The imported project was committed; indexing can resume after restart.", CancellationToken.None);
+            await MarkCompletedAsync(job, false, CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -209,7 +237,15 @@ public sealed class ProjectImportJobProcessor(
                     $"Import concurrency failure ({string.Join(", ", concurrency.Entries.Select(entry => $"{entry.Metadata.ClrType.Name}:{entry.State}"))}).",
                     concurrency)
                 : ex;
-            await MarkFailedAsync(job, failure, cancellationToken);
+            if (committed)
+            {
+                await AddWarningAsync(job, "Post-commit import work failed", failure.Message, CancellationToken.None);
+                await MarkCompletedAsync(job, false, CancellationToken.None);
+            }
+            else
+            {
+                await MarkFailedAsync(job, failure, CancellationToken.None);
+            }
         }
     }
 
@@ -309,6 +345,7 @@ public sealed class ProjectImportJobProcessor(
         foreach (var imported in document.IngestSources)
         {
             var sourceId = Guid.NewGuid();
+            var extractionId = sourceId;
             state.IngestSourceMap[imported.Id] = sourceId;
             var source = new IngestSource
             {
@@ -319,8 +356,6 @@ public sealed class ProjectImportJobProcessor(
                 Description = imported.Description,
                 Synopsis = imported.Synopsis,
                 UserInstructions = imported.UserInstructions,
-                SourceText = imported.SourceText,
-                SourceHash = imported.SourceHash,
                 SourceUrl = imported.SourceUrl,
                 FinalUrl = imported.FinalUrl,
                 CanonicalUrl = imported.CanonicalUrl,
@@ -330,9 +365,36 @@ public sealed class ProjectImportJobProcessor(
                 VectorIndexState = VectorIndexState.Stale,
                 VectorIndexedAt = null,
                 VectorIndexError = null,
+                ActiveExtractionVersionId = extractionId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
+                Original = new SourceOriginal
+                {
+                    SourceId = sourceId,
+                    State = SourceOriginalState.OriginalUnavailable,
+                    FileName = imported.Title,
+                    MediaType = imported.ContentType,
+                    Length = 0,
+                    Sha256 = null,
+                    CreatedAt = imported.CreatedAt,
+                },
             };
+            source.ExtractionVersions.Add(new SourceExtractionVersion
+            {
+                Id = extractionId,
+                SourceId = sourceId,
+                Ordinal = 0,
+                Extractor = "legacy-project-import",
+                ExtractorVersion = $"json-v{document.FormatVersion}",
+                OptionsJson = "{}",
+                ContentHash = string.IsNullOrWhiteSpace(imported.SourceHash)
+                    ? SourceRetentionValidator.Sha256(imported.SourceText)
+                    : imported.SourceHash,
+                Status = SourceExtractionStatus.LegacyImmutable,
+                Diagnostics = "Imported from a legacy JSON project export; original bytes were not available.",
+                NormalizedText = imported.SourceText,
+                CreatedAt = imported.CreatedAt,
+            });
             foreach (var importedPage in imported.Pages)
             {
                 var pageId = Guid.NewGuid();
@@ -341,6 +403,7 @@ public sealed class ProjectImportJobProcessor(
                 {
                     Id = pageId,
                     SourceId = sourceId,
+                    SourceExtractionVersionId = extractionId,
                     PageNumber = importedPage.PageNumber,
                     Text = importedPage.Text,
                     StartChar = importedPage.StartChar,
@@ -364,6 +427,7 @@ public sealed class ProjectImportJobProcessor(
                 {
                     Id = chunkId,
                     SourceId = sourceId,
+                    SourceExtractionVersionId = extractionId,
                     Index = importedChunk.Index,
                     Title = importedChunk.Title,
                     HeadingPath = importedChunk.HeadingPath,
@@ -383,11 +447,13 @@ public sealed class ProjectImportJobProcessor(
             foreach (var importedBlock in imported.Blocks)
             {
                 var blockId = Guid.NewGuid();
+                var normalizedText = ReadLegacyBlockText(imported.SourceText, importedBlock.StartChar, importedBlock.EndChar);
                 state.IngestSourceBlockMap[importedBlock.Id] = blockId;
                 source.SourceBlocks.Add(new IngestSourceBlock
                 {
                     Id = blockId,
                     SourceId = sourceId,
+                    SourceExtractionVersionId = extractionId,
                     SourcePageId = importedBlock.SourcePageId is { } oldPageId
                         ? state.IngestSourcePageMap.GetValueOrDefault(oldPageId)
                         : null,
@@ -398,6 +464,8 @@ public sealed class ProjectImportJobProcessor(
                     PageNumber = importedBlock.PageNumber,
                     StartChar = importedBlock.StartChar,
                     EndChar = importedBlock.EndChar,
+                    NormalizedText = normalizedText,
+                    ContentHash = SourceRetentionValidator.Sha256(normalizedText),
                     MetadataJson = importedBlock.MetadataJson,
                     CreatedAt = importedBlock.CreatedAt,
                 });
@@ -416,16 +484,361 @@ public sealed class ProjectImportJobProcessor(
             cancellationToken);
     }
 
+    private static string ReadLegacyBlockText(string sourceText, int start, int end)
+    {
+        var safeStart = Math.Clamp(start, 0, sourceText.Length);
+        var safeEnd = Math.Clamp(end, safeStart, sourceText.Length);
+        var length = Math.Min(safeEnd - safeStart, IngestSourceBlock.MaximumNormalizedTextLength);
+        return sourceText.Substring(safeStart, length);
+    }
+
+    private async Task ImportArchiveSourceClosureAsync(
+        ProjectImportJob job,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        var key = new ProjectImportJobFileKey(job.StagedFileKey);
+        await using var input = _fileStore.OpenRead(key);
+        _ = await ProjectArchiveZip.ReadAsync(input, cancellationToken: cancellationToken);
+        input.Position = 0;
+        using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
+        var sourceIds = await ReadArchiveJsonAsync<List<Guid>>(archive, "sources/index.json", cancellationToken);
+        if (sourceIds.Distinct().Count() != sourceIds.Count || sourceIds.Any(id => id == Guid.Empty))
+            throw new InvalidDataException("Archive source index is not a unique set of source identities.");
+
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.ShareWithNestedOperations();
+        var db = operation.Db;
+        var extractionMaps = new Dictionary<Guid, Guid>();
+        var blockMaps = new Dictionary<Guid, Guid>();
+        var extractionRecordsById = new Dictionary<Guid, ArchiveExtractionRecord>();
+        var blockExtractionIds = new Dictionary<Guid, Guid>();
+        var extractionPageNumbers = new Dictionary<Guid, HashSet<int>>();
+        var sourceMaps = new Dictionary<Guid, Guid>();
+
+        foreach (var exportedSourceId in sourceIds.Order())
+        {
+            var root = $"sources/{exportedSourceId:N}";
+            var record = await ReadArchiveJsonAsync<ArchiveSourceRecord>(archive, $"{root}/source.json", cancellationToken);
+            if (record.Id != exportedSourceId)
+                throw new InvalidDataException("Archive source record identity does not match its path.");
+            var localSourceId = Guid.NewGuid();
+            sourceMaps.Add(exportedSourceId, localSourceId);
+            state.IngestSourceMap[exportedSourceId] = localSourceId;
+
+            var extractionEntries = archive.Entries
+                .Where(entry => entry.FullName.StartsWith($"{root}/extractions/", StringComparison.Ordinal)
+                    && entry.FullName.EndsWith("/extraction.json", StringComparison.Ordinal))
+                .OrderBy(entry => entry.FullName, StringComparer.Ordinal)
+                .ToArray();
+            if (extractionEntries.Length == 0)
+                throw new InvalidDataException("Archive source has no immutable extraction versions.");
+
+            var extractionRecords = new List<(ArchiveExtractionRecord Record, string Root)>();
+            foreach (var entry in extractionEntries)
+            {
+                var extraction = await ReadArchiveJsonAsync<ArchiveExtractionRecord>(archive, entry.FullName, cancellationToken);
+                var extractionRoot = entry.FullName[..^"/extraction.json".Length];
+                if (extraction.SourceId != exportedSourceId || extraction.Id == Guid.Empty || extraction.Ordinal < 0)
+                    throw new InvalidDataException("Archive extraction ownership or identity is invalid.");
+                if (extractionRecords.Any(item => item.Record.Id == extraction.Id || item.Record.Ordinal == extraction.Ordinal))
+                    throw new InvalidDataException("Archive source has duplicate extraction identities or ordinals.");
+                extractionRecords.Add((extraction, extractionRoot));
+                extractionMaps.Add(extraction.Id, Guid.NewGuid());
+                extractionRecordsById.Add(extraction.Id, extraction);
+            }
+            if (record.ActiveExtractionVersionId is not Guid activeId || !extractionMaps.ContainsKey(activeId))
+                throw new InvalidDataException("Archive source active extraction is missing.");
+
+            var active = extractionRecords.Single(item => item.Record.Id == activeId).Record;
+            if (active.Status is not (SourceExtractionStatus.Ready or SourceExtractionStatus.LegacyImmutable))
+                throw new InvalidDataException("Archive source active extraction is not readable.");
+            var source = new IngestSource
+            {
+                Id = localSourceId,
+                ProjectId = job.ProjectId,
+                Title = record.Title,
+                SourceKind = record.SourceKind,
+                Description = record.Description,
+                Synopsis = record.Synopsis,
+                UserInstructions = record.UserInstructions,
+                SourceUrl = record.SourceUrl,
+                FinalUrl = record.FinalUrl,
+                CanonicalUrl = record.CanonicalUrl,
+                FetchedAt = record.FetchedAt,
+                ContentType = record.ContentType,
+                SourceMetadataJson = record.SourceMetadataJson,
+                ActiveExtractionVersionId = extractionMaps[activeId],
+                VectorIndexState = VectorIndexState.Stale,
+                CreatedAt = record.CreatedAt,
+                UpdatedAt = record.UpdatedAt,
+            };
+            db.IngestSources.Add(source);
+
+            await ImportArchiveOriginalAsync(db, archive, root, exportedSourceId, localSourceId, cancellationToken);
+            foreach (var (extraction, extractionRoot) in extractionRecords)
+            {
+                var localExtractionId = extractionMaps[extraction.Id];
+                db.SourceExtractionVersions.Add(new SourceExtractionVersion
+                {
+                    Id = localExtractionId,
+                    SourceId = localSourceId,
+                    Ordinal = extraction.Ordinal,
+                    Extractor = extraction.Extractor,
+                    ExtractorVersion = extraction.ExtractorVersion,
+                    OptionsJson = extraction.OptionsJson,
+                    ContentHash = extraction.ContentHash,
+                    Status = extraction.Status,
+                    Diagnostics = extraction.Diagnostics,
+                    NormalizedText = extraction.NormalizedText,
+                    CreatedAt = extraction.CreatedAt,
+                });
+                await ImportArchiveExtractionChildrenAsync(db, archive, extractionRoot, exportedSourceId, localSourceId,
+                    extraction.Id, localExtractionId, state, blockMaps, blockExtractionIds, extractionPageNumbers, cancellationToken);
+            }
+            await ImportArchiveLocationsAsync(db, archive, root, job.ProjectId, exportedSourceId, localSourceId,
+                extractionMaps, extractionRecordsById, blockMaps, blockExtractionIds, extractionPageNumbers, cancellationToken);
+        }
+
+        await ImportArchiveBibliographyAsync(db, archive, job.ProjectId, sourceMaps, cancellationToken);
+        var selections = document.BookBriefCanonSourceIds.Select(id => sourceMaps.GetValueOrDefault(id)).ToArray();
+        if (selections.Any(id => id == Guid.Empty))
+            throw new InvalidDataException("Archive canonical-source selection is not closed over its source index.");
+        var existing = await bookBriefs.ListCanonSourcesAsync(job.ProjectId, cancellationToken);
+        await bookBriefs.ReplaceCanonSourcesAsync(job.ProjectId,
+            existing.Select(item => item.SourceId).Concat(selections).Distinct().ToArray(), cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task ImportArchiveOriginalAsync(AppDbContext db, ZipArchive archive, string sourceRoot,
+        Guid exportedSourceId, Guid localSourceId, CancellationToken cancellationToken)
+    {
+        var path = $"{sourceRoot}/original/manifest.json";
+        if (archive.GetEntry(path) is null)
+            throw new InvalidDataException("Archive source original manifest is missing.");
+        var original = await ReadArchiveJsonAsync<ArchiveOriginalRecord>(archive, path, cancellationToken);
+        if (original.SourceId != exportedSourceId)
+            throw new InvalidDataException("Archive source original ownership is invalid.");
+        var local = new SourceOriginal { SourceId = localSourceId, State = original.State, FileName = original.FileName,
+            MediaType = original.MediaType, Length = original.Length, Sha256 = original.Sha256, CreatedAt = original.CreatedAt };
+        if (original.State == SourceOriginalState.OriginalUnavailable)
+        {
+            if (original.Length != 0 || original.Sha256 is not null || original.Chunks.Count != 0)
+                throw new InvalidDataException("Unavailable source originals cannot carry reconstructed bytes.");
+            db.SourceOriginals.Add(local);
+            return;
+        }
+        using var originalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        long originalLength = 0;
+        foreach (var chunk in original.Chunks.OrderBy(item => item.Index))
+        {
+            if (chunk.Index != local.Chunks.Count || chunk.ByteLength is <= 0 or > SourceOriginal.MaximumChunkBytes)
+                throw new InvalidDataException("Archive source original chunks are not contiguous or bounded.");
+            var bytes = await ReadArchiveBytesAsync(archive, chunk.Path, SourceOriginal.MaximumChunkBytes, cancellationToken);
+            if (bytes.LongLength != chunk.ByteLength || !string.Equals(SourceRetentionValidator.Sha256(bytes), chunk.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Archive source original chunk hash does not match its manifest.");
+            originalHash.AppendData(bytes);
+            originalLength = checked(originalLength + bytes.LongLength);
+            var existingBlob = await db.SourceOriginalBlobs.AsNoTracking()
+                .Where(blob => blob.Sha256 == chunk.Sha256)
+                .Select(blob => new { blob.Length, blob.Data })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (existingBlob is not null
+                && (existingBlob.Length != bytes.Length || !existingBlob.Data.AsSpan().SequenceEqual(bytes)))
+            {
+                throw new InvalidDataException("Archive source blob collides with different retained bytes.");
+            }
+            if (existingBlob is null)
+            {
+                var inserted = await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"INSERT OR IGNORE INTO \"SourceOriginalBlobs\" (\"Sha256\", \"Length\", \"Data\") VALUES ({chunk.Sha256}, {bytes.Length}, {bytes})",
+                    cancellationToken);
+                if (inserted == 0)
+                {
+                    existingBlob = await db.SourceOriginalBlobs.AsNoTracking()
+                        .Where(blob => blob.Sha256 == chunk.Sha256)
+                        .Select(blob => new { blob.Length, blob.Data })
+                        .SingleAsync(cancellationToken);
+                    if (existingBlob.Length != bytes.Length || !existingBlob.Data.AsSpan().SequenceEqual(bytes))
+                        throw new InvalidDataException("Archive source blob collides with different retained bytes.");
+                }
+            }
+            local.Chunks.Add(new SourceOriginalChunk
+            {
+                SourceId = localSourceId,
+                Index = chunk.Index,
+                BlobSha256 = chunk.Sha256,
+                ByteLength = bytes.Length,
+            });
+        }
+        if (originalLength != original.Length
+            || !string.Equals(Convert.ToHexStringLower(originalHash.GetHashAndReset()), original.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Archive source original length or full hash does not match its manifest.");
+        }
+        SourceRetentionValidator.MarkExternallyVerifiedOriginal(local);
+        db.SourceOriginals.Add(local);
+    }
+
+    private static async Task ImportArchiveExtractionChildrenAsync(AppDbContext db, ZipArchive archive, string root,
+        Guid exportedSourceId, Guid localSourceId, Guid exportedExtractionId, Guid localExtractionId, ImportState state,
+        IDictionary<Guid, Guid> blockMaps, IDictionary<Guid, Guid> blockExtractionIds,
+        IDictionary<Guid, HashSet<int>> extractionPageNumbers, CancellationToken cancellationToken)
+    {
+        var pages = new Dictionary<Guid, Guid>();
+        foreach (var entry in ArchiveJsonEntries(archive, $"{root}/pages/"))
+        {
+            var page = await ReadArchiveJsonAsync<ArchivePageRecord>(archive, entry.FullName, cancellationToken);
+            if (page.Id == Guid.Empty || !pages.TryAdd(page.Id, Guid.NewGuid())) throw new InvalidDataException("Archive pages are not unique.");
+            db.IngestSourcePages.Add(new IngestSourcePage { Id = pages[page.Id], SourceId = localSourceId, SourceExtractionVersionId = localExtractionId,
+                PageNumber = page.PageNumber, Text = page.Text, StartChar = page.StartChar, EndChar = page.EndChar, ExtractionMethod = page.ExtractionMethod,
+                Width = page.Width, Height = page.Height, ImageHash = page.ImageHash, RenderSettingsJson = page.RenderSettingsJson, VisionProviderId = page.VisionProviderId,
+                VisionModelName = page.VisionModelName, Diagnostics = page.Diagnostics, CreatedAt = page.CreatedAt });
+            state.IngestSourcePageMap[page.Id] = pages[page.Id];
+            if (!extractionPageNumbers.TryGetValue(exportedExtractionId, out var pageNumbers))
+                extractionPageNumbers.Add(exportedExtractionId, pageNumbers = []);
+            if (!pageNumbers.Add(page.PageNumber))
+                throw new InvalidDataException("Archive extraction has duplicate page numbers.");
+        }
+        foreach (var entry in ArchiveJsonEntries(archive, $"{root}/chunks/"))
+        {
+            var chunk = await ReadArchiveJsonAsync<ArchiveChunkRecord>(archive, entry.FullName, cancellationToken);
+            if (chunk.Id == Guid.Empty || state.IngestSourceChunkMap.ContainsKey(chunk.Id)) throw new InvalidDataException("Archive chunks are not unique.");
+            var id = Guid.NewGuid(); state.IngestSourceChunkMap[chunk.Id] = id;
+            db.IngestSourceChunks.Add(new IngestSourceChunk { Id = id, SourceId = localSourceId, SourceExtractionVersionId = localExtractionId,
+                Index = chunk.Index, Title = chunk.Title, HeadingPath = chunk.HeadingPath, StartChar = chunk.StartChar, EndChar = chunk.EndChar,
+                EstimatedTokenCount = chunk.EstimatedTokenCount, TokenCountMethod = chunk.TokenCountMethod, TokenEncodingName = chunk.TokenEncodingName,
+                TokenCountIsExact = chunk.TokenCountIsExact, Summary = chunk.Summary, AgentNotes = chunk.AgentNotes, StructureStatus = chunk.StructureStatus,
+                CreatedAt = chunk.CreatedAt, UpdatedAt = chunk.UpdatedAt });
+        }
+        foreach (var entry in ArchiveJsonEntries(archive, $"{root}/blocks/"))
+        {
+            var block = await ReadArchiveJsonAsync<ArchiveBlockRecord>(archive, entry.FullName, cancellationToken);
+            if (block.Id == Guid.Empty || !blockMaps.TryAdd(block.Id, Guid.NewGuid()) || block.SourcePageId is Guid pageId && !pages.ContainsKey(pageId))
+                throw new InvalidDataException("Archive blocks are not unique or reference a missing page.");
+            state.IngestSourceBlockMap[block.Id] = blockMaps[block.Id];
+            blockExtractionIds[block.Id] = exportedExtractionId;
+            db.IngestSourceBlocks.Add(new IngestSourceBlock { Id = blockMaps[block.Id], SourceId = localSourceId, SourceExtractionVersionId = localExtractionId,
+                SourcePageId = block.SourcePageId is Guid sourcePageId ? pages[sourcePageId] : null, Index = block.Index, Kind = block.Kind, Title = block.Title,
+                Locator = block.Locator, PageNumber = block.PageNumber, StartChar = block.StartChar, EndChar = block.EndChar, NormalizedText = block.NormalizedText,
+                ContentHash = block.ContentHash, MetadataJson = block.MetadataJson, CreatedAt = block.CreatedAt });
+        }
+    }
+
+    private async Task ResumeCommittedIndexingAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    {
+        // A committed import must never be replayed. The import transaction is
+        // already durable, so recovery is strictly a best-effort refresh over
+        // the current project state.
+        await MarkIndexingAsync(job, cancellationToken);
+        var indexedWithoutWarnings = await ReindexCommittedProjectAsync(job, cancellationToken);
+        await MarkCompletedAsync(job, indexedWithoutWarnings, CancellationToken.None);
+    }
+
+    private static async Task ImportArchiveLocationsAsync(AppDbContext db, ZipArchive archive, string root, Guid projectId,
+        Guid exportedSourceId, Guid localSourceId, IReadOnlyDictionary<Guid, Guid> extractionMaps,
+        IReadOnlyDictionary<Guid, ArchiveExtractionRecord> extractionRecords, IReadOnlyDictionary<Guid, Guid> blockMaps,
+        IReadOnlyDictionary<Guid, Guid> blockExtractionIds, IReadOnlyDictionary<Guid, HashSet<int>> extractionPageNumbers,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in ArchiveJsonEntries(archive, $"{root}/locations/"))
+        {
+            var location = await ReadArchiveJsonAsync<ArchiveLocationRecord>(archive, entry.FullName, cancellationToken);
+            if (location.Id == Guid.Empty
+                || location.SourceId != exportedSourceId
+                || !extractionMaps.TryGetValue(location.ExtractionVersionId, out var extractionId)
+                || !extractionRecords.TryGetValue(location.ExtractionVersionId, out var extraction)
+                || location.SourceBlockId is Guid blockId && (!blockMaps.TryGetValue(blockId, out _) || blockExtractionIds.GetValueOrDefault(blockId) != location.ExtractionVersionId)
+                || location.PageNumber is int pageNumber && (!extractionPageNumbers.TryGetValue(location.ExtractionVersionId, out var pages) || !pages.Contains(pageNumber))
+                || location.NormalizedStart < 0
+                || location.NormalizedLength < 0
+                || location.NormalizedStart > extraction.NormalizedText.Length
+                || location.NormalizedLength > extraction.NormalizedText.Length - location.NormalizedStart
+                || !ProjectArchiveManifest.IsSha256(location.VerificationHash)
+                || !Enum.IsDefined(location.ResolutionState))
+                throw new InvalidDataException("Archive source location is not closed over its extraction or block.");
+            var exactQuote = location.NormalizedLength == 0 ? string.Empty
+                : extraction.NormalizedText.Substring(location.NormalizedStart, location.NormalizedLength);
+            var quoteMatches = string.Equals(SourceRetentionValidator.Sha256(exactQuote), location.VerificationHash, StringComparison.OrdinalIgnoreCase);
+            if (location.ResolutionState == SourceLocationResolutionState.Resolved
+                && (location.NormalizedLength == 0 || !quoteMatches || !string.Equals(location.Quote, exactQuote, StringComparison.Ordinal)))
+            {
+                throw new InvalidDataException("A resolved archive location does not match its immutable extraction text.");
+            }
+            db.SourceLocations.Add(new SourceLocation { Id = Guid.NewGuid(), ProjectId = projectId, SourceId = localSourceId,
+                ExtractionVersionId = extractionId, SourceBlockId = location.SourceBlockId is Guid value ? blockMaps[value] : null,
+                PageNumber = location.PageNumber, NormalizedStart = location.NormalizedStart, NormalizedLength = location.NormalizedLength,
+                Locator = location.Locator, Quote = location.Quote, VerificationHash = location.VerificationHash,
+                ResolutionState = location.ResolutionState, CreatedAt = location.CreatedAt });
+        }
+    }
+
+    private static async Task ImportArchiveBibliographyAsync(AppDbContext db, ZipArchive archive, Guid projectId,
+        IReadOnlyDictionary<Guid, Guid> sourceMaps, CancellationToken cancellationToken)
+    {
+        var entries = ArchiveJsonEntries(archive, "bibliography/")
+            .Concat(archive.Entries.Where(entry => entry.FullName.StartsWith("sources/", StringComparison.Ordinal)
+                && entry.FullName.Contains("/bibliography/", StringComparison.Ordinal) && entry.FullName.EndsWith(".json", StringComparison.Ordinal)))
+            .OrderBy(entry => entry.FullName, StringComparer.Ordinal);
+        var seen = new HashSet<Guid>();
+        foreach (var entry in entries)
+        {
+            var record = await ReadArchiveJsonAsync<ArchiveBibliographyRecord>(archive, entry.FullName, cancellationToken);
+            if (record.Id == Guid.Empty || !seen.Add(record.Id)
+                || record.SourceId is Guid sourceId && !sourceMaps.TryGetValue(sourceId, out _))
+                throw new InvalidDataException("Archive bibliography is not closed over its source records.");
+            db.BibliographicRecords.Add(new BibliographicRecord { Id = Guid.NewGuid(), ProjectId = projectId,
+                SourceId = record.SourceId is Guid mapped ? sourceMaps[mapped] : null, Kind = record.Kind, Title = record.Title,
+                ContainerTitle = record.ContainerTitle, AuthorsJson = record.AuthorsJson, EditorsJson = record.EditorsJson,
+                IssuedYear = record.IssuedYear, Publisher = record.Publisher, PublisherPlace = record.PublisherPlace,
+                Volume = record.Volume, Issue = record.Issue, Pages = record.Pages, Doi = record.Doi, Url = record.Url,
+                AccessedAt = record.AccessedAt, Isbn = record.Isbn, Notes = record.Notes, CreatedAt = record.CreatedAt, UpdatedAt = record.UpdatedAt });
+        }
+    }
+
+    private static IEnumerable<ZipArchiveEntry> ArchiveJsonEntries(ZipArchive archive, string prefix) => archive.Entries
+        .Where(entry => entry.FullName.StartsWith(prefix, StringComparison.Ordinal) && entry.FullName.EndsWith(".json", StringComparison.Ordinal))
+        .OrderBy(entry => entry.FullName, StringComparer.Ordinal);
+
+    private static async Task<T> ReadArchiveJsonAsync<T>(ZipArchive archive, string path, CancellationToken cancellationToken)
+    {
+        var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Archive is missing '{path}'.");
+        if (entry.Length > ProjectArchiveLimits.Default.MaximumEntryBytes)
+            throw new InvalidDataException($"Archive record '{path}' exceeds its configured limit.");
+        await using var stream = entry.Open();
+        return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken)
+            ?? throw new InvalidDataException($"Archive record '{path}' is malformed.");
+    }
+
+    private static async Task<byte[]> ReadArchiveBytesAsync(ZipArchive archive, string path, long maximumBytes, CancellationToken cancellationToken)
+    {
+        var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Archive is missing '{path}'.");
+        if (entry.Length > maximumBytes || entry.Length > int.MaxValue)
+            throw new InvalidDataException($"Archive record '{path}' exceeds its configured limit.");
+        await using var stream = entry.Open();
+        using var output = new MemoryStream(checked((int)entry.Length));
+        await stream.CopyToAsync(output, cancellationToken);
+        if (output.Length != entry.Length) throw new InvalidDataException($"Archive record '{path}' was truncated.");
+        return output.ToArray();
+    }
+
+    private sealed record ArchiveSourceRecord(Guid Id, string Title, string SourceKind, string Description, string Synopsis, string UserInstructions, string SourceUrl, string FinalUrl, string CanonicalUrl, DateTime? FetchedAt, string ContentType, string SourceMetadataJson, Guid? ActiveExtractionVersionId, DateTime CreatedAt, DateTime UpdatedAt);
+    private sealed record ArchiveOriginalChunk(int Index, string Path, long ByteLength, string Sha256);
+    private sealed record ArchiveOriginalRecord(Guid SourceId, SourceOriginalState State, string FileName, string MediaType, long Length, string? Sha256, DateTime CreatedAt, List<ArchiveOriginalChunk> Chunks);
+    private sealed record ArchiveExtractionRecord(Guid Id, Guid SourceId, int Ordinal, string Extractor, string ExtractorVersion, string OptionsJson, string ContentHash, SourceExtractionStatus Status, string Diagnostics, string NormalizedText, DateTime CreatedAt);
+    private sealed record ArchiveChunkRecord(Guid Id, int Index, string Title, string HeadingPath, int StartChar, int EndChar, int EstimatedTokenCount, string TokenCountMethod, string? TokenEncodingName, bool TokenCountIsExact, string Summary, string AgentNotes, IngestSourceChunkStructureStatus StructureStatus, DateTime CreatedAt, DateTime UpdatedAt);
+    private sealed record ArchivePageRecord(Guid Id, int PageNumber, string Text, int StartChar, int EndChar, string ExtractionMethod, int Width, int Height, string ImageHash, string RenderSettingsJson, int? VisionProviderId, string VisionModelName, string Diagnostics, DateTime CreatedAt);
+    private sealed record ArchiveBlockRecord(Guid Id, Guid? SourcePageId, int Index, string Kind, string Title, string Locator, int? PageNumber, int StartChar, int EndChar, string NormalizedText, string ContentHash, string MetadataJson, DateTime CreatedAt);
+    private sealed record ArchiveLocationRecord(Guid Id, Guid SourceId, Guid ExtractionVersionId, Guid? SourceBlockId, int? PageNumber, int NormalizedStart, int NormalizedLength, string Locator, string Quote, string VerificationHash, SourceLocationResolutionState ResolutionState, DateTime CreatedAt);
+    private sealed record ArchiveBibliographyRecord(Guid Id, Guid? SourceId, BibliographicRecordKind Kind, string Title, string ContainerTitle, string AuthorsJson, string EditorsJson, int? IssuedYear, string Publisher, string PublisherPlace, string Volume, string Issue, string Pages, string Doi, string Url, DateTime? AccessedAt, string Isbn, string Notes, DateTime CreatedAt, DateTime UpdatedAt);
+
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var imports = databaseOperation.Repositories.ProjectImports;
         ProjectExportDocument document;
         try
         {
-            document = JsonSerializer.Deserialize<ProjectExportDocument>(job.ContentJson, JsonOptions)
-                ?? throw new InvalidOperationException("Import file did not contain a project export document.");
+            document = await ReadStagedDocumentAsync(job, cancellationToken);
         }
         catch (JsonException ex)
         {
@@ -463,9 +876,17 @@ public sealed class ProjectImportJobProcessor(
         ValidateIngestSourcePayloads(document);
         ValidateManuscriptAnnotationPayloads(document);
 
-        job.FormatId = document.FormatId;
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
+        job.FormatId = job.InputKind == ProjectImportInputKind.LorekeeperArchive
+            ? ProjectArchiveContract.FormatId
+            : document.FormatId;
         job.FormatVersion = document.FormatVersion;
         job.ExportKind = document.ExportKind.ToString();
+        job.Status = ProjectImportJobStatus.Validated;
+        job.CurrentMessage = "Import validated; waiting to apply.";
+        job.UpdatedAt = DateTime.UtcNow;
         imports.UpdateJob(job);
         await databaseOperation.SaveChangesAsync(cancellationToken);
 
@@ -479,6 +900,98 @@ public sealed class ProjectImportJobProcessor(
             cancellationToken: cancellationToken);
         await StepAsync(job, "Validated import file.", cancellationToken);
         return document;
+    }
+
+    private async Task<ProjectExportDocument> ReadStagedDocumentAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    {
+        if (job.StagedLength <= 0 || !ProjectArchiveManifest.IsSha256(job.StagedSha256))
+            throw new InvalidDataException("Import staging declaration is invalid.");
+        var key = new ProjectImportJobFileKey(job.StagedFileKey);
+        await using var input = _fileStore.OpenRead(key);
+        var (length, sha256) = await ComputeHashAsync(input, ProjectImportExportService.MaximumImportBytes, cancellationToken);
+        if (length != job.StagedLength || !string.Equals(sha256, job.StagedSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The staged import file changed after upload.");
+        input.Position = 0;
+
+        if (job.InputKind == ProjectImportInputKind.LegacyJson)
+        {
+            return await JsonSerializer.DeserializeAsync<ProjectExportDocument>(input, JsonOptions, cancellationToken)
+                ?? throw new InvalidOperationException("Import file did not contain a project export document.");
+        }
+
+        var archive = await ProjectArchiveZip.ReadAsync(input, cancellationToken: cancellationToken);
+        if (archive.Manifest.Policy is not (ProjectDependencyTraversalPolicy.FullArchive or ProjectDependencyTraversalPolicy.NonStructuralArchive))
+            throw new InvalidDataException("History snapshot archives cannot be imported as projects.");
+        input.Position = 0;
+        using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
+        var creative = zip.GetEntry("project/creative-state.json")
+            ?? throw new InvalidDataException("Archive is missing its creative-state record.");
+        if (creative.Length > ProjectArchiveLimits.Default.MaximumEntryBytes)
+            throw new InvalidDataException("Archive creative-state record exceeds its configured limit.");
+        await using var creativeStream = creative.Open();
+        var document = await JsonSerializer.DeserializeAsync<ProjectExportDocument>(creativeStream, JsonOptions, cancellationToken)
+            ?? throw new InvalidDataException("Archive creative-state record is invalid.");
+        // `sources/` is the v1 archive authority. Do not use the legacy
+        // SourceText projection embedded in creative-state.json when restoring
+        // an archive: ImportArchiveSourceClosureAsync reads every immutable
+        // extraction/original record and supplies graph remapping.
+        if (!Guid.TryParse(archive.Manifest.ProjectId, out var manifestProjectId)
+            || manifestProjectId != document.Project.Id)
+        {
+            throw new InvalidDataException("Archive manifest project identity does not match project/creative-state.json.");
+        }
+
+        return (await PopulateArchiveBinaryPayloadsAsync(zip, document, cancellationToken)) with { IngestSources = [] };
+    }
+
+    private static async Task<(long Length, string Sha256)> ComputeHashAsync(Stream input, long maximumBytes, CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81_920];
+        long total = 0;
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0) break;
+            total = checked(total + read);
+            if (total > maximumBytes)
+                throw new InvalidDataException("Staged import exceeds the configured byte limit.");
+            hash.AppendData(buffer, 0, read);
+        }
+        return (total, Convert.ToHexStringLower(hash.GetHashAndReset()));
+    }
+
+    private static async Task<ProjectExportDocument> PopulateArchiveBinaryPayloadsAsync(
+        ZipArchive archive,
+        ProjectExportDocument document,
+        CancellationToken cancellationToken)
+    {
+        var images = new List<ProjectExportImage>(document.Images.Count);
+        foreach (var image in document.Images)
+            images.Add(image with { Data = await ReadArchiveEntryAsync(archive, $"assets/images/{image.Id:N}", cancellationToken) });
+
+        var families = new List<ProjectExportFontFamily>(document.FontFamilies.Count);
+        foreach (var family in document.FontFamilies)
+        {
+            var faces = new List<ProjectExportFontFace>(family.Faces.Count);
+            foreach (var face in family.Faces)
+                faces.Add(face with { Data = await ReadArchiveEntryAsync(archive, $"assets/fonts/{face.Id:N}", cancellationToken) });
+            families.Add(family with { Faces = faces });
+        }
+        return document with { Images = images, FontFamilies = families };
+    }
+
+    private static async Task<byte[]> ReadArchiveEntryAsync(ZipArchive archive, string path, CancellationToken cancellationToken)
+    {
+        var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Archive is missing required binary '{path}'.");
+        if (entry.Length > ProjectArchiveLimits.Default.MaximumEntryBytes || entry.Length > int.MaxValue)
+            throw new InvalidDataException($"Archive binary '{path}' exceeds an importable size.");
+        await using var input = entry.Open();
+        using var output = new MemoryStream(checked((int)entry.Length));
+        await input.CopyToAsync(output, cancellationToken);
+        if (output.Length != entry.Length)
+            throw new InvalidDataException($"Archive binary '{path}' was truncated.");
+        return output.ToArray();
     }
 
     internal static void ValidateChapterPayloads(ProjectExportDocument document)
@@ -3292,67 +3805,107 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
-    private async Task ReindexBestEffortAsync(ProjectImportJob job, ImportState state, CancellationToken cancellationToken)
+    private async Task<bool> ReindexBestEffortAsync(ProjectImportJob job, ImportState state, CancellationToken cancellationToken)
     {
+        var succeeded = true;
         foreach (var actId in state.CreatedActIds.Distinct())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await TryReindexAsync(
-                job,
-                "Act context index refresh failed",
-                () => contextIndexing.ReindexActAsync(actId, cancellationToken),
-                cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Act context index refresh failed", () => contextIndexing.ReindexActAsync(actId, cancellationToken), cancellationToken);
         }
 
         foreach (var chapterId in state.CreatedChapterIds.Distinct())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await TryReindexAsync(
-                job,
-                "Chapter context index refresh failed",
-                () => contextIndexing.ReindexChapterAsync(chapterId, cancellationToken),
-                cancellationToken);
-            await TryReindexAsync(
-                job,
-                "Chapter body index refresh failed",
-                () => chapters.ReindexAsync(chapterId, cancellationToken),
-                cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Chapter context index refresh failed", () => contextIndexing.ReindexChapterAsync(chapterId, cancellationToken), cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Chapter body index refresh failed", () => chapters.ReindexAsync(chapterId, cancellationToken), cancellationToken);
         }
 
         foreach (var entityId in state.ContextEntityIdsToReindex.Distinct())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await TryReindexAsync(
-                job,
-                "Entity context index refresh failed",
-                () => contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken),
-                cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Entity context index refresh failed", () => contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken), cancellationToken);
         }
 
         foreach (var sourceId in state.IngestSourceMap.Values.Distinct())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await TryReindexAsync(
-                job,
-                "Imported source context index refresh failed",
-                () => contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken),
-                cancellationToken);
-            await TryReindexAsync(
-                job,
-                "Imported source search index refresh failed",
-                async () =>
-                {
-                    await using var operation = await database.OpenReadAsync(cancellationToken);
-                    var source = await operation.Db.IngestSources
-                        .Include(item => item.SourceChunks)
-                        .SingleAsync(item => item.Id == sourceId, cancellationToken);
-                    await ingestVectorIndexing.EnsureVectorFragmentsAsync(source, cancellationToken: cancellationToken);
-                },
-                cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Imported source context index refresh failed", () => contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken), cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Imported source search index refresh failed", async () =>
+            {
+                await using var operation = await database.OpenReadAsync(cancellationToken);
+                var source = await operation.Db.IngestSources.Include(item => item.SourceChunks)
+                    .SingleAsync(item => item.Id == sourceId, cancellationToken);
+                await ingestVectorIndexing.EnsureVectorFragmentsAsync(source, cancellationToken: cancellationToken);
+            }, cancellationToken);
         }
+
+        return succeeded;
     }
 
-    private async Task TryReindexAsync(
+    private async Task<bool> ReindexCommittedProjectAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    {
+        List<Guid> actIds;
+        List<Guid> chapterIds;
+        List<Guid> entityIds;
+        List<Guid> sourceIds;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            actIds = await operation.Db.Acts.AsNoTracking()
+                .Where(item => item.ProjectId == job.ProjectId)
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+            chapterIds = await operation.Db.Chapters.AsNoTracking()
+                .Where(item => item.ProjectId == job.ProjectId)
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+            var entityKeys = await operation.Db.GraphNodes.AsNoTracking()
+                .Where(item => item.ProjectId == job.ProjectId
+                    && item.NodeType != EntityTypeService.ProjectNodeType
+                    && item.NodeType != EntityTypeService.ActNodeType
+                    && item.NodeType != EntityTypeService.ChapterNodeType
+                    && item.NodeType != EntityTypeService.ProjectFactNodeType
+                    && item.NodeType != EntityTypeService.SourceNodeType
+                    && item.NodeType != EntityTypeService.SourceChunkNodeType
+                    && item.NodeType != EntityTypeService.SourceBlockNodeType)
+                .Select(item => item.Key)
+                .ToListAsync(cancellationToken);
+            entityIds = entityKeys
+                .Where(key => Guid.TryParseExact(key, "N", out _))
+                .Select(key => Guid.ParseExact(key, "N"))
+                .ToList();
+            sourceIds = await operation.Db.IngestSources.AsNoTracking()
+                .Where(item => item.ProjectId == job.ProjectId)
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+        }
+
+        var succeeded = await TryReindexAsync(job, "Project context index refresh failed", () =>
+            contextIndexing.ReindexProjectProfileAsync(job.ProjectId, cancellationToken), cancellationToken);
+        foreach (var actId in actIds)
+            succeeded &= await TryReindexAsync(job, "Act context index refresh failed", () => contextIndexing.ReindexActAsync(actId, cancellationToken), cancellationToken);
+        foreach (var chapterId in chapterIds)
+        {
+            succeeded &= await TryReindexAsync(job, "Chapter context index refresh failed", () => contextIndexing.ReindexChapterAsync(chapterId, cancellationToken), cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Chapter body index refresh failed", () => chapters.ReindexAsync(chapterId, cancellationToken), cancellationToken);
+        }
+        foreach (var entityId in entityIds)
+            succeeded &= await TryReindexAsync(job, "Entity context index refresh failed", () => contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken), cancellationToken);
+        foreach (var sourceId in sourceIds)
+        {
+            succeeded &= await TryReindexAsync(job, "Imported source context index refresh failed", () => contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken), cancellationToken);
+            succeeded &= await TryReindexAsync(job, "Imported source search index refresh failed", async () =>
+            {
+                await using var operation = await database.OpenReadAsync(cancellationToken);
+                var source = await operation.Db.IngestSources.Include(item => item.SourceChunks)
+                    .SingleAsync(item => item.Id == sourceId, cancellationToken);
+                await ingestVectorIndexing.EnsureVectorFragmentsAsync(source, cancellationToken: cancellationToken);
+            }, cancellationToken);
+        }
+        return succeeded;
+    }
+
+    private async Task<bool> TryReindexAsync(
         ProjectImportJob job,
         string warningTitle,
         Func<Task> action,
@@ -3361,6 +3914,7 @@ public sealed class ProjectImportJobProcessor(
         try
         {
             await action();
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -3371,11 +3925,9 @@ public sealed class ProjectImportJobProcessor(
             }
             catch (Exception warningException) when (warningException is not OperationCanceledException)
             {
-                logger.LogWarning(
-                    warningException,
-                    "Could not persist post-import indexing warning for committed import {JobId}",
-                    job.Id);
+                logger.LogWarning(warningException, "Could not persist post-import indexing warning for committed import {JobId}", job.Id);
             }
+            return false;
         }
     }
 
@@ -4104,18 +4656,65 @@ public sealed class ProjectImportJobProcessor(
             StringComparison.Ordinal);
     }
 
-    private async Task MarkRunningAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    private async Task MarkApplyingAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var imports = databaseOperation.Repositories.ProjectImports;
-        job.Status = ProjectImportJobStatus.Running;
+        job.Status = ProjectImportJobStatus.Applying;
         job.StartedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
-        job.CurrentMessage = "Starting import.";
+        job.CurrentMessage = "Applying validated import.";
         imports.UpdateJob(job);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Progress);
+    }
+
+    private async Task MarkIndexingAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
+        job.Status = ProjectImportJobStatus.Indexing;
+        job.CurrentMessage = "Import committed; rebuilding indexes.";
+        job.UpdatedAt = DateTime.UtcNow;
+        imports.UpdateJob(job);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Progress);
+    }
+
+    private async Task MarkCompletedAsync(ProjectImportJob job, bool withoutWarnings, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
+        job.Status = withoutWarnings && job.WarningCount == 0
+            ? ProjectImportJobStatus.Completed
+            : ProjectImportJobStatus.CompletedWithWarnings;
+        job.CurrentMessage = job.Status == ProjectImportJobStatus.Completed
+            ? "Import completed."
+            : "Import committed with indexing warnings.";
+        job.CompletedAt = DateTime.UtcNow;
+        job.UpdatedAt = DateTime.UtcNow;
+        imports.UpdateJob(job);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Completed);
+        DeleteTerminalStagingFile(job);
+    }
+
+    private async Task MarkCancelledAsync(ProjectImportJob job, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
+        job.Status = ProjectImportJobStatus.Cancelled;
+        job.CurrentMessage = "Import cancelled before commit.";
+        job.CompletedAt = DateTime.UtcNow;
+        job.UpdatedAt = DateTime.UtcNow;
+        imports.UpdateJob(job);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Failed);
+        DeleteTerminalStagingFile(job);
     }
 
     private async Task StepAsync(ProjectImportJob job, string message, CancellationToken cancellationToken)
@@ -4145,6 +4744,19 @@ public sealed class ProjectImportJobProcessor(
         await databaseOperation.SaveChangesAsync(cancellationToken);
         await AddReportAsync(job, ProjectImportReportItemKind.Validation, "Import failed", exception.Message, status: ProjectImportReportItemStatus.Failed, errorMessage: exception.Message, cancellationToken: cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Failed);
+        DeleteTerminalStagingFile(job);
+    }
+
+    private void DeleteTerminalStagingFile(ProjectImportJob job)
+    {
+        try
+        {
+            _fileStore.Delete(new ProjectImportJobFileKey(job.StagedFileKey));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not remove staged import file for terminal job {JobId}", job.Id);
+        }
     }
 
     private async Task AddWarningAsync(ProjectImportJob job, string title, string summary, CancellationToken cancellationToken)

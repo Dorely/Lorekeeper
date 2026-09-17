@@ -13,6 +13,7 @@ public interface IIngestRepository
     Task<IngestJob?> GetJobResumeDetailAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<IngestJobDetailView?> GetJobDetailViewAsync(Guid jobId, int eventLimit = 20, CancellationToken cancellationToken = default);
     Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default);
+    Task<SourceExtractionVersion?> GetActiveExtractionAsync(Guid sourceId, CancellationToken cancellationToken = default);
     Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default);
     Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default);
     Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);

@@ -604,13 +604,17 @@
                 }
             </section>
 
-            @if (!string.IsNullOrWhiteSpace(_source.SourceText))
-            {
-                <section class="context-detail-section">
-                    <h6>@(IsTruncated(_source.SourceText, 12_000) ? "Source text (truncated)" : "Source text")</h6>
-                    <pre class="context-detail-text"><code>@LimitText(_source.SourceText, 12_000)</code></pre>
-                </section>
-            }
+            <section class="context-detail-section">
+                <h6>Retained reading</h6>
+                @if (!string.IsNullOrWhiteSpace(Project?.Slug))
+                {
+                    <p class="mb-0">Read normalized text, original files, and evidence in the <a href="@($"/projects/{Project.Slug}/sources")">Sources workspace</a>.</p>
+                }
+                else
+                {
+                    <p class="mb-0">Read normalized text, original files, and evidence in the Sources workspace.</p>
+                }
+            </section>
         }
     </div>;
 
@@ -1072,15 +1076,6 @@
         false => "false",
         null => string.Empty,
     };
-
-    private static bool IsTruncated(string? value, int maxChars) => value?.Length > maxChars;
-
-    private static string LimitText(string? value, int maxChars)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-        var text = value.Trim();
-        return text.Length <= maxChars ? text : text[..maxChars] + "...";
-    }
 
     private static string TokenCountLabel(IngestSourceChunk chunk) =>
         $"{(chunk.TokenCountIsExact ? string.Empty : "~")}{chunk.EstimatedTokenCount:N0}";

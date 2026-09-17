@@ -89,6 +89,10 @@ public class Project
 
     public ICollection<IngestSource> IngestSources { get; set; } = [];
 
+    public ICollection<BibliographicRecord> BibliographicRecords { get; set; } = [];
+
+    public ICollection<SourceLocation> SourceLocations { get; set; } = [];
+
     public ICollection<WebIngestCandidate> WebIngestCandidates { get; set; } = [];
 
     public ICollection<SourceVisualCandidate> SourceVisualCandidates { get; set; } = [];
