@@ -23,7 +23,8 @@ export function findImportPosition(document, blockId, offset) {
         }
         return null;
     };
-    return find(document.content, ["document"]);
+    return find(document.content, ["document"])
+        || (document.notes || []).map(note => find(note.content, ["notes", note.id])).find(Boolean) || null;
 }
 
 export function insertSemanticFragment(source, position, fragment, trailingBlockId) {

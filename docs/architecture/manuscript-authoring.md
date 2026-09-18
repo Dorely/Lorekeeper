@@ -570,6 +570,24 @@ offers list formatting, and uses Tab/Shift-Tab for list nesting. List text edits
 remain bounded inline operations; structural list changes retain exact document
 preconditions and canonical inverses.
 
+### Rich note editing
+
+The shared semantic editor exposes document-owned footnotes/endnotes through a
+rich note region. Reference double-click, Ctrl+Enter on a selected reference, and
+the Notes chooser enter the same surface. Its ProseMirror view supports the
+canonical note block subset (paragraph/list/Figure), inline formatting, named
+styles, citations, images, and Word insertion. A note-kind change updates the
+reference and owned body together. Tables, headings, and nested notes are rejected
+before changing local content. Escape/Return to manuscript restores reference
+focus; read-only fences disable mutations while retaining the return control.
+
+The note view has no independent journal or Undo stack. Each transaction updates
+the parent document's notes; normal typing becomes an exact nested inline delta,
+and structural changes use the existing document precondition/inverse. Parent
+recovery and Undo/Redo resynchronize the open note view or close it when ownership
+is removed. Image preview URLs stay in the note view rather than entering canonical
+note JSON or request hashes. Teardown destroys the subordinate view.
+
 ### Semantic Word insertion
 
 `ISemanticImportService` owns both DOCX and Word clipboard conversion into
@@ -614,6 +632,7 @@ and Word desktop compatibility remain manual acceptance work.
 
 | File or family | Architectural role |
 |---|---|
+| [`tools/semantic-editor/src/note-editor.js`](../../tools/semantic-editor/src/note-editor.js) | Rich note interaction backed immediately by the parent manuscript authoring journal and history. |
 | [`Lorekeeper/Manuscripts/Import/`](../../Lorekeeper/Manuscripts/Import/) | Semantic fragment contracts, bounded DOCX/Word HTML conversion, shared package guard, resource admission, and exact-position insertion. |
 | [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v7.schema.json`](../schemas/manuscript-v7.schema.json) | Current v7 document, recursive tables, notes, citations, Figures, Designed Page references, presentation, positions, and schema contract. |
 | [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v7 serialization remains in `ManuscriptCodec`. |

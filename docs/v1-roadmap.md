@@ -772,7 +772,12 @@ endnote metadata round-trip through editable output. Deterministic checks cover
 conversion, malformed input, rollback, replay, and resource preservation. Word
 desktop and clipboard fidelity still require manual acceptance.
 
-Remaining work is final output/preservation review, rich note interaction, remaining aggregate
+Rich note interaction now supports paragraph/list/Figure content, formatting,
+citations, and Word insertion through the parent manuscript's save and Undo
+boundary. Headless checks cover nested deltas and ownership; keyboard/focus and
+visual interaction remain manual acceptance items.
+
+Remaining work is final output/preservation review, remaining aggregate
 history/source paths, and affected usability/documentation cleanup. Full automated
 gates, diff review, and isolated HTTP startup precede the clean committed
 implementation checkpoint. Manual acceptance comes next; broader UI, Word

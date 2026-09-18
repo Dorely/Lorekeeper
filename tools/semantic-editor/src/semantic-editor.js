@@ -6,6 +6,7 @@ import {GapCursor, gapCursor} from "prosemirror-gapcursor";
 import {closeHistory} from "prosemirror-history";
 import {keymap} from "prosemirror-keymap";
 import {findImportPosition, insertSemanticFragment, journalImportResources} from "./semantic-import.js";
+import {createNoteEditor} from "./note-editor.js";
 
 const idsKey = new PluginKey("lorekeeper-block-ids");
 const annotationsKey = new PluginKey("lorekeeper-review-annotations");
@@ -2586,19 +2587,11 @@ async function insertRichTable(view, root) {
     view.focus();
 }
 
-async function insertNote(view, root, kind) {
+function insertNote(view, root, kind) {
     if (!view.state.selection.$from.parent.inlineContent) {
         showEditorNotice(root, "Place the cursor in a paragraph, list item, figure caption, or table cell first.");
         return;
     }
-    const values = await showEditorForm(root, {
-        title: kind === "endnote" ? "Insert endnote" : "Insert footnote",
-        description: "The note is part of this semantic document and moves with its reference.",
-        submitLabel: "Insert",
-        fields: [{name: "text", label: "Note text", type: "textarea", rows: 4, required: true}],
-        validate: value => value.text.trim().length > 20000 ? "Use 20,000 characters or fewer." : null
-    });
-    if (!values) return;
     const noteId = newBlockId();
     const referenceId = newBlockId();
     const notes = structuredClone(view.state.doc.attrs.notes || []);
@@ -2612,15 +2605,17 @@ async function insertNote(view, root, kind) {
             headingLevel: null,
             imageId: null,
             altText: null,
-            content: [{type: "text", text: values.text.trim(), marks: []}]
+            content: []
         }]
     });
     const reference = schema.nodes.note_reference.create({id: referenceId, noteId, kind});
     view.dispatch(view.state.tr
+        .setSelection(TextSelection.create(view.state.doc, view.state.selection.to))
         .replaceSelectionWith(reference)
         .setDocAttribute("notes", notes)
         .scrollIntoView());
     view.focus();
+    return noteId;
 }
 
 export function citationItemsFromForm(values, count, originalItems = []) {
@@ -3333,6 +3328,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     let attachmentDisposed = false;
     let importCancelled = false;
     let pendingImport = null;
+    let noteEditor = null;
     let updateFormattingControls = () => {};
     let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
     let performPersistentHistory = async () => false;
@@ -3361,6 +3357,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         for (const control of root.querySelectorAll("button, select, input"))
             control.disabled = readOnly;
         root.classList.toggle("semantic-editor--readonly", readOnly);
+        noteEditor?.update();
     };
     const notifyWriterState = () => {
         // A failed IndexedDB operation makes even an otherwise acknowledged
@@ -3723,13 +3720,13 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         figureInspector.update();
     };
 
-    const importWord = async (read) => {
+    const importWord = async (read, insertionView = view) => {
         if (readOnly || importBusy) return;
-        if (!view.state.selection.empty || !view.state.selection.$from.parent.inlineContent) {
+        if (!insertionView.state.selection.empty || !insertionView.state.selection.$from.parent.inlineContent) {
             showEditorNotice(root, "Place a single cursor in a text paragraph. Word import inserts there without replacing selected content.");
             return;
         }
-        const selected = {blockId: view.state.selection.$from.parent.attrs.id, headOffset: view.state.selection.$from.parentOffset};
+        const selected = {blockId: insertionView.state.selection.$from.parent.attrs.id, headOffset: insertionView.state.selection.$from.parentOffset};
         importBusy = true; importCancelled = false; applyEffectiveReadOnly();
         status.textContent = "Reading Word content…";
         const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel Word import";
@@ -3780,20 +3777,38 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 namedStyleRules.update(namedStyles); refreshStylePickers();
             }
             cancel.remove(); importBusy = false;
-            if (!attachmentDisposed && root.isConnected) { applyEffectiveReadOnly(); updateStatus(); view.focus(); }
+            if (!attachmentDisposed && root.isConnected) {
+                applyEffectiveReadOnly(); updateStatus();
+                (insertionView.isDestroyed ? view : insertionView).focus();
+            }
         }
     };
 
-    const chooseWordFile = () => {
+    const chooseWordFile = (insertionView = view) => {
         if (readOnly) return;
         const input = document.createElement("input"); input.type = "file"; input.accept = ".docx";
         input.addEventListener("change", () => {
             const file = input.files?.[0];
             if (!file) return;
             if (file.size > 32 * 1024 * 1024) { showEditorNotice(root, "Choose a DOCX file no larger than 32 MiB."); return; }
-            void importWord(async () => dotNetRef.invokeMethodAsync("ReadWordDocx", new Uint8Array(await file.arrayBuffer())));
+            void importWord(async () => dotNetRef.invokeMethodAsync("ReadWordDocx", new Uint8Array(await file.arrayBuffer())), insertionView);
         }, {once: true});
         input.click();
+    };
+
+    const handleWordPaste = (insertionView, event) => {
+        const html = event.clipboardData?.getData("text/html") || "";
+        if (!/class=["']?Mso|mso-|urn:schemas-microsoft-com:office|Microsoft Word/i.test(html)) return false;
+        event.preventDefault();
+        const files = [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
+        void importWord(async () => {
+            if (html.length > 4 * 1024 * 1024 || files.reduce((size, file) => size + file.size, 0) > 32 * 1024 * 1024)
+                throw new Error("Word clipboard content exceeds the bounded import limit. Use Import DOCX.");
+            const images = await Promise.all(files.map(async file => ({id: authoringId(), fileName: file.name,
+                contentType: file.type, data: new Uint8Array(await file.arrayBuffer())})));
+            return dotNetRef.invokeMethodAsync("ReadWordClipboard", html, images);
+        }, insertionView);
+        return true;
     };
 
     const initialDocument = documentFromDomain(initial);
@@ -3825,6 +3840,10 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             annotationsPlugin,
             gapCursor(),
             keymap({
+                "Mod-Enter": state => {
+                    if (!(state.selection instanceof NodeSelection) || state.selection.node.type.name !== "note_reference") return false;
+                    noteEditor.open(state.selection.node.attrs.noteId); return true;
+                },
                 "Mod-z": () => { void performPersistentHistory(false); return true; },
                 "Shift-Mod-z": () => { void performPersistentHistory(true); return true; },
                 "Mod-y": () => { void performPersistentHistory(true); return true; },
@@ -3923,6 +3942,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 return true;
             },
             dblclick(_view, event) {
+                const note = event.target instanceof Element ? event.target.closest("[data-note-id]") : null;
+                if (note?.dataset.noteId) { noteEditor.open(note.dataset.noteId); return true; }
                 const element = event.target instanceof Element
                     ? event.target.closest("[data-designed-page-id]")
                     : null;
@@ -3932,19 +3953,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             }
         },
         handlePaste(_view, event) {
-            const html = event.clipboardData?.getData("text/html") || "";
-            if (/class=["']?Mso|mso-|urn:schemas-microsoft-com:office|Microsoft Word/i.test(html)) {
-                event.preventDefault();
-                const files = [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
-                void importWord(async () => {
-                    if (html.length > 4 * 1024 * 1024 || files.reduce((size, file) => size + file.size, 0) > 32 * 1024 * 1024)
-                        throw new Error("Word clipboard content exceeds the bounded import limit. Use Import DOCX.");
-                    const images = await Promise.all(files.map(async file => ({id: authoringId(), fileName: file.name,
-                        contentType: file.type, data: new Uint8Array(await file.arrayBuffer())})));
-                    return dotNetRef.invokeMethodAsync("ReadWordClipboard", html, images);
-                });
-                return true;
-            }
+            if (handleWordPaste(_view, event)) return true;
             forceAuthoringBoundary = true;
             void saveNow();
             // The first save closes any typing group before the paste. The queued save
@@ -3971,6 +3980,82 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
     });
     surface.append(persistentCaret);
+    const performNoteHistory = async redo => {
+        const active = noteEditor?.view;
+        await performPersistentHistory(redo);
+        if (active && active === noteEditor?.view && !active.isDestroyed) active.focus();
+    };
+    noteEditor = createNoteEditor(root, view, {
+        toDocument: content => documentFromDomain(hydrateFigureImageUrls({manuscriptId, revision,
+            content: structuredClone(content), notes: []}, imageById)),
+        fromDocument: doc => domainFromDocument(doc, manuscriptId, revision).content,
+        readOnly: () => readOnly,
+        notice: message => showEditorNotice(root, message),
+        click: (editor, event) => {
+            const image = event.target instanceof Element ? event.target.closest("figure[data-block-id] img") : null;
+            if (!image) return false;
+            event.preventDefault(); return selectFigureFromElement(editor, image);
+        },
+        boundary: () => { forceAuthoringBoundary = true; void saveNow(); },
+        transformPasted: slice => sanitizePastedSlice(slice, paragraphRoles, characterRoles, imageById),
+        handlePaste: (editor, event) => {
+            if (handleWordPaste(editor, event)) return true;
+            forceAuthoringBoundary = true; void saveNow();
+            setTimeout(() => { void saveNow(); }, 0);
+            return false;
+        },
+        plugins: () => [blockIdPlugin(), listNumberingPlugin(), gapCursor(), keymap({
+            "Mod-z": () => { void performNoteHistory(false); return true; },
+            "Shift-Mod-z": () => { void performNoteHistory(true); return true; },
+            "Mod-y": () => { void performNoteHistory(true); return true; },
+            "Mod-b": toggleMark(schema.marks.strong), "Mod-i": toggleMark(schema.marks.em),
+            "Shift-Enter": insertHardBreak,
+            "Tab": (_state, _dispatch, editor) => changeListLevel(editor, 1),
+            "Shift-Tab": (_state, _dispatch, editor) => changeListLevel(editor, -1)
+        }), keymap(baseKeymap)],
+        controls: editor => {
+            const typography = buildTypographyControls(editor, namedStyles, fontFamilies, root);
+            const historyButton = (label, redo) => {
+                const control = button(label, `${label} note or manuscript edit`, () => { void performNoteHistory(redo); });
+                control.dataset.historyDirection = redo ? "redo" : "undo";
+                return control;
+            };
+            return {update: () => typography.update(), elements: [
+            historyButton("Undo", false), historyButton("Redo", true),
+            typography.group,
+            button("B", "Bold", () => applyMark(editor, "strong")),
+            button("I", "Italic", () => applyMark(editor, "em")),
+            button("U", "Underline", () => applyMark(editor, "underline")),
+            selectControl("Note inline formatting", [["", "More formatting"], ["strikethrough", "Strikethrough"],
+                ["code", "Inline code"], ["small_caps", "Small caps"], ["superscript", "Superscript"], ["subscript", "Subscript"]],
+                value => { if (value) applyMark(editor, value); }),
+            selectControl("Note paragraph style", [["", "Paragraph style"], ["__reset__", "Built-in style"]].concat(
+                namedStyles.filter(style => style.kind === "paragraph").map(style => [style.semanticRole, style.name])),
+                value => { if (value === "__reset__") resetBlockRole(editor); else if (value) applyParagraphStyle(editor, value); }),
+            selectControl("Note character style", [["", "Character style"], ["__remove__", "Remove character style"]].concat(
+                namedStyles.filter(style => style.kind === "character").map(style => [style.semanticRole, style.name])),
+                value => { if (value) applyMark(editor, "character_style", value === "__remove__" ? null : value); }),
+            button("Lang", "Edit note language", () => { void editLanguage(editor, root); }),
+            button("Link", "Edit note hyperlink", () => { void editLink(editor, root); }),
+            button("List", "Format note list", () => toggleListFormatting(editor)),
+            button("Paragraph", "Convert note block to paragraph", () => applyBlock(editor, "paragraph", "body")),
+            button("Format", "Format note paragraph", () => { void editParagraphPresentation(editor, root); }),
+            button("Cite", "Insert or edit note citation", () => { void insertOrEditCitation(editor, root,
+                () => dotNetRef.invokeMethodAsync("ListCitationBibliography")); }),
+            button("Image", "Insert or replace note Figure", async () => {
+                const images = [...imageById.values()];
+                if (!images.length) { showEditorNotice(root, "Add an image to the project library or import a Word picture first."); return; }
+                const values = await showEditorForm(root, {title: "Note Figure", submitLabel: "Insert",
+                    fields: [{name: "image", label: "Project image", type: "select", options: images.map(image =>
+                        [image.id, image.title || image.fileName || `Image ${image.id.slice(0, 8)}`])}]});
+                if (values && !editor.isDestroyed && !readOnly) await setFigureImage(editor, images.find(image => image.id === values.image), root);
+            }),
+            button("Alt", "Edit note Figure alternative text", () => { void editFigureAltText(editor, root); }),
+            button("Figure", "Edit note Figure presentation", () => { void editFigurePresentation(editor, root); }),
+            button("Import DOCX", "Import Word content into this note", () => chooseWordFile(editor))
+            ]};
+        }
+    });
     const caretResizeObserver = new ResizeObserver(schedulePersistentCaret);
     caretResizeObserver.observe(surface);
     caretResizeObserver.observe(view.dom);
@@ -3986,6 +4071,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     editorChrome.append(findPanel.panel, outline.panel, figureInspector.panel);
     figureInspector.update();
     const updateStatus = () => {
+        noteEditor?.update();
         const text = editorialText(view.state.doc, manuscriptId, revision);
         const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
         const saveState = journalFailure
@@ -4210,8 +4296,19 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         iconButton("⁂", "Insert scene break", () => insertSceneBreak(view)),
         button("Table", "Insert semantic table", () => void insertRichTable(view, root)),
         button("Import DOCX", "Insert Word content at the cursor", chooseWordFile),
-        button("Fn", "Insert footnote", () => void insertNote(view, root, "footnote")),
-        button("En", "Insert endnote", () => void insertNote(view, root, "endnote")),
+        button("Fn", "Insert footnote", () => noteEditor.open(insertNote(view, root, "footnote"))),
+        button("En", "Insert endnote", () => noteEditor.open(insertNote(view, root, "endnote"))),
+        button("Notes", "Edit manuscript notes", async () => {
+            const selected = view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "note_reference"
+                ? view.state.selection.node.attrs.noteId : null;
+            if (selected) { noteEditor.open(selected); return; }
+            const notes = view.state.doc.attrs.notes || [];
+            if (!notes.length) { showEditorNotice(root, "Insert a footnote or endnote at its manuscript reference first."); return; }
+            const values = await showEditorForm(root, {title: "Edit manuscript note", submitLabel: "Edit",
+                fields: [{name: "note", label: "Note", type: "select", options: notes.map((note, index) =>
+                    [note.id, `${index + 1}. ${note.kind === "endnote" ? "Endnote" : "Footnote"}: ${note.content.map(domainBlockText).join(" ").slice(0, 80)}`])}]});
+            if (values) noteEditor.open(values.note);
+        }),
         button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
             () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
         selectControl("Insert special character", [
@@ -4293,6 +4390,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             controlByTitle("Insert semantic table"),
             controlByTitle("Insert footnote"),
             controlByTitle("Insert endnote"),
+            controlByTitle("Edit manuscript notes"),
             controlByTitle("Insert or edit citation"),
             controlBySelect("Insert special character"),
         ]),
@@ -4796,6 +4894,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);
             caretResizeObserver.disconnect();
+            noteEditor?.dispose();
             view.destroy();
             root.replaceChildren();
             root.classList.remove("semantic-editor-root");

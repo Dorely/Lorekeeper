@@ -168,6 +168,9 @@ its planned features are not claims about current capabilities.
   table headers, protects row-span groups, reserves footnote space beside references,
   labels continuation, retains fitting note artwork, and emits
   explicit diagnostics for content it cannot place safely.
+  Notes have a rich editor for paragraphs, lists, Figures, formatting, and
+  citations, using the manuscript's autosave and Undo/Redo. Open a reference with
+  a double-click or Ctrl+Enter, or use Notes in the toolbar.
 - Import DOCX or paste Word HTML at an explicit manuscript cursor, preserving
   supported formatting, lists, merged tables, embedded images, links, notes, and
   available citation metadata. Import reports discarded review/layout information

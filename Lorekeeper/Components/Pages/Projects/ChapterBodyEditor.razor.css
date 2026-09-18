@@ -732,6 +732,29 @@
     opacity: 0.82;
 }
 
+.semantic-editor ::deep .semantic-note-editor {
+    border: 1px solid var(--bs-border-color, #ced4da);
+    border-radius: .5rem;
+    padding: 1rem;
+    margin-block: 1rem;
+    background: var(--bs-body-bg, #fff);
+}
+
+.semantic-editor ::deep .semantic-note-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    margin-bottom: .75rem;
+}
+
+.semantic-editor ::deep .semantic-note-editor .semantic-prosemirror {
+    min-height: 8rem;
+    max-height: 24rem;
+    overflow: auto;
+    padding: .75rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+}
+
 .semantic-editor ::deep .semantic-editor-conflict {
     display: flex;
     flex-wrap: wrap;
