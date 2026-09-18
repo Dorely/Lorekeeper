@@ -106,7 +106,14 @@ its planned features are not claims about current capabilities.
   preserves versioned extraction and stable evidence, supports contents and
   lexical navigation, bounded PDF-page viewing, original download, and explicit
   re-extraction without silently moving citations. File ingest accepts up to 50
-  files together and keeps per-file progress visible.
+  files together and keeps per-file progress visible. Choose **Index only** to
+  retain locally readable text and queue lexical/vector indexing without entity
+  or relationship extraction; vector indexing uses the configured embedding
+  provider. Missing embeddings leave a resumable job, without requiring a chat
+  model. **Convert legacy source** builds a new retained extraction from saved
+  legacy text, preserving source identity and existing evidence. It cannot recover
+  an unavailable original file. Monitor, stop, or resume either operation in
+  **Sources → Manage jobs**.
 - Streamed `.lorekeeper` project archives preserve the complete retained-source
   closure for full exports and use a separate non-structural dependency policy
   with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.

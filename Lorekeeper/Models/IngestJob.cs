@@ -12,6 +12,8 @@ public class IngestJob
 
     public required string Instructions { get; set; }
     public IngestJobStatus Status { get; set; } = IngestJobStatus.Queued;
+    public IngestJobMode Mode { get; set; } = IngestJobMode.ExtractEntities;
+    public Guid? SourceExtractionVersionId { get; set; }
 
     public int TotalSourceChunks { get; set; }
     public int CompletedSourceChunks { get; set; }
@@ -34,6 +36,13 @@ public class IngestJob
     public ICollection<IngestReportItem> ReportItems { get; set; } = [];
     public ICollection<IngestStagingRecord> StagingRecords { get; set; } = [];
     public ICollection<IngestJobEvent> Events { get; set; } = [];
+}
+
+public enum IngestJobMode
+{
+    ExtractEntities,
+    IndexOnly,
+    ConvertLegacySource,
 }
 
 public enum IngestJobStatus

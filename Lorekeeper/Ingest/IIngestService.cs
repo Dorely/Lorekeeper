@@ -15,6 +15,8 @@ public interface IIngestService
     Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default);
     Task<IngestJob> CreateJobAsync(Guid projectId, IngestCreateJobRequest request, CancellationToken cancellationToken = default);
     Task ReextractSourceAsync(Guid sourceId, CancellationToken cancellationToken = default);
+    Task<IngestJob> QueueLegacyConversionAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
+    Task<IngestSource> ConvertLegacySourceAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task RequestStopAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task ResumeAsync(Guid jobId, IngestResumeRequest? request = null, CancellationToken cancellationToken = default);
     Task RestartAsync(Guid jobId, CancellationToken cancellationToken = default);

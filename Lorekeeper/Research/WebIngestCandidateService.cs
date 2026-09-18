@@ -257,7 +257,8 @@ IAppDatabaseOperationFactory database, IWebPageReader pageReader,
         int? providerId,
         string? instructions,
         string? title = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IngestJobMode mode = IngestJobMode.ExtractEntities)
     {
         var distinctIds = candidateIds.Distinct().ToArray();
         if (distinctIds.Length == 0)
@@ -314,7 +315,7 @@ IAppDatabaseOperationFactory database, IWebPageReader pageReader,
             CanonicalUrl: firstCandidate.CanonicalUrl,
             FetchedAt: candidatesToQueue.Min(candidate => candidate.FetchedAt),
             ContentType: firstCandidate.ContentType,
-            SourceMetadataJson: BuildBatchMetadataJson(candidatesToQueue)), cancellationToken);
+            SourceMetadataJson: BuildBatchMetadataJson(candidatesToQueue), Mode: mode), cancellationToken);
 
         var now = DateTime.UtcNow;
         foreach (var candidate in candidatesToQueue)

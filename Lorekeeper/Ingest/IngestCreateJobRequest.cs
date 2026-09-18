@@ -19,4 +19,5 @@ public sealed record IngestCreateJobRequest(
     string? ArtifactFileName = null,
     string? ArtifactContentType = null,
     IngestExtractionProfile ExtractionProfile = IngestExtractionProfile.Auto,
-    PdfArtifactIngestOptions? PdfOptions = null);
+    PdfArtifactIngestOptions? PdfOptions = null,
+    Lorekeeper.Models.IngestJobMode Mode = Lorekeeper.Models.IngestJobMode.ExtractEntities);

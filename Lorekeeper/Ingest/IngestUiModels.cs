@@ -18,7 +18,8 @@ public sealed record IngestJobListItem(
     int? ProviderId,
     string? ModelName,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    IngestJobMode Mode = IngestJobMode.ExtractEntities);
 
 public sealed record IngestJobDetailView(
     Guid Id,
@@ -42,7 +43,8 @@ public sealed record IngestJobDetailView(
     DateTime UpdatedAt,
     IReadOnlyList<IngestJobChunkProgress> Chunks,
     IngestFinalizationProgressView Finalization,
-    IReadOnlyList<IngestJobEventView> Events);
+    IReadOnlyList<IngestJobEventView> Events,
+    IngestJobMode Mode = IngestJobMode.ExtractEntities);
 
 public enum IngestFinalizationPhase
 {

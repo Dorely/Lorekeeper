@@ -208,6 +208,16 @@ one durable job per file sequentially so mixed batches retain independent
 results. A single text/Markdown upload remains editable before submission, and
 that edited text is authoritative over its original bytes.
 
+New-source UI defaults to `IndexOnly`; callers that do not supply a mode retain
+the existing `ExtractEntities` behavior. Index-only upload and webpage batches
+use local preprocessing, immutable originals/extractions, bounded text reading
+blocks, and the durable ingest queue for graph structure plus lexical/vector
+indexing. They never resolve a chat provider, create extraction checkpoints, or
+run entity/relationship extraction. Images and scanned PDFs still require an
+explicit vision-capable extraction path. If embeddings are unavailable, local
+reading and lexical search remain available and the job stops with a resumable
+configuration message.
+
 Preprocessing creates durable `IngestSource` records, page- and block-level
 locators, large logical source chunks, visual candidates, and small lexical and
 vector fragments. Logical chunks are extraction checkpoints; retrieval
@@ -217,10 +227,11 @@ ordered structural edges, with web/artifact provenance retained on the source.
 
 The ingest processor performs bounded source analysis, stages records, promotes
 simple relationships and canonical knowledge, persists reports/events, and
-indexes final source projections. Restart and delete subtract only that
+indexes final source projections. Entity-extraction restart subtracts only that
 source's evidence, citations, legacy assertions, and ingest-owned orphan graph
-output, then refresh affected entity and retrieval projections. They must not
+output, then refreshes affected entity and retrieval projections. It must not
 erase independently authored canon that happens to mention the same entity.
+Job deletion removes operational audit state without deleting the source.
 
 `BookBriefCanonSource` is a relational selection of an actual ingest source;
 source deletion cascades the selection. Selected sources are canonical
@@ -261,7 +272,17 @@ version with new child identities, and never retargets existing evidence.
 Every legacy source migrates to an immutable legacy extraction preserving its
 source/chunk/block/page identities, normalized text, evidence, and hashes, with
 original state `OriginalUnavailable`. Extracted text must never be presented as
-a reconstructed original. Bibliographic records are project-owned and may exist
+a reconstructed original. The explicit `ConvertLegacySource` job pins the active
+legacy version, structures its saved text outside write locks, and atomically
+publishes a new ready extraction with fresh blocks/chunks. Its job ID identifies
+the published extraction so interrupted indexing can retry without repeating
+conversion. Original state, old versions, source identity, and existing evidence
+anchors remain unchanged. Foreign-project requests, changed active versions,
+and stopped jobs fail before publication. Re-extraction rejects active source
+jobs. The same job then rebuilds search indexes without entity extraction;
+restart never subtracts existing graph evidence for either non-extraction mode.
+Sources exposes conversion from a legacy reader and the shared job controls.
+Bibliographic records are project-owned and may exist
 without a source. Bibliography saves acquire the project write lease and edits
 require the `UpdatedAt` value read by the editor, rejecting stale writes.
 Detaching preserves bibliographic metadata and atomically clears dependent

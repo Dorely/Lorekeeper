@@ -16,8 +16,8 @@ else if (_showAddSource)
         <header class="sources-header">
             <div>
                 <span class="sources-kicker">Sources</span>
-                <h2>Add retained source</h2>
-                <p>The existing upload boundary creates the immutable original and its extraction.</p>
+                <h2>Add sources and manage jobs</h2>
+                <p>Retain and index source text, optionally extract entities, or follow a legacy conversion.</p>
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAddSource">Back to library</button>
         </header>
@@ -119,6 +119,10 @@ else
                         {
                             <span class="sources-unavailable-note">Original unavailable; extracted text is not a reconstructed original.</span>
                         }
+                        @if (_reading.ExtractionStatus == SourceExtractionStatus.LegacyImmutable)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_confirmationBusy" @onclick="ConvertLegacySourceAsync">Convert legacy source</button>
+                        }
                     </header>
 
                     @if (!string.IsNullOrWhiteSpace(_reading.Diagnostics))
@@ -169,10 +173,11 @@ else
 
             <aside class="sources-details" aria-label="Source details">
                 <section>
-                    <div class="sources-section-heading">Enrichment jobs <span>@_workspace.Jobs.Count</span></div>
+                    <div class="sources-section-heading">Source jobs <span>@_workspace.Jobs.Count</span></div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-2" @onclick="OpenAddSource">Manage jobs</button>
                     @if (_workspace.Jobs.Count == 0)
                     {
-                        <p class="small text-muted">No enrichment jobs.</p>
+                        <p class="small text-muted">No source jobs.</p>
                     }
                     else
                     {
@@ -628,8 +633,32 @@ else
         }
     }
 
+    private async Task ConvertLegacySourceAsync()
+    {
+        if (Project is null || _selectedSourceId is not Guid sourceId) return;
+        _confirmationBusy = true;
+        _error = null;
+        try
+        {
+            await Sources.QueueLegacyConversionAsync(Project.Id, sourceId);
+            _showAddSource = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
     private void OpenAddSource() => _showAddSource = true;
-    private void CloseAddSource() => _showAddSource = false;
+    private async Task CloseAddSource()
+    {
+        _showAddSource = false;
+        await ReloadAsync();
+    }
     private void CancelConfirmation()
     {
         _detachBibliography = null;

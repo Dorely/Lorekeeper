@@ -1221,6 +1221,7 @@ public class AppDbContext(
 
         modelBuilder.Entity<IngestJob>(entity =>
         {
+            entity.Property(e => e.Mode).HasConversion<string>().HasDefaultValue(IngestJobMode.ExtractEntities);
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
             entity.HasIndex(e => new { e.SourceId, e.CreatedAt });
             entity.HasIndex(e => e.ProviderId);

@@ -416,9 +416,15 @@ terminal job rows — including `RawProviderResponseJson` — are purged on next
 use, provider payload diagnosis lives in these Development logs, not in
 database rows.
 
-Ingest uses an in-process queue, notifier, hosted worker, and scoped processor;
-restart/delete additionally clean source-owned graph/index state without deleting
-retained source material merely because an ingest job is terminal. Import stages
+Ingest uses an in-process queue, notifier, hosted worker, and scoped processor.
+`ExtractEntities` performs model enrichment; `IndexOnly` and
+`ConvertLegacySource` bypass chat-provider admission and use the existing
+embedding service after local source preparation. Missing embeddings stop these
+jobs with an actionable resume message. Conversion publication is idempotent;
+retries after publication only rebuild derived indexes. Entity-extraction
+restart cleans source-owned graph contributions; indexing/conversion restart
+preserves them. Job deletion removes operational records, preserving retained
+source material and evidence. Import stages
 and hashes uploads outside SQLite, then uses a durable queued job, notifier,
 hosted worker, and atomic creative transaction. Interrupted pre-commit imports
 fail closed; `Committed` and `Indexing` imports resume only retryable projection

@@ -34,6 +34,6 @@ public interface IWebIngestCandidateService
     Task<WebIngestCandidate> StageAsync(Guid candidateId, string rationale, CancellationToken cancellationToken = default);
     Task<WebIngestCandidate> UnstageAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<IngestJob> QueueAsync(Guid candidateId, int? providerId, string? instructions, CancellationToken cancellationToken = default);
-    Task<IngestJob> QueueBatchAsync(Guid projectId, IReadOnlyCollection<Guid> candidateIds, int? providerId, string? instructions, string? title = null, CancellationToken cancellationToken = default);
+    Task<IngestJob> QueueBatchAsync(Guid projectId, IReadOnlyCollection<Guid> candidateIds, int? providerId, string? instructions, string? title = null, CancellationToken cancellationToken = default, IngestJobMode mode = IngestJobMode.ExtractEntities);
     Task DeleteAsync(Guid candidateId, CancellationToken cancellationToken = default);
 }

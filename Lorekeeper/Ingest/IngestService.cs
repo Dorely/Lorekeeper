@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Ingest;
 
-public sealed class IngestService(
+public sealed partial class IngestService(
 IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBuilder, IBookArtifactPreprocessor artifactPreprocessor, IEntityVisualExampleService entityVisualExamples, IIngestGraphSync graphSync, IIngestJobQueue queue, ILlmProviderService providers, IIngestJobNotifier notifier, IIngestGraphCleanup graphCleanup, IGraphStore graphStore, IVectorStore vectors, IContextIndexingService contextIndexing, IOptions<BookArtifactIngestOptions> artifactOptions, ILogger<IngestService> logger) : IIngestService
 {
     public async Task<IReadOnlyList<IngestJob>> ListJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -83,6 +83,9 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
     }
     public async Task<IngestJob> CreateJobAsync(Guid projectId, IngestCreateJobRequest request, CancellationToken cancellationToken = default)
     {
+        if (request.Mode is not (IngestJobMode.ExtractEntities or IngestJobMode.IndexOnly))
+            throw new ArgumentException("Choose indexing only or entity extraction for a new source.", nameof(request));
+        var indexOnly = request.Mode == IngestJobMode.IndexOnly;
         var title = (request.Title ?? string.Empty).Trim();
         if (title.Length == 0) throw new ArgumentException("Source title is required.", nameof(request));
 
@@ -158,9 +161,11 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
                 request.ArtifactFileName ?? title,
                 request.ArtifactContentType,
                 artifactBytes,
-                request.ProviderId,
+                indexOnly ? null : request.ProviderId,
                 request.ExtractionProfile,
-                request.PdfOptions ?? new PdfArtifactIngestOptions()), cancellationToken);
+                indexOnly
+                    ? (request.PdfOptions ?? new PdfArtifactIngestOptions()) with { ForceVision = false }
+                    : request.PdfOptions ?? new PdfArtifactIngestOptions()), cancellationToken);
 
             sourceText = preprocessed.SourceText;
             pageDrafts = preprocessed.Pages;
@@ -183,7 +188,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         var instructions = (request.UserInstructions ?? string.Empty).Trim();
         // Extraction and provider resolution can do file, model, or network work.
         // Deliberately complete them before acquiring the process-wide write lease.
-        var provider = await ResolveProviderAsync(request.ProviderId, requireProvider: false, cancellationToken);
+        var provider = indexOnly ? null : await ResolveProviderAsync(request.ProviderId, requireProvider: false, cancellationToken);
         var sourceChunks = structureBuilder.Build(new IngestSourceStructureRequest(
                 sourceText,
                 provider?.ModelId,
@@ -247,6 +252,9 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             };
         }).ToList();
 
+        if (sourceBlocks.Count == 0)
+            sourceBlocks = BuildTextBlocks(sourceId, extraction.Id, sourceText, sourceChunks, cancellationToken);
+
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var ingest = databaseOperation.Repositories.Ingest;
@@ -293,19 +301,21 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             ProjectId = projectId,
             SourceId = sourceId,
             Instructions = instructions,
-            Status = provider is null ? IngestJobStatus.Stopped : IngestJobStatus.Queued,
+            Mode = request.Mode,
+            SourceExtractionVersionId = extraction.Id,
+            Status = !indexOnly && provider is null ? IngestJobStatus.Stopped : IngestJobStatus.Queued,
             TotalSourceChunks = sourceChunks.Count,
             ProviderId = provider?.Id,
             ModelName = provider?.ModelId,
             EncodingName = request.EncodingName?.Trim(),
-            CurrentMessage = provider is null
+            CurrentMessage = indexOnly ? "Queued for source indexing; entity extraction is disabled." : provider is null
                 ? "Source retained and extracted locally. Select a working chat provider to enrich it."
                 : "Queued.",
-            CompletedAt = provider is null ? DateTime.UtcNow : null,
+            CompletedAt = !indexOnly && provider is null ? DateTime.UtcNow : null,
         };
         await ingest.AddJobAsync(job, cancellationToken);
 
-        foreach (var sourceChunk in sourceChunks)
+        foreach (var sourceChunk in indexOnly ? [] : sourceChunks)
         {
             await ingest.AddJobChunkAsync(new IngestJobChunk
             {
@@ -319,8 +329,11 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        await graphSync.EnsureSourceAsync(source, sourceChunks, sourceBlocks, cancellationToken);
-        await contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken);
+        if (!indexOnly)
+        {
+            await graphSync.EnsureSourceAsync(source, sourceChunks, sourceBlocks, cancellationToken);
+            await contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken);
+        }
         if (job.Status == IngestJobStatus.Queued)
             queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Created);
@@ -428,6 +441,10 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         operation.ShareWithNestedOperations();
         var source = await operation.Repositories.Ingest.GetSourceAsync(sourceId, cancellationToken)
             ?? throw new InvalidOperationException("Retained source not found.");
+        if (await operation.Db.IngestJobs.AnyAsync(item => item.SourceId == sourceId
+            && (item.Status == IngestJobStatus.Queued || item.Status == IngestJobStatus.Running
+                || item.Status == IngestJobStatus.StopRequested), cancellationToken))
+            throw new InvalidOperationException("Stop the active source job before re-extracting this source.");
         var original = await operation.Db.SourceOriginals
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.SourceId == sourceId, cancellationToken);
@@ -661,13 +678,13 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
 
         if (job.Status is not (IngestJobStatus.Stopped or IngestJobStatus.Failed)) return;
 
-        if (request is not null)
+        if (job.Mode == IngestJobMode.ExtractEntities && request is not null)
         {
             var provider = await ResolveProviderAsync(request.ProviderId, requireProvider: true, cancellationToken);
             job.ProviderId = provider?.Id;
             job.ModelName = provider?.ModelId;
         }
-        else
+        else if (job.Mode == IngestJobMode.ExtractEntities)
         {
             await EnsureProviderAvailableForQueuedJobAsync(job.ProviderId, cancellationToken);
         }
@@ -725,6 +742,25 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobDetailAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
+
+        if (job.Status is IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested)
+            throw new InvalidOperationException("Stop the job before restarting it.");
+        if (job.Mode != IngestJobMode.ExtractEntities)
+        {
+            if (job.Mode == IngestJobMode.IndexOnly)
+                job.SourceExtractionVersionId = job.Source.ActiveExtractionVersionId
+                    ?? throw new InvalidOperationException("The source has no active extraction to index.");
+            job.Status = IngestJobStatus.Queued;
+            job.ErrorMessage = null;
+            job.CompletedSourceChunks = 0;
+            job.CompletedAt = null;
+            job.CurrentMessage = "Queued for source indexing.";
+            job.UpdatedAt = DateTime.UtcNow;
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+            queue.Enqueue(job.Id);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Queued);
+            return;
+        }
 
         await EnsureProviderAvailableForQueuedJobAsync(job.ProviderId, cancellationToken);
 

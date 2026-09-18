@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestJobProcessor(
-IAppDatabaseOperationFactory database, ILlmProviderService providerService, IChatClientFactory chatClientFactory, ITokenCounter tokenCounter, IngestAgentTools tools, IEntityTypeService entityTypes, IIngestVectorIndexingService ingestVectorIndexing, IIngestGraphSync graphSync, IIngestJobNotifier notifier, IContextIndexingService contextIndexing, IOptions<AgentOptions> options, IOptions<EntityVisualContextOptions> visualOptions, IEntityVisualExampleService entityVisualExamples, IEntityVisualContextService entityVisualContext, ILogger<IngestJobProcessor> logger)
+IAppDatabaseOperationFactory database, ILlmProviderService providerService, IChatClientFactory chatClientFactory, ITokenCounter tokenCounter, IngestAgentTools tools, IEntityTypeService entityTypes, IIngestVectorIndexingService ingestVectorIndexing, IIngestGraphSync graphSync, IIngestJobNotifier notifier, IContextIndexingService contextIndexing, IOptions<AgentOptions> options, IOptions<EntityVisualContextOptions> visualOptions, IEntityVisualExampleService entityVisualExamples, IEntityVisualContextService entityVisualContext, ILogger<IngestJobProcessor> logger, IIngestService ingestService)
 {
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
@@ -82,6 +82,13 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
             }
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
+            if (job.Mode is IngestJobMode.IndexOnly or IngestJobMode.ConvertLegacySource)
+            {
+                await ProcessSourceIndexingAsync(job, cancellationToken);
+                return;
+            }
+            if (job.Mode != IngestJobMode.ExtractEntities)
+                throw new InvalidOperationException("Unsupported ingest job mode.");
             var provider = await ResolveJobProviderAsync(job, cancellationToken);
 
             await EnsureJobChunksMatchActiveExtractionAsync(job, cancellationToken);
@@ -141,6 +148,40 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
             logger.LogError(ex, "Ingest job {JobId} failed", jobId);
             await MarkFailedAsync(jobId, activeChunk, ex.Message);
         }
+    }
+
+    private async Task ProcessSourceIndexingAsync(IngestJob job, CancellationToken cancellationToken)
+    {
+        if (job.Mode == IngestJobMode.ConvertLegacySource)
+        {
+            job.CurrentMessage = "Converting saved legacy text; existing evidence is preserved.";
+            await SaveJobAsync(job, cancellationToken);
+            Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
+            job.Source = await ingestService.ConvertLegacySourceAsync(job.Id, cancellationToken);
+        }
+        else if (job.SourceExtractionVersionId != job.Source.ActiveExtractionVersionId)
+            throw new InvalidOperationException("The source extraction changed before indexing. Restart this job to index the active source.");
+
+        var chunks = await ingestService.ListSourceChunksAsync(job.SourceId, cancellationToken);
+        var blocks = await ReadSourceBlocksAsync(job.SourceId, cancellationToken);
+        job.TotalSourceChunks = chunks.Count;
+        job.CurrentMessage = "Indexing source text for search.";
+        await SaveJobAsync(job, cancellationToken);
+        Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
+        await graphSync.EnsureSourceAsync(job.Source, chunks, blocks, cancellationToken);
+        await contextIndexing.ReindexIngestSourceAsync(job.SourceId, cancellationToken);
+        await ingestVectorIndexing.EnsureVectorFragmentsAsync(job.Source, force: true, cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var indexed = job.Source.VectorIndexState == VectorIndexState.UpToDate;
+        job.Status = indexed ? IngestJobStatus.Completed : IngestJobStatus.Stopped;
+        job.CompletedSourceChunks = indexed ? chunks.Count : 0;
+        job.CurrentMessage = indexed
+            ? "Source indexed. No entity or relationship extraction was run."
+            : "Source is readable and lexically indexed. Configure an embedding provider, then resume to create its vector index.";
+        job.CompletedAt = DateTime.UtcNow;
+        job.UpdatedAt = DateTime.UtcNow;
+        await SaveJobAsync(job, CancellationToken.None);
+        Notify(job.ProjectId, job.Id, indexed ? IngestJobUpdateKind.Completed : IngestJobUpdateKind.Stopped);
     }
 
     private async Task ProcessChunkAsync(

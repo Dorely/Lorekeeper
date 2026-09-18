@@ -20,7 +20,15 @@ else
     <div class="ingest-pane">
         <section class="ingest-column ingest-create">
             <div class="ingest-section-title">New Source</div>
-            @if (ChatDisabled)
+            <div class="mb-2">
+                <label class="form-label small text-muted" for="source-ingest-mode">Processing</label>
+                <select id="source-ingest-mode" class="form-select form-select-sm" @bind="_mode" disabled="@(_creating || _webReading)">
+                    <option value="@IngestJobMode.IndexOnly">Index only</option>
+                    <option value="@IngestJobMode.ExtractEntities">Extract entities and relationships</option>
+                </select>
+                <div class="form-text small">Index only retains readable text and indexes it for search using your embedding provider. It does not extract entities or relationships. Scanned PDFs and images require vision extraction.</div>
+            </div>
+            @if (_mode == IngestJobMode.ExtractEntities && ChatDisabled)
             {
                 <div class="alert alert-warning py-2 small">
                     LLM ingest is disabled. <a class="alert-link" href="/settings/providers">Configure and test a chat provider</a>.
@@ -37,7 +45,7 @@ else
                 </div>
                 <div>
                     <label class="form-label small text-muted">Model</label>
-                    <select class="form-select form-select-sm" value="@(_providerId?.ToString() ?? string.Empty)" @onchange="OnProviderChanged">
+                    <select class="form-select form-select-sm" value="@(_providerId?.ToString() ?? string.Empty)" @onchange="OnProviderChanged" disabled="@(_mode == IngestJobMode.IndexOnly)">
                         <option value="">Select model</option>
                         @foreach (var provider in _providers)
                         {
@@ -52,11 +60,11 @@ else
             </div>
             <div class="mb-2">
                 <label class="form-label small text-muted">Extraction instructions (optional)</label>
-                <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
+                <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput" disabled="@(_mode == IngestJobMode.IndexOnly)"></textarea>
             </div>
             <div class="mb-2">
                 <label class="form-label small text-muted">Extraction profile</label>
-                <select class="form-select form-select-sm" @bind="_extractionProfile">
+                <select class="form-select form-select-sm" @bind="_extractionProfile" disabled="@(_mode == IngestJobMode.IndexOnly)">
                     <option value="@IngestExtractionProfile.Auto">Auto</option>
                     <option value="@IngestExtractionProfile.StoryWorldbuilding">Story / Worldbuilding</option>
                     <option value="@IngestExtractionProfile.ResearchNonfiction">Research / Nonfiction</option>
@@ -147,7 +155,7 @@ else
                 {
                     <div class="ingest-pdf-options">
                         <label class="form-check small">
-                            <input class="form-check-input" type="checkbox" @bind="_pdfForceVision" />
+                            <input class="form-check-input" type="checkbox" @bind="_pdfForceVision" disabled="@(_mode == IngestJobMode.IndexOnly)" />
                             <span class="form-check-label">Read every PDF page with vision</span>
                         </label>
                         <div>
@@ -159,7 +167,7 @@ else
                             <input type="number" class="form-control form-control-sm" min="72" max="300" @bind="_pdfVisionDpi" />
                         </div>
                     </div>
-                    @if (_pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
+                    @if (_mode == IngestJobMode.ExtractEntities && _pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
                     {
                         <div class="form-text small text-warning">The selected provider must pass the vision check before force-vision PDF ingest can start.</div>
                     }
@@ -177,7 +185,7 @@ else
             {
                 <div class="alert alert-danger py-2 small">@_formError</div>
             }
-            @if (_providers.Count == 0)
+            @if (_mode == IngestJobMode.ExtractEntities && _providers.Count == 0)
             {
                 <div class="alert alert-warning py-2 small">No working chat models.</div>
             }
@@ -215,7 +223,7 @@ else
                         var selected = _selectedJob?.Id == job.Id;
                         <button type="button" class="ingest-job-row @(selected ? "selected" : null)" @onclick="() => SelectJobAsync(job.Id)">
                             <span class="ingest-job-title">@job.SourceTitle</span>
-                            <span class="ingest-job-meta">@job.Status - @job.CompletedSourceChunks/@job.TotalSourceChunks chunks</span>
+                            <span class="ingest-job-meta">@ModeLabel(job.Mode) · @job.Status - @job.CompletedSourceChunks/@job.TotalSourceChunks chunks</span>
                         </button>
                     }
                 </div>
@@ -239,7 +247,7 @@ else
                         }
                     </div>
                     <div class="ingest-actions">
-                        @if (CanResume(_selectedJob))
+                        @if (CanResume(_selectedJob) && _selectedJob.Mode == IngestJobMode.ExtractEntities)
                         {
                             <select class="form-select form-select-sm ingest-model-select" value="@(_resumeProviderId?.ToString() ?? string.Empty)" @onchange="OnResumeProviderChanged">
                                 <option value="">Select model</option>
@@ -250,8 +258,8 @@ else
                             </select>
                         }
                         <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_jobActionBusy || !CanStop(_selectedJob))" @onclick="StopAsync">Stop</button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_jobActionBusy || ChatDisabled || !CanResume(_selectedJob) || _resumeProviderId is null)" @onclick="ResumeAsync">Resume</button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_jobActionBusy || ChatDisabled || IsBusy(_selectedJob))" @onclick="RestartAsync">Restart</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_jobActionBusy || !CanResume(_selectedJob) || (_selectedJob.Mode == IngestJobMode.ExtractEntities && (ChatDisabled || _resumeProviderId is null)))" @onclick="ResumeAsync">Resume</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_jobActionBusy || (_selectedJob.Mode == IngestJobMode.ExtractEntities && ChatDisabled) || IsBusy(_selectedJob))" @onclick="RestartAsync">Restart</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_jobActionBusy || IsBusy(_selectedJob))" @onclick="DeleteAsync">Delete</button>
                     </div>
                 </div>
@@ -332,14 +340,17 @@ else
                             }
                         </button>
                     }
-                    <button type="button" class="ingest-chunk-row ingest-finalization-row @(_selectedFinalization ? "selected" : null)" @onclick="SelectFinalizationAsync">
-                        <span class="ingest-chunk-main">
-                            <span>Final review &amp; relationship build</span>
-                            <span class="badge bg-@FinalizationStatusColor(_selectedJob.Finalization.Phase)">@FinalizationPhaseLabel(_selectedJob.Finalization.Phase)</span>
-                        </span>
-                        <span class="ingest-job-meta">@FinalizationMeta(_selectedJob.Finalization)</span>
-                        <span class="ingest-finalization-hint">Graph relationship links are built after entity final review.</span>
-                    </button>
+                    @if (_selectedJob.Mode == IngestJobMode.ExtractEntities)
+                    {
+                        <button type="button" class="ingest-chunk-row ingest-finalization-row @(_selectedFinalization ? "selected" : null)" @onclick="SelectFinalizationAsync">
+                            <span class="ingest-chunk-main">
+                                <span>Final review &amp; relationship build</span>
+                                <span class="badge bg-@FinalizationStatusColor(_selectedJob.Finalization.Phase)">@FinalizationPhaseLabel(_selectedJob.Finalization.Phase)</span>
+                            </span>
+                            <span class="ingest-job-meta">@FinalizationMeta(_selectedJob.Finalization)</span>
+                            <span class="ingest-finalization-hint">Graph relationship links are built after entity final review.</span>
+                        </button>
+                    }
                 </div>
                 @if (_sourceVisuals.Count > 0)
                 {
@@ -546,6 +557,8 @@ else
     private string? _jobActionError;
     private string? _reportActionError;
     private int? _providerId;
+    private IngestJobMode _mode = IngestJobMode.IndexOnly;
+
     private int? _resumeProviderId;
     private IIngestJobUpdateSubscription? _subscription;
     private CancellationTokenSource? _subscriptionCts;
@@ -590,6 +603,13 @@ else
     private string _editNotes = string.Empty;
 
     private bool CanCreate => CreateBlockedReason is null;
+    private static string ModeLabel(IngestJobMode mode) => mode switch
+    {
+        IngestJobMode.IndexOnly => "Index only",
+        IngestJobMode.ConvertLegacySource => "Legacy conversion",
+        _ => "Entity extraction",
+    };
+
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
@@ -610,9 +630,9 @@ else
         get
         {
             if (_readingFile) return "Reading the selected source file.";
-            if (ChatDisabled) return ChatDisabledMessage;
-            if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
-            if (_pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId.Value)) return "Run Test for the selected model before force-vision PDF ingest.";
+            if (_mode == IngestJobMode.ExtractEntities && ChatDisabled) return ChatDisabledMessage;
+            if (_mode == IngestJobMode.ExtractEntities && _providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
+            if (_mode == IngestJobMode.ExtractEntities && _pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId!.Value)) return "Run Test for the selected model before force-vision PDF ingest.";
             if (!IsBatchSelection && string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
             if (_selectedFiles.Count == 0 && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose one or more source files.";
             if (_selectedFiles.Any(file => file.Size > MaximumFileBytes)) return $"Each source file must be {MaximumFileBytes / 1024 / 1024:N0} MB or smaller.";
@@ -627,8 +647,8 @@ else
         get
         {
             if (_webReading) return "Reading webpage.";
-            if (ChatDisabled) return ChatDisabledMessage;
-            if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
+            if (_mode == IngestJobMode.ExtractEntities && ChatDisabled) return ChatDisabledMessage;
+            if (_mode == IngestJobMode.ExtractEntities && _providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
             if (string.IsNullOrWhiteSpace(_webUrl)) return "Add a webpage URL.";
             if (!TryNormalizeWebUrl(_webUrl, out _, out _)) return "Enter a valid http or https URL.";
             return null;
@@ -1054,7 +1074,7 @@ else
                 successfulCandidateIds,
                 _providerId,
                 _instructions,
-                $"{startHost} webpage crawl");
+                $"{startHost} webpage crawl", mode: _mode);
 
             _webStatus = $"Queued {successfulCandidateIds.Count} webpage{(successfulCandidateIds.Count == 1 ? string.Empty : "s")} into one ingest job" +
                 (failedCount > 0 ? $"; {failedCount} failed to read." : ".");
@@ -1318,7 +1338,7 @@ else
                 _pdfForceVision,
                 _pdfMaxPages > 0 ? _pdfMaxPages : null,
                 _pdfVisionDpi > 0 ? _pdfVisionDpi : null,
-                null)));
+                null), Mode: _mode));
 
     private async Task ResumeAsync()
     {

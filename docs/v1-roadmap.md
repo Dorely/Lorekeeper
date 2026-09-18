@@ -518,6 +518,10 @@ reading blocks.
 - Retain the original before extraction; show separate retained/extracting/ready/failed states.
 - Local extraction and lexical indexing require no AI connection.
 - AI summaries, graph enrichment, and embeddings are separately queued optional work.
+- Implementation now offers index-only ingestion and resumable legacy-to-retained
+  conversion through source jobs. Conversion preserves existing evidence and
+  unavailable-original state; vector indexing requires an embedding provider.
+  Manual acceptance remains for both job flows and live embedding results.
 - Scanned documents remain available in original-page view; do not claim searchable
   text without extraction/OCR evidence.
 - Re-extraction creates a new version rather than changing existing citation anchors.

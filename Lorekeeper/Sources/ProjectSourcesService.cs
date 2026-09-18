@@ -567,6 +567,9 @@ public sealed class ProjectSourcesService(
         return await ingest.GetSourceDeletionUsageAsync(sourceId, cancellationToken);
     }
 
+    public Task<IngestJob> QueueLegacyConversionAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default) =>
+        ingest.QueueLegacyConversionAsync(projectId, sourceId, cancellationToken);
+
     public async Task ReextractSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default)
     {
         if (!await IsOwnedSourceAsync(projectId, sourceId, cancellationToken))

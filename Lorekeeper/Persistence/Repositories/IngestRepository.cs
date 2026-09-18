@@ -35,7 +35,8 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
                 job.ProviderId,
                 job.ModelName,
                 job.CreatedAt,
-                job.UpdatedAt))
+                job.UpdatedAt,
+                job.Mode))
             .ToListAsync(cancellationToken);
 
     public Task<IngestJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
@@ -81,6 +82,7 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
                 SourceKind = job.Source.SourceKind,
                 SourceDescription = job.Source.Description,
                 job.Instructions,
+                job.Mode,
                 job.Status,
                 job.TotalSourceChunks,
                 job.CompletedSourceChunks,
@@ -178,7 +180,8 @@ public sealed class IngestRepository(AppDatabaseReadOperation operation) : IInge
                 job.CompletedSourceChunks,
                 job.CurrentMessage,
                 finalizationRecords),
-            events);
+            events,
+            job.Mode);
     }
 
     public Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default) =>

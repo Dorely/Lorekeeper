@@ -15,6 +15,7 @@ public interface IProjectSourcesService
     Task<ProjectSourcePdfPage?> RenderPdfPageAsync(Guid projectId, Guid sourceId, int pageNumber, int maxEdge, CancellationToken cancellationToken = default);
     Task<SourceDeletionUsageReport?> GetDeletionUsageAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
     Task ReextractSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
+    Task<IngestJob> QueueLegacyConversionAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
     Task DetachBibliographicRecordAsync(Guid projectId, Guid bibliographicRecordId, DateTime expectedUpdatedAt, CancellationToken cancellationToken = default);
     Task DeleteSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
 }

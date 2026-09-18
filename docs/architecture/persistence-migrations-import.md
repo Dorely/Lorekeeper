@@ -142,6 +142,16 @@ migration copies legacy `IngestSources.SourceText`/`SourceHash` into the
 identity-preserving legacy extraction and then removes those obsolete columns;
 JSON v1-v31 fields survive only in the import adapter and rollback path.
 
+`SourceJobProcessingModes` adds the durable ingest mode and nullable pinned
+extraction identity. Existing jobs default to `ExtractEntities`, retaining their
+checkpoint state. Index-only jobs pin the initial ready extraction; explicit
+Restart repins to the current active version after a later re-extraction. Conversion
+jobs pin the legacy version and use their job identity for the newly published
+version. Conversion adds all new children and changes the active pointer in one
+transaction, leaving historical extraction/evidence rows and unavailable
+original metadata untouched. Job mode/pinning are operational state and do not
+enter project archive or history payloads.
+
 ## Current architecture and invariants
 
 The application stores local state in SQLite through `AppDbContext`, including
