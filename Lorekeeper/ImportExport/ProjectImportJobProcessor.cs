@@ -616,6 +616,14 @@ public sealed class ProjectImportJobProcessor(
             }
             await ImportArchiveLocationsAsync(db, archive, root, job.ProjectId, exportedSourceId, localSourceId,
                 extractionMaps, extractionRecordsById, blockMaps, blockExtractionIds, extractionPageNumbers, state.SourceLocationMap, cancellationToken);
+            // Keep only identity maps across sources. The outer import transaction
+            // still owns atomicity if any later source, asset, or manuscript fails.
+            await operation.SaveChangesAsync(cancellationToken);
+            foreach (var entry in db.ChangeTracker.Entries().Where(entry => entry.Entity is
+                IngestSource or SourceOriginal or SourceOriginalChunk or SourceExtractionVersion
+                or IngestSourceChunk or IngestSourcePage or IngestSourceBlock or SourceLocation).ToList())
+                entry.State = EntityState.Detached;
+            extractionRecordsById.Clear();
         }
 
         await ImportArchiveBibliographyAsync(db, archive, job.ProjectId, sourceMaps, state.BibliographyMap, cancellationToken);
@@ -902,7 +910,8 @@ public sealed class ProjectImportJobProcessor(
 
         ValidateChapterPayloads(document, binariesValidatedSeparately: job.InputKind == ProjectImportInputKind.LorekeeperArchive);
         ValidatePublicationPayloads(document);
-        ValidateIngestSourcePayloads(document);
+        if (job.InputKind == ProjectImportInputKind.LegacyJson)
+            ValidateIngestSourcePayloads(document);
         ValidateManuscriptAnnotationPayloads(document);
 
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -971,6 +980,17 @@ public sealed class ProjectImportJobProcessor(
         {
             throw new InvalidDataException("Archive manifest project identity does not match project/creative-state.json.");
         }
+
+        var expectedKind = archive.Manifest.Policy == ProjectDependencyTraversalPolicy.FullArchive
+            ? ProjectExportKind.Full : ProjectExportKind.NonStructural;
+        if (document.ExportKind != expectedKind || document.IngestSources.Count != 0)
+            throw new InvalidDataException("Archive creative state does not match its source ownership policy.");
+        var sourceIds = expectedKind == ProjectExportKind.Full
+            ? await ReadArchiveJsonAsync<List<Guid>>(zip, "sources/index.json", cancellationToken) : [];
+        if (sourceIds.Any(id => id == Guid.Empty) || sourceIds.Distinct().Count() != sourceIds.Count
+            || document.BookBriefCanonSourceIds.Distinct().Count() != document.BookBriefCanonSourceIds.Count
+            || document.BookBriefCanonSourceIds.Any(id => !sourceIds.Contains(id)))
+            throw new InvalidDataException("Archive canonical-source selections must be unique and closed over its source index.");
 
         await ValidateArchiveBinaryPayloadsAsync(zip, document, cancellationToken);
         return document with { IngestSources = [] };

@@ -407,7 +407,7 @@ exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
-### Current M2-M5A and accepted M5B contract evidence
+### Current M2-M5 contract evidence
 
 M2-M5A fixtures now have implementation evidence. M5B citation/DOCX fixtures
 remain normative input, not formatter- or exporter-generated snapshots. Focused deterministic regressions
@@ -427,9 +427,21 @@ modifying developer data. Local scale tooling may measure source/archive memory
 and cancellation on the 50-source fixture, but does not establish native
 navigation evidence. M4's deterministic retention, archive, history, and
 fail-closed import contracts do not establish its native scale/portability gate.
-M5A is current deterministic capability; M5B and exact reference-page footnote
-reservation remain incomplete, so M5 stays in progress. M3's native latency
-gate also remains unverified.
+M5B implementation adds manuscript v7/archive record 3/history 10/agent projection
+4/EPUB 6/Press 15 preservation, managed semantic citation runs, editable DOCX
+output, semantic Word file/paste insertion, and rich note editing. Approved
+regressions cover reference remapping and ownership, duplicate titles and repeated
+placements, nested note/table citations, malformed input rollback, resource
+admission and receipt replay, rich Undo/recovery, full-publication formatting,
+and reference-aware footnote reservation/continuation. History and archive
+restoration read sources and binary assets individually; preservation regressions
+exercise later failure rollback and predecessor formats.
+
+These deterministic contracts are ready for manual acceptance after the exact-head
+repository gate and isolated HTTP startup check. M5 remains in progress until
+acceptance findings are resolved. Broader UI, live OAuth/provider, Word desktop,
+and native performance validation require the owner's next go-ahead. M3's latency
+and M4's 50-source/multi-GB memory targets remain unmeasured.
 
 ## Key files and file families
 

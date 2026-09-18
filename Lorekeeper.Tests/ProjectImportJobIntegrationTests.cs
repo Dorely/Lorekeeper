@@ -869,23 +869,18 @@ public sealed class ProjectImportJobIntegrationTests
         var database = Database(db);
         var exporter = new ProjectImportExportService(
             database,
-            new EntityTypeService(database),
             new ProjectImportJobQueue(),
             new ProjectImportJobNotifier());
-        var file = await exporter.ExportProjectAsync(source.Id, ProjectExportKind.Full);
-        var json = Encoding.UTF8.GetString(file.Content);
-        var document = JsonSerializer.Deserialize<ProjectExportDocument>(
-            file.Content,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var capture = await exporter.CaptureArchiveDocumentAsync(source.Id, ProjectExportKind.Full);
+        var document = capture.Document;
+        var json = JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var warning = ProjectExportWarningText.OutgoingReferencesOmitted(1, referenced.Name);
 
         Assert.DoesNotContain("\"projectReferences\"", json, StringComparison.Ordinal);
-        Assert.Equal([warning], file.Warnings);
-        Assert.Equal(file.Warnings, document.Warnings);
-        Assert.Contains(warning, document.Warnings);
+        Assert.Equal([warning], document.Warnings);
 
         await using var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        var import = await exporter.CreateImportJobAsync(destination.Id, file.FileName, jsonStream);
+        var import = await exporter.CreateImportJobAsync(destination.Id, "outgoing-references.v31.lorekeeper.json", jsonStream);
         var processor = await CreateProcessorAsync(db, destination);
         await processor.RunAsync(import.Id);
 
@@ -958,22 +953,21 @@ public sealed class ProjectImportJobIntegrationTests
 
         var exporter = new ProjectImportExportService(
             Database(db),
-            new EntityTypeService(Database(db)),
             new ProjectImportJobQueue(),
             new ProjectImportJobNotifier());
-        var file = await exporter.ExportProjectAsync(project.Id, ProjectExportKind.NonStructural);
-        var document = JsonSerializer.Deserialize<ProjectExportDocument>(
-            file.Content,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var document = (await exporter.CaptureArchiveDocumentAsync(project.Id, ProjectExportKind.NonStructural)).Document;
 
         Assert.Equal(31, document.FormatVersion);
         Assert.Equal(new[] { upscale.Id, original.Id }.OrderBy(id => id), document.Images.Select(image => image.Id).OrderBy(id => id));
         Assert.Equal(original.Id, document.Images.Single(image => image.Id == upscale.Id).DerivedFromImageId);
         Assert.Equal(upscale.Id, Assert.Single(document.EntityVisualExamples).ImageId);
+        Assert.All(document.Images, image => Assert.Empty(image.Data));
     }
 
-    [Fact]
-    public async Task FullArchiveRoundTripPreservesRetainedSourceClosureAndEvidence()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FullArchiveRoundTripPreservesRetainedSourceClosureAndEvidence(bool failAfterSources)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -1101,18 +1095,51 @@ public sealed class ProjectImportJobIntegrationTests
             DerivedFromImageId = originalImage.Id,
         };
         db.PublishAssets.AddRange(derivedImage, originalImage);
+        var secondaryExtraction = new SourceExtractionVersion
+        {
+            Ordinal = 0, Extractor = "test", ExtractorVersion = "1",
+            Status = SourceExtractionStatus.Ready, NormalizedText = "Second source",
+            ContentHash = SourceRetentionValidator.Sha256("Second source"),
+        };
+        var secondary = new IngestSource
+        {
+            Project = sourceProject, Title = "Secondary source", ContentType = "text/plain",
+            UserInstructions = string.Empty,
+            ActiveExtractionVersionId = secondaryExtraction.Id,
+            Original = new SourceOriginal { State = SourceOriginalState.OriginalUnavailable, FileName = "second.txt", MediaType = "text/plain" },
+        };
+        secondaryExtraction.Source = secondary;
+        secondary.ExtractionVersions.Add(secondaryExtraction);
+        db.IngestSources.Add(secondary);
+        var brief = new BookBrief { Project = sourceProject };
+        brief.CanonSources.Add(new BookBriefCanonSource { BookBrief = brief, IngestSource = retainedSource });
+        db.BookBriefs.Add(brief);
+        db.GraphNodes.AddRange(
+            new GraphNode { ProjectId = sourceProject.Id, NodeType = EntityTypeService.SourceNodeType, Key = retainedSource.Id.ToString("N"), Label = retainedSource.Title },
+            new GraphNode { ProjectId = sourceProject.Id, NodeType = EntityTypeService.SourceNodeType, Key = secondary.Id.ToString("N"), Label = secondary.Title });
+        if (failAfterSources)
+        {
+            db.PublicationEditions.AddRange(
+                new PublicationEdition { Project = sourceProject, Name = "Imported EPUB", Format = PublicationEditionFormat.Epub, Isbn = "9780306406157" },
+                new PublicationEdition { Project = destination, Name = "Existing paperback", Format = PublicationEditionFormat.Paperback, Isbn = "9780306406157" });
+        }
         await db.SaveChangesAsync();
 
         var database = Database(db);
         var exporter = new ProjectImportExportService(
             database,
-            new EntityTypeService(database),
             new ProjectImportJobQueue(),
             new ProjectImportJobNotifier());
         var traversal = new ProjectDependencyTraversalService(
             new PassthroughAuthoringMutationFence(),
             database,
             exporter);
+        var capture = await exporter.CaptureArchiveDocumentAsync(sourceProject.Id, ProjectExportKind.Full);
+        Assert.Empty(capture.Document.IngestSources);
+        Assert.Equal([retainedSource.Id], capture.Document.BookBriefCanonSourceIds);
+        Assert.Contains(capture.Document.Nodes, node => node.Key == secondary.Id.ToString("N"));
+        var nonStructural = await exporter.CaptureArchiveDocumentAsync(sourceProject.Id, ProjectExportKind.NonStructural);
+        Assert.DoesNotContain(nonStructural.Document.Nodes, node => node.NodeType == EntityTypeService.SourceNodeType);
         var archives = new ProjectArchiveService(traversal);
         await using var archive = new MemoryStream();
         var written = await archives.WriteAsync(
@@ -1127,11 +1154,24 @@ public sealed class ProjectImportJobIntegrationTests
 
         db.ChangeTracker.Clear();
         var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(job => job.Id == import.Id);
+        if (failAfterSources)
+        {
+            Assert.Equal(ProjectImportJobStatus.Failed, completed.Status);
+            Assert.Contains("ISBN-13 conflicts", completed.ErrorMessage, StringComparison.Ordinal);
+            Assert.Empty(await db.IngestSources.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            Assert.Empty(await db.SourceLocations.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            Assert.Empty(await db.BibliographicRecords.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            Assert.Empty(await db.PublishAssets.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            Assert.Empty(await db.Chapters.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            Assert.Single(await db.PublicationEditions.Where(item => item.ProjectId == destination.Id).ToListAsync());
+            return;
+        }
         Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        Assert.Equal(2, await db.IngestSources.CountAsync(item => item.ProjectId == destination.Id));
         var restored = await db.IngestSources.AsNoTracking()
             .Include(item => item.Original).ThenInclude(original => original!.Chunks).ThenInclude(chunk => chunk.Blob)
             .Include(item => item.ExtractionVersions).ThenInclude(version => version.SourceBlocks)
-            .SingleAsync(item => item.ProjectId == destination.Id);
+            .SingleAsync(item => item.ProjectId == destination.Id && item.Title == "Primary source");
         var restoredExtraction = Assert.Single(restored.ExtractionVersions);
         var restoredChunk = Assert.Single(restored.Original!.Chunks);
         Assert.Equal(originalBytes, restoredChunk.Blob.Data);

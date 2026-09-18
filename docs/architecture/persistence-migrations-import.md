@@ -378,6 +378,20 @@ maps after all images exist. All writes remain inside the import transaction, so
 failure still rolls back the complete import. Legacy JSON remains a bounded
 aggregate compatibility reader.
 
+Retained-source archive import likewise saves and detaches each source and its
+extraction/evidence rows inside the outer transaction. Extraction text is released
+after that source's locations have been validated; only identity maps persist
+across the library. A later publication or asset failure rolls back these earlier
+source writes as well as the rest of the import.
+Archive creative-state capture includes source identities/provenance but no
+source bodies or asset bytes; their owning traversal reads them individually.
+Full archives retain provenance from every retained source, independently of
+Book Brief canon selection. The obsolete aggregate JSON export route and binary
+hydration branches are removed; v1-v31 JSON remains an import boundary only.
+Archive canon selections validate against the source index, while predecessor
+JSON validates against its embedded source records. Non-structural archives omit
+source provenance nodes along with source bodies and evidence links.
+
 Intermediate edition-content and publication-section schema transitions restore
 citation compatibility columns after rebuilding their tables and before querying
 with the current EF model. Compatibility columns remain a guarded startup

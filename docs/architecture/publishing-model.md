@@ -403,7 +403,7 @@ actionable failures. Publish UI and assistant preparation results surface this
 summary. Since image preparation precedes artifact reuse, both the final artifact
 and its fingerprint describe the permanent replacement references.
 
-### Current M2-M5A and accepted M5B publication contract
+### Current M2-M5 publication contract
 
 Effective publication projection resolves a
 Designed Page by page identity plus Core/release content and authored-layout

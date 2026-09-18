@@ -434,11 +434,11 @@ asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
-### Current M2-M5A and accepted M5B implementation contract
+### Current M2-M5 implementation contract
 
 The reusable Designed Page identity and placement contract above is current.
-The M3 authoring and M5A rich-manuscript guidance in this section are current;
-citations and Word interchange remain accepted M5B work. `AuthoringBatchProtocolV1` and
+The authoring, rich-manuscript, citation, and Word interchange contracts are
+implemented and await manual acceptance. `AuthoringBatchProtocolV1` and
 `AuthoringJournalV1` are the sole manual-edit transport and recovery contracts.
 A batch has an ordered target set, expected version/generation per target,
 session, batch identity/sequence, action label, operations, and explicit
@@ -512,8 +512,8 @@ selected cluster, retaining its atom ID and source evidence for unchanged record
 Changing a cited record clears its old evidence link. An open form rejects changes
 if the manuscript changed while it was open. Assistant citation edits use bounded
 `ReplaceInlineContent` operations at full positions; lossy plain-text operations
-reject blocks containing semantic atoms. Complete output parity remains M5B work. Citation
-occurrence identity is publication target, top-level container, complete
+reject blocks containing semantic atoms. Shared semantic projections preserve citation
+occurrence identity: publication target, top-level container, complete
 placement path, citation atom, and cluster-item ordinal. Current note numbering
 restarts for every top-level chapter or publication section. Standalone
 manuscript preview uses the effective publication citation context. Press protocol v15 repeats leading

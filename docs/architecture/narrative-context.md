@@ -304,7 +304,7 @@ and semantic conversion implementation.
 - [assistants-chat.md](assistants-chat.md) owns the shared conversation runtime,
   system-prompt composition, surface charters, tools, review changes, contests,
   and revision workers.
-- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v6, chapter
+- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v7, chapter
   body mutations, editor behavior, annotations, styles, and authoring history.
 - [providers-background.md](providers-background.md) owns LLM/search provider
   configuration and the shared rules for provider-backed background execution.

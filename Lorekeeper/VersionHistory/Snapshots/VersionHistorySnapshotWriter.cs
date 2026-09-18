@@ -501,17 +501,3 @@ public sealed class VersionHistorySnapshotWriter(
 
     private sealed record SupplementalProject(bool ContestModeEnabled);
 }
-
-internal static class VersionHistoryProjectExportExtensions
-{
-    private static readonly System.Text.Json.JsonSerializerOptions ProjectExportCompatibilityOptions =
-        new(System.Text.Json.JsonSerializerDefaults.Web);
-
-    public static ProjectExportDocument Document(this ProjectExportFile file)
-    {
-        var document = System.Text.Json.JsonSerializer.Deserialize<ProjectExportDocument>(
-            file.Content,
-            ProjectExportCompatibilityOptions);
-        return document ?? throw new InvalidDataException("Project export returned no document.");
-    }
-}

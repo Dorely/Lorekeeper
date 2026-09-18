@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Ingest;
@@ -16,57 +15,30 @@ namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportExportService(
     IAppDatabaseOperationFactory database,
-    IEntityTypeService entityTypeService,
     IProjectImportJobQueue importQueue,
     IProjectImportJobNotifier notifier,
     IProjectImportFileStore? fileStore = null,
     ILogger<ProjectImportExportService>? logger = null,
     ProjectArchiveLimits? archiveLimits = null) : IProjectImportExportService
 {
-    // Kept for constructor compatibility while JSON v31 import jobs still own
-    // entity-type defaulting. Archive capture intentionally never invokes it.
-    private readonly IEntityTypeService _entityTypeService = entityTypeService;
     private readonly IProjectImportFileStore _fileStore = fileStore ?? new ProjectImportFileStore();
     private readonly ILogger<ProjectImportExportService> _logger = logger ?? NullLogger<ProjectImportExportService>.Instance;
     private readonly ProjectArchiveLimits _archiveLimits = archiveLimits ?? ProjectArchiveLimits.Default;
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
-
     private static readonly HashSet<string> NonStructuralExcludedNodeTypes =
     [
         EntityTypeService.ProjectNodeType,
         EntityTypeService.ActNodeType,
         EntityTypeService.ChapterNodeType,
         EntityTypeService.EventNodeType,
+        EntityTypeService.SourceNodeType,
+        EntityTypeService.SourceChunkNodeType,
+        EntityTypeService.SourceBlockNodeType,
     ];
-
-    public async Task<ProjectExportFile> ExportProjectAsync(
-        Guid projectId,
-        ProjectExportKind kind,
-        CancellationToken cancellationToken = default)
-    {
-        var capture = await CaptureDocumentAsync(projectId, kind, includeBinaryPayloads: true, cancellationToken);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(capture.Document, JsonOptions);
-        return new ProjectExportFile(
-            FileName: $"{SafeFileName(capture.ProjectSlug)}-{kind.ToString().ToLowerInvariant()}-graph.lorekeeper.json",
-            ContentType: "application/json; charset=utf-8",
-            Content: bytes,
-            Warnings: capture.Document.Warnings);
-    }
 
     public async Task<ProjectArchiveDocumentCapture> CaptureArchiveDocumentAsync(
         Guid projectId,
         ProjectExportKind kind,
         CancellationToken cancellationToken = default)
-        => await CaptureDocumentAsync(projectId, kind, includeBinaryPayloads: false, cancellationToken);
-
-    private async Task<ProjectArchiveDocumentCapture> CaptureDocumentAsync(
-        Guid projectId,
-        ProjectExportKind kind,
-        bool includeBinaryPayloads,
-        CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
@@ -91,15 +63,15 @@ public sealed class ProjectImportExportService(
             .ToListAsync(cancellationToken);
         var omittedSourceIds = (kind == ProjectExportKind.NonStructural
                 ? allProjectSourceIds
-                : allProjectSourceIds.Except(canonSourceIds))
+                : Enumerable.Empty<Guid>())
             .ToHashSet();
-        var exportedProvenanceIds = canonSourceIds
+        var exportedProvenanceIds = allProjectSourceIds
             .Concat(await db.IngestSourceChunks.AsNoTracking()
-                .Where(chunk => canonSourceIds.Contains(chunk.SourceId))
+                .Where(chunk => allProjectSourceIds.Contains(chunk.SourceId))
                 .Select(chunk => chunk.Id)
                 .ToListAsync(cancellationToken))
             .Concat(await db.IngestSourceBlocks.AsNoTracking()
-                .Where(block => canonSourceIds.Contains(block.SourceId))
+                .Where(block => allProjectSourceIds.Contains(block.SourceId))
                 .Select(block => block.Id)
                 .ToListAsync(cancellationToken))
             .Select(id => id.ToString("N"))
@@ -124,19 +96,6 @@ public sealed class ProjectImportExportService(
                     : reference.ReferencedProjectName));
             warnings.Add(ProjectExportWarningText.OutgoingReferencesOmitted(outgoingReferences.Count, names));
         }
-        var exportedIngestSources = kind == ProjectExportKind.Full
-            ? (await db.IngestSources
-                .AsNoTracking()
-                .Include(source => source.ExtractionVersions)
-                .Include(source => source.SourceChunks)
-                .Include(source => source.SourcePages)
-                .Include(source => source.SourceBlocks)
-                .Where(source => source.ProjectId == projectId && canonSourceIds.Contains(source.Id))
-                .OrderBy(source => source.Title)
-                .ToListAsync(cancellationToken))
-                .Select(ProjectIngestSource)
-                .ToList()
-            : [];
         if (kind == ProjectExportKind.NonStructural && allProjectSourceIds.Count > 0)
             warnings.Add($"Omitted {allProjectSourceIds.Count} ingested source body/bodies, all source evidence, and {canonSourceIds.Count} Book Brief canonical selection(s) from this non-structural export.");
         var visualExamples = await db.EntityVisualExamples
@@ -245,14 +204,14 @@ public sealed class ProjectImportExportService(
                     brief.AccessibilityGoals,
                     brief.VisualDirection))
                 .SingleOrDefaultAsync(cancellationToken),
-            IngestSources = exportedIngestSources,
+            IngestSources = [],
             BookBriefCanonSourceIds = kind == ProjectExportKind.Full ? canonSourceIds : [],
             EntityTypes = (await entityTypes.ListByProjectAsync(projectId, cancellationToken))
                 .Where(type => ShouldExportType(kind, type))
                 .Select(ProjectEntityType)
                 .ToList(),
             Images = await ListExportImagesAsync(
-                db, projectId, kind, exportedImageIds, includeBinaryPayloads, cancellationToken),
+                db, projectId, kind, exportedImageIds, cancellationToken),
             EntityVisualExamples = exportedVisualExamples,
             PublicationBook = kind == ProjectExportKind.Full
                 ? ProjectPublicationBook(await db.PublicationBooks.AsNoTracking()
@@ -357,7 +316,7 @@ public sealed class ProjectImportExportService(
                     .ToList()
                 : [],
             FontFamilies = kind == ProjectExportKind.Full
-                ? await ListExportFontFamiliesAsync(db, projectId, includeBinaryPayloads, cancellationToken)
+                ? await ListExportFontFamiliesAsync(db, projectId, cancellationToken)
                 : [],
             Acts = kind == ProjectExportKind.Full
                 ? (await acts.ListByProjectAsync(projectId, cancellationToken)).Select(ProjectAct).ToList()
@@ -554,46 +513,6 @@ public sealed class ProjectImportExportService(
         return new(node.NodeType, node.Key, node.Label, properties, node.CreatedAt, node.UpdatedAt);
     }
 
-    private static ProjectExportIngestSource ProjectIngestSource(IngestSource source)
-    {
-        var active = source.ActiveExtractionVersionId is Guid activeId
-            ? source.ExtractionVersions.SingleOrDefault(item => item.Id == activeId)
-            : null;
-        active ??= source.ExtractionVersions.OrderByDescending(item => item.Ordinal).FirstOrDefault()
-            ?? throw new InvalidOperationException($"Source {source.Id:N} has no extraction to export through the legacy adapter.");
-        return new ProjectExportIngestSource(
-            source.Id,
-            source.Title,
-            source.SourceKind,
-            source.Description,
-            source.Synopsis,
-            source.UserInstructions,
-            active.NormalizedText,
-            active.ContentHash,
-            source.SourceUrl,
-            source.FinalUrl,
-            source.CanonicalUrl,
-            source.FetchedAt,
-            source.ContentType,
-            source.SourceMetadataJson,
-            source.CreatedAt,
-            source.UpdatedAt,
-            source.SourceChunks.Where(chunk => chunk.SourceExtractionVersionId == active.Id)
-                .OrderBy(chunk => chunk.Index).Select(chunk => new ProjectExportIngestSourceChunk(
-                    chunk.Id, chunk.Index, chunk.Title, chunk.HeadingPath, chunk.StartChar, chunk.EndChar,
-                    chunk.EstimatedTokenCount, chunk.TokenCountMethod, chunk.TokenEncodingName, chunk.TokenCountIsExact,
-                    chunk.Summary, chunk.AgentNotes, chunk.StructureStatus, chunk.CreatedAt, chunk.UpdatedAt)).ToList(),
-            source.SourcePages.Where(page => page.SourceExtractionVersionId == active.Id)
-                .OrderBy(page => page.PageNumber).Select(page => new ProjectExportIngestSourcePage(
-                    page.Id, page.PageNumber, page.Text, page.StartChar, page.EndChar, page.ExtractionMethod,
-                    page.Width, page.Height, page.ImageHash, page.RenderSettingsJson, page.VisionProviderId,
-                    page.VisionModelName, page.Diagnostics, page.CreatedAt)).ToList(),
-            source.SourceBlocks.Where(block => block.SourceExtractionVersionId == active.Id)
-                .OrderBy(block => block.Index).Select(block => new ProjectExportIngestSourceBlock(
-                    block.Id, block.SourcePageId, block.Index, block.Kind, block.Title, block.Locator,
-                    block.PageNumber, block.StartChar, block.EndChar, block.MetadataJson, block.CreatedAt)).ToList());
-    }
-
     private static ProjectExportEdge ProjectEdge(
         GraphEdge edge,
         GraphNode from,
@@ -636,16 +555,12 @@ public sealed class ProjectImportExportService(
         Guid projectId,
         ProjectExportKind kind,
         IReadOnlySet<Guid>? selectedImageIds,
-        bool includeBinaryPayloads,
         CancellationToken cancellationToken)
     {
         var query = db.PublishAssets.AsNoTracking()
             .Where(asset => asset.ProjectId == projectId
                 && (kind == ProjectExportKind.Full || selectedImageIds!.Contains(asset.Id)))
             .OrderBy(asset => asset.CreatedAt);
-        if (includeBinaryPayloads)
-            return (await query.ToListAsync(cancellationToken)).Select(asset => ProjectImage(asset, true)).ToList();
-
         var metadata = await query.Select(asset => new ImageMetadata(
             asset.Id, asset.FileName, asset.ContentType, asset.AltText, asset.Source, asset.Prompt,
             asset.GenerationModel, asset.SourceMetadataJson, asset.DerivedFromImageId, asset.CropXPercent,
@@ -661,29 +576,8 @@ public sealed class ProjectImportExportService(
     private static async Task<List<ProjectExportFontFamily>> ListExportFontFamiliesAsync(
         AppDbContext db,
         Guid projectId,
-        bool includeBinaryPayloads,
         CancellationToken cancellationToken)
     {
-        if (includeBinaryPayloads)
-        {
-            return (await db.ProjectFontFamilies.AsNoTracking()
-                    .Include(family => family.Faces)
-                    .Where(family => family.ProjectId == projectId)
-                    .OrderBy(family => family.Name)
-                    .ToListAsync(cancellationToken))
-                .Select(family => new ProjectExportFontFamily(
-                    family.Id,
-                    family.Name,
-                    family.Faces.OrderBy(face => face.Weight).ThenBy(face => face.Italic)
-                        .Select(face => new ProjectExportFontFace(face.Id, face.SubfamilyName, face.FileName,
-                            face.ContentType, face.Weight, face.Italic, face.Data,
-                            Convert.ToHexStringLower(SHA256.HashData(face.Data))))
-                        .ToList(),
-                    family.EmbeddingRightsConfirmed,
-                    family.RightsDeclaration))
-                .ToList();
-        }
-
         var families = await db.ProjectFontFamilies.AsNoTracking()
             .Where(family => family.ProjectId == projectId)
             .OrderBy(family => family.Name)
@@ -708,25 +602,6 @@ public sealed class ProjectImportExportService(
             family.EmbeddingRightsConfirmed,
             family.RightsDeclaration)).ToList();
     }
-
-    private static ProjectExportImage ProjectImage(PublishAsset asset, bool includeBinaryPayloads) =>
-        new(
-            asset.Id,
-            asset.FileName,
-            asset.ContentType,
-            includeBinaryPayloads ? asset.Data : [],
-            asset.AltText,
-            asset.Source,
-            asset.Prompt,
-            asset.GenerationModel,
-            asset.SourceMetadataJson,
-            asset.DerivedFromImageId,
-            asset.CropXPercent,
-            asset.CropYPercent,
-            asset.CropWidthPercent,
-            asset.CropHeightPercent,
-            asset.CreatedAt,
-            asset.UpdatedAt);
 
     private sealed record ImageMetadata(Guid Id, string FileName, string ContentType, string AltText,
         PublishAssetSource Source, string Prompt, string GenerationModel, string SourceMetadataJson,
@@ -908,14 +783,6 @@ public sealed class ProjectImportExportService(
 
     private static string NodeStableKey(GraphNode node) =>
         $"{node.NodeType}/{node.Key}";
-
-    private static string SafeFileName(string input)
-    {
-        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
-        var chars = input.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray();
-        var result = new string(chars).Trim('-', ' ', '.');
-        return string.IsNullOrWhiteSpace(result) ? "project" : result;
-    }
 
     private void Notify(Guid projectId, Guid jobId, ProjectImportJobUpdateKind kind) =>
         notifier.Notify(new ProjectImportJobUpdate(projectId, jobId, kind, DateTime.UtcNow));

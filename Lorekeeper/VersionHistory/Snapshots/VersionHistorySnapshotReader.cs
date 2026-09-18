@@ -871,6 +871,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             .Concat(payload.Sources.RetainedSources.Select(source => "Source/" + source.Id.ToString("N")))
             .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Chunks)
                 .Select(chunk => "SourceChunk/" + chunk.Id.ToString("N")))
+            .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Blocks)
+                .Select(block => "SourceBlock/" + block.Id.ToString("N")))
             .ToHashSet(StringComparer.Ordinal);
         foreach (var edge in payload.Graph.Edges)
         {

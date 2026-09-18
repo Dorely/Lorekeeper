@@ -68,7 +68,7 @@ public interface IProjectDependencyTraversalService
 public sealed class ProjectDependencyTraversalService(
     IAuthoringMutationFence authoringFence,
     IAppDatabaseOperationFactory database,
-    IProjectImportExportService legacyExport,
+    IProjectImportExportService projectExport,
     ProjectArchiveLimits? archiveLimits = null) : IProjectDependencyTraversalService
 {
     private readonly ProjectArchiveLimits _limits = archiveLimits ?? ProjectArchiveLimits.Default;
@@ -104,7 +104,7 @@ public sealed class ProjectDependencyTraversalService(
             var exportKind = policy == ProjectDependencyTraversalPolicy.NonStructuralArchive
                 ? ProjectExportKind.NonStructural
                 : ProjectExportKind.Full;
-            var creative = await legacyExport.CaptureArchiveDocumentAsync(projectId, exportKind, cancellationToken);
+            var creative = await projectExport.CaptureArchiveDocumentAsync(projectId, exportKind, cancellationToken);
             await using var operation = await database.OpenReadAsync(cancellationToken);
             var db = operation.Db;
             var manuscripts = ProjectCitationRemapping.Manuscripts(creative.Document).ToList();
@@ -400,7 +400,7 @@ public sealed class ProjectDependencyTraversalService(
         var result = JsonSerializer.SerializeToNode(document, JsonOptions)?.AsObject()
             ?? throw new ProjectArchiveException("Creative archive state could not be serialized.");
         // Retained sources have one authority under sources/. The legacy source
-        // projection exists only for JSON v1-v31 import/export adapters.
+        // projection exists only for JSON v1-v31 import adapters.
         result["ingestSources"] = new JsonArray();
         RemoveDataProperties(result);
         return result;

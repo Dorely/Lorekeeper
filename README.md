@@ -114,6 +114,8 @@ its planned features are not claims about current capabilities.
   transaction, then rebuild derived indexes as retryable post-commit work.
   The `ProjectArchive` settings bound archive input to 8 GiB and expanded content
   to 16 GiB by default, retaining separate per-entry and manifest limits.
+  Source extraction/evidence rows and image/font bytes are imported one source
+  or asset at a time, with complete rollback if a later import step fails.
 - Local version history schema v10 captures deterministic checkpoints of the creative
   project in an app-managed Git repository. History includes canonical project,
   narrative, graph, source, asset, manuscript, composition, and publication

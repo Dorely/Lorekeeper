@@ -571,6 +571,7 @@ public sealed class ProjectVersionRestoreTests
             var bytes = Encoding.UTF8.GetBytes("retained source bytes");
             var hash = VersionHistoryCanonicalJson.Sha256Hex(bytes);
             var normalized = new string('x', 9000);
+            var blockId = Guid.NewGuid();
             var retained = new VersionHistoryRetainedSource(
                 sourceId, "Source", "artifact", string.Empty, string.Empty, string.Empty,
                 string.Empty, string.Empty, string.Empty, "text/plain", "{}",
@@ -578,11 +579,17 @@ public sealed class ProjectVersionRestoreTests
                 new VersionHistorySourceOriginal(SourceOriginalState.Available, "source.txt", "text/plain",
                     bytes.Length, hash, [new VersionHistorySourceOriginalChunk(Guid.NewGuid(), 0, hash, bytes.Length)]),
                 [new VersionHistorySourceExtraction(extractionId, 0, "test", "1", "{}", SourceRetentionValidator.Sha256(normalized),
-                    SourceExtractionStatus.Ready, string.Empty, normalized, [], [], [])],
+                    SourceExtractionStatus.Ready, string.Empty, normalized, [], [],
+                    [new VersionHistorySourceBlock(blockId, null, 0, "paragraph", "", "", null, 0, normalized.Length,
+                        normalized, SourceRetentionValidator.Sha256(normalized), "{}")])],
                 [], []);
             var payload = CreatePayload(repositoryId, projectId) with
             {
                 Sources = new VersionHistorySnapshotSourcesArea([]) { RetainedSources = [retained] },
+                Graph = new VersionHistorySnapshotGraphArea([], [new ProjectExportEdge(
+                    new ProjectExportNodeRef(EntityTypeService.SourceBlockNodeType, blockId.ToString("N")),
+                    new ProjectExportNodeRef(EntityTypeService.ProjectNodeType, projectId.ToString("N")),
+                    "Supports", new Dictionary<string, object?>(), 0, DateTime.UnixEpoch, DateTime.UnixEpoch)]),
             };
             WriteSnapshotTree(
                 root,

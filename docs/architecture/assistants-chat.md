@@ -605,7 +605,7 @@ managed publication model's layout math. Permanent replacements are system-owned
 invalidate Review Edits/manual history through their content owners just like
 other direct assistant-visible changes.
 
-### Current M2-M5A and accepted M5B assistant contract
+### Current M2-M5 assistant contract
 
 The M2-M4 Designed Page, mutation-fence, and durable source-evidence contracts
 are current. Assistant reads and mutations of Designed Pages use
@@ -620,8 +620,9 @@ Source links in assistant-visible output carry validated durable `SourceLocation
 data and preserve unavailable/outdated/ambiguous status rather than guessing.
 Current `agent-manuscript-v4` projections and read tools preserve canonical
 UTF-16 `ManuscriptPosition` values plus recursive table, row, cell, note, and
-note-reference identities. Citation clusters and Designed Page citation/note
-atoms remain M5B work. An
+note-reference identities, citation clusters, and Designed Page citation/note
+atoms. Bounded citation and bibliography operations use the shared ownership,
+revision, mutation-fence, and invalidation services. An
 assistant evidence link never silently creates a manuscript citation.
 
 ## Key files and file families

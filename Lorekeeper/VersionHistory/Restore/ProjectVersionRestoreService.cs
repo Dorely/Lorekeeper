@@ -1205,6 +1205,8 @@ public sealed class ProjectVersionRestoreService(
             .Concat(payload.Sources.RetainedSources.Select(source => EntityTypeService.SourceNodeType + "/" + source.Id.ToString("N")))
             .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Chunks)
                 .Select(chunk => EntityTypeService.SourceChunkNodeType + "/" + chunk.Id.ToString("N")))
+            .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Blocks)
+                .Select(block => EntityTypeService.SourceBlockNodeType + "/" + block.Id.ToString("N")))
             .ToHashSet(StringComparer.Ordinal);
         if (payload.Graph.Nodes.GroupBy(node => node.NodeType + "/" + node.Key, StringComparer.Ordinal).Any(group => group.Count() != 1)
             || payload.Graph.Edges.Any(edge => !knownGraphKeys.Contains(edge.From.StableKey) || !knownGraphKeys.Contains(edge.To.StableKey)))
