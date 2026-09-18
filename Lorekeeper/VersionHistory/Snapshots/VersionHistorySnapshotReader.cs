@@ -132,7 +132,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
         assets = AdaptAssetsForSchema(assets, manifest.SchemaVersion);
         var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
-        var composition = ReadRequired<VersionHistorySnapshotCompositionArea>(files, "composition/composition.json");
+        var composition = ReadComposition(files, manifest.SchemaVersion);
         var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(
             files,
             "publication/publication.json",
@@ -692,6 +692,28 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         return chapters;
     }
+
+    private static VersionHistorySnapshotCompositionArea ReadComposition(
+        IReadOnlyDictionary<string, byte[]> files,
+        int schemaVersion)
+    {
+        const string path = "composition/composition.json";
+        if (schemaVersion >= VersionHistorySnapshotContract.DesignedPagesSchemaVersion)
+            return ReadRequired<VersionHistorySnapshotCompositionArea>(files, path);
+
+        // Validate the persisted shape before adapting it. Serializing the current
+        // DTO would add designedPages, which did not exist in schema v1-v6.
+        var legacy = ReadRequired<LegacySnapshotCompositionArea>(files, path);
+        if (legacy.PageCompositions is null)
+            throw new InvalidDataException("Legacy snapshot page compositions are missing.");
+        return new VersionHistorySnapshotCompositionArea([])
+        {
+            LegacyPageCompositions = legacy.PageCompositions,
+        };
+    }
+
+    private sealed record LegacySnapshotCompositionArea(
+        IReadOnlyList<ProjectExportPageComposition> PageCompositions);
 
     private static VersionHistorySnapshotCompositionArea AdaptRichComposition(
         VersionHistorySnapshotCompositionArea composition) => composition with

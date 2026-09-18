@@ -110,6 +110,11 @@ v7 tables, notes, and citation identities; undeclared files and
 noncanonical paths or encodings fail closed. Readers route every predecessor
 from schema v1 through v9 through an explicit adapter only after
 validating the predecessor's original manifest and file hashes.
+Schema v1-v6 composition files are round-trip validated against their original
+`pageCompositions` DTO before adapting to the current payload. The reader never
+requires the later `designedPages` property in those files and never rewrites
+stored checkpoints. Both predecessor and current composition readers retain
+canonical-byte and unknown-property rejection.
 
 Citation references are validated across body text, tables, notes, and publication
 content before restore. Unlinked bibliography records restore independently of
@@ -463,7 +468,7 @@ in deterministic checkpoints, comparisons, restore, and clone import.
 
 | Path or family | Architectural role |
 |---|---|
-| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v8 payloads, canonical JSON, deterministic writer, strict reader, explicit predecessor adapters, and manifest/blob validation. |
+| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v10 payloads, canonical JSON, deterministic writer, strict reader, explicit predecessor adapters, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
 | `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, and assistant checkpoint adapter. |
 | `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |

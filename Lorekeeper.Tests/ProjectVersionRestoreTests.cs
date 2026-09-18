@@ -27,6 +27,84 @@ namespace Lorekeeper.Tests;
 
 public sealed class ProjectVersionRestoreTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void PreDesignedPageSnapshotsValidateTheirOriginalCompositionShape(int schemaVersion)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid(), chapter: CreateChapter(Guid.NewGuid(), "Chapter"));
+            var chapter = Assert.Single(payload.Narrative.Chapters);
+            var pageId = Guid.NewGuid();
+            var page = new ProjectExportPageComposition(pageId, chapter.Id,
+                "Historical page", ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(pageId)), 0, []);
+            payload = payload with
+            {
+                Composition = new VersionHistorySnapshotCompositionArea([]) { LegacyPageCompositions = [page] },
+            };
+            WriteSnapshotTree(root, payload, schemaVersion: schemaVersion);
+            var path = Path.Combine(root, "composition", "composition.json");
+            var original = File.ReadAllBytes(path);
+            Assert.DoesNotContain("designedPages", Encoding.UTF8.GetString(original), StringComparison.Ordinal);
+
+            foreach (var options in new[] { VersionHistorySnapshotReadOptions.Default,
+                new VersionHistorySnapshotReadOptions { IncludeAssetData = false, IncludeSourceDetails = false } })
+            {
+                var read = new VersionHistorySnapshotReader().Read(root, options: options);
+                Assert.Empty(read.Payload.Composition.DesignedPages);
+                var restored = Assert.Single(read.Payload.Composition.PageCompositions);
+                Assert.Equal(page.Id, restored.Id);
+                Assert.Equal(page.ChapterId, restored.ChapterId);
+                Assert.Equal(page.Name, restored.Name);
+                Assert.Equal(ManuscriptCodec.Serialize(ManuscriptCodec.Deserialize(page.SemanticManuscriptJson, page.Id, page.Revision)),
+                    ManuscriptCodec.Serialize(ManuscriptCodec.Deserialize(restored.SemanticManuscriptJson, page.Id, page.Revision)));
+                Assert.Equal(original, File.ReadAllBytes(path));
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(6, false)]
+    [InlineData(6, true)]
+    [InlineData(10, false)]
+    [InlineData(10, true)]
+    public void CompositionSchemaAdaptersStillRejectNoncanonicalPayloads(int schemaVersion, bool unknownProperty)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            WriteSnapshotTree(root, CreatePayload(Guid.NewGuid(), Guid.NewGuid()), (path, bytes) =>
+            {
+                if (path != "composition/composition.json")
+                    return bytes;
+                if (!unknownProperty)
+                    return [.. bytes, (byte)' '];
+                var node = System.Text.Json.Nodes.JsonNode.Parse(bytes)!.AsObject();
+                node["unexpected"] = true;
+                return VersionHistoryCanonicalJson.Serialize(node);
+            }, schemaVersion);
+            var exception = Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(root));
+            Assert.Contains("composition/composition.json", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("not in canonical form", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void SchemaFiveCoverBindingsAdaptToDescription()
     {
@@ -1736,7 +1814,9 @@ public sealed class ProjectVersionRestoreTests
             ["graph/graph.json"] = VersionHistoryCanonicalJson.Serialize(payload.Graph),
             ["assets/assets.json"] = VersionHistoryCanonicalJson.Serialize(payload.Assets),
             ["manuscript/styles.json"] = VersionHistoryCanonicalJson.Serialize(payload.Manuscript),
-            ["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(payload.Composition),
+            ["composition/composition.json"] = effectiveSchemaVersion < VersionHistorySnapshotContract.DesignedPagesSchemaVersion
+                ? VersionHistoryCanonicalJson.Serialize(new { PageCompositions = payload.Composition.PageCompositions })
+                : VersionHistoryCanonicalJson.Serialize(payload.Composition),
             ["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(payload.Publication),
         };
         if (effectiveSchemaVersion >= 8)
