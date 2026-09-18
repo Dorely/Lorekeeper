@@ -1983,7 +1983,9 @@ public sealed class DatabaseStartupMigrationService(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        if (!await HasColumnAsync(db, "Projects", "ReviewEditsEnabled", cancellationToken)
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(ReviewWorkflowAdditiveMigrationId)
+            || !await HasColumnAsync(db, "Projects", "ReviewEditsEnabled", cancellationToken)
             || !await HasColumnAsync(db, "Projects", "AiChangeApprovalEnabled", cancellationToken))
         {
             return;

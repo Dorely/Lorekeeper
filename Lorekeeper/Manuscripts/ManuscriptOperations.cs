@@ -7,11 +7,39 @@ public static class ManuscriptOperations
         IReadOnlyList<ManuscriptOperation> operations)
     {
         var blocks = source.Content.Select(Clone).ToList();
+        var notes = source.Notes.Select(ManuscriptClone.Note).ToList();
+        var originallyReferencedNotes = ReferencedNoteIds(blocks);
         var changed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var operation in operations)
         {
             switch (operation)
             {
+                case PutRichManuscriptBlock put:
+                    if (put.Index < 0 || put.Index > blocks.Count)
+                        throw new ArgumentOutOfRangeException(nameof(put.Index));
+                    var richBlock = ManuscriptClone.Block(put.Block);
+                    var richExisting = blocks.FindIndex(block => AreEquivalentBlockIds(block.Id, richBlock.Id));
+                    if (richExisting >= 0)
+                        blocks.RemoveAt(richExisting);
+                    blocks.Insert(Math.Clamp(put.Index, 0, blocks.Count), richBlock);
+                    changed.Add(richBlock.Id);
+                    break;
+
+                case ReplaceManuscriptNotes replaceNotes:
+                    notes = replaceNotes.Notes.Select(ManuscriptClone.Note).ToList();
+                    foreach (var note in notes)
+                        changed.Add(note.Id);
+                    break;
+
+                case ReplaceManuscriptStructure replaceStructure:
+                    blocks = replaceStructure.Content.Select(ManuscriptClone.Block).ToList();
+                    notes = replaceStructure.Notes.Select(ManuscriptClone.Note).ToList();
+                    foreach (var block in blocks)
+                        changed.Add(block.Id);
+                    foreach (var note in notes)
+                        changed.Add(note.Id);
+                    break;
+
                 case InsertManuscriptBlock insert:
                     if (insert.Index < 0 || insert.Index > blocks.Count)
                         throw new ArgumentOutOfRangeException(nameof(insert.Index));
@@ -129,7 +157,7 @@ public static class ManuscriptOperations
                     var typeIndex = Find(blocks, blockType.BlockId);
                     var current = blocks[typeIndex];
                     var typeIsUnchanged = blockType.Type == current.Type;
-                    if (blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+                    if (blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
                         && !string.IsNullOrEmpty(ManuscriptCodec.Text(current)))
                     {
                         throw new InvalidOperationException(
@@ -143,7 +171,7 @@ public static class ManuscriptOperations
                                 ? current.StyleRole
                                 : DefaultStyle(blockType.Type)
                             : blockType.StyleRole.Trim(),
-                        Content = blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+                        Content = blockType.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
                             ? []
                             : current.Content,
                         ImageId = blockType.Type == ManuscriptBlockType.Figure
@@ -167,6 +195,9 @@ public static class ManuscriptOperations
                         DesignedPageId = blockType.Type == ManuscriptBlockType.DesignedPage
                             ? blockType.DesignedPageId
                                 ?? (typeIsUnchanged ? current.DesignedPageId : null)
+                            : null,
+                        Table = blockType.Type == ManuscriptBlockType.Table && typeIsUnchanged
+                            ? current.Table
                             : null,
                         HeadingLevel = blockType.Type == ManuscriptBlockType.Heading
                             ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
@@ -209,7 +240,7 @@ public static class ManuscriptOperations
                 case SetParagraphPresentation paragraph:
                     var paragraphIndex = Find(blocks, paragraph.BlockId);
                     var currentParagraph = blocks[paragraphIndex];
-                    if (currentParagraph.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
+                    if (currentParagraph.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table)
                         throw new InvalidOperationException($"Block {paragraph.BlockId} does not support paragraph formatting.");
                     blocks[paragraphIndex] = currentParagraph with { ParagraphPresentation = paragraph.Presentation };
                     changed.Add(currentParagraph.Id);
@@ -220,13 +251,49 @@ public static class ManuscriptOperations
             }
         }
 
+        var referencedNotes = ReferencedNoteIds(blocks);
+        notes.RemoveAll(note => originallyReferencedNotes.Contains(note.Id)
+            && !referencedNotes.Contains(note.Id));
+        foreach (var removedNoteId in originallyReferencedNotes.Except(referencedNotes, StringComparer.Ordinal))
+            changed.Add(removedNoteId);
+
         var result = source with
         {
             Revision = checked(source.Revision + 1),
             Content = blocks,
+            Notes = notes,
         };
         ManuscriptCodec.Validate(result, source.ManuscriptId, result.Revision);
         return (result, changed.ToList());
+    }
+
+    private static HashSet<string> ReferencedNoteIds(IEnumerable<ManuscriptBlock> blocks)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        AddReferencedNoteIds(blocks, result);
+        return result;
+    }
+
+    private static void AddReferencedNoteIds(
+        IEnumerable<ManuscriptBlock> blocks,
+        ISet<string> result)
+    {
+        foreach (var block in blocks)
+        {
+            foreach (var inline in block.Content)
+            {
+                if (inline.Type == ManuscriptInlineType.NoteReference
+                    && !string.IsNullOrWhiteSpace(inline.NoteId))
+                {
+                    result.Add(inline.NoteId);
+                }
+            }
+            if (block.Table is not { } table)
+                continue;
+            foreach (var row in table.Rows)
+            foreach (var cell in row.Cells)
+                AddReferencedNoteIds(cell.Content, result);
+        }
     }
 
     public static List<ManuscriptInline> ReplaceTextPreservingMarks(
@@ -341,7 +408,7 @@ public static class ManuscriptOperations
 
     private static void ValidateBlockText(ManuscriptBlockType type, string text)
     {
-        if (type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage)
+        if (type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table)
         {
             if (!string.IsNullOrWhiteSpace(text))
                 throw new ArgumentException("Non-flowing blocks cannot contain text.", nameof(text));
@@ -377,7 +444,7 @@ public static class ManuscriptOperations
         string? blockId = null) =>
         NewBlock(
             type,
-            type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+            type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
                 ? []
                 : [new ManuscriptInline { Text = text }],
             styleRole,
@@ -409,7 +476,7 @@ public static class ManuscriptOperations
             Id = string.IsNullOrWhiteSpace(blockId) ? Guid.NewGuid().ToString("N") : blockId,
             Type = type,
             StyleRole = string.IsNullOrWhiteSpace(styleRole) ? DefaultStyle(type) : styleRole.Trim(),
-            Content = type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+            Content = type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
                 ? []
                 : content,
             ImageId = type == ManuscriptBlockType.Figure ? imageId : null,
@@ -459,14 +526,7 @@ public static class ManuscriptOperations
             Marks = inline.Marks.Select(mark => mark with { }).ToList(),
         };
 
-    private static ManuscriptBlock Clone(ManuscriptBlock block) =>
-        block with
-        {
-            Content = block.Content.Select(inline => inline with
-            {
-                Marks = inline.Marks.Select(mark => mark with { }).ToList(),
-            }).ToList(),
-        };
+    private static ManuscriptBlock Clone(ManuscriptBlock block) => ManuscriptClone.Block(block);
 
     internal static ManuscriptBlock FindBlock(IReadOnlyList<ManuscriptBlock> blocks, string blockId) =>
         blocks[Find(blocks, blockId)];
@@ -519,7 +579,7 @@ public static class ManuscriptOperations
 
     private static void RequireTextBlock(ManuscriptBlock block)
     {
-        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage)
+        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table)
             throw new InvalidOperationException($"Block {block.Id} does not contain directly editable text.");
     }
 
@@ -532,6 +592,7 @@ public static class ManuscriptOperations
             ManuscriptBlockType.ListItem => ManuscriptStyleRoles.ListItem,
             ManuscriptBlockType.Figure => ManuscriptStyleRoles.FigureCaption,
             ManuscriptBlockType.DesignedPage => ManuscriptStyleRoles.DesignedPage,
+            ManuscriptBlockType.Table => ManuscriptStyleRoles.Table,
             _ => ManuscriptStyleRoles.Body,
         };
 }

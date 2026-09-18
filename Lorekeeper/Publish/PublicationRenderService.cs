@@ -1118,8 +1118,8 @@ public sealed class PublicationRenderProcessor(
                 cancellationToken,
                 layoutTraceMode: "pagination");
             var response = await InvokePaginationAsync(jobId, request, cancellationToken);
-            if (response.ProtocolVersion != 13)
-                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 13 is required.");
+            if (response.ProtocolVersion != 14)
+                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 14 is required.");
             if (!string.Equals(response.RendererVersion, rendererVersion, StringComparison.Ordinal))
                 throw new InvalidOperationException("The press renderer returned a different renderer version while paginating the interior.");
             if (!string.Equals(response.JobId, jobId.ToString("N"), StringComparison.Ordinal))
@@ -1321,8 +1321,8 @@ public sealed class PublicationRenderProcessor(
                 _logger.LogDebug("Render job {JobId} progress {Percent}%: {Message}", job.Id, mapped, progress.Message);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 13)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 13 is required.");
+        if (result.ProtocolVersion != 14)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 14 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1822,12 +1822,14 @@ public sealed class PublicationRenderProcessor(
                 synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                 chapter.IncludeHeading,
                 blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
+                notes = chapter.Manuscript.Notes.Select(NotePayload).ToArray(),
                 designedPages = chapter.DesignedPages.Select(composition => new
                 {
                     id = composition.Id,
                     composition.Name,
                     revision = composition.Revision,
                     semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
+                    semanticNotes = composition.SemanticManuscript.Notes.Select(NotePayload).ToArray(),
                     variants = composition.Variants.Select(variant => new
                     {
                         id = variant.Id,
@@ -1855,12 +1857,14 @@ public sealed class PublicationRenderProcessor(
                 item.LocalOrder,
                 startSide = item.StartSide.ToString(),
                 blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
+                notes = item.Manuscript.Notes.Select(NotePayload).ToArray(),
                 designedPages = item.DesignedPages.Select(composition => new
                 {
                     id = composition.Id,
                     composition.Name,
                     revision = composition.Revision,
                     semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
+                    semanticNotes = composition.SemanticManuscript.Notes.Select(NotePayload).ToArray(),
                     variants = composition.Variants.Select(variant => new
                     {
                         id = variant.Id,
@@ -1892,7 +1896,7 @@ public sealed class PublicationRenderProcessor(
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 13,
+            protocolVersion = 14,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             renderScope = job.Scope.ToString().ToLowerInvariant(),
@@ -2351,10 +2355,29 @@ public sealed class PublicationRenderProcessor(
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
         designedPageId = block.DesignedPageId,
+        table = block.Table is null ? null : new
+        {
+            id = block.Table.Id,
+            columnWidthWeights = block.Table.ColumnWidthWeights.ToArray(),
+            block.Table.HeaderRowCount,
+            rows = block.Table.Rows.Select(row => new
+            {
+                id = row.Id,
+                cells = row.Cells.Select(cell => new
+                {
+                    id = cell.Id,
+                    cell.RowSpan,
+                    cell.ColumnSpan,
+                    content = cell.Content.Select(BlockPayload).ToArray(),
+                }).ToArray(),
+            }).ToArray(),
+        },
         content = block.Content.Select(inline => new
         {
+            inline.Id,
             type = inline.Type.ToString(),
             inline.Text,
+            inline.NoteId,
             marks = inline.Marks.Select(mark => new
             {
                 type = mark.Type.ToString(),
@@ -2365,8 +2388,15 @@ public sealed class PublicationRenderProcessor(
         }).ToArray(),
     };
 
+    private static object NotePayload(ManuscriptNote note) => new
+    {
+        id = note.Id,
+        kind = note.Kind.ToString(),
+        content = note.Content.Select(BlockPayload).ToArray(),
+    };
+
     private static bool IsPressPageMappedBlock(ManuscriptBlock block) =>
-        block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage
+        block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
         || !string.IsNullOrWhiteSpace(ManuscriptCodec.Text(block));
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with

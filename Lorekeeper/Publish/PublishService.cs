@@ -733,7 +733,7 @@ public sealed class PublishService(
             chapter.ActId,
             chapter.Title,
             IsIncluded(selections, PublishOutlineTargetKind.Chapter, chapter.Id),
-            manuscript.Content.Count(block => block.Type == ManuscriptBlockType.Figure),
+            ManuscriptTraversal.EnumerateBlocks(manuscript).Count(block => block.Type == ManuscriptBlockType.Figure),
             manuscript.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
             0);
     }

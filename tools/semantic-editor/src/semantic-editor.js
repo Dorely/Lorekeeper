@@ -19,7 +19,8 @@ const blockTypeToNode = {
     blockQuote: "blockquote",
     listItem: "list_item",
     figure: "figure",
-    designedPage: "designed_page"
+    designedPage: "designed_page",
+    table: "table"
 };
 const nodeToBlockType = Object.fromEntries(Object.entries(blockTypeToNode).map(([key, value]) => [value, key]));
 const markTypeToName = {
@@ -53,7 +54,8 @@ const defaultRoleByNode = {
     list_item: "list-item",
     scene_break: "scene-break",
     figure: "figure-caption",
-    designed_page: "designed-page"
+    designed_page: "designed-page",
+    table: "table"
 };
 
 function newBlockId() {
@@ -206,8 +208,27 @@ function designedPageDom(node) {
 
 const schema = new Schema({
     nodes: {
-        doc: {content: "block*"},
+        doc: {content: "block*", attrs: {notes: {default: []}}},
         text: {group: "inline"},
+        note_reference: {
+            inline: true,
+            group: "inline",
+            atom: true,
+            selectable: true,
+            attrs: {id: {}, noteId: {}, kind: {default: "footnote"}},
+            parseDOM: [{tag: "sup[data-note-id]", getAttrs: element => ({
+                id: element.dataset.noteReferenceId,
+                noteId: element.dataset.noteId,
+                kind: element.dataset.noteKind || "footnote"
+            })}],
+            toDOM: node => ["sup", {
+                class: "semantic-note-reference",
+                "data-note-reference-id": node.attrs.id,
+                "data-note-id": node.attrs.noteId,
+                "data-note-kind": node.attrs.kind,
+                title: node.attrs.kind === "endnote" ? "Endnote" : "Footnote"
+            }, node.attrs.kind === "endnote" ? "[e]" : "[n]"]
+        },
         hard_break: {
             inline: true,
             group: "inline",
@@ -323,6 +344,55 @@ const schema = new Schema({
                 })
             }],
             toDOM: designedPageDom
+        },
+        table: {
+            group: "block",
+            content: "table_row+",
+            isolating: true,
+            attrs: {
+                ...blockAttrs,
+                styleRole: {default: "table"},
+                tableId: {},
+                columnWidthWeights: {default: []},
+                headerRowCount: {default: 0}
+            },
+            parseDOM: [{tag: "table[data-table-id]", getAttrs: element => ({
+                id: element.dataset.blockId,
+                styleRole: "table",
+                tableId: element.dataset.tableId,
+                columnWidthWeights: JSON.parse(element.dataset.columnWidths || "[]"),
+                headerRowCount: Number(element.dataset.headerRows || 0)
+            })}],
+            toDOM: node => ["table", {
+                class: "semantic-rich-table",
+                "data-block-id": node.attrs.id,
+                "data-style-role": "table",
+                "data-table-id": node.attrs.tableId,
+                "data-column-widths": JSON.stringify(node.attrs.columnWidthWeights || []),
+                "data-header-rows": String(node.attrs.headerRowCount || 0)
+            }, ["tbody", 0]]
+        },
+        table_row: {
+            content: "table_cell+",
+            attrs: {id: {default: null}, header: {default: false}},
+            parseDOM: [{tag: "tr", getAttrs: element => ({id: element.dataset.rowId, header: element.dataset.header === "true"})}],
+            toDOM: node => ["tr", {"data-row-id": node.attrs.id, "data-header": String(node.attrs.header)}, 0]
+        },
+        table_cell: {
+            content: "(paragraph|list_item|figure)+",
+            isolating: true,
+            attrs: {id: {default: null}, rowSpan: {default: 1}, columnSpan: {default: 1}, header: {default: false}},
+            parseDOM: [{tag: "td, th", getAttrs: element => ({
+                id: element.dataset.cellId,
+                rowSpan: Number(element.getAttribute("rowspan") || 1),
+                columnSpan: Number(element.getAttribute("colspan") || 1),
+                header: element.tagName.toLowerCase() === "th"
+            })}],
+            toDOM: node => [node.attrs.header ? "th" : "td", {
+                "data-cell-id": node.attrs.id,
+                rowspan: node.attrs.rowSpan > 1 ? node.attrs.rowSpan : null,
+                colspan: node.attrs.columnSpan > 1 ? node.attrs.columnSpan : null
+            }, 0]
         }
     },
     marks: {
@@ -392,6 +462,13 @@ const schema = new Schema({
 });
 
 function inlineFromDomain(inline) {
+    if (inline.type === "noteReference") {
+        return [schema.nodes.note_reference.create({
+            id: inline.id || newBlockId(),
+            noteId: inline.noteId,
+            kind: inline.kind || "footnote"
+        })];
+    }
     if (!inline.text) return [];
     const marks = (inline.marks || []).flatMap(mark => {
         const name = markTypeToName[mark.type];
@@ -411,91 +488,145 @@ function inlineFromDomain(inline) {
     return nodes;
 }
 
+function blockFromDomain(block, noteKinds) {
+    const nodeName = blockTypeToNode[block.type] || "paragraph";
+    const nodeType = schema.nodes[nodeName];
+    const attrs = {
+        id: block.id || newBlockId(),
+        styleRole: block.styleRole || "body",
+        imageId: block.imageId || null,
+        altText: block.altText || null,
+        imageUrl: block.imageUrl || null,
+        decorative: block.decorative === true,
+        language: block.language || null,
+        accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null),
+        presentation: block.figurePresentation || null,
+        paragraphPresentation: block.paragraphPresentation || null,
+        designedPageId: block.designedPageId || null,
+        designedPageName: block.designedPageName || null,
+        designedPageSurfaceLabel: block.designedPageSurfaceLabel || null,
+        designedPageStatus: block.designedPageStatus || null,
+        designedPagePreviewUrl: block.designedPagePreviewUrl || null
+    };
+    if (nodeName === "heading") attrs.level = block.headingLevel || 2;
+    if (nodeName === "table") {
+        const table = block.table || {};
+        attrs.tableId = table.id || newBlockId();
+        attrs.columnWidthWeights = table.columnWidthWeights || [];
+        attrs.headerRowCount = Number(table.headerRowCount || 0);
+        const rows = (table.rows || []).map((row, rowIndex) => schema.nodes.table_row.create({
+            id: row.id || newBlockId(),
+            header: rowIndex < attrs.headerRowCount
+        }, (row.cells || []).map(cell => schema.nodes.table_cell.create({
+            id: cell.id || newBlockId(),
+            rowSpan: Number(cell.rowSpan || 1),
+            columnSpan: Number(cell.columnSpan || 1),
+            header: rowIndex < attrs.headerRowCount
+        }, (cell.content || []).map(value => blockFromDomain(value, noteKinds))))));
+        return nodeType.create(attrs, rows);
+    }
+    const content = ["scene_break", "designed_page"].includes(nodeName)
+        ? null
+        : (block.content || []).flatMap(inline => inline.type === "noteReference"
+            ? [schema.nodes.note_reference.create({
+                id: inline.id || newBlockId(),
+                noteId: inline.noteId,
+                kind: noteKinds.get(inline.noteId) || "footnote"
+            })]
+            : inlineFromDomain(inline));
+    return nodeType.create(attrs, content);
+}
+
 function documentFromDomain(document) {
-    const blocks = (document.content || []).map(block => {
-        const nodeName = blockTypeToNode[block.type] || "paragraph";
-        const nodeType = schema.nodes[nodeName];
-        const attrs = {
-            id: block.id || newBlockId(),
-            styleRole: block.styleRole || "body",
-            imageId: block.imageId || null,
-            altText: block.altText || null,
-            imageUrl: block.imageUrl || null
-            ,decorative: block.decorative === true
-            ,language: block.language || null
-            ,accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null)
-            ,presentation: block.figurePresentation || null
-            ,paragraphPresentation: block.paragraphPresentation || null
-            ,designedPageId: block.designedPageId || null
-            ,designedPageName: block.designedPageName || null
-            ,designedPageSurfaceLabel: block.designedPageSurfaceLabel || null
-            ,designedPageStatus: block.designedPageStatus || null
-            ,designedPagePreviewUrl: block.designedPagePreviewUrl || null
-        };
-        if (nodeName === "heading")
-            attrs.level = block.headingLevel || 2;
-        const content = ["scene_break", "designed_page"].includes(nodeName)
-            ? null
-            : (block.content || []).flatMap(inlineFromDomain);
-        return nodeType.create(attrs, content);
-    });
+    const notes = structuredClone(document.notes || []);
+    const noteKinds = new Map(notes.map(note => [note.id, note.kind || "footnote"]));
+    const blocks = (document.content || []).map(block => blockFromDomain(block, noteKinds));
     if (blocks.length === 0) {
         blocks.push(schema.nodes.paragraph.create({
             id: newBlockId(),
             styleRole: "body"
         }));
     }
-    return schema.nodes.doc.create(null, blocks);
+    return schema.nodes.doc.create({notes}, blocks);
+}
+
+function domainBlockFromNode(node) {
+    if (node.type.name === "table") {
+        const rows = [];
+        node.forEach(row => {
+            const cells = [];
+            row.forEach(cell => cells.push({
+                id: cell.attrs.id || newBlockId(),
+                rowSpan: Number(cell.attrs.rowSpan || 1),
+                columnSpan: Number(cell.attrs.columnSpan || 1),
+                content: Array.from({length: cell.childCount}, (_, index) => domainBlockFromNode(cell.child(index)))
+            }));
+            rows.push({id: row.attrs.id || newBlockId(), cells});
+        });
+        return {
+            id: node.attrs.id || newBlockId(),
+            type: "table",
+            styleRole: "table",
+            headingLevel: null,
+            imageId: null,
+            altText: null,
+            language: null,
+            paragraphPresentation: null,
+            table: {
+                id: node.attrs.tableId || newBlockId(),
+                columnWidthWeights: node.attrs.columnWidthWeights || [],
+                headerRowCount: Number(node.attrs.headerRowCount || 0),
+                rows
+            },
+            content: []
+        };
+    }
+    const inlines = [];
+    if (node.isTextblock) {
+        node.forEach(child => {
+            if (child.type.name === "note_reference") {
+                inlines.push({id: child.attrs.id || newBlockId(), type: "noteReference", text: "", noteId: child.attrs.noteId, marks: []});
+                return;
+            }
+            const marks = child.marks.flatMap(mark => {
+                const type = markNameToType[mark.type.name];
+                if (!type) return [];
+                const value = mark.attrs?.value ?? null;
+                return [{type, value}];
+            });
+            const text = child.isText ? child.text : child.type.name === "hard_break" ? "\n" : null;
+            if (!text) return;
+            const previous = inlines.at(-1);
+            if (previous?.type === "text" && JSON.stringify(previous.marks) === JSON.stringify(marks)) previous.text += text;
+            else inlines.push({type: "text", text, marks});
+        });
+    }
+    const block = {
+        id: node.attrs.id || newBlockId(),
+        type: nodeToBlockType[node.type.name] || "paragraph",
+        styleRole: node.attrs.styleRole || "body",
+        headingLevel: node.type.name === "heading" ? node.attrs.level : null,
+        imageId: node.type.name === "figure" ? node.attrs.imageId : null,
+        altText: node.type.name === "figure" ? node.attrs.altText : null,
+        language: node.attrs.language || null,
+        paragraphPresentation: ["paragraph", "heading", "blockquote", "list_item", "figure"].includes(node.type.name)
+            ? node.attrs.paragraphPresentation || null
+            : null,
+        content: inlines
+    };
+    if (node.type.name === "figure") {
+        block.decorative = node.attrs.decorative === true;
+        block.accessibilityRole = node.attrs.accessibilityRole || "figure";
+        block.figurePresentation = node.attrs.presentation || {...defaultFigurePresentation};
+    }
+    if (node.type.name === "designed_page") block.designedPageId = node.attrs.designedPageId;
+    return block;
 }
 
 function domainFromDocument(doc, manuscriptId, revision) {
     const content = [];
-    doc.forEach(node => {
-        const inlines = [];
-        if (node.isTextblock) {
-            node.forEach(child => {
-                const marks = child.marks.flatMap(mark => {
-                    const type = markNameToType[mark.type.name];
-                    if (!type) return [];
-                    const value = mark.attrs?.value ?? null;
-                    return [{type, value}];
-                });
-                const text = child.isText
-                    ? child.text
-                    : child.type.name === "hard_break"
-                        ? "\n"
-                        : null;
-                if (!text) return;
-                const previous = inlines.at(-1);
-                if (previous && JSON.stringify(previous.marks) === JSON.stringify(marks))
-                    previous.text += text;
-                else
-                    inlines.push({type: "text", text, marks});
-            });
-        }
-        const block = {
-            id: node.attrs.id || newBlockId(),
-            type: nodeToBlockType[node.type.name] || "paragraph",
-            styleRole: node.attrs.styleRole || "body",
-            headingLevel: node.type.name === "heading" ? node.attrs.level : null,
-            imageId: node.type.name === "figure" ? node.attrs.imageId : null,
-            altText: node.type.name === "figure" ? node.attrs.altText : null,
-            language: node.attrs.language || null,
-            paragraphPresentation: ["paragraph", "heading", "blockquote", "list_item", "figure"].includes(node.type.name)
-                ? node.attrs.paragraphPresentation || null
-                : null,
-            content: inlines
-        };
-        if (node.type.name === "figure") {
-            block.decorative = node.attrs.decorative === true;
-            block.accessibilityRole = node.attrs.accessibilityRole || "figure";
-            block.figurePresentation = node.attrs.presentation || {...defaultFigurePresentation};
-        }
-        if (node.type.name === "designed_page")
-            block.designedPageId = node.attrs.designedPageId;
-        content.push(block);
-    });
-    return {schemaVersion: 5, manuscriptId, revision, content};
+    doc.forEach(node => content.push(domainBlockFromNode(node)));
+    return {schemaVersion: 6, manuscriptId, revision, content, notes: structuredClone(doc.attrs.notes || [])};
 }
 
 export function roundTripManuscriptJson(json) {
@@ -513,8 +644,10 @@ function blockIdPlugin() {
             const seen = new Set();
             let transaction = newState.tr;
             let changed = false;
+            const referencedNotes = new Set();
             newState.doc.descendants((node, position) => {
-                if (!node.isBlock || node.type.name === "doc") return true;
+                if (node.type.name === "note_reference") referencedNotes.add(node.attrs.noteId);
+                if ((!node.isBlock && node.type.name !== "note_reference") || node.type.name === "doc") return true;
                 const id = node.attrs.id;
                 if (!id || seen.has(id)) {
                     transaction = transaction.setNodeMarkup(position, undefined, {...node.attrs, id: newBlockId()});
@@ -522,8 +655,14 @@ function blockIdPlugin() {
                 } else {
                     seen.add(id);
                 }
-                return false;
+                return ["table", "table_row", "table_cell"].includes(node.type.name);
             });
+            const notes = newState.doc.attrs.notes || [];
+            const retainedNotes = notes.filter(note => referencedNotes.has(note.id));
+            if (retainedNotes.length !== notes.length) {
+                transaction = transaction.setDocAttribute("notes", retainedNotes);
+                changed = true;
+            }
             return changed ? transaction : null;
         }
     });
@@ -2175,7 +2314,7 @@ function canonicalPlainText(doc, manuscriptId, revision) {
         .filter(block => block.type !== "designedPage")
         .map(block => block.type === "sceneBreak"
             ? "***"
-            : block.content.map(inline => inline.text).join(""))
+            : domainBlockText(block))
         .join("\n\n");
 }
 
@@ -2183,12 +2322,25 @@ function editorialText(doc, manuscriptId, revision) {
     const domain = domainFromDocument(doc, manuscriptId, revision);
     return domain.content
         .filter(block => !["sceneBreak", "designedPage"].includes(block.type))
-        .map(block => block.content.map(inline => inline.text).join(""))
+        .map(domainBlockText)
         .join("\n\n");
+}
+
+function domainBlockText(block) {
+    if (block.type === "table") {
+        return (block.table?.rows || []).map(row =>
+            (row.cells || []).map(cell =>
+                (cell.content || []).map(domainBlockText).join("\n")).join("\t")).join("\n");
+    }
+    return (block.content || []).map(inline => inline.text || "").join("");
 }
 
 function hydrateFigureImageUrls(document, imageById) {
     for (const block of document.content || []) {
+        if (block.type === "table") {
+            for (const row of block.table?.rows || [])
+                for (const cell of row.cells || []) hydrateFigureImageUrls({content: cell.content || []}, imageById);
+        }
         const image = block.type === "figure"
             ? imageById.get(String(block.imageId).toLowerCase())
             : null;
@@ -2208,6 +2360,84 @@ function hydrateDesignedPageSummaries(document, designedPageById) {
         block.designedPagePreviewUrl = summary?.previewUrl ?? null;
     }
     return document;
+}
+
+async function insertRichTable(view, root) {
+    const values = await showEditorForm(root, {
+        title: "Insert table",
+        description: "Create a semantic table. Column widths begin equal and can be refined by imported or future layout tools.",
+        submitLabel: "Insert",
+        fields: [
+            {name: "rows", label: "Rows", type: "number", value: "2", required: true},
+            {name: "columns", label: "Columns", type: "number", value: "2", required: true},
+            {name: "header", label: "Use first row as headers", type: "checkbox", value: true}
+        ],
+        validate: value => {
+            const rows = Number(value.rows);
+            const columns = Number(value.columns);
+            return !Number.isInteger(rows) || rows < 1 || rows > 50 || !Number.isInteger(columns) || columns < 1 || columns > 20
+                ? "Use 1–50 rows and 1–20 columns."
+                : null;
+        }
+    });
+    if (!values) return;
+    const rowCount = Number(values.rows);
+    const columnCount = Number(values.columns);
+    const rows = Array.from({length: rowCount}, (_, rowIndex) => schema.nodes.table_row.create({
+        id: newBlockId(),
+        header: values.header && rowIndex === 0
+    }, Array.from({length: columnCount}, () => schema.nodes.table_cell.create({
+        id: newBlockId(),
+        rowSpan: 1,
+        columnSpan: 1,
+        header: values.header && rowIndex === 0
+    }, schema.nodes.paragraph.create({id: newBlockId(), styleRole: "body"})))));
+    const table = schema.nodes.table.create({
+        id: newBlockId(),
+        styleRole: "table",
+        tableId: newBlockId(),
+        columnWidthWeights: Array(columnCount).fill(1),
+        headerRowCount: values.header ? 1 : 0
+    }, rows);
+    view.dispatch(view.state.tr.replaceSelectionWith(table).scrollIntoView());
+    view.focus();
+}
+
+async function insertNote(view, root, kind) {
+    if (!view.state.selection.$from.parent.inlineContent) {
+        showEditorNotice(root, "Place the cursor in a paragraph, list item, figure caption, or table cell first.");
+        return;
+    }
+    const values = await showEditorForm(root, {
+        title: kind === "endnote" ? "Insert endnote" : "Insert footnote",
+        description: "The note is part of this semantic document and moves with its reference.",
+        submitLabel: "Insert",
+        fields: [{name: "text", label: "Note text", type: "textarea", rows: 4, required: true}],
+        validate: value => value.text.trim().length > 20000 ? "Use 20,000 characters or fewer." : null
+    });
+    if (!values) return;
+    const noteId = newBlockId();
+    const referenceId = newBlockId();
+    const notes = structuredClone(view.state.doc.attrs.notes || []);
+    notes.push({
+        id: noteId,
+        kind,
+        content: [{
+            id: newBlockId(),
+            type: "paragraph",
+            styleRole: "body",
+            headingLevel: null,
+            imageId: null,
+            altText: null,
+            content: [{type: "text", text: values.text.trim(), marks: []}]
+        }]
+    });
+    const reference = schema.nodes.note_reference.create({id: referenceId, noteId, kind});
+    view.dispatch(view.state.tr
+        .replaceSelectionWith(reference)
+        .setDocAttribute("notes", notes)
+        .scrollIntoView());
+    view.focus();
 }
 
 const authoringJournalDatabase = "LorekeeperAuthoringJournalV1";
@@ -2335,7 +2565,7 @@ class AuthoringJournalV1 {
 }
 
 function blockText(block) {
-    return (block.content || []).map(inline => inline.text || "").join("");
+    return domainBlockText(block);
 }
 
 function sameJson(left, right) {
@@ -2393,6 +2623,13 @@ function sameFigureProperties(left, right) {
 // Translate the ProseMirror semantic document, never its DOM or HTML. The
 // server validates these operations against its pre-state and derives inverses.
 export function authoringOperations(before, after) {
+    const hasRichContent = value => (value.notes || []).length > 0
+        || (value.content || []).some(block => block.type === "table");
+    if (hasRichContent(before) || hasRichContent(after)) {
+        return sameJson(before.content || [], after.content || []) && sameJson(before.notes || [], after.notes || [])
+            ? []
+            : [{kind: "replaceRichDocument", richDocument: after}];
+    }
     const operations = [];
     const beforeById = new Map((before.content || []).map((block, index) => [block.id, {block, index}]));
     const afterById = new Map((after.content || []).map((block, index) => [block.id, {block, index}]));
@@ -2477,7 +2714,7 @@ function baseOrderPrecondition(beforeById, afterBlocks, blockId) {
     };
 }
 
-export function addAuthoringPreconditions(operations, before, after, fingerprints) {
+export function addAuthoringPreconditions(operations, before, after, fingerprints, documentFingerprint = null) {
     const beforeBlocks = before.content || [];
     const afterBlocks = after.content || [];
     const beforeById = new Map(beforeBlocks.map(block => [block.id, {
@@ -2486,6 +2723,10 @@ export function addAuthoringPreconditions(operations, before, after, fingerprint
     }]));
     for (const operation of operations) {
         const kind = String(operation.kind || "").toLowerCase();
+        if (kind === "replacerichdocument") {
+            operation.expectedDocumentFingerprint = documentFingerprint;
+            continue;
+        }
         const blockId = operation.blockId || operation.placementBlockId;
         if (blockId && beforeById.has(blockId))
             operation.expectedElementFingerprint = beforeById.get(blockId).fingerprint;
@@ -2544,6 +2785,11 @@ function applyAuthoringOperations(view, operations) {
             transaction = Number.isInteger(existing)
                 ? transaction.replaceWith(existing, existing + view.state.doc.nodeAt(existing).nodeSize, replacement)
                 : transaction.insert(positionForIndex(view.state.doc, operation.index), replacement);
+        } else if (kind === "replacerichdocument") {
+            const replacement = documentFromDomain(operation.richDocument);
+            transaction = transaction
+                .replaceWith(0, view.state.doc.content.size, replacement.content)
+                .setDocAttribute("notes", replacement.attrs.notes || []);
         } else if (kind === "deleteblock" || kind === "removedesignedpageplacement") {
             if (!Number.isInteger(position)) continue;
             transaction = transaction.delete(position, position + view.state.doc.nodeAt(position).nodeSize);
@@ -2985,7 +3231,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (dispatchPaused || !journal.recoverable || !authoringSession) return false;
             const before = queuedDocument;
             const operations = authoringOperations(before, after);
-            addAuthoringPreconditions(operations, before, after, elementFingerprints);
+            addAuthoringPreconditions(operations, before, after, elementFingerprints, targetVersion.fingerprint);
             if (operations.length === 0) {
                 savedGeneration = Math.max(savedGeneration, targetGeneration);
                 return true;
@@ -3503,6 +3749,9 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 "character_style",
                 value === "__remove__" ? null : value || null)),
         iconButton("⁂", "Insert scene break", () => insertSceneBreak(view)),
+        button("Table", "Insert semantic table", () => void insertRichTable(view, root)),
+        button("Fn", "Insert footnote", () => void insertNote(view, root, "footnote")),
+        button("En", "Insert endnote", () => void insertNote(view, root, "endnote")),
         selectControl("Insert special character", [
             ["", "Ω"],
             ["—", "Em dash —"],
@@ -3578,6 +3827,9 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             controlByTitle("Convert selected figure to a paragraph"),
             controlByTitle("Insert a designed page at the current manuscript position"),
             controlByTitle("Insert scene break"),
+            controlByTitle("Insert semantic table"),
+            controlByTitle("Insert footnote"),
+            controlByTitle("Insert endnote"),
             controlBySelect("Insert special character"),
         ]),
         toolGroup("Paragraph formatting", [

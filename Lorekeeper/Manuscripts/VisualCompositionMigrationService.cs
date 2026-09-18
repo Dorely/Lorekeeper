@@ -358,6 +358,13 @@ public sealed class VisualCompositionMigrationService(
                 chapter.ManuscriptJson,
                 chapter.Id,
                 chapter.ManuscriptRevision),
+            5 => ManuscriptCodec.Deserialize(
+                ManuscriptSchemaUpgrade.UpgradeV5DocumentJson(
+                    chapter.ManuscriptJson,
+                    chapter.Id,
+                    chapter.ManuscriptRevision),
+                chapter.Id,
+                chapter.ManuscriptRevision),
             4 => ManuscriptCodec.Deserialize(
                 ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(
                     chapter.ManuscriptJson,

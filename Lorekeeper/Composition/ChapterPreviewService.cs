@@ -517,6 +517,7 @@ public sealed class ChapterPreviewService(
                             synopsis = profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                             includeHeading = profile.IncludeChapterHeadings,
                             blocks = documents[chapter.Id].Content.Select(BlockPayload).ToArray(),
+                            notes = documents[chapter.Id].Notes.Select(NotePayload).ToArray(),
                             designedPages = documents[chapter.Id].Content
                                 .Where(block => block.DesignedPageId is not null)
                                 .Select(block => pagePayloads[block.DesignedPageId!.Value])
@@ -526,7 +527,7 @@ public sealed class ChapterPreviewService(
                 }).ToArray();
             var payload = new
             {
-                protocolVersion = 13,
+                protocolVersion = 14,
                 jobId = jobId.ToString("N"),
                 profile = "generic-digital-pdf-v1",
                 ink = "Color",
@@ -608,8 +609,8 @@ public sealed class ChapterPreviewService(
                 throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
-            if (response.ProtocolVersion != 13)
-                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 13 is required.");
+            if (response.ProtocolVersion != 14)
+                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 14 is required.");
             if (response.JobId != jobId.ToString("N"))
                 throw new InvalidDataException("Lorekeeper Press returned a preview response for a different job.");
             var firstPage = response.PageMap.Where(item => Guid.TryParse(item.ChapterId, out var mapped) && mapped == chapterId)
@@ -1021,10 +1022,29 @@ public sealed class ChapterPreviewService(
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
         designedPageId = block.DesignedPageId,
+        table = block.Table is null ? null : new
+        {
+            id = block.Table.Id,
+            columnWidthWeights = block.Table.ColumnWidthWeights.ToArray(),
+            block.Table.HeaderRowCount,
+            rows = block.Table.Rows.Select(row => new
+            {
+                id = row.Id,
+                cells = row.Cells.Select(cell => new
+                {
+                    id = cell.Id,
+                    cell.RowSpan,
+                    cell.ColumnSpan,
+                    content = cell.Content.Select(BlockPayload).ToArray(),
+                }).ToArray(),
+            }).ToArray(),
+        },
         content = block.Content.Select(inline => new
         {
+            inline.Id,
             type = inline.Type.ToString(),
             inline.Text,
+            inline.NoteId,
             marks = inline.Marks
                 .Where(mark => mark.Type != ManuscriptMarkType.Language || !string.IsNullOrWhiteSpace(mark.Value))
                 .Select(mark => new
@@ -1035,6 +1055,13 @@ public sealed class ChapterPreviewService(
                         : mark.Value,
                 }).ToArray(),
         }).ToArray(),
+    };
+
+    private static object NotePayload(ManuscriptNote note) => new
+    {
+        id = note.Id,
+        kind = note.Kind.ToString(),
+        content = note.Content.Select(BlockPayload).ToArray(),
     };
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with

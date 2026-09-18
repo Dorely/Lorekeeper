@@ -227,7 +227,7 @@ public sealed class SystemPromptComposer(
         builder.Append("\n\nActive chapter: ")
             .Append(chapter.Title)
             .Append(". It is a format-neutral sequence of semantic text, ")
-            .Append(manuscript.Content.Count(block => block.Type == ManuscriptBlockType.Figure))
+            .Append(ManuscriptTraversal.EnumerateBlocks(manuscript).Count(block => block.Type == ManuscriptBlockType.Figure))
             .Append(" Figure block(s), and ")
             .Append(manuscript.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage))
             .Append(" Designed Page block(s). Keep semantic reading order independent from page-object layering.");

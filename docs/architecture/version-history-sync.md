@@ -71,7 +71,7 @@ projection repair do not retain an EF context across that client flush.
 
 ### Snapshot contract
 
-The format ID remains `lorekeeper.version-history-snapshot`. Current schema v8
+The format ID remains `lorekeeper.version-history-snapshot`. Current schema v9
 uses this stable layout:
 
 ```text
@@ -105,9 +105,10 @@ canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
-`N` format. Writers emit the exact canonical schema-v8 file set; undeclared
-files and noncanonical paths or encodings fail closed. Readers route every
-predecessor from schema v1 through v7 through an explicit adapter only after
+`N` format. Writers emit the exact canonical schema-v9 file set with manuscript
+v6 tables, notes, and inline-reference identities; undeclared files and
+noncanonical paths or encodings fail closed. Readers route every predecessor
+from schema v1 through v8 through an explicit adapter only after
 validating the predecessor's original manifest and file hashes.
 
 The manifest records repository/project identity, schema and included areas,
@@ -458,7 +459,7 @@ in deterministic checkpoints, comparisons, restore, and clone import.
   import/export.
 - [`narrative-context.md`](narrative-context.md) owns outline, graph, ingest,
   references, and retrieval projections that restore repairs.
-- [`manuscript-authoring.md`](manuscript-authoring.md) owns manuscript v5,
+- [`manuscript-authoring.md`](manuscript-authoring.md) owns manuscript v6,
   styles, annotations, and process-lifetime Undo/Redo.
 - [`composition-media.md`](composition-media.md) owns images, fonts,
   compositions, and scene semantics captured by snapshots.

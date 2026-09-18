@@ -75,7 +75,7 @@ public sealed class PublicationPackageService(
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
-    private const string EpubExporterVersion = "lorekeeper-epub-v4";
+    private const string EpubExporterVersion = "lorekeeper-epub-v5";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -1087,7 +1087,7 @@ public sealed class PublicationPackageService(
                 .Concat(document.PublicationSections.Select(item => item.Manuscript))
                 .Concat(document.PublicationSections.SelectMany(item => item.DesignedPages).Select(designedPage => designedPage.SemanticManuscript));
             var missingFigureAlt = semanticManuscripts.Any(manuscript =>
-                    manuscript.Content.Any(block =>
+                    ManuscriptTraversal.EnumerateBlocks(manuscript).Any(block =>
                         block.Type == ManuscriptBlockType.Figure
                         && !block.Decorative
                         && (string.IsNullOrWhiteSpace(block.AltText)

@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 13);
+    assert_eq!(value["protocolVersion"], 14);
     assert_eq!(value["rendererVersion"], "2.1.10");
     assert_eq!(
         value["profiles"],
@@ -59,8 +59,13 @@ fn v12_fixture_is_read_at_the_boundary_and_returns_the_current_protocol() {
     job.write_request();
 
     let output = job.render();
-    assert!(output.status.success(), "stderr={}", stderr(&output));
-    assert_eq!(response(&output)["protocolVersion"], 13);
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    assert_eq!(response(&output)["protocolVersion"], 14);
 }
 
 #[test]
@@ -73,7 +78,48 @@ fn v13_fixture_uses_current_designed_page_names() {
     );
     let output = job.render();
     assert!(output.status.success(), "stderr={}", stderr(&output));
-    assert_eq!(response(&output)["protocolVersion"], 13);
+    assert_eq!(response(&output)["protocolVersion"], 14);
+}
+
+#[test]
+fn v14_fixture_renders_rich_tables_and_note_atoms() {
+    let job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    let trace = job.layout_trace();
+    let lines = trace["pages"]
+        .as_array()
+        .expect("layout pages")
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    assert!(lines.iter().any(|line| {
+        line["semanticParentId"] == "footnotes"
+            && line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("A retained note."))
+    }));
+    assert!(lines.iter().any(|line| {
+        line["semanticId"] == "paragraph-a"
+            && line["runs"].as_array().is_some_and(|runs| {
+                runs.iter().any(|run| {
+                    run["text"] == "1" && run["baselineShiftEm"].as_f64().unwrap_or_default() > 0.0
+                })
+            })
+    }));
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert_eq!(response["protocolVersion"], 14);
+    assert!(response["pageMap"].as_array().is_some_and(|entries| {
+        entries
+            .iter()
+            .any(|entry| entry["blockId"] == "table-block-a")
+    }));
 }
 
 #[test]
@@ -167,7 +213,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 13);
+    assert_eq!(response["protocolVersion"], 14);
     assert_eq!(response["rendererVersion"], "2.1.10");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -4758,9 +4804,11 @@ impl PreparedJob {
         };
         request["profile"] = Value::String(profile.to_owned());
         if profile == "generic-digital-pdf-v1" {
-            request["cover"]["barcodeMode"] = json!("None");
+            if request.get("cover").is_some_and(|cover| !cover.is_null()) {
+                request["cover"]["barcodeMode"] = json!("None");
+                request["cover"]["surfaces"] = json!([]);
+            }
             request["printArtifactProfile"] = Value::Null;
-            request["cover"]["surfaces"] = json!([]);
         } else {
             let registry: Value =
                 serde_json::from_slice(include_bytes!("../assets/print-artifact-profiles-v1.json"))
@@ -4801,8 +4849,13 @@ impl PreparedJob {
                 "requiredCoverSurfaces": ["perfect-bound-outside"]
             });
         }
-        request["assets"][0]["byteLength"] = json!(PIXEL_PNG.len());
-        request["assets"][0]["sha256"] = Value::String(hex_hash(PIXEL_PNG));
+        if let Some(asset) = request["assets"]
+            .as_array_mut()
+            .and_then(|assets| assets.first_mut())
+        {
+            asset["byteLength"] = json!(PIXEL_PNG.len());
+            asset["sha256"] = Value::String(hex_hash(PIXEL_PNG));
+        }
         let job = Self { root, request };
         job.write_request();
         job

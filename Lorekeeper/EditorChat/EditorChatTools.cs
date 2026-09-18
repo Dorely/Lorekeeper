@@ -232,7 +232,7 @@ IActService acts,
                     ReadManuscriptAsync(context, chapterId, startBlock, blockCount),
                 name: "read_manuscript",
                 description:
-                    "Read bounded agent-manuscript-v2 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. Designed Page rows carry both their page ID and placement block ID; use the latter to address one repeated occurrence. " +
+                    "Read bounded agent-manuscript-v3 semantic rows with stable recursive IDs, exact text, sparse structure, UTF-16 inline marks and positions, table/note metadata, Figure/Designed Page metadata, source hash, and the current revision token. Designed Page rows carry both their page ID and placement block ID; use the latter to address one repeated occurrence. " +
                     "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient. In Contest Mode, use the returned stable IDs and revision to choose two boundary anchors anywhere in the chapter, or null for either document edge, then pass them to start_contest; both null anchors select the whole chapter. Empty spans between adjacent anchors and empty chapters are valid insertion targets. Do not attempt to mutate the manuscript from Contest Mode. The anchored interior may cross scene breaks and rich/atomic blocks; it is replaced wholesale while the anchors and all outside blocks remain unchanged. In normal Editor Mode, pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
@@ -241,7 +241,7 @@ IActService acts,
                 name: "inspect_manuscript",
                 description:
                     "Validate a manuscript and structurally search all blocks by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching agent-manuscript-v2 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore from the current persisted manuscript."),
+                    "Returns at most 40 matching agent-manuscript-v3 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore from the current persisted manuscript."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>

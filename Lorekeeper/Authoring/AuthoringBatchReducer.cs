@@ -71,6 +71,19 @@ public static class AuthoringBatchReducer
         foreach (var operation in operations)
         {
             var kind = operation.Kind.Trim().ToLowerInvariant();
+            if (kind == "replacerichdocument")
+            {
+                if (operation.RichDocument is null
+                    || string.IsNullOrWhiteSpace(operation.ExpectedDocumentFingerprint)
+                    || !string.Equals(
+                        operation.ExpectedDocumentFingerprint,
+                        Fingerprint(current),
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+                continue;
+            }
             var blockId = TargetBlockId(operation);
             if (kind is "insertblock" or "insertdesignedpageplacement")
             {
@@ -206,11 +219,28 @@ public static class AuthoringBatchReducer
     public static string Fingerprint(ManuscriptBlock block) =>
         AuthoringPersistence.Fingerprint(JsonSerializer.Serialize(block, ManuscriptCodec.JsonOptions));
 
+    public static string Fingerprint(ManuscriptDocument document) =>
+        AuthoringPersistence.Fingerprint(ManuscriptCodec.Serialize(document));
+
     private static IReadOnlyList<AuthoringOperationV1> CreateCanonicalDeltaCore(
         ManuscriptDocument source,
         ManuscriptDocument destination,
         int targetOrdinal)
     {
+        if (source.Notes.Count != 0
+            || destination.Notes.Count != 0
+            || source.Content.Any(block => block.Type == ManuscriptBlockType.Table)
+            || destination.Content.Any(block => block.Type == ManuscriptBlockType.Table))
+        {
+            return
+            [
+                new(
+                    targetOrdinal,
+                    "replaceRichDocument",
+                    RichDocument: ManuscriptClone.Document(destination),
+                    ExpectedDocumentFingerprint: Fingerprint(source)),
+            ];
+        }
         var current = source.Content.Select(Clone).ToList();
         var operations = new List<AuthoringOperationV1>();
         var desiredIds = destination.Content.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
@@ -275,20 +305,9 @@ public static class AuthoringBatchReducer
                 var existing = current.Content.FindIndex(item => ManuscriptOperations.AreEquivalentBlockIds(item.Id, wire.CanonicalBlock.Id));
                 if (existing >= 0)
                     result.Add(new DeleteManuscriptBlock(current.Content[existing].Id));
-                result.Add(new InsertManuscriptBlock(
+                result.Add(new PutRichManuscriptBlock(
                     Math.Clamp(wire.Index.Value, 0, current.Content.Count - (existing >= 0 ? 1 : 0)),
-                    wire.CanonicalBlock.Type,
-                    string.Concat(wire.CanonicalBlock.Content.Select(item => item.Text)),
-                    wire.CanonicalBlock.StyleRole,
-                    wire.CanonicalBlock.ImageId,
-                    wire.CanonicalBlock.AltText,
-                    wire.CanonicalBlock.HeadingLevel,
-                    wire.CanonicalBlock.Decorative,
-                    wire.CanonicalBlock.FigurePresentation,
-                    wire.CanonicalBlock.DesignedPageId,
-                    wire.CanonicalBlock.Language,
-                    wire.CanonicalBlock.AccessibilityRole ?? FigureAccessibilityRole.Figure,
-                    wire.CanonicalBlock.Id));
+                    ManuscriptClone.Block(wire.CanonicalBlock)));
                 current = Apply(current, [wire], allowCanonicalInverseOperations: true).Document;
                 continue;
             }
@@ -302,6 +321,14 @@ public static class AuthoringBatchReducer
     private static ManuscriptOperation ToOperation(ManuscriptDocument current, AuthoringOperationV1 wire)
     {
         var kind = wire.Kind.Trim().ToLowerInvariant();
+        if (kind == "replacerichdocument")
+        {
+            var rich = wire.RichDocument
+                ?? throw new ArgumentException("richDocument is required for ReplaceRichDocument.");
+            if (rich.ManuscriptId != current.ManuscriptId)
+                throw new ArgumentException("richDocument belongs to another manuscript.");
+            return new ReplaceManuscriptStructure(rich.Content, rich.Notes);
+        }
         if (kind == "removedesignedpageplacement")
             return new DeleteManuscriptBlock(Required(wire.PlacementBlockId, "placementBlockId"));
         if (kind == "insertdesignedpageplacement")
@@ -401,6 +428,17 @@ public static class AuthoringBatchReducer
         int oldIndex)
     {
         var kind = wire.Kind.Trim().ToLowerInvariant();
+        if (kind == "replacerichdocument")
+        {
+            return
+            [
+                new(
+                    wire.TargetOrdinal,
+                    "replaceRichDocument",
+                    RichDocument: ManuscriptClone.Document(before),
+                    ExpectedDocumentFingerprint: Fingerprint(after)),
+            ];
+        }
         if (kind is "insertblock" or "insertdesignedpageplacement")
         {
             return [new(wire.TargetOrdinal, "deleteBlock", BlockId: TargetBlockId(wire))];
@@ -467,16 +505,7 @@ public static class AuthoringBatchReducer
     private static string Required(string? value, string name) =>
         !string.IsNullOrWhiteSpace(value) ? value : throw new ArgumentException($"{name} is required.");
 
-    private static ManuscriptDocument Clone(ManuscriptDocument document) => document with
-    {
-        Content = document.Content.Select(Clone).ToList(),
-    };
+    private static ManuscriptDocument Clone(ManuscriptDocument document) => ManuscriptClone.Document(document);
 
-    private static ManuscriptBlock Clone(ManuscriptBlock block) => block with
-    {
-        Content = block.Content.Select(inline => inline with
-        {
-            Marks = inline.Marks.Select(mark => mark with { }).ToList(),
-        }).ToList(),
-    };
+    private static ManuscriptBlock Clone(ManuscriptBlock block) => ManuscriptClone.Block(block);
 }

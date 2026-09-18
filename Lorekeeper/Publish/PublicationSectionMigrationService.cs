@@ -689,6 +689,7 @@ public sealed class PublicationSectionMigrationService(
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, storedId, storedRevision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, storedId, storedRevision),
             4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, storedId, storedRevision),
+            5 => ManuscriptSchemaUpgrade.UpgradeV5DocumentJson(json, storedId, storedRevision),
             ManuscriptDocument.CurrentSchemaVersion => json,
             _ => throw new InvalidDataException($"Unsupported publication-section manuscript schema version {schemaVersion}."),
         };

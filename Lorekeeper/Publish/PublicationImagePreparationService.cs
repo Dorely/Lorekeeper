@@ -494,7 +494,7 @@ public sealed class PublicationImagePreparationService(
         if (renderScope != PublicationRenderScope.Cover)
         foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
         {
-            foreach (var block in chapter.Manuscript.Content.Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
+            foreach (var block in ManuscriptTraversal.EnumerateBlocks(chapter.Manuscript).Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
             {
                 var presentation = block.FigurePresentation ?? new FigurePresentation();
                 var dimensionsForFigure = FlowingFigureDimensions(document.Profile, presentation);
@@ -514,7 +514,7 @@ public sealed class PublicationImagePreparationService(
         if (renderScope != PublicationRenderScope.Cover)
         foreach (var section in document.PublicationSections)
         {
-            foreach (var block in section.Manuscript.Content.Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
+            foreach (var block in ManuscriptTraversal.EnumerateBlocks(section.Manuscript).Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId is not null))
             {
                 var presentation = block.FigurePresentation ?? new FigurePresentation();
                 var dimensionsForFigure = FlowingFigureDimensions(document.Profile, presentation);

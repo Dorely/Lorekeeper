@@ -2337,6 +2337,7 @@ public sealed class ProjectImportJobProcessor(
         return parsed.RootElement.GetProperty("schemaVersion").GetInt32() switch
         {
             ManuscriptDocument.CurrentSchemaVersion => json,
+            5 => ManuscriptSchemaUpgrade.UpgradeV5DocumentJson(json, id, revision),
             4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, id, revision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, id, revision),
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, id, revision),
@@ -2718,7 +2719,7 @@ public sealed class ProjectImportJobProcessor(
                 || matter.Title.Contains('\n'))
                 throw new InvalidOperationException("Core Book contains invalid matter metadata.");
             var manuscript = ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision);
-            if (manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure
+            if (ManuscriptTraversal.EnumerateBlocks(manuscript).Any(block => block.Type == ManuscriptBlockType.Figure
                 && block.ImageId is Guid imageId && !imageIds.Contains(imageId)))
                 throw new InvalidOperationException($"Core matter {matter.Id:N} references a missing image.");
             ManuscriptStyleService.ValidateDocumentReferences(manuscript, styles);

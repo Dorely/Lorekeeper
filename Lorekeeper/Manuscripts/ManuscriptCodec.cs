@@ -156,7 +156,7 @@ public static partial class ManuscriptCodec
                 throw new InvalidDataException($"Non-heading block {block.Id} cannot contain a heading level.");
             if (block.Content is null)
                 throw new InvalidDataException($"Block {block.Id} has no inline-content collection.");
-            if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage
+            if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
                 && block.Content.Count != 0)
             {
                 throw new InvalidDataException($"Non-flowing block {block.Id} cannot contain inline text.");
@@ -192,17 +192,17 @@ public static partial class ManuscriptCodec
             if (block.Type != ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
                 throw new InvalidDataException($"Block {block.Id} cannot reference a Designed Page.");
             ValidateParagraphPresentation(block);
-            if (block.Type != ManuscriptBlockType.SceneBreak
-                && block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
-            {
-                throw new InvalidDataException($"Block {block.Id} contains an unsupported inline node.");
-            }
             foreach (var inline in block.Content)
             {
                 if (inline is null || inline.Text is null || inline.Marks is null)
                     throw new InvalidDataException($"Block {block.Id} contains an incomplete inline node.");
                 if (!Enum.IsDefined(inline.Type))
                     throw new InvalidDataException($"Block {block.Id} contains an unsupported inline type.");
+                if (inline.Type == ManuscriptInlineType.Text
+                    && (inline.Id is not null || inline.NoteId is not null))
+                {
+                    throw new InvalidDataException($"Text in block {block.Id} cannot carry atom identity metadata.");
+                }
                 if (!ContainsOnlyXmlCharacters(inline.Text))
                     throw new InvalidDataException($"Block {block.Id} contains XML-forbidden text.");
                 if (ContainsBlockDelimiter(inline.Text))
@@ -269,16 +269,120 @@ public static partial class ManuscriptCodec
                 }
             }
         }
+        foreach (var table in document.Content.Where(block => block.Table is not null).Select(block => block.Table!))
+        foreach (var row in table.Rows)
+        foreach (var cell in row.Cells)
+            ValidateNestedBlocks(cell.Content);
+        foreach (var note in document.Notes)
+            ValidateNestedBlocks(note.Content);
+        RichManuscriptValidator.Validate(document);
+    }
+
+    private static void ValidateNestedBlocks(IEnumerable<ManuscriptBlock> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block is null || string.IsNullOrWhiteSpace(block.Id) || !ContainsOnlyXmlCharacters(block.Id))
+                throw new InvalidDataException("Nested manuscript block IDs must be non-empty and XML-safe.");
+            if (!Enum.IsDefined(block.Type) || string.IsNullOrWhiteSpace(block.StyleRole)
+                || !ManuscriptSemanticRoles.IsValid(block.StyleRole))
+                throw new InvalidDataException($"Nested block {block.Id} has an invalid type or semantic style role.");
+            if (block.Type == ManuscriptBlockType.Heading && block.HeadingLevel is not (>= 1 and <= 6)
+                || block.Type != ManuscriptBlockType.Heading && block.HeadingLevel is not null)
+                throw new InvalidDataException($"Nested block {block.Id} has an invalid heading level.");
+            if (block.Content is null)
+                throw new InvalidDataException($"Nested block {block.Id} has no inline-content collection.");
+            if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
+                && block.Content.Count != 0)
+                throw new InvalidDataException($"Nested non-flowing block {block.Id} cannot contain inline text.");
+            if (block.Type == ManuscriptBlockType.Figure)
+            {
+                if (block.ImageId is null || block.ImageId == Guid.Empty)
+                    throw new InvalidDataException($"Nested figure block {block.Id} requires a project image.");
+                if (block.Decorative && !string.IsNullOrWhiteSpace(block.AltText))
+                    throw new InvalidDataException($"Decorative nested figure block {block.Id} cannot carry alternative text.");
+                ValidateFigurePresentation(block);
+            }
+            else if (block.ImageId is not null || block.AltText is not null || block.Decorative
+                || block.AccessibilityRole is not null || block.FigurePresentation is not null)
+                throw new InvalidDataException($"Nested non-figure block {block.Id} cannot contain figure metadata.");
+            if (block.AltText is not null && !ContainsOnlyXmlCharacters(block.AltText))
+                throw new InvalidDataException($"Nested figure block {block.Id} contains XML-forbidden alternative text.");
+            if (block.Language is not null
+                && (string.IsNullOrWhiteSpace(block.Language) || block.Language.Length > 35))
+                throw new InvalidDataException($"Nested block {block.Id} language must be a compact BCP 47 tag.");
+            if (block.DesignedPageId is not null)
+                throw new InvalidDataException($"Nested block {block.Id} cannot reference a Designed Page.");
+            ValidateParagraphPresentation(block);
+            ValidateNestedInlines(block);
+            if (block.Table is { } table)
+            {
+                foreach (var row in table.Rows)
+                foreach (var cell in row.Cells)
+                    ValidateNestedBlocks(cell.Content);
+            }
+        }
+    }
+
+    private static void ValidateNestedInlines(ManuscriptBlock block)
+    {
+        foreach (var inline in block.Content)
+        {
+            if (inline is null || inline.Text is null || inline.Marks is null || !Enum.IsDefined(inline.Type))
+                throw new InvalidDataException($"Nested block {block.Id} contains an incomplete inline node.");
+            if (inline.Type == ManuscriptInlineType.Text && (inline.Id is not null || inline.NoteId is not null))
+                throw new InvalidDataException($"Text in nested block {block.Id} cannot carry atom identity metadata.");
+            if (!ContainsOnlyXmlCharacters(inline.Text) || ContainsBlockDelimiter(inline.Text))
+                throw new InvalidDataException($"Nested block {block.Id} contains invalid text.");
+            if (inline.Marks.Any(mark => mark is null || !Enum.IsDefined(mark.Type)))
+                throw new InvalidDataException($"Nested block {block.Id} contains an invalid inline mark.");
+            if (inline.Marks.GroupBy(mark => mark.Type).Any(group => group.Count() > 1))
+                throw new InvalidDataException($"Nested block {block.Id} contains duplicate inline marks.");
+            foreach (var mark in inline.Marks)
+            {
+                if (mark.Value is not null && !ContainsOnlyXmlCharacters(mark.Value))
+                    throw new InvalidDataException($"Nested block {block.Id} contains an XML-forbidden mark value.");
+                if (mark.Type is ManuscriptMarkType.Link or ManuscriptMarkType.Language or ManuscriptMarkType.CharacterStyle
+                    && string.IsNullOrWhiteSpace(mark.Value))
+                    throw new InvalidDataException($"Nested block {block.Id} contains a value-bearing mark without a value.");
+                if (mark.Type is not (ManuscriptMarkType.Link or ManuscriptMarkType.Language or ManuscriptMarkType.CharacterStyle)
+                    && mark.Value is not null)
+                    throw new InvalidDataException($"Nested block {block.Id} contains a value on a flag-style mark.");
+                if (mark.Type == ManuscriptMarkType.Link && mark.Value is { } link && !IsSafeLink(link))
+                    throw new InvalidDataException($"Nested block {block.Id} contains an unsafe link protocol.");
+                if (mark.Type == ManuscriptMarkType.Language && mark.Value is { } language
+                    && !LanguageTagRegex().IsMatch(language))
+                    throw new InvalidDataException($"Nested block {block.Id} contains an invalid BCP-47 language tag.");
+                if (mark.Type == ManuscriptMarkType.CharacterStyle && !ManuscriptSemanticRoles.IsValid(mark.Value))
+                    throw new InvalidDataException($"Nested block {block.Id} contains an invalid character style.");
+            }
+            if (inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Superscript)
+                && inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Subscript))
+                throw new InvalidDataException($"Nested block {block.Id} contains conflicting superscript and subscript marks.");
+        }
     }
 
     public static string ProjectPlainText(ManuscriptDocument document) =>
         string.Join(
             "\n\n",
-            document.Content
-                .Where(block => block.Type != ManuscriptBlockType.DesignedPage)
-                .Select(block => block.Type == ManuscriptBlockType.SceneBreak
-                    ? "***"
-                    : string.Concat(block.Content.Select(inline => inline.Text))));
+            ProjectBlocks(document.Content).Concat(
+                document.Notes.SelectMany(note => ProjectBlocks(note.Content))));
+
+    private static IEnumerable<string> ProjectBlocks(IEnumerable<ManuscriptBlock> blocks)
+    {
+        foreach (var block in blocks)
+        {
+            if (block.Type == ManuscriptBlockType.DesignedPage)
+                continue;
+            if (block.Type == ManuscriptBlockType.Table && block.Table is { } table)
+            {
+                foreach (var row in table.Rows)
+                    yield return string.Join("\t", row.Cells.Select(cell => string.Join("\n", ProjectBlocks(cell.Content))));
+                continue;
+            }
+            yield return block.Type == ManuscriptBlockType.SceneBreak ? "***" : Text(block);
+        }
+    }
 
     public static string ProjectPlainText(string json, Guid manuscriptId, long revision) =>
         ProjectPlainText(Deserialize(json, manuscriptId, revision));
@@ -343,12 +447,19 @@ public static partial class ManuscriptCodec
     public static string Text(ManuscriptBlock block) =>
         block.Type == ManuscriptBlockType.SceneBreak
             ? "***"
+            : block.Type == ManuscriptBlockType.Table && block.Table is { } table
+                ? string.Join("\n", table.Rows.Select(row =>
+                    string.Join("\t", row.Cells.Select(cell => string.Join("\n", ProjectBlocks(cell.Content))))))
             : string.Concat(block.Content.Select(inline => inline.Text));
 
     public static bool ContentEquals(ManuscriptDocument left, ManuscriptDocument right) =>
         string.Equals(
             JsonSerializer.Serialize(left.Content, JsonOptions),
             JsonSerializer.Serialize(right.Content, JsonOptions),
+            StringComparison.Ordinal)
+        && string.Equals(
+            JsonSerializer.Serialize(left.Notes, JsonOptions),
+            JsonSerializer.Serialize(right.Notes, JsonOptions),
             StringComparison.Ordinal);
 
     public static bool IsPlainTextOnly(ManuscriptDocument document) =>
@@ -415,7 +526,7 @@ public static partial class ManuscriptCodec
         var presentation = block.ParagraphPresentation;
         if (presentation is null)
             return;
-        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
+        if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table)
             throw new InvalidDataException($"Block {block.Id} cannot contain paragraph presentation settings.");
         if (presentation.Alignment is { } alignment && !Enum.IsDefined(alignment))
             throw new InvalidDataException($"Block {block.Id} has an unsupported paragraph alignment.");

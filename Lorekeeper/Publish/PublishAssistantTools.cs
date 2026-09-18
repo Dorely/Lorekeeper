@@ -231,7 +231,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null, int blockStart = 0, int blockCount = 30) => ReadPublicationSectionAsync(context, releaseId, sectionId, blockStart, blockCount),
                 name: "read_publication_section",
-                description: "Read one Core or release publication section with a bounded agent-manuscript-v2 semantic projection: compact rows, sparse structure and UTF-16 marks, interned paragraph formatting, figure/publication metadata, and designed-page [index, placementBlockId, designedPageId] values. Use the placement block ID to address a repeated occurrence and the page ID with the page-reading tools before editing."),
+                description: "Read one Core or release publication section with a bounded agent-manuscript-v3 semantic projection: compact rows, sparse structure and UTF-16 marks/positions, rich tables and notes, interned paragraph formatting, figure/publication metadata, and designed-page [index, placementBlockId, designedPageId] values. Use the placement block ID to address a repeated occurrence and the page ID with the page-reading tools before editing."),
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",

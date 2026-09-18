@@ -340,7 +340,7 @@ geometry-free canonical appearance candidate and explicitly associates the
 inspected result with an entity.
 
 Editor is the complete Core/release authoring assistant. It receives the active
-chapter's full `agent-manuscript-v2` projection and versioned named-style
+chapter's full `agent-manuscript-v3` projection and versioned named-style
 definitions automatically and can read
 or mutate the outline, canon, manuscript, annotations, Figures, Designed Pages,
 styles, composition, page setup, and image workflows appropriate to the
@@ -526,7 +526,7 @@ coordinator's explicit task/target fence and its captured text/tool evidence.
 Candidate prompting omits the coordinator system prompt so its tool instructions
 cannot become contestant instructions; captured user, assistant, and tool
 material is quoted as evidence. Each candidate also receives the exact
-batch-source `agent-manuscript-v2` projection once, generated from the canonical
+batch-source `agent-manuscript-v3` projection once, generated from the canonical
 manuscript stored on the batch. Canonical `OriginalManuscriptJson` remains the
 durable validation/audit source. Legacy context snapshots remain inert audit data
 for already persisted contests and are not replayed through the new runner path.
@@ -590,7 +590,7 @@ managed publication model's layout math. Permanent replacements are system-owned
 invalidate Review Edits/manual history through their content owners just like
 other direct assistant-visible changes.
 
-### Current M2-M4 and accepted M5 assistant contract
+### Current M2-M5A and accepted M5B assistant contract
 
 The M2-M4 Designed Page, mutation-fence, and durable source-evidence contracts
 are current. Assistant reads and mutations of Designed Pages use
@@ -603,8 +603,10 @@ successful committed batch.
 
 Source links in assistant-visible output carry validated durable `SourceLocation`
 data and preserve unavailable/outdated/ambiguous status rather than guessing.
-The following M5 guidance is not yet a current capability: manuscript projections and tools preserve `ManuscriptPosition`, table/note
-identities, citation clusters, and Designed Page citation/note atoms. An
+Current `agent-manuscript-v3` projections and read tools preserve canonical
+UTF-16 `ManuscriptPosition` values plus recursive table, row, cell, note, and
+note-reference identities. Citation clusters and Designed Page citation/note
+atoms remain M5B work. An
 assistant evidence link never silently creates a manuscript citation.
 
 ## Key files and file families

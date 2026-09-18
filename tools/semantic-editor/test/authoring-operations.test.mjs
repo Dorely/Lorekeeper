@@ -8,13 +8,48 @@ import {
     authoringOperations,
     authoringSequenceWatermarks,
     operationsForTarget,
+    roundTripManuscriptJson,
     shouldApplyAuthoringTransaction
 } from "../src/semantic-editor.js";
 
 const block = (id, type = "paragraph", content = [{type: "text", text: "Text", marks: []}], extra = {}) => ({
     id, type, styleRole: type === "figure" ? "figure-caption" : "body", content, ...extra
 });
-const document = content => ({schemaVersion: 5, manuscriptId: "00000000-0000-0000-0000-000000000001", revision: 1, content});
+const document = content => ({schemaVersion: 6, manuscriptId: "00000000-0000-0000-0000-000000000001", revision: 1, content, notes: []});
+
+test("rich table and note atoms round-trip and save behind one exact document precondition", () => {
+    const rich = document([
+        block("p", "paragraph", [
+            {type: "text", text: "Text", marks: []},
+            {id: "ref", type: "noteReference", text: "", noteId: "note", marks: []}
+        ]),
+        block("table-block", "table", [], {
+            styleRole: "table",
+            table: {
+                id: "table",
+                columnWidthWeights: [1, 2],
+                headerRowCount: 1,
+                rows: [{id: "row", cells: [
+                    {id: "cell-a", rowSpan: 1, columnSpan: 1, content: [block("cell-p-a", "paragraph", [{type: "text", text: "A", marks: []}])]},
+                    {id: "cell-b", rowSpan: 1, columnSpan: 1, content: [block("cell-p-b", "paragraph", [{type: "text", text: "B", marks: []}])]}
+                ]}]
+            }
+        })
+    ]);
+    rich.notes = [{id: "note", kind: "footnote", content: [block("note-p", "paragraph", [{type: "text", text: "Body", marks: []}])]}];
+
+    const roundTripped = JSON.parse(roundTripManuscriptJson(JSON.stringify(rich)));
+    assert.deepEqual(JSON.parse(roundTripManuscriptJson(JSON.stringify(roundTripped))), roundTripped);
+    assert.equal(roundTripped.content[1].table.rows[0].cells[1].id, "cell-b");
+    assert.equal(roundTripped.content[0].content[1].noteId, "note");
+    assert.equal(roundTripped.notes[0].content[0].content[0].text, "Body");
+    const before = document([block("p")]);
+    const operations = authoringOperations(before, rich);
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0].kind, "replaceRichDocument");
+    addAuthoringPreconditions(operations, before, rich, new Map(), "sha256:document");
+    assert.equal(operations[0].expectedDocumentFingerprint, "sha256:document");
+});
 
 test("authoring delta preserves mark-only additions and removals through text replacement", () => {
     const before = document([block("p")]);

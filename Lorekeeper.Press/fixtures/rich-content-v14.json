@@ -1,0 +1,89 @@
+{
+  "protocolVersion": 14,
+  "jobId": "14141414141414141414141414141414",
+  "profile": "generic-digital-pdf-v1",
+  "ink": "Color",
+  "document": {
+    "title": "Rich Content",
+    "author": "Lorekeeper",
+    "language": "en",
+    "publicationSections": [],
+    "sections": [{
+      "id": "10000000-0000-0000-0000-000000000001",
+      "title": "Part",
+      "includePage": false,
+      "includeHeading": false,
+      "chapters": [{
+        "id": "20000000-0000-0000-0000-000000000001",
+        "title": "Tables and notes",
+        "includeHeading": true,
+        "blocks": [
+          {
+            "id": "paragraph-a",
+            "type": "Paragraph",
+            "styleRole": "body",
+            "content": [
+              {"type": "Text", "text": "Evidence", "marks": []},
+              {"id": "note-reference-a", "type": "NoteReference", "text": "", "noteId": "note-a", "marks": []}
+            ]
+          },
+          {
+            "id": "table-block-a",
+            "type": "Table",
+            "styleRole": "table",
+            "content": [],
+            "table": {
+              "id": "table-a",
+              "columnWidthWeights": [1, 2],
+              "headerRowCount": 1,
+              "rows": [
+                {"id": "row-a", "cells": [
+                  {"id": "cell-a", "rowSpan": 1, "columnSpan": 1, "content": [{"id": "cell-a-p", "type": "Paragraph", "styleRole": "body", "content": [{"type": "Text", "text": "Name", "marks": []}]}]},
+                  {"id": "cell-b", "rowSpan": 1, "columnSpan": 1, "content": [{"id": "cell-b-p", "type": "Paragraph", "styleRole": "body", "content": [{"type": "Text", "text": "Value", "marks": []}]}]}
+                ]},
+                {"id": "row-b", "cells": [
+                  {"id": "cell-c", "rowSpan": 1, "columnSpan": 1, "content": [{"id": "cell-c-p", "type": "Paragraph", "styleRole": "body", "content": [{"type": "Text", "text": "Format", "marks": []}]}]},
+                  {"id": "cell-d", "rowSpan": 1, "columnSpan": 1, "content": [{"id": "cell-d-p", "type": "Paragraph", "styleRole": "body", "content": [{"type": "Text", "text": "Semantic", "marks": []}]}]}
+                ]}
+              ]
+            }
+          }
+        ],
+        "notes": [{"id": "note-a", "kind": "Footnote", "content": [{"id": "note-p", "type": "Paragraph", "styleRole": "body", "content": [{"type": "Text", "text": "A retained note.", "marks": []}]}]}],
+        "designedPages": []
+      }]
+    }],
+    "styles": [],
+    "includeActHeadings": false,
+    "includeChapterHeadings": true,
+    "outputMode": "DigitalPdf"
+  },
+  "trim": {
+    "widthInches": 6.0,
+    "heightInches": 9.0,
+    "marginInches": 0.75,
+    "bodyFontSizePoints": 11.0,
+    "bodyLineHeight": 1.4,
+    "bleedInches": 0.0,
+    "mirrorMargins": false,
+    "rectoChapterStarts": false,
+    "minimumWidowLines": 2,
+    "minimumOrphanLines": 2
+  },
+  "cover": {
+    "bleedInches": 0.0,
+    "description": "Rich-content fixture cover.",
+    "title": "Rich Content",
+    "subtitle": "",
+    "author": "Lorekeeper",
+    "spineText": "",
+    "backgroundColor": "#16324f",
+    "barcodeMode": "None",
+    "assetId": "90000000-0000-0000-0000-000000000001",
+    "imageCropXPercent": 50,
+    "imageCropYPercent": 50,
+    "surfaces": []
+  },
+  "assets": [{"id": "90000000-0000-0000-0000-000000000001", "relativePath": "assets/pixel.png", "mediaType": "image/png", "byteLength": 0, "sha256": "", "widthPixels": 1, "heightPixels": 1}],
+  "fonts": []
+}

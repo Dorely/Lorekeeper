@@ -112,7 +112,7 @@ its planned features are not claims about current capabilities.
   with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
   Imports validate the staged file and archive closure before one creative-state
   transaction, then rebuild derived indexes as retryable post-commit work.
-- Local version history schema v8 captures deterministic checkpoints of the creative
+- Local version history schema v9 captures deterministic checkpoints of the creative
   project in an app-managed Git repository. History includes canonical project,
   narrative, graph, source, asset, manuscript, composition, and publication
   state, including per-source manifests and reusable content-addressed original
@@ -159,6 +159,12 @@ its planned features are not claims about current capabilities.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.
+- Semantic tables and document-owned footnotes/endnotes in the canonical editor
+  model, with stable row/cell/note identities, proportional column widths,
+  validated merged cells, reversible note ownership, and matching Read, plain
+  text, Markdown, EPUB, and PDF projections. PDF pagination repeats leading
+  table headers, protects row-span groups, bounds footnote regions, and emits
+  explicit diagnostics for content it cannot place safely.
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
   Designed Page/spread composition, project font management, and format-aware
@@ -346,7 +352,7 @@ its planned features are not claims about current capabilities.
   embedded fonts, output intent, flattened transparency, and exact imported
   template geometry.
 - Streamed `.lorekeeper` project import/export (archive-envelope v1,
-  archive-record v1, manuscript-v5/page-setup/Designed Page model, Core Book,
+  archive-record v2, manuscript-v6/page-setup/Designed Page model, Core Book,
   sparse release overlays, edition chapter snapshots/page overrides,
   exact-target review annotations, complete retained-source closure, covers,
   custom-font binaries, and isolated legacy JSON v1-v31 import adapters) plus TXT, Markdown,

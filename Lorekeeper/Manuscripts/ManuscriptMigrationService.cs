@@ -38,6 +38,7 @@ public sealed class ManuscriptMigrationService(
     public const string MigrationName = "structured-manuscript-v1";
     public const string SchemaV2MigrationName = "semantic-manuscript-v2";
     public const string SchemaV3MigrationName = "semantic-manuscript-v3";
+    public const string SchemaV6MigrationName = "semantic-manuscript-v6";
     public const string SchemaV2EfMigrationId = "20260730180725_SemanticManuscriptV2";
     private const int MaxAutomaticBackups = 5;
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
@@ -57,6 +58,13 @@ public sealed class ManuscriptMigrationService(
             && !canResumeInterruptedTransform;
         var needsSchemaV2Upgrade = hasCurrentColumns
             && await ContainsSchemaV1ManuscriptsAsync(cancellationToken);
+        var includesSchemaV5 = needsSchemaV2Upgrade
+            && await ContainsSchemaVersionAsync(5, cancellationToken);
+        var includesPreV5Schema = needsSchemaV2Upgrade
+            && (await ContainsSchemaVersionAsync(1, cancellationToken)
+                || await ContainsSchemaVersionAsync(2, cancellationToken)
+                || await ContainsSchemaVersionAsync(3, cancellationToken)
+                || await ContainsSchemaVersionAsync(4, cancellationToken));
         if (!needsDataMigration
             && !manuscriptSchemaPending
             && !canResumeInterruptedTransform
@@ -113,10 +121,15 @@ public sealed class ManuscriptMigrationService(
 
             if (await ContainsSchemaV1ManuscriptsAsync(cancellationToken))
             {
-                activeMigrationName = SchemaV3MigrationName;
-                activeSourceVersion = 1;
+                var isV5OnlyUpgrade = includesSchemaV5 && !includesPreV5Schema;
+                activeMigrationName = isV5OnlyUpgrade ? SchemaV6MigrationName : SchemaV3MigrationName;
+                activeSourceVersion = isV5OnlyUpgrade ? 5 : 1;
                 activeTargetVersion = ManuscriptDocument.CurrentSchemaVersion;
-                await UpgradeSchemaV1Async(backupPath ?? string.Empty, cancellationToken);
+                await UpgradeSchemaV1Async(
+                    backupPath ?? string.Empty,
+                    activeMigrationName,
+                    activeSourceVersion,
+                    cancellationToken);
             }
 
             await EnsureHealthyAsync(_connectionString, cancellationToken);
@@ -963,7 +976,7 @@ public sealed class ManuscriptMigrationService(
                 SELECT 1 FROM Chapters
                 WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                     THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                    ELSE 0 END NOT IN (1, 2, 3, 4, 5)
+                    ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6)
                    OR COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '') COLLATE NOCASE != Id COLLATE NOCASE
                    OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
             """
@@ -976,7 +989,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3, 4, 5)
+                            ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6)
                        )
                 """);
         }
@@ -992,7 +1005,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(AcceptedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                         THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
                 """);
         }
 
@@ -1004,7 +1017,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(ProposedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
                 """);
             checks.Add("""
                 EXISTS (
@@ -1022,7 +1035,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(DraftManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(DraftManuscriptJson) = 1
                         THEN COALESCE(json_extract(DraftManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
                 """);
         }
 
@@ -1033,7 +1046,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
                 """);
         }
 
@@ -1077,7 +1090,8 @@ public sealed class ManuscriptMigrationService(
                 journal => journal.Status == ManuscriptMigrationStatus.Completed
                     && (journal.MigrationName == MigrationName
                         || journal.MigrationName == SchemaV2MigrationName
-                        || journal.MigrationName == SchemaV3MigrationName),
+                        || journal.MigrationName == SchemaV3MigrationName
+                        || journal.MigrationName == SchemaV6MigrationName),
                 cancellationToken);
         if (completedStructuredMigration)
             return false;
@@ -1115,8 +1129,40 @@ public sealed class ManuscriptMigrationService(
         return false;
     }
 
+    private async Task<bool> ContainsSchemaVersionAsync(
+        int version,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        foreach (var spec in SchemaUpgradeColumns)
+        {
+            if (!await TableExistsAsync(_connectionString, spec.Table, cancellationToken))
+                continue;
+            var columns = await ExistingColumnsAsync(connection, spec.Table, spec.Columns, cancellationToken);
+            if (columns.Count == 0)
+                continue;
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {string.Join(", ", columns)} FROM {spec.Table};";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                for (var index = 0; index < columns.Count; index++)
+                {
+                    if (!reader.IsDBNull(index)
+                        && ManuscriptSchemaUpgrade.ContainsDocumentVersion(reader.GetString(index), version))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private async Task UpgradeSchemaV1Async(
         string backupPath,
+        string migrationName,
+        int sourceSchemaVersion,
         CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(_connectionString, cancellationToken);
@@ -1134,16 +1180,17 @@ public sealed class ManuscriptMigrationService(
                     RevisionSessionCount, SourceHash, TargetHash, ValidationReportJson,
                     ErrorDetail, StartedAt, CompletedAt)
                 VALUES (
-                    $id, $name, 1, $targetVersion, 'Transform', 'Running',
+                    $id, $name, $sourceVersion, $targetVersion, 'Transform', 'Running',
                     $backup, 0, 0, 0, 0, '', '', '{}', NULL, $startedAt, NULL);
                 """;
             insertJournal.Parameters.AddWithValue("$id", journalId.ToString());
-            insertJournal.Parameters.AddWithValue("$name", SchemaV3MigrationName);
+            insertJournal.Parameters.AddWithValue("$name", migrationName);
+            insertJournal.Parameters.AddWithValue("$sourceVersion", sourceSchemaVersion);
             insertJournal.Parameters.AddWithValue("$targetVersion", ManuscriptDocument.CurrentSchemaVersion);
             insertJournal.Parameters.AddWithValue("$backup", backupPath);
             insertJournal.Parameters.AddWithValue("$startedAt", startedAt);
             if (await insertJournal.ExecuteNonQueryAsync(cancellationToken) != 1)
-                throw new InvalidDataException("The manuscript-v2 migration journal could not be created.");
+                throw new InvalidDataException("The manuscript schema migration journal could not be created.");
         }
 
         var sourceHashes = new List<string>();
@@ -1210,15 +1257,15 @@ public sealed class ManuscriptMigrationService(
         var sourceHash = AggregateHash(sourceHashes);
         var targetHash = AggregateHash(targetHashes);
         if (!string.Equals(sourceHash, targetHash, StringComparison.Ordinal))
-            throw new InvalidDataException("Manuscript-v2 migration hash validation failed.");
+            throw new InvalidDataException("Manuscript schema migration hash validation failed.");
         if (sourceHashes.Count == 0)
-            throw new InvalidDataException("Manuscript-v2 migration found no upgradeable documents.");
+            throw new InvalidDataException("Manuscript schema migration found no upgradeable documents.");
 
         var completedAt = DateTime.UtcNow;
         var report = JsonSerializer.Serialize(new
         {
-            sourceSchemaVersion = 1,
-            targetSchemaVersion = 2,
+            sourceSchemaVersion,
+            targetSchemaVersion = ManuscriptDocument.CurrentSchemaVersion,
             documentCount = sourceHashes.Count,
             upgradedByTable,
             materializedStyleCount,
@@ -1249,7 +1296,7 @@ public sealed class ManuscriptMigrationService(
             complete.Parameters.AddWithValue("$completedAt", completedAt);
             complete.Parameters.AddWithValue("$id", journalId.ToString());
             if (await complete.ExecuteNonQueryAsync(cancellationToken) != 1)
-                throw new InvalidDataException("The manuscript-v2 migration journal could not be finalized.");
+                throw new InvalidDataException("The manuscript schema migration journal could not be finalized.");
         }
         await transaction.CommitAsync(cancellationToken);
     }
@@ -1790,6 +1837,13 @@ public sealed class ManuscriptMigrationService(
     private static readonly IReadOnlyList<SchemaUpgradeColumnSet> SchemaUpgradeColumns =
     [
         new("Chapters", "Id", ["ManuscriptJson"]),
+        new("PublicationEditionChapterOverrides", "Id", ["ManuscriptJson"]),
+        new("PublicationSections", "Id", ["ManuscriptJson"]),
+        new("DesignedPageContents", "Id", ["SemanticManuscriptJson"]),
+        new("PageCompositions", "Id", ["SemanticManuscriptJson"]),
+        new("PublicationBooks", "Id", ["ManuscriptJson"]),
+        new("PublicationBookMatter", "Id", ["ManuscriptJson"]),
+        new("PublicationMatter", "Id", ["ManuscriptJson"]),
         new("ContestBatches", "Id", ["OriginalManuscriptJson", "AcceptedManuscriptJson"]),
         new("ContestCandidates", "Id", ["ProposedManuscriptJson", "DraftManuscriptJson", "ReviewStateJson"]),
         new("EditorRevisionSessions", "Id", ["OriginalManuscriptJson", "OperationsJson", "ProposalJson"]),

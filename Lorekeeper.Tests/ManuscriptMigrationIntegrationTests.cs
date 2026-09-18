@@ -374,6 +374,34 @@ public sealed class ManuscriptMigrationIntegrationTests
     }
 
     [Fact]
+    public async Task CurrentSchemaDatabaseUpgradesV5ManuscriptsToV6AtomicallyAndIdempotently()
+    {
+        using var fixture = new MigrationFixture();
+        _ = await fixture.CreateV7DatabaseAsync("Version five content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.DowngradeChapterToV5Async();
+
+        await using (var upgrade = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(upgrade);
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        await using var verification = fixture.CreateDbContext();
+        var journal = Assert.Single(
+            await verification.ManuscriptMigrationJournals.AsNoTracking()
+                .Where(item => item.MigrationName == ManuscriptMigrationService.SchemaV6MigrationName)
+                .ToListAsync());
+        Assert.Equal(5, journal.SourceSchemaVersion);
+        Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, journal.TargetSchemaVersion);
+        Assert.Equal(journal.SourceHash, journal.TargetHash);
+        var manuscript = (await verification.Chapters.AsNoTracking().SingleAsync()).Manuscript;
+        Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, manuscript.SchemaVersion);
+        Assert.Empty(manuscript.Notes);
+    }
+
+    [Fact]
     public async Task HistoricalAuditPayloadsDoNotBlockSchemaV3Upgrade()
     {
         using var fixture = new MigrationFixture();
@@ -1334,10 +1362,26 @@ public sealed class ManuscriptMigrationIntegrationTests
                     + string.Join(
                         ", ",
                         columns.Select(column =>
-                            $"{column} = replace(replace(replace(replace(replace(replace(replace(replace({column}, '\"schemaVersion\":5', '\"schemaVersion\":1'), '\"schemaVersion\":4', '\"schemaVersion\":1'), '\"schemaVersion\":3', '\"schemaVersion\":1'), '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":5', 'schemaVersion\\\":1'), 'schemaVersion\\\":4', 'schemaVersion\\\":1'), 'schemaVersion\\\":3', 'schemaVersion\\\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
+                            $"{column} = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace({column}, '\"schemaVersion\":6', '\"schemaVersion\":1'), '\"schemaVersion\":5', '\"schemaVersion\":1'), '\"schemaVersion\":4', '\"schemaVersion\":1'), '\"schemaVersion\":3', '\"schemaVersion\":1'), '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":6', 'schemaVersion\\\":1'), 'schemaVersion\\\":5', 'schemaVersion\\\":1'), 'schemaVersion\\\":4', 'schemaVersion\\\":1'), 'schemaVersion\\\":3', 'schemaVersion\\\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
                     + ";";
                 await command.ExecuteNonQueryAsync();
             }
+        }
+
+        public async Task DowngradeChapterToV5Async()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var select = connection.CreateCommand();
+            select.CommandText = "SELECT ManuscriptJson FROM Chapters;";
+            var json = (string)(await select.ExecuteScalarAsync())!;
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+            node["schemaVersion"] = 5;
+            node.Remove("notes");
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE Chapters SET ManuscriptJson = $json;";
+            update.Parameters.AddWithValue("$json", node.ToJsonString(ManuscriptCodec.JsonOptions));
+            await update.ExecuteNonQueryAsync();
         }
 
         public async Task SetCustomV1ParagraphRoleAsync(string role)

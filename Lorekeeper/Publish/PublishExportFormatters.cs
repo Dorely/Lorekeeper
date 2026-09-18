@@ -61,6 +61,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         foreach (var item in document.PublicationSections.Where(item => item.Anchor == anchor
             && item.TargetKind == targetKind && item.TargetId == targetId).OrderBy(item => item.LocalOrder))
         {
+            var noteNumbers = SemanticPublishFormatting.NoteNumbers(item.Manuscript);
             AppendMatterStart(sb, item.Title);
             if (item.SystemRole == PublicationSectionSystemRole.Contents)
             {
@@ -79,11 +80,15 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
                     && item.DesignedPages.FirstOrDefault(value => value.Id == designedPageId) is { } designedPage)
                 {
                     foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                        AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId)));
+                        AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers));
                 }
                 else
-                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(block, imageId => FindAsset(document, imageId)));
+                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(block, imageId => FindAsset(document, imageId), noteNumbers));
             }
+            AppendText(sb, SemanticPublishFormatting.PlainTextNotes(
+                item.Manuscript,
+                imageId => FindAsset(document, imageId),
+                noteNumbers));
         }
     }
 
@@ -141,6 +146,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
 
     private static void AppendVisualText(StringBuilder sb, PublishDocument document, PublishChapterDocument chapter)
     {
+        var noteNumbers = SemanticPublishFormatting.NoteNumbers(chapter.Manuscript);
         foreach (var block in chapter.Manuscript.Content)
         {
             if (block.Type == ManuscriptBlockType.DesignedPage
@@ -148,13 +154,18 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
                 && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } designedPage)
             {
                 foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId)));
+                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers));
                 continue;
             }
             AppendText(sb, SemanticPublishFormatting.PlainTextBlock(
                 block,
-                imageId => FindAsset(document, imageId)));
+                imageId => FindAsset(document, imageId),
+                noteNumbers));
         }
+        AppendText(sb, SemanticPublishFormatting.PlainTextNotes(
+            chapter.Manuscript,
+            imageId => FindAsset(document, imageId),
+            noteNumbers));
     }
 
     private static PublishAssetDocument? FindAsset(PublishDocument document, Guid imageId) =>
@@ -249,6 +260,10 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
                 else
                     sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(block, imageId => FindAsset(document, imageId)));
             }
+            foreach (var note in SemanticPublishFormatting.MarkdownNotes(
+                item.Manuscript,
+                imageId => FindAsset(document, imageId)))
+                sb.AppendLine().AppendLine(note);
         }
     }
 
@@ -319,6 +334,10 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
                     manuscriptBlock,
                     imageId => FindAsset(document, imageId)));
         }
+        foreach (var note in SemanticPublishFormatting.MarkdownNotes(
+            chapter.Manuscript,
+            imageId => FindAsset(document, imageId)))
+            sb.AppendLine().AppendLine(note);
     }
 
     private static IReadOnlyList<string> SplitMarkdownParagraphs(string text)
@@ -413,7 +432,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             .Concat(document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter => chapter.DesignedPages).Select(designedPage => designedPage.SemanticManuscript))
             .Concat(document.PublicationSections.Select(item => item.Manuscript))
             .Concat(document.PublicationSections.SelectMany(item => item.DesignedPages).Select(item => item.SemanticManuscript));
-        if (manuscripts.Any(manuscript => manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure
+        if (manuscripts.Any(manuscript => ManuscriptTraversal.EnumerateBlocks(manuscript).Any(block => block.Type == ManuscriptBlockType.Figure
             && !block.Decorative && string.IsNullOrWhiteSpace(block.AltText))))
             throw new InvalidDataException("EPUB export requires alternative text or an explicit decorative decision for every Figure.");
         var scenes = document.Sections.SelectMany(section => section.Chapters)
@@ -505,6 +524,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             sectionIndex++;
             var baseId = $"publication-section-{sectionIndex.ToString(CultureInfo.InvariantCulture)}";
+            var noteNumbers = SemanticPublishFormatting.NoteNumbers(section.Manuscript);
+            var noteFile = $"{baseId}-notes.xhtml";
+            var noteBacklinks = new Dictionary<string, string>(StringComparer.Ordinal);
             var segment = new List<ManuscriptBlock>();
             var part = 0;
             var first = true;
@@ -513,10 +535,16 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 var generatedContents = first && section.SystemRole == PublicationSectionSystemRole.Contents;
                 if (segment.Count == 0 && !generatedContents) return;
                 var id = first ? baseId : $"{baseId}-part-{++part}";
+                foreach (var noteId in SemanticPublishFormatting.ReferencedNoteIds(segment))
+                    noteBacklinks[noteId] = $"{id}.xhtml#note-ref-{noteId}";
                 var content = generatedContents
                     ? RenderVisibleToc(document)
                     : RenderSemanticMatterBody(section.Title, string.Concat(segment.Select(block =>
-                        SemanticPublishFormatting.HtmlBlock(block, imageId => ImageHref(imageItems, imageId)))));
+                        SemanticPublishFormatting.HtmlBlock(
+                            block,
+                            imageId => ImageHref(imageItems, imageId),
+                            noteNumbers,
+                            noteFile))));
                 items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", section.Title,
                     RenderXhtmlPage(document, section.Title, content), IncludeInNavigation: first));
                 segment.Clear();
@@ -549,6 +577,23 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 first = false;
             }
             Flush();
+            if (section.Manuscript.Notes.Count > 0)
+            {
+                items.Add(new EpubXhtmlItem(
+                    $"{baseId}-notes",
+                    noteFile,
+                    $"{section.Title} notes",
+                    RenderXhtmlPage(
+                        document,
+                        $"{section.Title} notes",
+                        RenderSemanticMatterBody(
+                            $"{section.Title} notes",
+                            SemanticPublishFormatting.HtmlNotes(
+                                section.Manuscript,
+                                imageId => ImageHref(imageItems, imageId),
+                                noteBacklinks))),
+                    IncludeInNavigation: false));
+            }
         }
     }
 
@@ -559,6 +604,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         IReadOnlyList<EpubImageItem> imageItems,
         string chapterId)
     {
+        var noteNumbers = SemanticPublishFormatting.NoteNumbers(chapter.Manuscript);
+        var noteFile = $"{chapterId}-notes.xhtml";
+        var noteBacklinks = new Dictionary<string, string>(StringComparer.Ordinal);
         var segment = new List<ManuscriptBlock>();
         var part = 0;
         var firstReflow = true;
@@ -570,6 +618,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             if (segment.Count == 0 && !hasOpeningPresentation) return;
             var id = firstReflow ? chapterId : $"{chapterId}-part-{++part}";
             var title = firstReflow ? chapter.Title : $"{chapter.Title}, continued";
+            foreach (var noteId in SemanticPublishFormatting.ReferencedNoteIds(segment))
+                noteBacklinks[noteId] = $"{id}.xhtml#note-ref-{noteId}";
             items.Add(new EpubXhtmlItem(
                 id,
                 $"{id}.xhtml",
@@ -582,7 +632,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                         chapter,
                         imageItems,
                         segment,
-                        includeOpening: firstReflow)),
+                        firstReflow,
+                        noteNumbers,
+                        noteFile)),
                 IncludeInNavigation: firstReflow));
             segment.Clear();
             firstReflow = false;
@@ -619,6 +671,23 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             firstReflow = false;
         }
         FlushReflow();
+        if (chapter.Manuscript.Notes.Count > 0)
+        {
+            items.Add(new EpubXhtmlItem(
+                $"{chapterId}-notes",
+                noteFile,
+                $"{chapter.Title} notes",
+                RenderXhtmlPage(
+                    document,
+                    $"{chapter.Title} notes",
+                    RenderSemanticMatterBody(
+                        $"{chapter.Title} notes",
+                        SemanticPublishFormatting.HtmlNotes(
+                            chapter.Manuscript,
+                            imageId => ImageHref(imageItems, imageId),
+                            noteBacklinks))),
+                IncludeInNavigation: false));
+        }
     }
 
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
@@ -627,7 +696,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var assets = new Dictionary<Guid, PublishAssetDocument>();
         foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
         {
-            foreach (var block in chapter.Manuscript.Content.Where(block =>
+            foreach (var block in ManuscriptTraversal.EnumerateBlocks(chapter.Manuscript).Where(block =>
                 block.Type == ManuscriptBlockType.Figure))
             {
                 if (block.ImageId is Guid imageId
@@ -648,7 +717,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         }
         foreach (var section in document.PublicationSections)
         {
-            foreach (var block in section.Manuscript.Content.Where(block => block.Type == ManuscriptBlockType.Figure))
+            foreach (var block in ManuscriptTraversal.EnumerateBlocks(section.Manuscript).Where(block => block.Type == ManuscriptBlockType.Figure))
             {
                 if (block.ImageId is Guid imageId
                     && document.Assets.FirstOrDefault(asset => asset.Id == imageId) is { } asset)
@@ -851,7 +920,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         PublishChapterDocument chapter,
         IReadOnlyList<EpubImageItem> imageItems,
         IReadOnlyList<ManuscriptBlock> blocks,
-        bool includeOpening)
+        bool includeOpening,
+        IReadOnlyDictionary<string, int> noteNumbers,
+        string noteFile)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<article class=\"chapter-page\">");
@@ -861,7 +932,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             AppendTextBlocks(sb, chapter.Synopsis, "synopsis");
         sb.AppendLine("<div class=\"chapter-body\">");
         foreach (var block in blocks)
-            sb.Append(SemanticPublishFormatting.HtmlBlock(block, imageId => ImageHref(imageItems, imageId)));
+            sb.Append(SemanticPublishFormatting.HtmlBlock(
+                block,
+                imageId => ImageHref(imageItems, imageId),
+                noteNumbers,
+                noteFile));
         sb.AppendLine("</div>");
         sb.AppendLine("</article>");
         return sb.ToString();
@@ -1688,19 +1763,40 @@ internal static class SemanticPublishFormatting
         ManuscriptDocument manuscript,
         Func<Guid, PublishAssetDocument?> asset)
     {
+        var noteNumbers = NoteNumbers(manuscript);
         var blocks = new List<string>();
         foreach (var block in manuscript.Content)
-            blocks.Add(PlainTextBlock(block, asset));
+            blocks.Add(PlainTextBlock(block, asset, noteNumbers));
+        var notes = PlainTextNotes(manuscript, asset, noteNumbers);
+        if (!string.IsNullOrEmpty(notes)) blocks.Add(notes);
         return string.Join(Environment.NewLine + Environment.NewLine, blocks);
+    }
+
+    internal static string PlainTextNotes(
+        ManuscriptDocument manuscript,
+        Func<Guid, PublishAssetDocument?> asset,
+        IReadOnlyDictionary<string, int>? noteNumbers = null)
+    {
+        noteNumbers ??= NoteNumbers(manuscript);
+        return string.Join(Environment.NewLine, manuscript.Notes.Select(note =>
+            $"[{noteNumbers[note.Id]}] {string.Join(" ", note.Content.Select(item => PlainTextBlock(item, asset, noteNumbers)))}"));
     }
 
     internal static string PlainTextBlock(
         ManuscriptBlock block,
-        Func<Guid, PublishAssetDocument?> asset)
+        Func<Guid, PublishAssetDocument?> asset,
+        IReadOnlyDictionary<string, int>? noteNumbers = null)
     {
         if (block.Type == ManuscriptBlockType.SceneBreak)
             return "***";
-        var text = ManuscriptCodec.Text(block);
+        if (block.Type == ManuscriptBlockType.Table)
+            return string.Join("\n", block.Table!.Rows.Select(row => string.Join("\t", row.Cells.Select(cell =>
+                string.Join("\n", cell.Content.Select(child => PlainTextBlock(child, asset, noteNumbers)))))));
+        var text = string.Concat(block.Content.Select(inline => inline.Type == ManuscriptInlineType.NoteReference
+            ? noteNumbers is not null && noteNumbers.TryGetValue(inline.NoteId!, out var number)
+                ? $"[{number}]"
+                : "[*]"
+            : inline.Text));
         if (block.Type != ManuscriptBlockType.Figure)
             return text;
         var image = asset(block.ImageId!.Value);
@@ -1718,8 +1814,15 @@ internal static class SemanticPublishFormatting
         var blocks = new List<string>();
         foreach (var block in manuscript.Content)
             blocks.Add(MarkdownBlock(block, asset));
+        blocks.AddRange(MarkdownNotes(manuscript, asset));
         return string.Join(Environment.NewLine + Environment.NewLine, blocks);
     }
+
+    internal static IReadOnlyList<string> MarkdownNotes(
+        ManuscriptDocument manuscript,
+        Func<Guid, PublishAssetDocument?> asset) =>
+        manuscript.Notes.Select(note =>
+            $"[^{note.Id}]: {string.Join(" ", note.Content.Select(item => MarkdownBlock(item, asset)))}").ToArray();
 
     internal static string MarkdownBlock(
         ManuscriptBlock block,
@@ -1727,6 +1830,8 @@ internal static class SemanticPublishFormatting
     {
         if (!ManuscriptStyleService.BuiltInParagraphRoles.Contains(block.StyleRole))
         {
+            if (block.Type == ManuscriptBlockType.Table)
+                return MarkdownTable(block, asset);
             return HtmlBlock(
                 block,
                 imageId => asset(imageId) is { } image
@@ -1747,6 +1852,7 @@ internal static class SemanticPublishFormatting
                 block,
                 text,
                 asset(block.ImageId!.Value)),
+            ManuscriptBlockType.Table => MarkdownTable(block, asset),
             _ => text,
         };
     }
@@ -1755,17 +1861,50 @@ internal static class SemanticPublishFormatting
         ManuscriptDocument manuscript,
         Func<Guid, string?> imageHref)
     {
+        var noteNumbers = NoteNumbers(manuscript);
         var sb = new StringBuilder();
         foreach (var block in manuscript.Content)
-            sb.Append(HtmlBlock(block, imageHref));
+            sb.Append(HtmlBlock(block, imageHref, noteNumbers));
+        sb.Append(HtmlNotes(manuscript, imageHref));
+        return sb.ToString();
+    }
+
+    internal static string HtmlNotes(
+        ManuscriptDocument manuscript,
+        Func<Guid, string?> imageHref,
+        IReadOnlyDictionary<string, string>? backlinkHrefs = null)
+    {
+        var noteNumbers = NoteNumbers(manuscript);
+        var sb = new StringBuilder();
+        foreach (var group in manuscript.Notes.GroupBy(note => note.Kind))
+        {
+            sb.Append("<section class=\"manuscript-notes manuscript-notes--")
+                .Append(group.Key.ToString().ToLowerInvariant())
+                .Append("\" role=\"doc-")
+                .Append(group.Key == ManuscriptNoteKind.Footnote ? "footnotes" : "endnotes")
+                .Append("\"><ol>");
+            foreach (var note in group)
+            {
+                sb.Append("<li id=\"note-").Append(WebUtility.HtmlEncode(note.Id)).Append("\">");
+                foreach (var block in note.Content)
+                    sb.Append(HtmlBlock(block, imageHref, noteNumbers));
+                var backlink = backlinkHrefs?.GetValueOrDefault(note.Id)
+                    ?? $"#note-ref-{note.Id}";
+                sb.Append("<a href=\"").Append(WebUtility.HtmlEncode(backlink))
+                    .Append("\" role=\"doc-backlink\" aria-label=\"Back to note reference\">↩</a></li>");
+            }
+            sb.Append("</ol></section>");
+        }
         return sb.ToString();
     }
 
     internal static string HtmlBlock(
         ManuscriptBlock block,
-        Func<Guid, string?> imageHref)
+        Func<Guid, string?> imageHref,
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        string? noteHrefPrefix = null)
     {
-        var content = HtmlInlineContent(block);
+        var content = HtmlInlineContent(block, noteNumbers, noteHrefPrefix);
         var role = WebUtility.HtmlEncode(block.StyleRole);
         var anchor = $"block-{block.Id:N}";
         var language = PublicationLanguage.NormalizeOptional(block.Language) is not { } languageTag
@@ -1783,6 +1922,7 @@ internal static class SemanticPublishFormatting
             ManuscriptBlockType.ListItem =>
                 $"<ul><li id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</li></ul>",
             ManuscriptBlockType.Figure => HtmlFigure(block, content, role, anchor, imageHref),
+            ManuscriptBlockType.Table => HtmlTable(block, anchor, imageHref, noteNumbers, noteHrefPrefix),
             _ => $"<p id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</p>",
         };
     }
@@ -1824,8 +1964,11 @@ internal static class SemanticPublishFormatting
         return string.Join(';', declarations);
     }
 
-    internal static string HtmlInlineContent(ManuscriptBlock block) =>
-        string.Concat(block.Content.Select(HtmlInline));
+    internal static string HtmlInlineContent(
+        ManuscriptBlock block,
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        string? noteHrefPrefix = null) =>
+        string.Concat(block.Content.Select(inline => HtmlInline(inline, noteNumbers, noteHrefPrefix)));
 
     private static string HtmlFigure(
         ManuscriptBlock block,
@@ -1894,8 +2037,53 @@ internal static class SemanticPublishFormatting
             : $"{markdown}{Environment.NewLine}_{caption}_";
     }
 
+    private static string MarkdownTable(
+        ManuscriptBlock block,
+        Func<Guid, PublishAssetDocument?> asset) =>
+        HtmlTable(
+            block,
+            $"block-{block.Id:N}",
+            imageId => asset(imageId) is { } image
+                ? $"data:{image.ContentType};base64,{Convert.ToBase64String(image.Data)}"
+                : null);
+
+    private static string HtmlTable(
+        ManuscriptBlock block,
+        string anchor,
+        Func<Guid, string?> imageHref,
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        string? noteHrefPrefix = null)
+    {
+        var table = block.Table
+            ?? throw new InvalidOperationException($"Table block {block.Id} has no table payload.");
+        var sb = new StringBuilder($"<table id=\"{anchor}\" data-table-id=\"{WebUtility.HtmlEncode(table.Id)}\"><colgroup>");
+        var totalWeight = table.ColumnWidthWeights.Sum();
+        foreach (var weight in table.ColumnWidthWeights)
+            sb.Append("<col style=\"width:").Append((100d * weight / totalWeight).ToString("0.####", CultureInfo.InvariantCulture)).Append("%\" />");
+        sb.Append("</colgroup>");
+        for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+        {
+            sb.Append("<tr data-row-id=\"").Append(WebUtility.HtmlEncode(table.Rows[rowIndex].Id)).Append("\">");
+            foreach (var cell in table.Rows[rowIndex].Cells)
+            {
+                var tag = rowIndex < table.HeaderRowCount ? "th" : "td";
+                sb.Append('<').Append(tag).Append(" data-cell-id=\"").Append(WebUtility.HtmlEncode(cell.Id)).Append('"');
+                if (cell.RowSpan > 1) sb.Append(" rowspan=\"").Append(cell.RowSpan).Append('"');
+                if (cell.ColumnSpan > 1) sb.Append(" colspan=\"").Append(cell.ColumnSpan).Append('"');
+                sb.Append('>');
+                foreach (var child in cell.Content)
+                    sb.Append(HtmlBlock(child, imageHref, noteNumbers, noteHrefPrefix));
+                sb.Append("</").Append(tag).Append('>');
+            }
+            sb.Append("</tr>");
+        }
+        return sb.Append("</table>").ToString();
+    }
+
     private static string MarkdownInline(ManuscriptInline inline)
     {
+        if (inline.Type == ManuscriptInlineType.NoteReference)
+            return $"[^{EscapeMarkdownLiteral(inline.NoteId!)}]";
         var hasCode = inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Code);
         var text = hasCode
             ? $"<code>{EncodeHtmlInlineText(inline.Text)}</code>"
@@ -1924,8 +2112,18 @@ internal static class SemanticPublishFormatting
         return text;
     }
 
-    private static string HtmlInline(ManuscriptInline inline)
+    private static string HtmlInline(
+        ManuscriptInline inline,
+        IReadOnlyDictionary<string, int>? noteNumbers,
+        string? noteHrefPrefix)
     {
+        if (inline.Type == ManuscriptInlineType.NoteReference)
+        {
+            var id = WebUtility.HtmlEncode(inline.NoteId);
+            var number = noteNumbers?.GetValueOrDefault(inline.NoteId!) ?? 0;
+            var href = $"{noteHrefPrefix}#note-{id}";
+            return $"<sup class=\"note-reference\"><a id=\"note-ref-{id}\" href=\"{WebUtility.HtmlEncode(href)}\" role=\"doc-noteref\">{(number == 0 ? "*" : number.ToString(CultureInfo.InvariantCulture))}</a></sup>";
+        }
         var text = EncodeHtmlInlineText(inline.Text);
         foreach (var mark in inline.Marks)
         {
@@ -1947,6 +2145,31 @@ internal static class SemanticPublishFormatting
             };
         }
         return text;
+    }
+
+    internal static IReadOnlyDictionary<string, int> NoteNumbers(ManuscriptDocument manuscript) =>
+        ManuscriptTraversal.NumberNotes(manuscript)
+            .ToDictionary(item => item.NoteId, item => item.Number, StringComparer.Ordinal);
+
+    internal static IReadOnlySet<string> ReferencedNoteIds(IEnumerable<ManuscriptBlock> blocks)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        Add(blocks);
+        return ids;
+
+        void Add(IEnumerable<ManuscriptBlock> items)
+        {
+            foreach (var block in items)
+            {
+                foreach (var inline in block.Content.Where(item => item.Type == ManuscriptInlineType.NoteReference))
+                    ids.Add(inline.NoteId!);
+                if (block.Table is not { } table)
+                    continue;
+                foreach (var row in table.Rows)
+                foreach (var cell in row.Cells)
+                    Add(cell.Content);
+            }
+        }
     }
 
     internal static string EscapeMarkdownLiteral(string value)

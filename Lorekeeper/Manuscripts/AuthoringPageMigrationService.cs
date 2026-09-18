@@ -284,6 +284,7 @@ public sealed class AuthoringPageMigrationService(
         return version switch
         {
             ManuscriptDocument.CurrentSchemaVersion => json,
+            5 => ManuscriptSchemaUpgrade.UpgradeV5DocumentJson(json, id, revision),
             4 => ManuscriptSchemaUpgrade.UpgradeV4DocumentJson(json, id, revision),
             3 => ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(json, id, revision),
             2 => ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(json, id, revision),

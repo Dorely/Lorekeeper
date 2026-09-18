@@ -313,7 +313,7 @@ from the inherited or overridden Description visible in Book details. A cover
 does not own a second back-copy field or editor control.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
-shared `agent-manuscript-v2` projection for its bounded prose blocks. Core or
+shared `agent-manuscript-v3` projection for its bounded semantic blocks. Core or
 customized section reads retain the persisted source label; live release
 inheritance is labeled inherited. Absolute block indexes, source hash,
 revision, completeness, pagination, Figure semantics, Designed Page references,
@@ -344,6 +344,10 @@ direct presentation, including explicit `false` overrides for italic and small
 caps. Figure paragraph styles apply to captions. Links inherit surrounding
 text color and remain underlined, and overlay captions use the same translucent
 backing opacity and padding as the shared manuscript typography contract.
+It also emits semantic HTML tables with stable header structure and document-
+numbered note references. Each chapter or publication section receives a
+separate linked note document when needed, with occurrence-specific backlinks;
+the EPUB exporter boundary is `lorekeeper-epub-v5`.
 
 Artifacts carry source revision/fingerprint, edition settings, assets,
 renderer/profile provenance, validation evidence, and applicable exporter or
@@ -399,15 +403,22 @@ actionable failures. Publish UI and assistant preparation results surface this
 summary. Since image preparation precedes artifact reuse, both the final artifact
 and its fingerprint describe the permanent replacement references.
 
-### Accepted M2 and M5 publication contract
+### Current M2-M5A and accepted M5B publication contract
 
-This is accepted next-contract guidance, not a statement that the described
-features are already implemented. Effective publication projection resolves a
+Effective publication projection resolves a
 Designed Page by page identity plus Core/release content and authored-layout
 ownership. Repeated placements expand independently with occurrence-specific
 anchors; release reset restores inherited page content/layout without changing
 the page identity. Artifact freshness follows effective page content/variant
 dependencies, while an unplaced page stays searchable without staling output.
+
+M5A tables and notes are current across TXT, Markdown, HTML/Read, EPUB, and
+Press. Plain text uses explicit cell separators and numbered note bodies;
+Markdown keeps table and note syntax; HTML uses table, `doc-noteref`, footnote,
+and endnote semantics. Numbering restarts for every top-level chapter or
+publication section, and empty note sections are omitted. Archive record schema
+2 and history snapshot schema 9 preserve the recursive manuscript while their
+record-1/schema-8 predecessor readers validate and adapt older payloads.
 
 `ICitationFormatter` is managed C# with identity `lorekeeper-citations-v1` and
 the only v1 styles are Chicago Manual of Style 18 notes-and-bibliography, APA 7,

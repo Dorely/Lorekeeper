@@ -5,7 +5,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -15,6 +15,8 @@ public sealed record ManuscriptDocument
     public long Revision { get; init; }
     [JsonRequired]
     public List<ManuscriptBlock> Content { get; init; } = [];
+    [JsonRequired]
+    public List<ManuscriptNote> Notes { get; init; } = [];
 }
 
 public sealed record ManuscriptBlock
@@ -37,16 +39,19 @@ public sealed record ManuscriptBlock
     public ParagraphPresentation? ParagraphPresentation { get; init; }
     public Guid? DesignedPageId { get; init; }
     public PublicationBoundField? PublicationField { get; init; }
+    public ManuscriptTable? Table { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
 }
 
 public sealed record ManuscriptInline
 {
+    public string? Id { get; init; }
     [JsonRequired]
     public ManuscriptInlineType Type { get; init; } = ManuscriptInlineType.Text;
     [JsonRequired]
     public string Text { get; init; } = string.Empty;
+    public string? NoteId { get; init; }
     [JsonRequired]
     public List<ManuscriptMark> Marks { get; init; } = [];
 }
@@ -66,6 +71,49 @@ public enum ManuscriptBlockType
     ListItem,
     Figure,
     DesignedPage,
+    Table,
+}
+
+public sealed record ManuscriptTable
+{
+    public required string Id { get; init; }
+    [JsonRequired]
+    public List<int> ColumnWidthWeights { get; init; } = [];
+    [JsonRequired]
+    public int HeaderRowCount { get; init; }
+    [JsonRequired]
+    public List<ManuscriptTableRow> Rows { get; init; } = [];
+}
+
+public sealed record ManuscriptTableRow
+{
+    public required string Id { get; init; }
+    [JsonRequired]
+    public List<ManuscriptTableCell> Cells { get; init; } = [];
+}
+
+public sealed record ManuscriptTableCell
+{
+    public required string Id { get; init; }
+    public int RowSpan { get; init; } = 1;
+    public int ColumnSpan { get; init; } = 1;
+    [JsonRequired]
+    public List<ManuscriptBlock> Content { get; init; } = [];
+}
+
+public sealed record ManuscriptNote
+{
+    public required string Id { get; init; }
+    public ManuscriptNoteKind Kind { get; init; } = ManuscriptNoteKind.Footnote;
+    [JsonRequired]
+    public List<ManuscriptBlock> Content { get; init; } = [];
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ManuscriptNoteKind>))]
+public enum ManuscriptNoteKind
+{
+    Footnote,
+    Endnote,
 }
 
 public sealed record FigurePresentation
@@ -169,7 +217,22 @@ public enum FigureCaptionPlacement
 public enum ManuscriptInlineType
 {
     Text,
+    NoteReference,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter<ManuscriptPositionAffinity>))]
+public enum ManuscriptPositionAffinity
+{
+    Before,
+    After,
+}
+
+public sealed record ManuscriptPosition(
+    Guid DocumentId,
+    IReadOnlyList<string> ContainerPath,
+    string BlockOrAtomId,
+    int Offset,
+    ManuscriptPositionAffinity Affinity);
 
 public enum ManuscriptMarkType
 {
@@ -197,6 +260,7 @@ public static class ManuscriptStyleRoles
     public const string ListItem = "list-item";
     public const string FigureCaption = "figure-caption";
     public const string DesignedPage = "designed-page";
+    public const string Table = "table";
 }
 
 public sealed record ManuscriptSnapshot(
@@ -233,7 +297,21 @@ public sealed record ManuscriptRangeReference(
 [JsonDerivedType(typeof(SetManuscriptInlineMark), "setInlineMark")]
 [JsonDerivedType(typeof(SetFigurePresentation), "setFigurePresentation")]
 [JsonDerivedType(typeof(SetParagraphPresentation), "setParagraphPresentation")]
+[JsonDerivedType(typeof(PutRichManuscriptBlock), "putRichBlock")]
+[JsonDerivedType(typeof(ReplaceManuscriptNotes), "replaceNotes")]
+[JsonDerivedType(typeof(ReplaceManuscriptStructure), "replaceStructure")]
 public abstract record ManuscriptOperation;
+
+public sealed record PutRichManuscriptBlock(
+    int Index,
+    ManuscriptBlock Block) : ManuscriptOperation;
+
+public sealed record ReplaceManuscriptNotes(
+    IReadOnlyList<ManuscriptNote> Notes) : ManuscriptOperation;
+
+public sealed record ReplaceManuscriptStructure(
+    IReadOnlyList<ManuscriptBlock> Content,
+    IReadOnlyList<ManuscriptNote> Notes) : ManuscriptOperation;
 
 public sealed record InsertManuscriptBlock(
     int Index,

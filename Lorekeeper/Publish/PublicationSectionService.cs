@@ -945,7 +945,7 @@ public sealed class PublicationSectionService(
             row.InclusionMode != PublicationSectionInclusionMode.Omitted && !row.IsExcluded,
             inherited, orderOverridden, effectiveOrder, document, row.Revision,
             document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
-            document.Content.Count(block => block.Type == ManuscriptBlockType.Figure));
+            ManuscriptTraversal.EnumerateBlocks(document).Count(block => block.Type == ManuscriptBlockType.Figure));
     }
 
     private static (PublicationSection Row, bool Inherited, int EffectiveOrder, bool OrderOverridden) EffectiveRow(

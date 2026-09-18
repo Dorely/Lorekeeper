@@ -206,7 +206,9 @@ public static class ProjectArchiveZip
         if (manifest.FormatId != ProjectArchiveContract.FormatId
             || manifest.EnvelopeVersion != ProjectArchiveContract.EnvelopeVersion
             || manifest.SchemaVersions is null
-            || manifest.SchemaVersions.ArchiveRecord != ProjectArchiveContract.RecordSchemaVersion
+            || !ProjectArchiveContract.CanReadRecordSchema(manifest.SchemaVersions.ArchiveRecord)
+            || !ProjectArchiveContract.CanReadManuscriptSchema(manifest.SchemaVersions.Manuscript)
+            || !ProjectArchiveContract.CanReadHistorySchema(manifest.SchemaVersions.HistorySnapshot)
             || manifest.Entries is null
             || manifest.Warnings is null
             || !Enum.IsDefined(manifest.Policy))

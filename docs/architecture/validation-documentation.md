@@ -407,15 +407,18 @@ exception is the approved deterministic free/Store channel and updater-policy
 selection contract; actual package and update behavior still requires
 target-specific evidence.
 
-### Current M2-M4 and accepted M5 contract evidence
+### Current M2-M5A and accepted M5B contract evidence
 
-M2-M4 fixtures now have implementation evidence. M5 fixtures remain normative
-input, not formatter- or exporter-generated snapshots. Focused deterministic regressions
+M2-M5A fixtures now have implementation evidence. M5B citation/DOCX fixtures
+remain normative input, not formatter- or exporter-generated snapshots. Focused deterministic regressions
 must cover Designed Page migration/placement/release isolation and occurrence
 mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,
 conflicts, and mutation fences; source legacy `OriginalUnavailable` migration,
 archive/history closure, chunks, streamed restoration, and fail-closed import;
-and rich-manuscript, DOCX, citation, EPUB, and Press conformance. Citation
+and rich-manuscript, DOCX, citation, EPUB, and Press conformance. M5A coverage
+includes v5-to-v6 migration, recursive identity/span/note validation, exact rich
+authoring replacement and inverse identity, note cleanup, semantic projections,
+EPUB v5 structure, and Press v14 table/note diagnostics and layout fixtures. Citation
 fixtures are independently authored for Chicago 18, APA 7, and MLA 9, including
 missing metadata, repeats, and repeated Designed Page occurrences.
 
@@ -424,8 +427,9 @@ modifying developer data. Local scale tooling may measure source/archive memory
 and cancellation on the 50-source fixture, but does not establish native
 navigation evidence. M4's deterministic retention, archive, history, and
 fail-closed import contracts do not establish its native scale/portability gate.
-M5 remains an accepted target rather than a current capability, and M3's native
-latency gate also remains unverified.
+M5A is current deterministic capability; M5B and exact reference-page footnote
+reservation remain incomplete, so M5 stays in progress. M3's native latency
+gate also remains unverified.
 
 ## Key files and file families
 

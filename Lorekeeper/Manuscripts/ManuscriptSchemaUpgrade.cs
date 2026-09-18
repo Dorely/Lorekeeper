@@ -27,6 +27,7 @@ public static class ManuscriptSchemaUpgrade
         AddV3BlockFields(manuscript);
         AddV4BlockFields(manuscript);
         AddV5BlockFields(manuscript);
+        AddV6Fields(manuscript);
         manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
         var upgradedJson = manuscript.ToJsonString(ManuscriptCodec.JsonOptions);
         var upgraded = ManuscriptCodec.Deserialize(
@@ -97,7 +98,7 @@ public static class ManuscriptSchemaUpgrade
         }
 
         if (!IsV1Manuscript(manuscript) && !IsV2Manuscript(manuscript) && !IsV3Manuscript(manuscript)
-            && !IsV4Manuscript(manuscript) && !IsCurrentManuscript(manuscript))
+            && !IsV4Manuscript(manuscript) && !IsV5Manuscript(manuscript) && !IsCurrentManuscript(manuscript))
             return false;
         if (!Guid.TryParse(manuscript["manuscriptId"]?.GetValue<string>(), out var manuscriptId)
             || manuscriptId != expectedManuscriptId)
@@ -127,6 +128,11 @@ public static class ManuscriptSchemaUpgrade
         if (IsV4Manuscript(manuscript))
         {
             _ = UpgradeV4DocumentJson(value, expectedManuscriptId, expectedRevision ?? revision);
+            return true;
+        }
+        if (IsV5Manuscript(manuscript))
+        {
+            _ = UpgradeV5DocumentJson(value, expectedManuscriptId, expectedRevision ?? revision);
             return true;
         }
 
@@ -196,6 +202,7 @@ public static class ManuscriptSchemaUpgrade
             AddV3BlockFields(manuscript);
             AddV4BlockFields(manuscript);
             AddV5BlockFields(manuscript);
+            AddV6Fields(manuscript);
             manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
             var upgraded = ManuscriptCodec.Deserialize(
                 manuscript.ToJsonString(ManuscriptCodec.JsonOptions));
@@ -212,6 +219,7 @@ public static class ManuscriptSchemaUpgrade
             AddV3BlockFields(v2Manuscript);
             AddV4BlockFields(v2Manuscript);
             AddV5BlockFields(v2Manuscript);
+            AddV6Fields(v2Manuscript);
             v2Manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
             var upgraded = ManuscriptCodec.Deserialize(v2Manuscript.ToJsonString(ManuscriptCodec.JsonOptions));
             var targetHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded));
@@ -226,6 +234,7 @@ public static class ManuscriptSchemaUpgrade
             var sourceHash = ProjectStructuredHash(v3Manuscript);
             AddV4BlockFields(v3Manuscript);
             AddV5BlockFields(v3Manuscript);
+            AddV6Fields(v3Manuscript);
             v3Manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
             var upgraded = ManuscriptCodec.Deserialize(v3Manuscript.ToJsonString(ManuscriptCodec.JsonOptions));
             var targetHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded));
@@ -239,11 +248,25 @@ public static class ManuscriptSchemaUpgrade
         {
             var sourceHash = ProjectStructuredHash(v4Manuscript);
             AddV5BlockFields(v4Manuscript);
+            AddV6Fields(v4Manuscript);
             v4Manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
             var upgraded = ManuscriptCodec.Deserialize(v4Manuscript.ToJsonString(ManuscriptCodec.JsonOptions));
             var targetHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded));
             if (!string.Equals(sourceHash, targetHash, StringComparison.Ordinal))
                 throw new InvalidDataException("A persisted manuscript changed during schema-v5 upgrade.");
+            sourceHashes.Add(sourceHash);
+            targetHashes.Add(targetHash);
+            return 1;
+        }
+        if (node is JsonObject v5Manuscript && IsV5Manuscript(v5Manuscript))
+        {
+            var sourceHash = ProjectStructuredHash(v5Manuscript);
+            AddV6Fields(v5Manuscript);
+            v5Manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
+            var upgraded = ManuscriptCodec.Deserialize(v5Manuscript.ToJsonString(ManuscriptCodec.JsonOptions));
+            var targetHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded));
+            if (!string.Equals(sourceHash, targetHash, StringComparison.Ordinal))
+                throw new InvalidDataException("A persisted manuscript changed during schema-v6 upgrade.");
             sourceHashes.Add(sourceHash);
             targetHashes.Add(targetHash);
             return 1;
@@ -299,7 +322,7 @@ public static class ManuscriptSchemaUpgrade
     {
         if (node is JsonObject obj)
         {
-            if (IsV1Manuscript(obj) || IsV2Manuscript(obj) || IsV3Manuscript(obj) || IsV4Manuscript(obj))
+            if (IsV1Manuscript(obj) || IsV2Manuscript(obj) || IsV3Manuscript(obj) || IsV4Manuscript(obj) || IsV5Manuscript(obj))
                 return true;
             return obj.Any(property => ContainsV1Node(property.Value));
         }
@@ -311,12 +334,28 @@ public static class ManuscriptSchemaUpgrade
             && ContainsV1Node(embedded);
     }
 
+    private static bool ContainsVersionNode(JsonNode? node, int version)
+    {
+        if (node is JsonObject obj)
+        {
+            if (IsManuscriptWithVersion(obj, version))
+                return true;
+            return obj.Any(property => ContainsVersionNode(property.Value, version));
+        }
+        if (node is JsonArray array)
+            return array.Any(item => ContainsVersionNode(item, version));
+        return node is JsonValue value
+            && value.TryGetValue<string>(out var embeddedJson)
+            && TryParseEmbedded(embeddedJson, out var embedded)
+            && ContainsVersionNode(embedded, version);
+    }
+
     private static bool ContainsStructuredNode(JsonNode? node)
     {
         if (node is JsonObject obj)
         {
             if (IsV1Manuscript(obj) || IsV2Manuscript(obj) || IsV3Manuscript(obj)
-                || IsV4Manuscript(obj) || IsCurrentManuscript(obj))
+                || IsV4Manuscript(obj) || IsV5Manuscript(obj) || IsCurrentManuscript(obj))
                 return true;
             return obj.Any(property => ContainsStructuredNode(property.Value));
         }
@@ -339,6 +378,9 @@ public static class ManuscriptSchemaUpgrade
 
     private static bool IsV4Manuscript(JsonObject value) =>
         IsManuscriptWithVersion(value, 4);
+
+    private static bool IsV5Manuscript(JsonObject value) =>
+        IsManuscriptWithVersion(value, 5);
 
     private static bool IsCurrentManuscript(JsonObject value) =>
         IsManuscriptWithVersion(value, ManuscriptDocument.CurrentSchemaVersion);
@@ -438,6 +480,7 @@ public static class ManuscriptSchemaUpgrade
         AddV3BlockFields(manuscript);
         AddV4BlockFields(manuscript);
         AddV5BlockFields(manuscript);
+        AddV6Fields(manuscript);
         manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
         var upgradedJson = manuscript.ToJsonString(ManuscriptCodec.JsonOptions);
         var upgraded = ManuscriptCodec.Deserialize(upgradedJson, expectedManuscriptId, expectedRevision);
@@ -458,12 +501,25 @@ public static class ManuscriptSchemaUpgrade
         var sourceHash = ProjectStructuredHash(manuscript);
         AddV4BlockFields(manuscript);
         AddV5BlockFields(manuscript);
+        AddV6Fields(manuscript);
         manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
         var upgradedJson = manuscript.ToJsonString(ManuscriptCodec.JsonOptions);
         var upgraded = ManuscriptCodec.Deserialize(upgradedJson, expectedManuscriptId, expectedRevision);
         if (!string.Equals(sourceHash, ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded)), StringComparison.Ordinal))
             throw new InvalidDataException("Manuscript-v3 import changed during schema upgrade.");
         return upgradedJson;
+    }
+
+    internal static bool ContainsDocumentVersion(string json, int version)
+    {
+        try
+        {
+            return ContainsVersionNode(Parse(json), version);
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
     }
 
     public static string UpgradeV4DocumentJson(
@@ -478,11 +534,31 @@ public static class ManuscriptSchemaUpgrade
             throw new InvalidDataException("The import does not contain a manuscript-v4 document.");
         var sourceHash = ProjectStructuredHash(manuscript);
         AddV5BlockFields(manuscript, pageIdMap);
+        AddV6Fields(manuscript);
         manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
         var upgradedJson = manuscript.ToJsonString(ManuscriptCodec.JsonOptions);
         var upgraded = ManuscriptCodec.Deserialize(upgradedJson, expectedManuscriptId, expectedRevision);
         if (!string.Equals(sourceHash, ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded)), StringComparison.Ordinal))
             throw new InvalidDataException("Manuscript-v4 import changed during schema upgrade.");
+        return upgradedJson;
+    }
+
+    public static string UpgradeV5DocumentJson(
+        string json,
+        Guid expectedManuscriptId,
+        long expectedRevision)
+    {
+        var manuscript = Parse(json) as JsonObject
+            ?? throw new InvalidDataException("The manuscript root is not an object.");
+        if (!IsV5Manuscript(manuscript))
+            throw new InvalidDataException("The import does not contain a manuscript-v5 document.");
+        var sourceHash = ProjectStructuredHash(manuscript);
+        AddV6Fields(manuscript);
+        manuscript["schemaVersion"] = ManuscriptDocument.CurrentSchemaVersion;
+        var upgradedJson = manuscript.ToJsonString(ManuscriptCodec.JsonOptions);
+        var upgraded = ManuscriptCodec.Deserialize(upgradedJson, expectedManuscriptId, expectedRevision);
+        if (!string.Equals(sourceHash, ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(upgraded)), StringComparison.Ordinal))
+            throw new InvalidDataException("Manuscript-v5 import changed during schema upgrade.");
         return upgradedJson;
     }
 
@@ -560,6 +636,11 @@ public static class ManuscriptSchemaUpgrade
             }
             block["designedPageId"] = (pageIdMap?.Invoke(pageId) ?? pageId);
         }
+    }
+
+    private static void AddV6Fields(JsonObject manuscript)
+    {
+        manuscript["notes"] = new JsonArray();
     }
 
     private static JsonNode Parse(string json)

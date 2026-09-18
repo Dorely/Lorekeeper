@@ -453,7 +453,7 @@ public class ChapterService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        var imageIds = document.Content
+        var imageIds = ManuscriptTraversal.EnumerateBlocks(document)
             .Where(block => block.Type == ManuscriptBlockType.Figure)
             .Select(block => block.ImageId!.Value)
             .Distinct()

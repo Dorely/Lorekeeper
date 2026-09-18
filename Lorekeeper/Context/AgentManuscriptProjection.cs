@@ -12,7 +12,7 @@ namespace Lorekeeper.Context;
 /// </summary>
 internal static class AgentManuscriptProjection
 {
-    public const string Schema = "agent-manuscript-v2";
+    public const string Schema = "agent-manuscript-v3";
     public const string StylesSchema = "agent-manuscript-styles-v1";
 
     public static string SerializeCurrentChapter(Chapter chapter, ManuscriptSnapshot? snapshot)
@@ -224,6 +224,7 @@ internal static class AgentManuscriptProjection
         AddFigures(payload, blocks);
         AddDesignedPages(payload, blocks);
         AddPublicationFields(payload, blocks);
+        AddRichContent(payload, document, blocks);
         return payload;
     }
 
@@ -391,6 +392,40 @@ internal static class AgentManuscriptProjection
             payload["publicationFields"] = fields;
     }
 
+    private static void AddRichContent(
+        JsonObject payload,
+        ManuscriptDocument document,
+        IReadOnlyList<(ManuscriptBlock block, int index)> blocks)
+    {
+        var tables = new JsonArray();
+        foreach (var (block, index) in blocks.Where(item => item.block.Type == ManuscriptBlockType.Table))
+        {
+            tables.Add(new JsonObject
+            {
+                ["block"] = index,
+                ["table"] = JsonSerializer.SerializeToNode(block.Table, ContextPayloadJson.Options),
+            });
+        }
+        if (tables.Count > 0)
+            payload["tables"] = tables;
+
+        if (document.Notes.Count > 0)
+            payload["notes"] = JsonSerializer.SerializeToNode(document.Notes, ContextPayloadJson.Options);
+
+        var positions = new JsonArray();
+        foreach (var segment in ManuscriptTraversal.EnumerateText(document))
+        {
+            positions.Add(new JsonArray
+            {
+                JsonSerializer.SerializeToNode(segment.Start.ContainerPath, ContextPayloadJson.Options),
+                segment.Start.BlockOrAtomId,
+                segment.Text.Length,
+            });
+        }
+        if (positions.Count > 0)
+            payload["positionsUtf16"] = positions;
+    }
+
     private static JsonObject StylePayload(ManuscriptStyleView style) => new()
     {
         ["id"] = style.Id,
@@ -409,8 +444,7 @@ internal static class AgentManuscriptProjection
         JsonSerializer.SerializeToNode(definition, ContextPayloadJson.Options)?.AsObject()
         ?? new JsonObject();
 
-    private static string ExactText(ManuscriptBlock block) =>
-        string.Concat(block.Content.Select(inline => inline.Text));
+    private static string ExactText(ManuscriptBlock block) => ManuscriptCodec.Text(block);
 
     private static string EnumName<T>(T value) where T : struct, Enum =>
         JsonNamingPolicy.CamelCase.ConvertName(value.ToString());

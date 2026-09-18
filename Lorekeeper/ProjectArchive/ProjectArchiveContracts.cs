@@ -10,10 +10,14 @@ public static class ProjectArchiveContract
 {
     public const string FormatId = "lorekeeper.archive";
     public const int EnvelopeVersion = 1;
-    public const int RecordSchemaVersion = 1;
-    public const int ManuscriptSchemaVersion = 5;
-    public const int HistorySnapshotSchemaVersion = 8;
+    public const int RecordSchemaVersion = 2;
+    public const int ManuscriptSchemaVersion = 6;
+    public const int HistorySnapshotSchemaVersion = 9;
     public const string ManifestPath = "manifest.json";
+
+    public static bool CanReadRecordSchema(int version) => version is 1 or RecordSchemaVersion;
+    public static bool CanReadManuscriptSchema(int version) => version is 5 or ManuscriptSchemaVersion;
+    public static bool CanReadHistorySchema(int version) => version is 8 or HistorySnapshotSchemaVersion;
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<ProjectDependencyTraversalPolicy>))]

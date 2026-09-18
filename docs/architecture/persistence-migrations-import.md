@@ -238,10 +238,10 @@ markers are quarantined: pending work restarts from a fresh protected snapshot,
 while an already-applied cutover restores the newest protected source backup in
 the projectless recovery shell.
 
-The current persisted manuscript document is v5. Older v1-v4 documents and
+The current persisted manuscript document is v6. Older v1-v5 documents and
 historical/review payloads are upgraded only at guarded startup or isolated
 versioned import boundaries. `ManuscriptDocument.CurrentSchemaVersion` and
-`docs/schemas/manuscript-v5.schema.json` are the current-format authorities;
+`docs/schemas/manuscript-v6.schema.json` are the current-format authorities;
 names such as `SchemaV3MigrationName` or “manuscript-v3 import” identify
 historical transforms and must not be renamed merely to make prose look
 current. Malformed current manuscripts, structurally invalid documents, and
@@ -249,10 +249,19 @@ malformed non-result audit payloads fail closed into protected recovery. Legacy
 plain text is permitted only in its documented historical audit boundary and
 is preserved byte-for-byte.
 
+The v6 data migration scans chapters, release chapter overrides, publication
+sections and matter, Designed Page content and predecessor compositions, books,
+contest/revision payloads, and structured audit JSON under one protected
+transaction. It upgrades v5 directly, preserves the historical v1-v4 journal
+identity for older or mixed payloads, validates normalized-text hashes, and is
+idempotent on restart. Recovery restores the protected source database and
+replays its unapplied EF boundaries without removing columns whose owning
+migration was already recorded.
+
 The manuscript migration preflight validates contest source snapshots
 independently of the retired `AcceptedManuscriptJson` column, which is absent
 from the current schema. Non-empty candidate proposals and drafts must be
-structured v1-v5 documents; failed, invalid, pending, and running candidates
+structured v1-v6 documents; failed, invalid, pending, and running candidates
 may legitimately retain empty proposal/draft fields, while completed and
 selected candidates require a proposal. Legacy v1 discovery and upgrade also
 includes `DraftManuscriptJson` when that optional column exists. Empty candidate
@@ -297,7 +306,8 @@ Legacy project export v31 is the final JSON format and is import-only. Its
 adapter retains the durable print registry/profile fields, removes finish, and
 accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-at that boundary. New `.lorekeeper` full archives include the current v5
+at that boundary. New `.lorekeeper` full archives use archive-record schema 2
+and include the current v6
 manuscript model, Core/release annotations, the complete retained-source closure,
 page setup, independent Designed
 Pages with Core/release content and authored variants,
@@ -424,7 +434,7 @@ physical jobs are not recovered into the v12 queue.
 | `Lorekeeper/Persistence/DatabaseMigrationRecoveryService.cs` | Protected backup/restore, markers, recovery shell, confirmation, discovery, and pruning. |
 | `Lorekeeper/Persistence/DatabaseStartupMigrationService.cs` | Ordered startup migration/recovery orchestration and readiness-boundary integration. |
 | `Lorekeeper/Persistence/Migrations/` | Immutable EF schema history and current model snapshot; never edit applied files. |
-| `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v5 upgrade. |
+| `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v6 upgrade across every persisted manuscript-bearing payload. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
 | `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-artifact-profile, and edition-content transformations. |
 | `Lorekeeper/ImportExport/ProjectExportModels.cs` | Final JSON v31 portable DTOs and isolated older input adapters. |

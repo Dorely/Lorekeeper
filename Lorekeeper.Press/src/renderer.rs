@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path};
 
@@ -1237,7 +1237,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 13,
+        protocol_version: 14,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -1470,7 +1470,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
-                "protocolVersion": 13,
+                "protocolVersion": 14,
                 "rendererVersion": env!("CARGO_PKG_VERSION"),
                 "jobId": request.job_id,
                 "pageCount": layout.pages.len(),
@@ -1573,7 +1573,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 13,
+            "protocolVersion": 14,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1689,19 +1689,18 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    // Protocol v12 had the same request shape. Keep its reader at the
-    // boundary so historical saved jobs remain renderable; all responses use
-    // the current v13 contract.
-    if !matches!(request.protocol_version, 12 | 13) {
+    // Protocols v12 and v13 remain boundary readers so historical saved jobs
+    // stay renderable; all responses use the current v14 contract.
+    if !matches!(request.protocol_version, 12..=14) {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 12 or 13.",
+            "Lorekeeper Press requires protocol version 12, 13, or 14.",
         );
     }
-    if request.protocol_version == 13 && contains_legacy_designed_page_contract(&request.document) {
+    if request.protocol_version >= 13 && contains_legacy_designed_page_contract(&request.document) {
         return reject(
             "PRESS_LEGACY_DESIGNED_PAGE_CONTRACT",
-            "Protocol 13 requires designedPages and designedPageId; legacy composition fields are accepted only by the v12 adapter.",
+            "Protocols 13 and 14 require designedPages and designedPageId; legacy composition fields are accepted only by the v12 adapter.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -2411,6 +2410,7 @@ fn paginate_with_cancellation(
     let mut body_start_page = None;
     let document = &request.document;
     let mut chapter_entries = Vec::new();
+    let mut endnote_groups = Vec::new();
     let mut chapter_ordinal = 0usize;
     let mut semantic_order = 0i32;
     let toc_index = append_publication_sections(
@@ -2425,6 +2425,7 @@ fn paginate_with_cancellation(
         &mut diagnostics,
         &mut page_map,
         &mut semantic_order,
+        &mut endnote_groups,
     )?;
     let mut features = BTreeSet::new();
     if document
@@ -2456,6 +2457,7 @@ fn paginate_with_cancellation(
                 &mut diagnostics,
                 &mut page_map,
                 &mut semantic_order,
+                &mut endnote_groups,
             )?;
             let section_title = numbered_title(
                 &string(section, "title"),
@@ -2529,6 +2531,7 @@ fn paginate_with_cancellation(
                     &mut diagnostics,
                     &mut page_map,
                     &mut semantic_order,
+                    &mut endnote_groups,
                 )?;
                 if request.profile != "generic-digital-pdf-v1"
                     && chapter_begins_with_facing_spread(chapter, request.protocol_version)
@@ -2555,6 +2558,20 @@ fn paginate_with_cancellation(
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
+                let mut numbered_notes = prepare_numbered_notes(
+                    &mut blocks,
+                    chapter
+                        .get("notes")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default(),
+                )
+                .map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed(
+                        "rejected",
+                        diagnostic.with_source("chapter", string(chapter, "id")),
+                    ))
+                })?;
                 let include_chapter_heading = chapter
                     .get("includeHeading")
                     .and_then(Value::as_bool)
@@ -2681,6 +2698,29 @@ fn paginate_with_cancellation(
                             });
                         }
                         previous_space_after = 0.0;
+                        continue;
+                    }
+                    if block_type.eq_ignore_ascii_case("Table") {
+                        features.insert("rich-table".to_owned());
+                        let first_page = append_semantic_table(&mut pages, &block, trim).map_err(
+                            |diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)),
+                        )?;
+                        assign_semantic_order_since(
+                            &mut pages,
+                            &semantic_snapshot,
+                            semantic_order,
+                            &semantic_id,
+                            None,
+                            browser_preview.then(|| table_text(&block)).as_deref(),
+                        );
+                        if !block_id.is_empty() {
+                            page_map.push(PageMapEntry {
+                                chapter_id: string(chapter, "id"),
+                                block_id,
+                                page_number: first_page.max(chapter_start),
+                            });
+                        }
+                        previous_space_after = 6.0;
                         continue;
                     }
                     if block_type.eq_ignore_ascii_case("Figure") {
@@ -2957,6 +2997,23 @@ fn paginate_with_cancellation(
                         });
                     }
                 }
+                append_footnotes(&mut pages, &numbered_notes, trim).map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed(
+                        "rejected",
+                        diagnostic.with_source("chapter", string(chapter, "id")),
+                    ))
+                })?;
+                let chapter_endnotes = numbered_notes
+                    .drain(..)
+                    .filter(|note| note.kind == "Endnote")
+                    .collect::<Vec<_>>();
+                if !chapter_endnotes.is_empty() {
+                    endnote_groups.push(EndnoteGroup {
+                        container_id: string(chapter, "id"),
+                        title: chapter_title.clone(),
+                        notes: chapter_endnotes,
+                    });
+                }
                 if let Some(page) = pages.get_mut(chapter_page_index) {
                     page.bookmark = (!chapter_title.is_empty()).then_some(chapter_title.clone());
                 }
@@ -2973,6 +3030,7 @@ fn paginate_with_cancellation(
                     &mut diagnostics,
                     &mut page_map,
                     &mut semantic_order,
+                    &mut endnote_groups,
                 )?;
             }
             append_publication_sections(
@@ -2987,6 +3045,7 @@ fn paginate_with_cancellation(
                 &mut diagnostics,
                 &mut page_map,
                 &mut semantic_order,
+                &mut endnote_groups,
             )?;
         }
     }
@@ -3002,6 +3061,7 @@ fn paginate_with_cancellation(
         &mut diagnostics,
         &mut page_map,
         &mut semantic_order,
+        &mut endnote_groups,
     )?;
     let mut toc_converged = toc_index.is_none();
     if let Some(index) = toc_index {
@@ -3026,6 +3086,7 @@ fn paginate_with_cancellation(
             *page += delta;
         }
     }
+    append_endnotes(&mut pages, &mut endnote_groups, &page_map, trim);
     if request.cover.is_some() {
         features.insert("dedicated-cover".to_owned());
     }
@@ -4891,6 +4952,7 @@ fn append_publication_sections(
     diagnostics: &mut Vec<Diagnostic>,
     page_map: &mut Vec<PageMapEntry>,
     semantic_order: &mut i32,
+    endnote_groups: &mut Vec<EndnoteGroup>,
 ) -> RenderResult<Option<usize>> {
     let mut toc_index = None;
     let ordered_sections = ordered_publication_sections(document, anchor, target_id);
@@ -4913,12 +4975,25 @@ fn append_publication_sections(
             pages.push(centered_page("Contents", "", trim));
             continue;
         }
-        let blocks = section
+        let mut blocks = section
             .get("blocks")
             .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .cloned()
+            .unwrap_or_default();
+        let mut numbered_notes = prepare_numbered_notes(
+            &mut blocks,
+            section
+                .get("notes")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+        .map_err(|diagnostic| {
+            Box::new(RenderResponse::failed(
+                "rejected",
+                diagnostic.with_source("publication-section", section_id.clone()),
+            ))
+        })?;
         let begins_with_flowing_content = blocks
             .first()
             .is_some_and(|block| !string(block, "type").eq_ignore_ascii_case("DesignedPage"));
@@ -4933,7 +5008,7 @@ fn append_publication_sections(
         }
         let mut previous_was_designed_page = false;
         let mut previous_space_after = 0.0f32;
-        for (block_index, block) in blocks.into_iter().enumerate() {
+        for (block_index, block) in blocks.iter().enumerate() {
             *semantic_order += 1;
             let block_id = string(block, "id");
             let block_type = string(block, "type");
@@ -5023,6 +5098,32 @@ fn append_publication_sections(
                 .map(|page| (page.lines.len(), page.images.len()))
                 .collect::<Vec<_>>();
             previous_was_designed_page = false;
+            if block_type.eq_ignore_ascii_case("Table") {
+                let first_page =
+                    append_semantic_table(pages, block, trim).map_err(|diagnostic| {
+                        Box::new(RenderResponse::failed(
+                            "rejected",
+                            diagnostic.with_source("publication-section", section_id.clone()),
+                        ))
+                    })?;
+                assign_semantic_order_since(
+                    pages,
+                    &semantic_snapshot,
+                    *semantic_order,
+                    &block_id,
+                    None,
+                    None,
+                );
+                if !block_id.is_empty() {
+                    page_map.push(PageMapEntry {
+                        chapter_id: section_id.clone(),
+                        block_id,
+                        page_number: first_page,
+                    });
+                }
+                previous_space_after = 6.0;
+                continue;
+            }
             if block_type.eq_ignore_ascii_case("Figure") {
                 let caption_style = block_style(document, block, trim);
                 let caption_runs = block_runs(document, block, &caption_style);
@@ -5277,6 +5378,23 @@ fn append_publication_sections(
                     page_number: first_changed_page(pages, &semantic_snapshot),
                 });
             }
+        }
+        append_footnotes(pages, &numbered_notes, trim).map_err(|diagnostic| {
+            Box::new(RenderResponse::failed(
+                "rejected",
+                diagnostic.with_source("publication-section", section_id.clone()),
+            ))
+        })?;
+        let section_endnotes = numbered_notes
+            .drain(..)
+            .filter(|note| note.kind == "Endnote")
+            .collect::<Vec<_>>();
+        if !section_endnotes.is_empty() {
+            endnote_groups.push(EndnoteGroup {
+                container_id: section_id,
+                title: string(section, "title"),
+                notes: section_endnotes,
+            });
         }
     }
     Ok(toc_index)
@@ -5764,6 +5882,22 @@ struct BlockStyle {
     semantic_role: LayoutSemanticRole,
 }
 
+#[derive(Clone)]
+struct NumberedNote {
+    id: String,
+    kind: String,
+    number: usize,
+    reference_block_id: String,
+    reference_page: Option<usize>,
+    content: Vec<Value>,
+}
+
+struct EndnoteGroup {
+    container_id: String,
+    title: String,
+    notes: Vec<NumberedNote>,
+}
+
 impl BlockStyle {
     fn body(trim: &crate::model::Trim) -> Self {
         let defaults = &typography::defaults().body;
@@ -5849,6 +5983,745 @@ fn normalized_alignment(value: &str) -> String {
         "end" => "right".to_owned(),
         normalized => normalized.to_owned(),
     }
+}
+
+fn prepare_numbered_notes(
+    blocks: &mut [Value],
+    notes: &[Value],
+) -> Result<Vec<NumberedNote>, Diagnostic> {
+    let mut note_by_id = HashMap::new();
+    for note in notes {
+        let id = string(note, "id");
+        if id.is_empty() || note_by_id.insert(id.clone(), note).is_some() {
+            return Err(Diagnostic::error(
+                "PRESS_NOTE_INVALID",
+                "Notes require unique, non-empty stable IDs.",
+            ));
+        }
+    }
+    let mut counts = HashMap::<String, usize>::new();
+    let mut seen = HashSet::new();
+    let mut numbered = Vec::new();
+    for block in blocks {
+        let root_block_id = string(block, "id");
+        number_block_note_references(
+            block,
+            &root_block_id,
+            &note_by_id,
+            &mut counts,
+            &mut seen,
+            &mut numbered,
+        )?;
+    }
+    if seen.len() != note_by_id.len() {
+        return Err(Diagnostic::error(
+            "PRESS_NOTE_INVALID",
+            "Every note must have exactly one reference in its semantic document.",
+        ));
+    }
+    Ok(numbered)
+}
+
+fn number_block_note_references(
+    block: &mut Value,
+    root_block_id: &str,
+    notes: &HashMap<String, &Value>,
+    counts: &mut HashMap<String, usize>,
+    seen: &mut HashSet<String>,
+    numbered: &mut Vec<NumberedNote>,
+) -> Result<(), Diagnostic> {
+    if let Some(content) = block.get_mut("content").and_then(Value::as_array_mut) {
+        for inline in content {
+            if !string(inline, "type").eq_ignore_ascii_case("NoteReference") {
+                continue;
+            }
+            let note_id = string(inline, "noteId");
+            let note = notes.get(&note_id).ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_NOTE_INVALID",
+                    format!("Note reference '{note_id}' does not resolve to a note."),
+                )
+            })?;
+            if !seen.insert(note_id.clone()) {
+                return Err(Diagnostic::error(
+                    "PRESS_NOTE_INVALID",
+                    format!("Note '{note_id}' is referenced more than once."),
+                ));
+            }
+            let kind = string(note, "kind");
+            if !matches!(kind.as_str(), "Footnote" | "Endnote") {
+                return Err(Diagnostic::error(
+                    "PRESS_NOTE_INVALID",
+                    format!("Note '{note_id}' has an unsupported kind."),
+                ));
+            }
+            let number = counts.get(&kind).copied().unwrap_or_default() + 1;
+            counts.insert(kind.clone(), number);
+            let object = inline.as_object_mut().ok_or_else(|| {
+                Diagnostic::error("PRESS_NOTE_INVALID", "A note reference is not an object.")
+            })?;
+            object.insert("text".to_owned(), Value::String(number.to_string()));
+            object.insert(
+                "marks".to_owned(),
+                serde_json::json!([{ "type": "Superscript", "value": null }]),
+            );
+            numbered.push(NumberedNote {
+                id: note_id,
+                kind,
+                number,
+                reference_block_id: root_block_id.to_owned(),
+                reference_page: None,
+                content: note
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    if let Some(rows) = block
+        .get_mut("table")
+        .and_then(|table| table.get_mut("rows"))
+        .and_then(Value::as_array_mut)
+    {
+        for row in rows {
+            for cell in row
+                .get_mut("cells")
+                .and_then(Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
+                for nested in cell
+                    .get_mut("content")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    number_block_note_references(
+                        nested,
+                        root_block_id,
+                        notes,
+                        counts,
+                        seen,
+                        numbered,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_note_reference_pages(
+    notes: &mut [NumberedNote],
+    page_map: &[PageMapEntry],
+    container_id: &str,
+) {
+    for note in notes {
+        note.reference_page = page_map
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.chapter_id == container_id && entry.block_id == note.reference_block_id
+            })
+            .map(|entry| entry.page_number);
+    }
+}
+
+fn note_text(note: &NumberedNote) -> String {
+    note.content
+        .iter()
+        .map(display_block_text)
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn append_footnotes(
+    pages: &mut Vec<LayoutPage>,
+    notes: &[NumberedNote],
+    trim: &crate::model::Trim,
+) -> Result<(), Diagnostic> {
+    let notes = notes
+        .iter()
+        .filter(|note| note.kind == "Footnote")
+        .collect::<Vec<_>>();
+    if notes.is_empty() {
+        return Ok(());
+    }
+    let mut style = BlockStyle::body(trim);
+    style.size = (trim.body_font_size_points * 0.8).max(7.0);
+    style.line_height = 1.1;
+    style.space_before = 1.0;
+    style.space_after = 1.0;
+    let maximum_lines = ((remaining_line_capacity(&empty_body_page(), trim, &style) as f32) * 0.4)
+        .floor()
+        .max(2.0) as usize;
+    for note in notes {
+        if note
+            .content
+            .iter()
+            .any(|block| string(block, "type").eq_ignore_ascii_case("Figure"))
+        {
+            return Err(Diagnostic::error(
+                "UnplaceableFootnoteContent",
+                format!(
+                    "Footnote {} contains an unbreakable figure that cannot be placed in the bounded footnote region.",
+                    note.number
+                ),
+            ));
+        }
+        let text = format!("{}. {}", note.number, note_text(note));
+        let wrapped = wrap(&text, 92);
+        let mut offset = 0usize;
+        let mut continuation = false;
+        while offset < wrapped.len() {
+            let existing_footnote_lines = pages.last().map_or(0, |page| {
+                page.lines
+                    .iter()
+                    .filter(|line| line.semantic_parent_id.as_deref() == Some("footnotes"))
+                    .count()
+            });
+            let remaining_page_lines = pages.last().map_or(0, |page| {
+                if page.kind == PageKind::Body {
+                    remaining_line_capacity(page, trim, &style)
+                } else {
+                    0
+                }
+            });
+            let bounded_remaining = maximum_lines.saturating_sub(existing_footnote_lines);
+            if bounded_remaining == 0 || remaining_page_lines == 0 {
+                pages.push(empty_body_page());
+                continuation = true;
+                continue;
+            }
+            let take = (wrapped.len() - offset)
+                .min(bounded_remaining)
+                .min(remaining_page_lines);
+            if take == 0 {
+                pages.push(empty_body_page());
+                continuation = true;
+                continue;
+            }
+            let chunk = if continuation {
+                let marker = format!("Footnote {} (continued) ", note.number);
+                format!("{marker}{}", wrapped[offset..offset + take].join(" "))
+            } else {
+                wrapped[offset..offset + take].join(" ")
+            };
+            let snapshot = pages
+                .iter()
+                .map(|page| (page.lines.len(), page.images.len()))
+                .collect::<Vec<_>>();
+            append_styled_text(pages, &chunk, trim, &style);
+            assign_semantic_order_since(
+                pages,
+                &snapshot,
+                100_000 + note.number as i32,
+                &format!("footnote-{}", note.id),
+                Some("footnotes"),
+                None,
+            );
+            offset += take;
+            continuation = offset < wrapped.len();
+        }
+    }
+    Ok(())
+}
+
+fn append_endnotes(
+    pages: &mut Vec<LayoutPage>,
+    groups: &mut [EndnoteGroup],
+    page_map: &[PageMapEntry],
+    trim: &crate::model::Trim,
+) {
+    if !groups.iter().any(|group| !group.notes.is_empty()) {
+        return;
+    }
+    pages.push(centered_page("Endnotes", "", trim));
+    for group in groups.iter_mut().filter(|group| !group.notes.is_empty()) {
+        resolve_note_reference_pages(&mut group.notes, page_map, &group.container_id);
+        let heading = if group.title.trim().is_empty() {
+            "Untitled document"
+        } else {
+            &group.title
+        };
+        let mut heading_style = BlockStyle::chapter_heading(trim);
+        heading_style.size = (trim.body_font_size_points * 1.2).max(11.0);
+        append_styled_text(pages, heading, trim, &heading_style);
+        for note in &group.notes {
+            let mut style = BlockStyle::body(trim);
+            style.first_line_indent = -18.0;
+            style.indent = 18.0;
+            let snapshot = pages
+                .iter()
+                .map(|page| (page.lines.len(), page.images.len()))
+                .collect::<Vec<_>>();
+            append_styled_text(
+                pages,
+                &format!("{}. {}", note.number, note_text(note)),
+                trim,
+                &style,
+            );
+            assign_semantic_order_since(
+                pages,
+                &snapshot,
+                200_000 + note.number as i32,
+                &format!("endnote-{}", note.id),
+                Some(&format!("endnotes-{}", group.container_id)),
+                None,
+            );
+            if let Some(reference_page) = note.reference_page {
+                for page in pages.iter_mut().rev() {
+                    if let Some(line) = page.lines.iter_mut().rev().find(|line| {
+                        line.semantic_id.as_deref() == Some(&format!("endnote-{}", note.id))
+                    }) {
+                        line.link_page = Some(reference_page);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate_table_grid(
+    rows: &[Value],
+    column_count: usize,
+    header_count: usize,
+) -> Result<(), Diagnostic> {
+    let mut occupied = vec![vec![false; column_count]; rows.len()];
+    for (row_index, row) in rows.iter().enumerate() {
+        let cells = row.get("cells").and_then(Value::as_array).ok_or_else(|| {
+            Diagnostic::error("PRESS_TABLE_INVALID", "A table row has no cell collection.")
+        })?;
+        if cells.is_empty() {
+            return Err(Diagnostic::error(
+                "PRESS_TABLE_INVALID",
+                "A table row must contain at least one cell.",
+            ));
+        }
+        let mut column = 0usize;
+        for cell in cells {
+            while column < column_count && occupied[row_index][column] {
+                column += 1;
+            }
+            let row_span = cell
+                .get("rowSpan")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize;
+            let column_span = cell
+                .get("columnSpan")
+                .and_then(Value::as_u64)
+                .unwrap_or_default() as usize;
+            let content = cell.get("content").and_then(Value::as_array);
+            if row_span == 0
+                || column_span == 0
+                || row_index + row_span > rows.len()
+                || column + column_span > column_count
+                || content.is_none()
+                || content.is_some_and(Vec::is_empty)
+            {
+                return Err(Diagnostic::error(
+                    "PRESS_TABLE_INVALID",
+                    "A table cell has invalid spans, bounds, or semantic content.",
+                ));
+            }
+            if row_index < header_count && row_index + row_span > header_count {
+                return Err(Diagnostic::error(
+                    "PRESS_TABLE_INVALID",
+                    "A leading header-row span cannot cross into the table body.",
+                ));
+            }
+            for occupied_row in occupied.iter_mut().skip(row_index).take(row_span) {
+                for slot in occupied_row.iter_mut().skip(column).take(column_span) {
+                    if *slot {
+                        return Err(Diagnostic::error(
+                            "PRESS_TABLE_INVALID",
+                            "Table cell spans overlap.",
+                        ));
+                    }
+                    *slot = true;
+                }
+            }
+            column += column_span;
+        }
+    }
+    if occupied.iter().flatten().any(|slot| !slot) {
+        return Err(Diagnostic::error(
+            "PRESS_TABLE_INVALID",
+            "Table cell spans leave a grid gap.",
+        ));
+    }
+    Ok(())
+}
+
+fn append_semantic_table(
+    pages: &mut Vec<LayoutPage>,
+    block: &Value,
+    trim: &crate::model::Trim,
+) -> Result<usize, Diagnostic> {
+    let table = block.get("table").ok_or_else(|| {
+        Diagnostic::error("PRESS_TABLE_INVALID", "A table block has no table payload.")
+    })?;
+    let rows = table.get("rows").and_then(Value::as_array).ok_or_else(|| {
+        Diagnostic::error("PRESS_TABLE_INVALID", "A table has no row collection.")
+    })?;
+    let weights = table
+        .get("columnWidthWeights")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_TABLE_INVALID",
+                "A table has no column-width weights.",
+            )
+        })?
+        .iter()
+        .map(|value| value.as_u64().unwrap_or_default() as usize)
+        .collect::<Vec<_>>();
+    if rows.is_empty() || weights.is_empty() || weights.contains(&0) {
+        return Err(Diagnostic::error(
+            "PRESS_TABLE_INVALID",
+            "A table requires rows and positive column-width weights.",
+        ));
+    }
+    let header_count = table
+        .get("headerRowCount")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as usize;
+    if header_count > rows.len() {
+        return Err(Diagnostic::error(
+            "PRESS_TABLE_INVALID",
+            "A table declares more header rows than rows.",
+        ));
+    }
+    validate_table_grid(rows, weights.len(), header_count)?;
+
+    let mut body_style = BlockStyle::body(trim);
+    body_style.size = (trim.body_font_size_points * 0.9).max(7.0);
+    body_style.line_height = trim.body_line_height.max(1.0);
+    body_style.space_before = 2.0;
+    body_style.space_after = 2.0;
+    let mut header_style = body_style.clone();
+    header_style.font_weight = 700;
+    header_style.face = header_style.face.with_weight(700, false);
+    header_style.keep_with_next = true;
+    let full_capacity = remaining_line_capacity(&empty_body_page(), trim, &body_style);
+    let total_weight = weights.iter().sum::<usize>().max(1);
+    let header_lines = rows
+        .iter()
+        .take(header_count)
+        .map(|row| table_row_estimated_lines(row, &weights, total_weight))
+        .sum::<usize>();
+    if header_lines >= full_capacity && header_count > 0 {
+        return Err(Diagnostic::error(
+            "UnplaceableTableRowGroup",
+            "The repeated table header cannot fit on one page.",
+        ));
+    }
+
+    let mut first_page = None;
+    let mut row_index = 0usize;
+    while row_index < rows.len() {
+        let mut group_end = row_index + 1;
+        let mut cursor = row_index;
+        while cursor < group_end {
+            let cells = rows[cursor]
+                .get("cells")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    Diagnostic::error("PRESS_TABLE_INVALID", "A table row has no cells.")
+                })?;
+            for cell in cells {
+                let span = cell.get("rowSpan").and_then(Value::as_u64).unwrap_or(1) as usize;
+                group_end = group_end.max(cursor.saturating_add(span));
+            }
+            cursor += 1;
+        }
+        if group_end > rows.len() {
+            return Err(Diagnostic::error(
+                "PRESS_TABLE_INVALID",
+                "A table row span extends past the final row.",
+            ));
+        }
+        let group_lines = rows[row_index..group_end]
+            .iter()
+            .map(|row| table_row_estimated_lines(row, &weights, total_weight))
+            .sum::<usize>();
+        let required = group_lines
+            + if row_index >= header_count {
+                header_lines
+            } else {
+                0
+            };
+        if required > full_capacity {
+            if group_end != row_index + 1 || table_row_has_row_span(&rows[row_index]) {
+                return Err(Diagnostic::error(
+                    "UnplaceableTableRowGroup",
+                    "A row-span group cannot fit on one page at the selected page size.",
+                ));
+            }
+            let segments = table_row_semantic_segments(&rows[row_index]);
+            if segments.len() <= 1 {
+                return Err(Diagnostic::error(
+                    "UnplaceableTableRowGroup",
+                    "A table row has no semantic block boundary at which it can be split.",
+                ));
+            }
+            for segment in segments {
+                let segment_lines =
+                    table_cell_texts_estimated_lines(&segment, &weights, total_weight);
+                let segment_required = segment_lines + header_lines;
+                if segment_required > full_capacity {
+                    return Err(Diagnostic::error(
+                        "UnplaceableTableRowGroup",
+                        "A semantic table-row segment cannot fit on one page at the selected page size.",
+                    ));
+                }
+                let remaining = pages.last().map_or(0, |page| {
+                    if page.kind == PageKind::Body {
+                        remaining_line_capacity(page, trim, &body_style)
+                    } else {
+                        0
+                    }
+                });
+                if remaining < segment_required {
+                    pages.push(empty_body_page());
+                    for header in rows.iter().take(header_count) {
+                        let page = append_table_row(
+                            pages,
+                            header,
+                            &weights,
+                            total_weight,
+                            trim,
+                            &header_style,
+                        );
+                        first_page.get_or_insert(page);
+                    }
+                }
+                let page = append_table_cell_texts(
+                    pages,
+                    &segment,
+                    &weights,
+                    total_weight,
+                    trim,
+                    &body_style,
+                );
+                first_page.get_or_insert(page);
+            }
+            row_index += 1;
+            continue;
+        }
+        let remaining = pages.last().map_or(0, |page| {
+            if page.kind == PageKind::Body {
+                remaining_line_capacity(page, trim, &body_style)
+            } else {
+                0
+            }
+        });
+        if remaining < required {
+            pages.push(empty_body_page());
+            if row_index >= header_count {
+                for header in rows.iter().take(header_count) {
+                    let page = append_table_row(
+                        pages,
+                        header,
+                        &weights,
+                        total_weight,
+                        trim,
+                        &header_style,
+                    );
+                    first_page.get_or_insert(page);
+                }
+            }
+        }
+        for row in &rows[row_index..group_end] {
+            let style = if row_index < header_count {
+                &header_style
+            } else {
+                &body_style
+            };
+            let page = append_table_row(pages, row, &weights, total_weight, trim, style);
+            first_page.get_or_insert(page);
+            row_index += 1;
+        }
+    }
+    Ok(first_page.unwrap_or_else(|| pages.len().max(1)))
+}
+
+fn append_table_row(
+    pages: &mut Vec<LayoutPage>,
+    row: &Value,
+    weights: &[usize],
+    total_weight: usize,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+) -> usize {
+    append_table_cell_texts(
+        pages,
+        &table_row_cell_texts(row),
+        weights,
+        total_weight,
+        trim,
+        style,
+    )
+}
+
+fn table_row_estimated_lines(row: &Value, weights: &[usize], total_weight: usize) -> usize {
+    table_cell_texts_estimated_lines(&table_row_cell_texts(row), weights, total_weight)
+}
+
+fn table_cell_texts_estimated_lines(
+    cells: &[(String, usize)],
+    weights: &[usize],
+    total_weight: usize,
+) -> usize {
+    let mut column = 0usize;
+    cells
+        .iter()
+        .map(|(text, span)| {
+            let weight = weights
+                .iter()
+                .skip(column)
+                .take(*span)
+                .sum::<usize>()
+                .max(1);
+            column = column.saturating_add(*span);
+            let characters = (72usize.saturating_mul(weight) / total_weight).max(4);
+            wrap(text, characters).len().max(1)
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn table_row_cell_texts(row: &Value) -> Vec<(String, usize)> {
+    row.get("cells")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|cell| {
+            (
+                table_cell_text(cell),
+                cell.get("columnSpan").and_then(Value::as_u64).unwrap_or(1) as usize,
+            )
+        })
+        .collect()
+}
+
+fn append_table_cell_texts(
+    pages: &mut Vec<LayoutPage>,
+    cells: &[(String, usize)],
+    weights: &[usize],
+    total_weight: usize,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+) -> usize {
+    let separator_width = cells.len().saturating_sub(1) * 3;
+    let available_characters = 80usize.saturating_sub(separator_width).max(cells.len() * 4);
+    let mut column = 0usize;
+    let mut wrapped = Vec::with_capacity(cells.len());
+    for (text, span) in cells {
+        let weight = weights
+            .iter()
+            .skip(column)
+            .take(*span)
+            .sum::<usize>()
+            .max(1);
+        column = column.saturating_add(*span);
+        let width = (available_characters.saturating_mul(weight) / total_weight).max(4);
+        wrapped.push((wrap(text, width), width));
+    }
+    let line_count = wrapped
+        .iter()
+        .map(|(lines, _)| lines.len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let text = (0..line_count)
+        .map(|line_index| {
+            wrapped
+                .iter()
+                .map(|(lines, width)| {
+                    let value = lines.get(line_index).map(String::as_str).unwrap_or("");
+                    format!("{value:<width$}", width = *width)
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    append_styled_text(pages, &text, trim, style)
+}
+
+fn table_row_has_row_span(row: &Value) -> bool {
+    row.get("cells")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|cell| cell.get("rowSpan").and_then(Value::as_u64).unwrap_or(1) > 1)
+}
+
+fn table_row_semantic_segments(row: &Value) -> Vec<Vec<(String, usize)>> {
+    let cells = row
+        .get("cells")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let maximum_blocks = cells
+        .iter()
+        .filter_map(|cell| cell.get("content").and_then(Value::as_array).map(Vec::len))
+        .max()
+        .unwrap_or_default();
+    (0..maximum_blocks)
+        .map(|block_index| {
+            cells
+                .iter()
+                .map(|cell| {
+                    let text = cell
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .and_then(|content| content.get(block_index))
+                        .map(display_block_text)
+                        .unwrap_or_default();
+                    let span = cell.get("columnSpan").and_then(Value::as_u64).unwrap_or(1) as usize;
+                    (text, span)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn table_cell_text(cell: &Value) -> String {
+    cell.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(display_block_text)
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+fn table_text(block: &Value) -> String {
+    block
+        .get("table")
+        .and_then(|table| table.get("rows"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|row| {
+            row.get("cells")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(table_cell_text)
+                .collect::<Vec<_>>()
+                .join("\t")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn append_styled_text(
@@ -7945,7 +8818,20 @@ fn block_text(block: &Value) -> String {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|span| span.get("text").and_then(Value::as_str))
+        .map(|span| {
+            if string(span, "type").eq_ignore_ascii_case("NoteReference") {
+                span.get("text")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("*")
+                    .to_owned()
+            } else {
+                span.get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned()
+            }
+        })
         .collect::<String>()
 }
 
@@ -8325,7 +9211,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 13,
+            protocol_version: 14,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,
@@ -9474,6 +10360,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn semantic_tables_repeat_headers_without_splitting_normal_rows() {
+        let mut rows = vec![serde_json::json!({
+            "id": "header",
+            "cells": [{"id": "header-cell", "rowSpan": 1, "columnSpan": 1,
+                "content": [{"type": "Paragraph", "content": [{"type": "Text", "text": "Header", "marks": []}]}]}]
+        })];
+        rows.extend((0..80).map(|index| serde_json::json!({
+            "id": format!("row-{index}"),
+            "cells": [{"id": format!("cell-{index}"), "rowSpan": 1, "columnSpan": 1,
+                "content": [{"type": "Paragraph", "content": [{"type": "Text", "text": format!("Row {index}"), "marks": []}]}]}]
+        })));
+        let block = serde_json::json!({
+            "id": "table-block",
+            "type": "Table",
+            "table": {"id": "table", "columnWidthWeights": [1], "headerRowCount": 1, "rows": rows}
+        });
+        let mut pages = vec![empty_body_page()];
+
+        append_semantic_table(&mut pages, &block, &standard_trim()).expect("table layout");
+
+        assert!(pages.len() > 1);
+        assert!(
+            pages
+                .iter()
+                .filter(|page| page.lines.iter().any(|line| line.text == "Header"))
+                .count()
+                >= 2
+        );
+    }
+
+    #[test]
+    fn semantic_tables_fail_closed_when_a_row_group_cannot_fit() {
+        let block = serde_json::json!({
+            "id": "table-block",
+            "type": "Table",
+            "table": {"id": "table", "columnWidthWeights": [1], "headerRowCount": 0, "rows": [{
+                "id": "row",
+                "cells": [{"id": "cell", "rowSpan": 1, "columnSpan": 1,
+                    "content": [{"type": "Paragraph", "content": [{"type": "Text", "text": "word ".repeat(4000), "marks": []}]}]}]
+            }]}
+        });
+
+        let diagnostic =
+            append_semantic_table(&mut vec![empty_body_page()], &block, &standard_trim())
+                .expect_err("oversized row must fail");
+
+        assert_eq!(&*diagnostic.code, "UnplaceableTableRowGroup");
+    }
+
+    #[test]
+    fn semantic_tables_split_an_oversized_normal_row_only_at_block_boundaries() {
+        let block = serde_json::json!({
+            "id": "table-block",
+            "type": "Table",
+            "table": {"id": "table", "columnWidthWeights": [1], "headerRowCount": 0, "rows": [{
+                "id": "row",
+                "cells": [{"id": "cell", "rowSpan": 1, "columnSpan": 1,
+                    "content": [
+                        {"id": "first", "type": "Paragraph", "content": [{"type": "Text", "text": "first ".repeat(300), "marks": []}]},
+                        {"id": "second", "type": "Paragraph", "content": [{"type": "Text", "text": "second ".repeat(300), "marks": []}]}
+                    ]}]
+            }]}
+        });
+        let mut pages = vec![empty_body_page()];
+
+        append_semantic_table(&mut pages, &block, &standard_trim())
+            .expect("semantic block boundaries make the row splittable");
+
+        assert!(pages.len() > 1);
+        assert!(
+            pages
+                .iter()
+                .any(|page| page.lines.iter().any(|line| line.text.contains("first")))
+        );
+        assert!(
+            pages
+                .iter()
+                .any(|page| page.lines.iter().any(|line| line.text.contains("second")))
+        );
+    }
+
     fn standard_trim() -> crate::model::Trim {
         crate::model::Trim {
             width_inches: 6.0,
@@ -9491,7 +10459,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 13,
+            protocol_version: 14,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,

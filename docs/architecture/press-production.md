@@ -2,7 +2,7 @@
 
 ## When to read
 
-Read this chapter when a change touches the owned native renderer, protocol v12,
+Read this chapter when a change touches the owned native renderer, protocol v14,
 render requests, deterministic pagination or shaping, Press runtime packaging,
 print-artifact profile registry entries, stock/spine/cover geometry, cover surfaces,
 PDF versions/output intent/color/ink/transparency, tagged Digital PDF,
@@ -97,29 +97,29 @@ effective Core/release title, subtitle, author, spine text, and Description befo
 protocol serialization. Press therefore receives concrete selectable text and
 does not own application metadata-token semantics.
 
-The native `Lorekeeper.Press` project owns protocol v12, shaping, pagination,
+The native `Lorekeeper.Press` project owns protocol v14, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
 The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
 preview surfaces do not delegate layout to a browser-native PDF viewer.
 
-### Accepted M5 rich-layout contract
+### Current M5A rich-layout contract
 
-This is accepted next-contract guidance, not a claim that the current protocol
-already implements it. Press receives the canonical recursive table/note/citation
-projection and retains the shared `ManuscriptPosition` identity in page maps.
+Press receives the canonical recursive table/note projection and retains stable
+semantic identities in page maps. Citation structure remains M5B work.
 It repeats contiguous leading table headers after a break and does not split a
 normal row. A row taller than a page splits only at semantic block boundaries,
 never through a row-span group; an unplaceable atomic group reports
 `UnplaceableTableRowGroup`.
 
-Footnotes occupy no more than 40% of the body area. Overflow continues with a
-continuation marker, while the reference stays with at least two note lines when
-possible; unbreakable content reports `UnplaceableFootnoteContent`. Endnotes are
-generated final back matter grouped by top-level document with occurrence
-backlinks. PDF, EPUB, Read, and textual projections preserve citation structure,
-linked notes, bibliography semantics, and deterministic missing-metadata
-diagnostics; pagination never mutates stored atom offsets.
+Footnotes occupy no more than 40% of the body area and continue with an explicit
+marker; unbreakable figure content reports `UnplaceableFootnoteContent`.
+Endnotes are generated final back matter grouped by top-level document with
+backlinks to the recorded reference page. Numbering restarts independently for
+each chapter or publication section, and pagination never mutates stored atom
+offsets. Exact reference-page footnote reservation remains an M5 layout
+hardening item: protocol v14 currently places bounded footnote regions after
+the owning top-level semantic flow rather than reflowing earlier body pages.
 
 ## Current architecture and invariants
 
@@ -181,7 +181,7 @@ queued or rendering job are deleted immediately, while `press-previews` and
 `version-history` directories older than 24 hours are removed behind a guard
 against racing live operations.
 
-Press protocol v12 owns deterministic layout, English/Latin shaping and glyph
+Press protocol v14 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode
 maps, bounded pagination, headings/TOC, stable block/page maps, inline
 typography, sparse paragraph presentation, flowing Figures, crop positioning,
@@ -399,14 +399,14 @@ claim. The original downloadable PDF retains its text, vectors, and evidence.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v12 request/response, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v14 request/response, recursive tables/notes, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |
 | `Lorekeeper.Press/src/image.rs` | Bounded raster decoding, alpha/color conversion, crop positioning, and total-ink enforcement. |
 | `Lorekeeper.Press/src/inspect.rs` | Independent post-write geometry, font, color, output-intent, transparency, security, annotation, and tagged-PDF inspection. |
-| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v12 render CLI, and testable library surface. |
-| `Lorekeeper.Press/tests/conformance_v12.rs` | Protocol, containment, atomicity, determinism, layout, publication, artifact-profile, cover, typography, color, PDF, and negative evidence harness. |
+| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v14 render CLI, and testable library surface. |
+| `Lorekeeper.Press/tests/conformance_v12.rs` | Historical-name conformance harness covering the current protocol plus predecessor admission, containment, atomicity, determinism, rich layout, publication, artifact-profile, cover, typography, color, PDF, and negative evidence. |
 | `Lorekeeper.Press/fixtures/` | Frozen full-model, negative protocol, malformed raw-PDF, and test asset fixtures. |
 | `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, canonical print-artifact profile registry, and shared manuscript typography defaults. |
 | `Lorekeeper/Publish/PrintArtifactProfileRegistry.cs` | Application loader/validator for registry version/hash and profiles plus submitted/normalized/reported page counts, spine, paper thickness, surfaces, cover regions, barcode, duplex, case, jacket, and cloth geometry. |

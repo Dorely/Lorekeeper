@@ -9,7 +9,10 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectArchiveTests
 {
     private const string ProjectId = "10000000-0000-0000-0000-000000000001";
-    private static readonly ProjectArchiveSchemaVersions SchemaVersions = new(5, ProjectArchiveContract.RecordSchemaVersion, 8);
+    private static readonly ProjectArchiveSchemaVersions SchemaVersions = new(
+        ProjectArchiveContract.ManuscriptSchemaVersion,
+        ProjectArchiveContract.RecordSchemaVersion,
+        ProjectArchiveContract.HistorySnapshotSchemaVersion);
 
     [Fact]
     public void NormativeM4FixtureAgreesWithArchiveConstantsAndPolicies()
@@ -21,9 +24,15 @@ public sealed class ProjectArchiveTests
         Assert.Equal(ProjectArchiveContract.EnvelopeVersion, archive.GetProperty("envelopeVersion").GetInt32());
         var schemaVersions = archive.GetProperty("manifest").GetProperty("schemaVersions");
         Assert.Equal(ProjectId, archive.GetProperty("manifest").GetProperty("projectId").GetString());
-        Assert.Equal(SchemaVersions.Manuscript, schemaVersions.GetProperty("manuscript").GetInt32());
-        Assert.Equal(ProjectArchiveContract.RecordSchemaVersion, schemaVersions.GetProperty("archiveRecord").GetInt32());
-        Assert.Equal(SchemaVersions.HistorySnapshot, schemaVersions.GetProperty("historySnapshot").GetInt32());
+        // This fixture is the committed M4 predecessor contract. M5A must
+        // continue to admit it while emitting the newer rich-manuscript
+        // versions for newly created archives.
+        Assert.Equal(5, schemaVersions.GetProperty("manuscript").GetInt32());
+        Assert.Equal(1, schemaVersions.GetProperty("archiveRecord").GetInt32());
+        Assert.Equal(8, schemaVersions.GetProperty("historySnapshot").GetInt32());
+        Assert.True(ProjectArchiveContract.CanReadManuscriptSchema(5));
+        Assert.True(ProjectArchiveContract.CanReadRecordSchema(1));
+        Assert.True(ProjectArchiveContract.CanReadHistorySchema(8));
         Assert.Equal(
             Enum.GetNames<ProjectDependencyTraversalPolicy>(),
             archive.GetProperty("policies").EnumerateArray().Select(item => item.GetString()).ToArray());

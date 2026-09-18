@@ -105,7 +105,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var project = ReadRequired<VersionHistorySnapshotProjectArea>(files, "project/project.json");
         var narrativeFile = ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json");
         var chapterPaths = ValidateChapterFileSet(listedPaths);
-        var chapters = ReadChapters(files, chapterPaths);
+        var chapters = ReadChapters(files, chapterPaths, manifest.SchemaVersion);
         var narrative = narrativeFile.ToArea(chapters);
         var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
         var sources = ReadSources(files, manifest.SchemaVersion, listedPaths);
@@ -118,6 +118,11 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             "publication/publication.json",
             requireCanonicalRoundTrip: manifest.SchemaVersion == VersionHistorySnapshotContract.SchemaVersion);
         publication = AdaptPublicationForSchema(publication, manifest.SchemaVersion);
+        if (manifest.SchemaVersion < VersionHistorySnapshotContract.RichManuscriptSchemaVersion)
+        {
+            composition = AdaptRichComposition(composition);
+            publication = AdaptRichPublication(publication);
+        }
         ValidateSchemaFileSet(listedPaths, assets, chapterPaths, sources, manifest.SchemaVersion);
         ValidateAssetBlobs(assets, validatedFiles);
         ValidateSourceBlobs(sources, validatedFiles);
@@ -568,7 +573,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
     private static IReadOnlyList<ProjectExportChapter> ReadChapters(
         IReadOnlyDictionary<string, byte[]> files,
-        IReadOnlyDictionary<Guid, ChapterFilePaths> chapterPaths)
+        IReadOnlyDictionary<Guid, ChapterFilePaths> chapterPaths,
+        int schemaVersion)
     {
         var chapters = new List<ProjectExportChapter>(chapterPaths.Count);
         foreach (var (chapterId, paths) in chapterPaths.OrderBy(item => item.Key))
@@ -580,25 +586,75 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                     $"Snapshot chapter path ID {chapterId:N} does not match chapter metadata ID {metadata.Id:N}.");
             }
 
-            var manuscriptJson = VersionHistoryCanonicalJson.DeserializeDirectManuscript(
-                files[paths.ManuscriptPath]);
             try
             {
+                var manuscriptJson = VersionHistoryCanonicalJson.DeserializeDirectManuscript(
+                    files[paths.ManuscriptPath]);
+                if (schemaVersion < VersionHistorySnapshotContract.RichManuscriptSchemaVersion)
+                    manuscriptJson = UpgradeLegacyManuscript(manuscriptJson, metadata.Id, metadata.ManuscriptRevision);
                 _ = ManuscriptCodec.Deserialize(
                     manuscriptJson,
                     metadata.Id,
                     metadata.ManuscriptRevision);
+                chapters.Add(metadata.ToProjectExportChapter(manuscriptJson));
             }
             catch (InvalidDataException exception)
             {
                 throw new InvalidDataException(
-                    $"Snapshot chapter {chapterId:N} manuscript does not match its chapter metadata.",
+                    $"Snapshot chapter {chapterId:N} manuscript JSON does not match its chapter metadata.",
                     exception);
             }
-            chapters.Add(metadata.ToProjectExportChapter(manuscriptJson));
         }
 
         return chapters;
+    }
+
+    private static VersionHistorySnapshotCompositionArea AdaptRichComposition(
+        VersionHistorySnapshotCompositionArea composition) => composition with
+        {
+            DesignedPages = composition.DesignedPages.Select(page => page with
+            {
+                Contents = page.Contents.Select(content => content with
+                {
+                    SemanticManuscriptJson = UpgradeLegacyManuscript(
+                        content.SemanticManuscriptJson,
+                        content.Id,
+                        content.Revision),
+                }).ToList(),
+            }).ToList(),
+            LegacyPageCompositions = composition.LegacyPageCompositions?.Select(page => page with
+            {
+                SemanticManuscriptJson = UpgradeLegacyManuscript(
+                    page.SemanticManuscriptJson,
+                    page.Id,
+                    page.Revision),
+            }).ToList(),
+        };
+
+    private static VersionHistorySnapshotPublicationArea AdaptRichPublication(
+        VersionHistorySnapshotPublicationArea publication) => publication with
+        {
+            PublicationEditions = publication.PublicationEditions.Select(edition => edition with
+            {
+                ChapterOverrides = edition.ChapterOverrides.Select(chapter => chapter with
+                {
+                    ManuscriptJson = UpgradeLegacyManuscript(
+                        chapter.ManuscriptJson,
+                        chapter.ChapterId,
+                        chapter.Revision),
+                }).ToList(),
+            }).ToList(),
+            PublicationSections = publication.PublicationSections.Select(section => section with
+            {
+                ManuscriptJson = UpgradeLegacyManuscript(section.ManuscriptJson, section.Id, section.Revision),
+            }).ToList(),
+        };
+
+    private static string UpgradeLegacyManuscript(string json, Guid id, long revision)
+    {
+        var upgraded = ManuscriptSchemaUpgrade.UpgradeEmbeddedV1Documents(json).Json;
+        _ = ManuscriptCodec.Deserialize(upgraded, id, revision);
+        return upgraded;
     }
 
     private static void ValidateSchemaFileSet(

@@ -609,6 +609,47 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void Schema8ReaderUpgradesItsDirectV5ManuscriptAfterValidatingThePredecessor()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var chapter = CreateChapter(Guid.NewGuid(), "Rich predecessor");
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid(), chapter: chapter);
+            WriteSnapshotTree(
+                root,
+                payload,
+                (path, bytes) =>
+                {
+                    if (!path.EndsWith("/manuscript.json", StringComparison.Ordinal))
+                        return bytes;
+                    var manuscript = System.Text.Json.Nodes.JsonNode.Parse(bytes)!.AsObject();
+                    manuscript["schemaVersion"] = 5;
+                    manuscript.Remove("notes");
+                    return VersionHistoryCanonicalJson.SerializeDirectManuscript(manuscript.ToJsonString());
+                },
+                schemaVersion: 8);
+
+            var restored = new VersionHistorySnapshotReader()
+                .Read(root, payload.RepositoryId, payload.ProjectId)
+                .Payload.Narrative.Chapters.Single();
+            var manuscript = ManuscriptCodec.Deserialize(
+                restored.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision);
+
+            Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, manuscript.SchemaVersion);
+            Assert.Empty(manuscript.Notes);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Schema7DesignedPageRestoreSelectsCurrentDataWithoutLegacyCompositionData()
     {
         var repositoryId = Guid.NewGuid();
@@ -1520,7 +1561,7 @@ public sealed class ProjectVersionRestoreTests
         int? schemaVersion = null,
         IReadOnlyDictionary<string, byte[]>? sourceOriginalData = null)
     {
-        var effectiveSchemaVersion = schemaVersion ?? 7;
+        var effectiveSchemaVersion = schemaVersion ?? VersionHistorySnapshotContract.SchemaVersion;
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
             ["project/project.json"] = VersionHistoryCanonicalJson.Serialize(payload.Project),

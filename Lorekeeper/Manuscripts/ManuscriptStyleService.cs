@@ -45,6 +45,7 @@ public sealed class ManuscriptStyleService(
             ManuscriptStyleRoles.BlockQuote,
             ManuscriptStyleRoles.ListItem,
             ManuscriptStyleRoles.FigureCaption,
+            ManuscriptStyleRoles.Table,
         ],
         StringComparer.OrdinalIgnoreCase);
 
@@ -330,7 +331,8 @@ public sealed class ManuscriptStyleService(
             .Where(style => style.Kind == ManuscriptStyleKind.Character)
             .Select(style => style.SemanticRole)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var unknownParagraph = document.Content.FirstOrDefault(
+        var blocks = ManuscriptTraversal.EnumerateBlocks(document);
+        var unknownParagraph = blocks.FirstOrDefault(
             block => block.Type != ManuscriptBlockType.DesignedPage
                 && !paragraphRoles.Contains(block.StyleRole));
         if (unknownParagraph is not null)
@@ -338,7 +340,7 @@ public sealed class ManuscriptStyleService(
             throw new InvalidOperationException(
                 $"Block {unknownParagraph.Id} references unknown paragraph style role '{unknownParagraph.StyleRole}'.");
         }
-        var unknownCharacter = document.Content
+        var unknownCharacter = blocks
             .SelectMany(block => block.Content)
             .SelectMany(inline => inline.Marks)
             .FirstOrDefault(mark =>

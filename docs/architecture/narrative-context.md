@@ -123,10 +123,10 @@ from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph
 relationships, project-search results, named manuscript styles, page setup,
 annotations, and canonical entity visuals. The active chapter is loaded once as
-a complete `agent-manuscript-v2` snapshot with source/completeness metadata,
+a complete `agent-manuscript-v3` snapshot with source/completeness metadata,
 revision, source hash, stable block IDs, exact text, sparse UTF-16 marks,
-structure, interned direct paragraph formatting, Figures, Designed Pages, and
-publication bindings. Block rows use absolute indexes as compact overlay
+canonical positions, recursive tables and notes, interned direct paragraph
+formatting, Figures, Designed Pages, and publication bindings. Block rows use absolute indexes as compact overlay
 cross-references while stable IDs remain the only mutation identities. Named
 styles arrive separately as versioned definitions; direct formatting overrides
 named styles, which override built-in defaults. Ordinary active-chapter editing
@@ -293,7 +293,7 @@ external relationships and does not infer Word pagination.
 - [assistants-chat.md](assistants-chat.md) owns the shared conversation runtime,
   system-prompt composition, surface charters, tools, review changes, contests,
   and revision workers.
-- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v5, chapter
+- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v6, chapter
   body mutations, editor behavior, annotations, styles, and authoring history.
 - [providers-background.md](providers-background.md) owns LLM/search provider
   configuration and the shared rules for provider-backed background execution.

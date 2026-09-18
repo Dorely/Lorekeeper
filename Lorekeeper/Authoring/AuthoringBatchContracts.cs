@@ -90,7 +90,9 @@ public sealed record AuthoringOperationV1(
     FigurePresentation? FigurePresentation = null,
     Guid? DesignedPageId = null,
     string? Language = null,
-    FigureAccessibilityRole? AccessibilityRole = null);
+    FigureAccessibilityRole? AccessibilityRole = null,
+    ManuscriptDocument? RichDocument = null,
+    string? ExpectedDocumentFingerprint = null);
 
 public sealed record AuthoringSelectionPointV1(
     string TargetId,
