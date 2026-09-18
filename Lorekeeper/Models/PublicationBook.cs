@@ -1,4 +1,5 @@
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Citations;
 
 namespace Lorekeeper.Models;
 
@@ -25,6 +26,7 @@ public enum PublicationEditionOverrideField
     PageMarginInches = 18,
     AllowDesignedPageOverrides = 21,
     RectoChapterStarts = 22,
+    CitationStyle = 23,
 }
 
 public class PublicationBook
@@ -51,6 +53,7 @@ public class PublicationBook
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
     public bool RectoChapterStarts { get; set; }
+    public CitationStyle CitationStyle { get; set; } = CitationStyle.Chicago18NotesBibliography;
 
     public ICollection<PublicationBookOutlineItem> OutlineItems { get; set; } = [];
     public ICollection<PublicationBookMatter> Matter { get; set; } = [];

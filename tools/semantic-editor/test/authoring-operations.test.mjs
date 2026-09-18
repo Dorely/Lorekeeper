@@ -6,6 +6,7 @@ import {EditorState} from "prosemirror-state";
 import {
     addAuthoringPreconditions,
     authoringOperations,
+    citationItemsFromForm,
     authoringSequenceWatermarks,
     operationsForTarget,
     roundTripManuscriptJson,
@@ -15,7 +16,34 @@ import {
 const block = (id, type = "paragraph", content = [{type: "text", text: "Text", marks: []}], extra = {}) => ({
     id, type, styleRole: type === "figure" ? "figure-caption" : "body", content, ...extra
 });
-const document = content => ({schemaVersion: 6, manuscriptId: "00000000-0000-0000-0000-000000000001", revision: 1, content, notes: []});
+const document = content => ({schemaVersion: 7, manuscriptId: "00000000-0000-0000-0000-000000000001", revision: 1, content, notes: []});
+
+test("list metadata survives round trips and ordinary typing stays incremental", () => {
+    const original = document([block("item", "listItem", [{type: "text", text: "First", marks: []}],
+        {list: {id: "list-a", ordered: true, level: 2, start: 7}})]);
+    const before = JSON.parse(roundTripManuscriptJson(JSON.stringify(original)));
+    assert.deepEqual(before.content[0].list, original.content[0].list);
+    const after = structuredClone(before);
+    after.content[0].content[0].text += " edited";
+    assert.deepEqual(authoringOperations(before, after).map(operation => operation.kind), ["replaceInlineContent"]);
+    after.content[0].list.start = 10;
+    const operations = authoringOperations(before, after);
+    assert.equal(operations[0].kind, "replaceRichDocument");
+    assert.equal(operations[0].richDocument.content[0].list.start, 10);
+});
+
+test("citation form serializes the manuscript contract and preserves evidence only for an unchanged source", () => {
+    const original = [{bibliographicRecordId: "00000000-0000-0000-0000-000000000099", sourceLocationId: "00000000-0000-0000-0000-000000000098"}];
+    const values = {record1: original[0].bibliographicRecordId, prefix1: " see ", suffix1: " ", locatorLabel1: "chapter", locatorValue1: " 2 "};
+    const items = citationItemsFromForm(values, 1, original);
+    const manuscript = document([block("p", "paragraph", [{id: "citation", type: "citation", text: "", marks: [], citation: {items}}])]);
+    const saved = JSON.parse(roundTripManuscriptJson(JSON.stringify(manuscript))).content[0].content[0].citation.items[0];
+    assert.equal(saved.bibliographicRecordId, original[0].bibliographicRecordId);
+    assert.equal(saved.sourceLocationId, original[0].sourceLocationId);
+    assert.equal(saved.prefix, "see");
+    assert.equal(saved.locatorValue, "2");
+    assert.equal(citationItemsFromForm({...values, record1: "replacement"}, 1, original)[0].sourceLocationId, null);
+});
 
 test("rich table and note atoms round-trip and save behind one exact document precondition", () => {
     const rich = document([
@@ -49,6 +77,42 @@ test("rich table and note atoms round-trip and save behind one exact document pr
     assert.equal(operations[0].kind, "replaceRichDocument");
     addAuthoringPreconditions(operations, before, rich, new Map(), "sha256:document");
     assert.equal(operations[0].expectedDocumentFingerprint, "sha256:document");
+});
+
+test("citation atoms retain stable identity and structured cluster metadata", () => {
+    const cited = document([block("p", "paragraph", [
+        {type: "text", text: "Claim", marks: []},
+        {id: "cite-1", type: "citation", text: "", noteId: null, marks: [], citation: {items: [{
+            bibliographicRecordId: "00000000-0000-0000-0000-000000000099",
+            prefix: "see", suffix: "", locatorLabel: "page", locatorValue: "42", sourceLocationId: null
+        }]}}
+    ])]);
+    const roundTripped = JSON.parse(roundTripManuscriptJson(JSON.stringify(cited)));
+    assert.equal(roundTripped.schemaVersion, 7);
+    assert.deepEqual(roundTripped.content[0].content[1], cited.content[0].content[1]);
+    const operations = authoringOperations(document([block("p")]), cited);
+    assert.equal(operations[0].kind, "replaceInlineContent");
+    assert.deepEqual(operations[0].position.containerPath, ["document"]);
+    assert.equal(operations[0].inlineContent[1].citation.items[0].locatorValue, "42");
+});
+
+test("ordinary typing in table cells and notes sends only the changed inline content", () => {
+    const before = document([block("table-block", "table", [], {table: {
+        id: "table", columnWidthWeights: [1], headerRowCount: 0,
+        rows: [{id: "row", cells: [{id: "cell", rowSpan: 1, columnSpan: 1, content: [block("cell-text")]}]}]
+    }})]);
+    before.notes = [{id: "note", kind: "footnote", content: [block("note-text")]}];
+    const after = structuredClone(before);
+    after.content[0].table.rows[0].cells[0].content[0].content[0].text = "Cell edit";
+    after.notes[0].content[0].content[0].text = "Note edit";
+    const operations = authoringOperations(before, after);
+    assert.deepEqual(operations.map(operation => operation.kind), ["replaceInlineContent", "replaceInlineContent"]);
+    assert.deepEqual(operations.map(operation => operation.position.containerPath), [
+        ["document", "table:table", "row:row", "cell:cell"], ["notes", "note"]
+    ]);
+    addAuthoringPreconditions(operations, before, after, new Map([["cell-text", "cell-hash"], ["note-text", "note-hash"]]));
+    assert.deepEqual(operations.map(operation => operation.expectedElementFingerprint), ["cell-hash", "note-hash"]);
+    assert.ok(operations.every(operation => !operation.richDocument));
 });
 
 test("authoring delta preserves mark-only additions and removals through text replacement", () => {

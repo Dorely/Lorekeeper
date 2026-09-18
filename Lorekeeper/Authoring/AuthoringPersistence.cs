@@ -129,7 +129,7 @@ internal static class AuthoringPersistence
             Fingerprint(manuscriptJson),
             manuscriptJson,
             selectionJson,
-            document.Content.ToDictionary(
+            ManuscriptTraversal.EnumerateBlocks(document).ToDictionary(
                 item => item.Id,
                 AuthoringBatchReducer.Fingerprint,
                 StringComparer.Ordinal));

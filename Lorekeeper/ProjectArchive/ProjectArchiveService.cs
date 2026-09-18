@@ -14,7 +14,7 @@ public interface IProjectArchiveService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class ProjectArchiveService(IProjectDependencyTraversalService traversal) : IProjectArchiveService
+public sealed class ProjectArchiveService(IProjectDependencyTraversalService traversal, ProjectArchiveLimits? limits = null) : IProjectArchiveService
 {
     public async Task<ProjectArchiveWriteResult> WriteAsync(
         Guid projectId,
@@ -31,6 +31,7 @@ public sealed class ProjectArchiveService(IProjectDependencyTraversalService tra
             policy,
             capture.Files,
             capture.Warnings,
+            limits,
             cancellationToken: cancellationToken);
         return new ProjectArchiveWriteResult(
             $"{projectId:D}.lorekeeper",

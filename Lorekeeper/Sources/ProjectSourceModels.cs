@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Citations;
 
 namespace Lorekeeper.Sources;
 
@@ -39,10 +40,52 @@ public sealed record ProjectBibliographicRecordItem(
     string Title,
     string ContainerTitle,
     string AuthorsJson,
+    string EditorsJson,
+    string TranslatorsJson,
     int? IssuedYear,
+    int? IssuedMonth,
+    int? IssuedDay,
+    string Edition,
+    string Publisher,
+    string PublisherPlace,
+    string Institution,
+    string ThesisType,
+    string Volume,
+    string Issue,
+    string Pages,
     string Doi,
     string Url,
+    int? AccessedYear,
+    int? AccessedMonth,
+    int? AccessedDay,
+    string Isbn,
+    string Notes,
     DateTime UpdatedAt);
+
+public sealed record BibliographicRecordInput(
+    Guid? Id,
+    Guid? SourceId,
+    BibliographicRecordKind Kind,
+    string Title,
+    string ContainerTitle,
+    IReadOnlyList<CitationPerson> Authors,
+    IReadOnlyList<CitationPerson> Editors,
+    IReadOnlyList<CitationPerson> Translators,
+    CitationDate Issued,
+    CitationDate Accessed,
+    string Edition,
+    string Publisher,
+    string PublisherPlace,
+    string Institution,
+    string ThesisType,
+    string Volume,
+    string Issue,
+    string Pages,
+    string Doi,
+    string Url,
+    string Isbn,
+    string Notes,
+    DateTime? ExpectedUpdatedAt = null);
 
 public sealed record ProjectSourceReading(
     Guid SourceId,

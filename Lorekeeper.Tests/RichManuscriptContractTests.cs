@@ -10,6 +10,69 @@ namespace Lorekeeper.Tests;
 public sealed class RichManuscriptContractTests
 {
     [Fact]
+    public void Note_reference_cannot_hide_an_unvalidated_citation_payload()
+    {
+        var document = RichDocument();
+        var malformed = document with
+        {
+            Content = document.Content.Select(block => block with
+            {
+                Content = block.Content.Select(inline => inline.Type != ManuscriptInlineType.NoteReference ? inline : inline with
+                {
+                    Citation = new() { Items = [new() { BibliographicRecordId = Guid.NewGuid() }] },
+                }).ToList(),
+            }).ToList(),
+        };
+        Assert.Throws<InvalidDataException>(() => ManuscriptCodec.Serialize(malformed));
+    }
+
+    [Fact]
+    public void List_metadata_changes_and_typing_have_canonical_reversible_operations()
+    {
+        var before = ManuscriptCodec.FromPlainText(Guid.NewGuid(), "Item");
+        before = before with { Content = [before.Content[0] with
+        {
+            Type = ManuscriptBlockType.ListItem, StyleRole = ManuscriptStyleRoles.ListItem,
+            List = new() { Id = "list-a", Ordered = true, Level = 1, Start = 4 },
+        }] };
+        var after = before with { Content = [before.Content[0] with { Content = [new() { Text = "Edited item" }] }] };
+        var (forward, inverse) = AuthoringBatchReducer.CreateCanonicalDelta(before, after);
+        Assert.Equal("replaceInlineContent", Assert.Single(forward).Kind);
+        var applied = AuthoringBatchReducer.Apply(before, forward);
+        Assert.Equal(before.Content[0].List, applied.Document.Content[0].List);
+        Assert.True(ManuscriptCodec.ContentEquals(before, AuthoringBatchReducer.Apply(applied.Document, inverse).Document));
+        after = after with { Content = [after.Content[0] with { List = before.Content[0].List! with { Level = 2, Start = 8 } }] };
+        (forward, inverse) = AuthoringBatchReducer.CreateCanonicalDelta(before, after);
+        applied = AuthoringBatchReducer.Apply(before, forward);
+        Assert.True(ManuscriptCodec.ContentEquals(after, applied.Document));
+        Assert.True(ManuscriptCodec.ContentEquals(before, AuthoringBatchReducer.Apply(applied.Document, inverse).Document));
+    }
+
+    [Fact]
+    public void Assistant_inline_operations_preserve_atoms_and_reject_lossy_plain_text_edits()
+    {
+        var document = RichDocument();
+        var atomBlock = document.Content.First(block => block.Content.Any(inline => inline.Type == ManuscriptInlineType.NoteReference));
+        Assert.Throws<InvalidOperationException>(() => ManuscriptOperations.Apply(document,
+            [new ReplaceManuscriptBlockText(atomBlock.Id, "Replacement would lose the note")]));
+        var segment = ManuscriptTraversal.EnumerateText(document).Single(item => item.Block.Id == atomBlock.Id);
+        var edited = atomBlock.Content.Select(inline => inline.Type == ManuscriptInlineType.Text
+            ? inline with { Text = "Edited text" } : inline).ToList();
+        var operations = ManuscriptOperationInput.ToOperations([
+            new("ReplaceInlineContent", Position: segment.Start, InlineContent: edited),
+        ]);
+        var result = ManuscriptOperations.Apply(document, operations).Document;
+        Assert.Single(result.Notes);
+        var retainedReference = Assert.Single(result.Content.Single(block => block.Id == atomBlock.Id).Content,
+            inline => inline.Type == ManuscriptInlineType.NoteReference);
+        Assert.Equal("note-ref-a", retainedReference.Id);
+        Assert.Equal("note-a", retainedReference.NoteId);
+        Assert.Throws<ArgumentException>(() => ManuscriptOperationInput.ToOperations([
+            new("ReplaceInlineContent", Position: segment.Start, InlineContent: [new() { Text = new string('x', 65537) }]),
+        ]));
+    }
+
+    [Fact]
     public void V5_upgrade_preserves_content_and_adds_empty_note_ownership()
     {
         var id = Guid.NewGuid();
@@ -21,7 +84,7 @@ public sealed class RichManuscriptContractTests
         var upgraded = ManuscriptSchemaUpgrade.UpgradeV5DocumentJson(root.ToJsonString(), id, 4);
         var document = ManuscriptCodec.Deserialize(upgraded, id, 4);
 
-        Assert.Equal(6, document.SchemaVersion);
+        Assert.Equal(7, document.SchemaVersion);
         Assert.Empty(document.Notes);
         Assert.Equal("Before rich content", ManuscriptCodec.ProjectPlainText(document));
     }
@@ -74,9 +137,52 @@ public sealed class RichManuscriptContractTests
     }
 
     [Fact]
-    public void Html_and_markdown_keep_table_and_note_semantics()
+    public void Nested_typing_and_citation_edits_have_bounded_exact_inverses()
+    {
+        var before = RichDocument();
+        var cell = ManuscriptTraversal.EnumerateText(before).Single(item => item.Block.Id == "cell-a-paragraph");
+        var note = ManuscriptTraversal.EnumerateText(before).Single(item => item.Block.Id == "note-paragraph-a");
+        var after = ManuscriptOperations.Apply(before,
+        [
+            new ReplaceManuscriptInlineContent(cell.Start, [new() { Text = "Changed cell" }]),
+            new ReplaceManuscriptInlineContent(note.Start,
+            [
+                new() { Text = "Changed note " },
+                new() { Id = "citation", Type = ManuscriptInlineType.Citation,
+                    Citation = new() { Items = [new() { BibliographicRecordId = Guid.NewGuid(), LocatorValue = "42" }] } },
+            ]),
+        ]).Document;
+        var (forward, inverse) = AuthoringBatchReducer.CreateCanonicalDelta(before, after);
+        Assert.Equal(2, forward.Count);
+        Assert.All(forward, operation =>
+        {
+            Assert.Equal("replaceInlineContent", operation.Kind);
+            Assert.Null(operation.RichDocument);
+        });
+        Assert.True(AuthoringBatchReducer.ExactPreconditionsMatch(before, forward));
+        var applied = AuthoringBatchReducer.Apply(before, forward);
+        Assert.True(ManuscriptCodec.ContentEquals(after, applied.Document));
+        Assert.True(ManuscriptCodec.ContentEquals(before, AuthoringBatchReducer.Apply(applied.Document, inverse).Document));
+        Assert.True(ManuscriptCodec.ContentEquals(before, AuthoringBatchReducer.Apply(applied.Document, applied.CanonicalInverse).Document));
+        Assert.False(AuthoringBatchReducer.ExactPreconditionsMatch(after, forward));
+        var foreign = forward[0] with { Position = forward[0].Position! with { DocumentId = Guid.NewGuid() } };
+        Assert.False(AuthoringBatchReducer.ExactPreconditionsMatch(before, [foreign]));
+        Assert.Throws<InvalidDataException>(() => AuthoringBatchReducer.Apply(before, [foreign]));
+        var wrongPath = forward[0] with { Position = forward[0].Position! with { ContainerPath = ["document"] } };
+        Assert.False(AuthoringBatchReducer.ExactPreconditionsMatch(before, [wrongPath]));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Html_and_markdown_keep_table_and_note_semantics(bool referenceInTable)
     {
         var document = RichDocument();
+        if (referenceInTable)
+        {
+            document.Content[1].Table!.Rows[1].Cells[0].Content.Add(document.Content[0]);
+            document.Content.RemoveAt(0);
+        }
 
         var html = SemanticPublishFormatting.Html(document, _ => "image.png");
         var markdown = SemanticPublishFormatting.Markdown(document, _ => null);
@@ -86,8 +192,10 @@ public sealed class RichManuscriptContractTests
         Assert.Contains(">1</a>", html, StringComparison.Ordinal);
         Assert.Contains("role=\"doc-footnotes\"", html, StringComparison.Ordinal);
         Assert.Contains("Footnote body", html, StringComparison.Ordinal);
-        Assert.Contains("[^note-a]", markdown, StringComparison.Ordinal);
-        Assert.Contains("[^note-a]: Footnote body", markdown, StringComparison.Ordinal);
+        Assert.Contains("href=\"#note-note-a\" role=\"doc-noteref\">1</a>", markdown, StringComparison.Ordinal);
+        Assert.Contains("id=\"note-note-a\"", markdown, StringComparison.Ordinal);
+        Assert.Contains("1. Footnote body", markdown, StringComparison.Ordinal);
+        Assert.Contains("[↩](#note-ref-note-a)", markdown, StringComparison.Ordinal);
         Assert.Contains("[1]", SemanticPublishFormatting.PlainText(document, _ => null), StringComparison.Ordinal);
     }
 
@@ -144,9 +252,9 @@ public sealed class RichManuscriptContractTests
     [Fact]
     public void Allocated_format_versions_match_the_rich_manuscript_boundary()
     {
-        Assert.Equal(6, ManuscriptDocument.CurrentSchemaVersion);
-        Assert.Equal(2, ProjectArchiveContract.RecordSchemaVersion);
-        Assert.Equal(9, VersionHistorySnapshotContract.SchemaVersion);
+        Assert.Equal(7, ManuscriptDocument.CurrentSchemaVersion);
+        Assert.Equal(3, ProjectArchiveContract.RecordSchemaVersion);
+        Assert.Equal(10, VersionHistorySnapshotContract.SchemaVersion);
         Assert.True(ProjectArchiveContract.CanReadRecordSchema(1));
         Assert.True(VersionHistorySnapshotContract.CanReadSchema(8));
     }

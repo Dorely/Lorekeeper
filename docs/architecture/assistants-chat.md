@@ -267,6 +267,21 @@ hash, and bounded readback ranges. Editor must read every returned range from
 the live source before continuing; insertion-only text against a
 non-empty manuscript remains legal but returns the non-blocking
 `MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` warning.
+Blocks containing citation/note atoms reject lossy plain-text replacement,
+split/merge, and range-mark operations. `ReplaceInlineContent` addresses one leaf
+through its complete position and preserves unrelated atoms and formatting; it
+is bounded to 1,024 inlines and 65,536 text characters. Agent projection v4 exposes
+the canonical inline content for rich leaf blocks, and nested changes map
+readback to the owning top-level block rather than an unrelated opening range.
+
+Editor and Publish use `CitationAssistantTools` for bounded `list_bibliography`,
+single-record `read_bibliographic_record`, and `save_bibliographic_record` calls.
+Writes use `IProjectSourcesService`, including expected-update timestamps,
+project/source ownership, mutation coordination, evidence detachment, review
+refresh, and output invalidation. Contest mode exposes bibliography reads only.
+Creating metadata does not insert a manuscript citation. The save tool warns
+against blindly retrying a create after an uncertain response; metadata creation
+does not yet use an authoring receipt.
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
@@ -340,7 +355,7 @@ geometry-free canonical appearance candidate and explicitly associates the
 inspected result with an entity.
 
 Editor is the complete Core/release authoring assistant. It receives the active
-chapter's full `agent-manuscript-v3` projection and versioned named-style
+chapter's full `agent-manuscript-v4` projection and versioned named-style
 definitions automatically and can read
 or mutate the outline, canon, manuscript, annotations, Figures, Designed Pages,
 styles, composition, page setup, and image workflows appropriate to the
@@ -526,7 +541,7 @@ coordinator's explicit task/target fence and its captured text/tool evidence.
 Candidate prompting omits the coordinator system prompt so its tool instructions
 cannot become contestant instructions; captured user, assistant, and tool
 material is quoted as evidence. Each candidate also receives the exact
-batch-source `agent-manuscript-v3` projection once, generated from the canonical
+batch-source `agent-manuscript-v4` projection once, generated from the canonical
 manuscript stored on the batch. Canonical `OriginalManuscriptJson` remains the
 durable validation/audit source. Legacy context snapshots remain inert audit data
 for already persisted contests and are not replayed through the new runner path.
@@ -603,7 +618,7 @@ successful committed batch.
 
 Source links in assistant-visible output carry validated durable `SourceLocation`
 data and preserve unavailable/outdated/ambiguous status rather than guessing.
-Current `agent-manuscript-v3` projections and read tools preserve canonical
+Current `agent-manuscript-v4` projections and read tools preserve canonical
 UTF-16 `ManuscriptPosition` values plus recursive table, row, cell, note, and
 note-reference identities. Citation clusters and Designed Page citation/note
 atoms remain M5B work. An

@@ -193,7 +193,7 @@ public sealed class PublicationPressRuntime(
                 .ToArray();
             var registryVersion = description.GetProperty("printArtifactProfileRegistryVersion").GetString() ?? string.Empty;
             var registryHash = description.GetProperty("printArtifactProfileRegistrySha256").GetString() ?? string.Empty;
-            if (protocol != 13 || renderer.Length == 0 || profiles.Length == 0
+            if (protocol != 15 || renderer.Length == 0 || profiles.Length == 0
                 || registryVersion.Length == 0 || registryHash.Length != 64)
                 throw new InvalidDataException("The renderer capability contract is incomplete.");
             return new(

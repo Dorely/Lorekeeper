@@ -71,6 +71,19 @@ public static class AuthoringBatchReducer
         foreach (var operation in operations)
         {
             var kind = operation.Kind.Trim().ToLowerInvariant();
+            if (kind == "replaceinlinecontent")
+            {
+                if (operation.Position is null || operation.InlineContent is null
+                    || string.IsNullOrWhiteSpace(operation.ExpectedElementFingerprint)) return false;
+                try
+                {
+                    if (operation.Position.Offset != 0 || operation.BlockId != operation.Position.BlockOrAtomId
+                        || Fingerprint(ManuscriptTraversal.Resolve(current, operation.Position).Block) != operation.ExpectedElementFingerprint)
+                        return false;
+                }
+                catch (InvalidDataException) { return false; }
+                continue;
+            }
             if (kind == "replacerichdocument")
             {
                 if (operation.RichDocument is null
@@ -227,10 +240,12 @@ public static class AuthoringBatchReducer
         ManuscriptDocument destination,
         int targetOrdinal)
     {
+        var inlineDelta = CreateInlineDelta(source, destination, targetOrdinal);
+        if (inlineDelta is not null) return inlineDelta;
         if (source.Notes.Count != 0
             || destination.Notes.Count != 0
-            || source.Content.Any(block => block.Type == ManuscriptBlockType.Table)
-            || destination.Content.Any(block => block.Type == ManuscriptBlockType.Table))
+            || source.Content.Any(block => block.Type == ManuscriptBlockType.Table || block.List is not null)
+            || destination.Content.Any(block => block.Type == ManuscriptBlockType.Table || block.List is not null))
         {
             return
             [
@@ -289,6 +304,35 @@ public static class AuthoringBatchReducer
         return operations;
     }
 
+    private static IReadOnlyList<AuthoringOperationV1>? CreateInlineDelta(
+        ManuscriptDocument source, ManuscriptDocument destination, int targetOrdinal)
+    {
+        static ManuscriptBlock Structure(ManuscriptBlock block) => block with
+        {
+            Content = [],
+            Table = block.Table is not { } table ? null : table with
+            {
+                Rows = table.Rows.Select(row => row with
+                {
+                    Cells = row.Cells.Select(cell => cell with { Content = cell.Content.Select(Structure).ToList() }).ToList(),
+                }).ToList(),
+            },
+        };
+        static string StructureJson(ManuscriptDocument document) => JsonSerializer.Serialize(document with
+        {
+            Revision = 0,
+            Content = document.Content.Select(Structure).ToList(),
+            Notes = document.Notes.Select(note => note with { Content = note.Content.Select(Structure).ToList() }).ToList(),
+        }, ManuscriptCodec.JsonOptions);
+        if (StructureJson(source) != StructureJson(destination)) return null;
+        var before = ManuscriptTraversal.EnumerateText(source).ToDictionary(segment => segment.Block.Id, StringComparer.Ordinal);
+        return ManuscriptTraversal.EnumerateText(destination)
+            .Where(segment => Fingerprint(segment.Block) != Fingerprint(before[segment.Block.Id].Block))
+            .Select(segment => new AuthoringOperationV1(targetOrdinal, "replaceInlineContent",
+                BlockId: segment.Block.Id, ExpectedElementFingerprint: Fingerprint(before[segment.Block.Id].Block),
+                Position: before[segment.Block.Id].Start, InlineContent: ManuscriptClone.Block(segment.Block).Content)).ToList();
+    }
+
     public static IReadOnlyList<ManuscriptOperation> ToManuscriptOperations(
         ManuscriptDocument source,
         IReadOnlyList<AuthoringOperationV1> operations,
@@ -321,6 +365,14 @@ public static class AuthoringBatchReducer
     private static ManuscriptOperation ToOperation(ManuscriptDocument current, AuthoringOperationV1 wire)
     {
         var kind = wire.Kind.Trim().ToLowerInvariant();
+        if (kind == "replaceinlinecontent")
+        {
+            var position = wire.Position ?? throw new ArgumentException("position is required for ReplaceInlineContent.");
+            if (position.BlockOrAtomId != wire.BlockId)
+                throw new ArgumentException("The inline-content position does not match blockId.");
+            return new ReplaceManuscriptInlineContent(position,
+                wire.InlineContent ?? throw new ArgumentException("inlineContent is required for ReplaceInlineContent."));
+        }
         if (kind == "replacerichdocument")
         {
             var rich = wire.RichDocument
@@ -428,6 +480,8 @@ public static class AuthoringBatchReducer
         int oldIndex)
     {
         var kind = wire.Kind.Trim().ToLowerInvariant();
+        if (kind == "replaceinlinecontent")
+            return CreateCanonicalDeltaCore(after, before, wire.TargetOrdinal);
         if (kind == "replacerichdocument")
         {
             return

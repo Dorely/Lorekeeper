@@ -1,10 +1,15 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Docnet.Core;
 using Docnet.Core.Models;
+using Lorekeeper.Authoring;
+using Lorekeeper.Citations;
 using Lorekeeper.Ingest;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.ProjectArchive;
+using Lorekeeper.VersionHistory.Services;
 using Microsoft.EntityFrameworkCore;
 using SkiaSharp;
 
@@ -16,7 +21,13 @@ namespace Lorekeeper.Sources;
 /// </summary>
 public sealed class ProjectSourcesService(
     IAppDatabaseOperationFactory database,
-    IIngestService ingest) : IProjectSourcesService
+    IIngestService ingest,
+    IAuthoringMutationFence authoringFence,
+    IAuthoringTargetMutationService targetMutations,
+    IAuthoringMutationContextAccessor mutationContext,
+    IAuthoringGenerationService generations,
+    ProjectVersionHistoryUiEvents historyEvents,
+    ILogger<ProjectSourcesService>? logger = null) : IProjectSourcesService
 {
     private const int MaximumContentsItems = 1_000;
     private const int MaximumReadingCharacters = 64 * 1024;
@@ -95,9 +106,26 @@ public sealed class ProjectSourcesService(
                 record.Title,
                 record.ContainerTitle,
                 record.AuthorsJson,
+                record.EditorsJson,
+                record.TranslatorsJson,
                 record.IssuedYear,
+                record.IssuedMonth,
+                record.IssuedDay,
+                record.Edition,
+                record.Publisher,
+                record.PublisherPlace,
+                record.Institution,
+                record.ThesisType,
+                record.Volume,
+                record.Issue,
+                record.Pages,
                 record.Doi,
                 record.Url,
+                record.AccessedYear,
+                record.AccessedMonth,
+                record.AccessedDay,
+                record.Isbn,
+                record.Notes,
                 record.UpdatedAt))
             .ToListAsync(cancellationToken);
 
@@ -129,6 +157,140 @@ public sealed class ProjectSourcesService(
             items,
             jobs.OrderByDescending(job => job.UpdatedAt).ThenBy(job => job.Id).ToList(),
             bibliography.OrderBy(record => record.Title, StringComparer.OrdinalIgnoreCase).ThenBy(record => record.Id).ToList());
+    }
+
+    public Task<IReadOnlyList<ProjectBibliographicRecordItem>> ListBibliographyAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default) => ReadBibliographyCoreAsync(projectId, 0, null, null, cancellationToken);
+
+    public Task<IReadOnlyList<ProjectBibliographicRecordItem>> ReadBibliographyPageAsync(
+        Guid projectId, int offset, int limit, Guid? recordId = null, CancellationToken cancellationToken = default)
+    {
+        if (offset < 0 || limit is < 1 or > 51) throw new ArgumentOutOfRangeException(nameof(limit));
+        return ReadBibliographyCoreAsync(projectId, offset, limit, recordId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ProjectBibliographicRecordItem>> ReadBibliographyCoreAsync(
+        Guid projectId, int offset, int? limit, Guid? recordId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var query = operation.Db.BibliographicRecords
+            .AsNoTracking()
+            .Where(record => record.ProjectId == projectId && (recordId == null || record.Id == recordId))
+            .OrderBy(record => record.Title)
+            .ThenBy(record => record.Id)
+            .Skip(offset);
+        if (limit is int count) query = query.Take(count);
+        return await query
+            .Select(record => new ProjectBibliographicRecordItem(
+                record.Id,
+                record.SourceId,
+                record.Kind,
+                record.Title,
+                record.ContainerTitle,
+                record.AuthorsJson,
+                record.EditorsJson,
+                record.TranslatorsJson,
+                record.IssuedYear,
+                record.IssuedMonth,
+                record.IssuedDay,
+                record.Edition,
+                record.Publisher,
+                record.PublisherPlace,
+                record.Institution,
+                record.ThesisType,
+                record.Volume,
+                record.Issue,
+                record.Pages,
+                record.Doi,
+                record.Url,
+                record.AccessedYear,
+                record.AccessedMonth,
+                record.AccessedDay,
+                record.Isbn,
+                record.Notes,
+                record.UpdatedAt))
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<ProjectBibliographicRecordItem> SaveBibliographicRecordAsync(
+        Guid projectId,
+        BibliographicRecordInput input,
+        CancellationToken cancellationToken = default) => authoringFence.ExecuteAsync(
+            new(projectId, [], "edit bibliography"),
+            (_, token) => SaveBibliographicRecordCoreAsync(projectId, input, token), cancellationToken);
+
+    private async Task<ProjectBibliographicRecordItem> SaveBibliographicRecordCoreAsync(
+        Guid projectId,
+        BibliographicRecordInput input,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateBibliographicRecord(input);
+
+        await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        var db = operation.Db;
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (!await db.Projects.AnyAsync(project => project.Id == projectId, cancellationToken))
+            throw new InvalidOperationException("Project not found.");
+        if (input.SourceId is Guid sourceId
+            && !await db.IngestSources.AnyAsync(source => source.Id == sourceId && source.ProjectId == projectId, cancellationToken))
+        {
+            throw new InvalidOperationException("Bibliographic source not found.");
+        }
+
+        var record = input.Id is Guid id
+            ? await db.BibliographicRecords.SingleOrDefaultAsync(
+                item => item.Id == id && item.ProjectId == projectId,
+                cancellationToken)
+                ?? throw new InvalidOperationException("Bibliographic record not found.")
+            : new BibliographicRecord
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                Title = input.Title.Trim(),
+            };
+        if (input.Id is null)
+            db.BibliographicRecords.Add(record);
+        else if (input.ExpectedUpdatedAt is null || record.UpdatedAt != input.ExpectedUpdatedAt.Value)
+            throw new DbUpdateConcurrencyException("This bibliography record changed after it was opened. Reload it before saving your edits.");
+
+        var clearEvidence = input.Id is not null && record.SourceId != input.SourceId;
+        var affected = input.Id is null ? new List<string>()
+            : await PrepareBibliographyMutationAsync(db, projectId, record.Id, clearEvidence, cancellationToken);
+        record.SourceId = input.SourceId;
+        record.Kind = input.Kind;
+        record.Title = input.Title.Trim();
+        record.ContainerTitle = Clean(input.ContainerTitle);
+        record.AuthorsJson = JsonSerializer.Serialize(input.Authors, ManuscriptCodec.JsonOptions);
+        record.EditorsJson = JsonSerializer.Serialize(input.Editors, ManuscriptCodec.JsonOptions);
+        record.TranslatorsJson = JsonSerializer.Serialize(input.Translators, ManuscriptCodec.JsonOptions);
+        record.IssuedYear = input.Issued.Year;
+        record.IssuedMonth = input.Issued.Month;
+        record.IssuedDay = input.Issued.Day;
+        record.AccessedYear = input.Accessed.Year;
+        record.AccessedMonth = input.Accessed.Month;
+        record.AccessedDay = input.Accessed.Day;
+        record.Edition = Clean(input.Edition);
+        record.Publisher = Clean(input.Publisher);
+        record.PublisherPlace = Clean(input.PublisherPlace);
+        record.Institution = Clean(input.Institution);
+        record.ThesisType = Clean(input.ThesisType);
+        record.Volume = Clean(input.Volume);
+        record.Issue = Clean(input.Issue);
+        record.Pages = Clean(input.Pages);
+        record.Doi = Clean(input.Doi);
+        record.Url = Clean(input.Url);
+        record.Isbn = Clean(input.Isbn);
+        record.Notes = Clean(input.Notes);
+        record.UpdatedAt = DateTime.UtcNow;
+        await operation.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        var result = BibliographyItem(record);
+        await operation.DisposeAsync();
+        await CompleteBibliographyMutationAsync(projectId, affected, clearEvidence);
+        return result;
     }
 
     public async Task<ProjectSourceReading?> GetReadingAsync(
@@ -412,15 +574,134 @@ public sealed class ProjectSourcesService(
         await ingest.ReextractSourceAsync(sourceId, cancellationToken);
     }
 
-    public async Task DetachBibliographicRecordAsync(Guid projectId, Guid bibliographicRecordId, CancellationToken cancellationToken = default)
+    public Task DetachBibliographicRecordAsync(Guid projectId, Guid bibliographicRecordId, DateTime expectedUpdatedAt, CancellationToken cancellationToken = default) =>
+        authoringFence.ExecuteAsync(new(projectId, [], "detach bibliography evidence"), async (_, token) =>
+        {
+            await DetachBibliographicRecordCoreAsync(projectId, bibliographicRecordId, expectedUpdatedAt, token);
+            return true;
+        }, cancellationToken);
+
+    private async Task DetachBibliographicRecordCoreAsync(Guid projectId, Guid bibliographicRecordId, DateTime expectedUpdatedAt, CancellationToken cancellationToken)
     {
-        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        await using var transaction = await operation.Db.Database.BeginTransactionAsync(cancellationToken);
         var record = await operation.Db.BibliographicRecords
             .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.Id == bibliographicRecordId, cancellationToken)
             ?? throw new InvalidOperationException("Bibliographic record not found.");
+        if (record.UpdatedAt != expectedUpdatedAt)
+            throw new DbUpdateConcurrencyException("This bibliography record changed. Reload it before detaching its source evidence.");
+        var affected = await PrepareBibliographyMutationAsync(operation.Db, projectId, record.Id, clearEvidence: true, cancellationToken);
         record.SourceId = null;
         record.UpdatedAt = DateTime.UtcNow;
         await operation.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        await operation.DisposeAsync();
+        await CompleteBibliographyMutationAsync(projectId, affected, clearHistory: true);
+    }
+
+    private async Task<List<string>> PrepareBibliographyMutationAsync(
+        AppDbContext db, Guid projectId, Guid recordId, bool clearEvidence, CancellationToken cancellationToken)
+    {
+        var targets = (await db.Chapters.Where(item => item.ProjectId == projectId).OrderBy(item => item.Order).ThenBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken))
+            .Select(id => $"chapter:{id:D}").ToList();
+        targets.AddRange((await db.PublicationEditionChapterOverrides.Where(item => item.Edition.ProjectId == projectId)
+            .Select(item => new { item.EditionId, item.ChapterId }).ToListAsync(cancellationToken))
+            .Select(item => $"release:{item.EditionId:D}:chapter:{item.ChapterId:D}"));
+        targets.AddRange((await db.PublicationSections.Where(item => item.ProjectId == projectId)
+            .Select(item => new { item.Id, item.EditionId }).ToListAsync(cancellationToken))
+            .Select(item => item.EditionId is Guid editionId ? $"release:{editionId:D}:section:{item.Id:D}" : $"publication-section:{item.Id:D}"));
+        targets.AddRange((await db.DesignedPageContents.Where(item => item.ProjectId == projectId)
+            .Select(item => new { item.Id, item.EditionId }).ToListAsync(cancellationToken))
+            .Select(item => item.EditionId is Guid editionId ? $"release:{editionId:D}:designed-page-content:{item.Id:D}" : $"designed-page-content:{item.Id:D}"));
+        var affected = new List<string>();
+        using var suppression = mutationContext.SuppressHistory();
+        foreach (var targetId in targets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var state = await AuthoringPersistence.ReadTargetAsync(db, projectId, targetId, "", cancellationToken);
+            var document = ManuscriptCodec.Deserialize(state.ManuscriptJson);
+            if (!ManuscriptTraversal.EnumerateCitations(document).Any(occurrence => occurrence.Cluster.Items.Any(item => item.BibliographicRecordId == recordId)))
+                continue;
+            await CitationReferenceValidator.ValidateAsync(db, projectId, document, cancellationToken);
+            affected.Add(targetId);
+            if (!clearEvidence) continue;
+            var edits = EvidenceDetachOperations(document, recordId);
+            if (edits.Count > 0)
+                await targetMutations.ApplyAsync(projectId, targetId, state.Revision, edits, cancellationToken);
+        }
+        if (clearEvidence)
+        {
+            // Historical matter remains in portable snapshots. Keep those retained
+            // documents closed even though current authoring uses sections.
+            var coreMatterIds = await db.PublicationBookMatter.Where(item => item.ProjectId == projectId).Select(item => item.Id).ToListAsync(cancellationToken);
+            foreach (var id in coreMatterIds)
+            {
+                var matter = await db.PublicationBookMatter.SingleAsync(item => item.Id == id, cancellationToken);
+                var document = ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision);
+                var edits = EvidenceDetachOperations(document, recordId);
+                if (edits.Count == 0) continue;
+                await CitationReferenceValidator.ValidateAsync(db, projectId, document, cancellationToken);
+                var changed = ManuscriptOperations.Apply(document, edits).Document with { Revision = checked(matter.Revision + 1) };
+                matter.ManuscriptJson = ManuscriptCodec.Serialize(changed);
+                matter.Revision = changed.Revision;
+                matter.UpdatedAt = DateTime.UtcNow;
+            }
+            var releaseMatterIds = await db.PublicationMatter.Where(item => item.Edition.ProjectId == projectId).Select(item => item.Id).ToListAsync(cancellationToken);
+            foreach (var id in releaseMatterIds)
+            {
+                var matter = await db.PublicationMatter.SingleAsync(item => item.Id == id, cancellationToken);
+                var document = ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision);
+                var edits = EvidenceDetachOperations(document, recordId);
+                if (edits.Count == 0) continue;
+                await CitationReferenceValidator.ValidateAsync(db, projectId, document, cancellationToken);
+                var changed = ManuscriptOperations.Apply(document, edits).Document with { Revision = checked(matter.Revision + 1) };
+                matter.ManuscriptJson = ManuscriptCodec.Serialize(changed);
+                matter.Revision = changed.Revision;
+                matter.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+        var affectedCoreChapters = affected.Where(target => target.StartsWith("chapter:", StringComparison.Ordinal)).ToArray();
+        if (affectedCoreChapters.Length > 0)
+        {
+            var editionIds = await db.PublicationEditions.Where(edition => edition.ProjectId == projectId)
+                .Select(edition => edition.Id).ToListAsync(cancellationToken);
+            var persistedTargets = targets.ToHashSet(StringComparer.Ordinal);
+            foreach (var editionId in editionIds)
+            foreach (var chapterTarget in affectedCoreChapters)
+            {
+                var inheritedTarget = $"release:{editionId:D}:{chapterTarget}";
+                // A release without an override reads Core, so its outstanding
+                // authoring generation must also become stale without creating an override.
+                if (!persistedTargets.Contains(inheritedTarget)) affected.Add(inheritedTarget);
+            }
+        }
+        if (clearEvidence)
+            await generations.StageInvalidationAsync(db, projectId, affected, cancellationToken);
+        return affected;
+    }
+
+    private static List<ManuscriptOperation> EvidenceDetachOperations(ManuscriptDocument document, Guid recordId) =>
+        ManuscriptTraversal.EnumerateText(document)
+            .Where(segment => segment.Block.Content.Any(inline => inline.Citation?.Items.Any(item => item.BibliographicRecordId == recordId && item.SourceLocationId is not null) == true))
+            .Select(segment => (ManuscriptOperation)new ReplaceManuscriptInlineContent(segment.Start,
+                segment.Block.Content.Select(inline => inline.Citation is not { } cluster ? inline : inline with
+                {
+                    Citation = cluster with { Items = cluster.Items.Select(item => item.BibliographicRecordId == recordId ? item with { SourceLocationId = null } : item).ToList() },
+                }).ToList())).ToList();
+
+    private async Task CompleteBibliographyMutationAsync(Guid projectId, IReadOnlyCollection<string> affected, bool clearHistory)
+    {
+        if (clearHistory) generations.CompleteInvalidation(affected);
+        historyEvents.PublishReviewStateChanged(projectId);
+        foreach (var targetId in affected)
+        {
+            try { await targetMutations.RefreshAsync(projectId, targetId, CancellationToken.None); }
+            catch (Exception exception)
+            {
+                logger?.LogWarning(exception, "Bibliography was saved but derived state refresh failed for {TargetId}.", targetId);
+            }
+        }
     }
 
     public async Task DeleteSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default)
@@ -437,6 +718,90 @@ public sealed class ProjectSourcesService(
             .AsNoTracking()
             .AnyAsync(source => source.ProjectId == projectId && source.Id == sourceId, cancellationToken);
     }
+
+    private static void ValidateBibliographicRecord(BibliographicRecordInput input)
+    {
+        if (!Enum.IsDefined(input.Kind))
+            throw new ArgumentOutOfRangeException(nameof(input), "Choose a supported bibliographic record type.");
+        if (string.IsNullOrWhiteSpace(input.Title) || input.Title.Trim().Length > 1_000)
+            throw new ArgumentException("A bibliographic title of 1 to 1,000 characters is required.", nameof(input));
+        ValidatePeople(input.Authors, "author");
+        ValidatePeople(input.Editors, "editor");
+        ValidatePeople(input.Translators, "translator");
+        ValidateDate(input.Issued, "issued");
+        ValidateDate(input.Accessed, "accessed");
+        foreach (var value in new[]
+        {
+            input.ContainerTitle, input.Edition, input.Publisher, input.PublisherPlace,
+            input.Institution, input.ThesisType, input.Volume, input.Issue, input.Pages,
+            input.Doi, input.Url, input.Isbn,
+        })
+        {
+            if ((value?.Length ?? 0) > 2_000)
+                throw new ArgumentException("A bibliographic field exceeds the 2,000-character limit.", nameof(input));
+        }
+        if ((input.Notes?.Length ?? 0) > 20_000)
+            throw new ArgumentException("Bibliographic notes exceed the 20,000-character limit.", nameof(input));
+    }
+
+    private static void ValidatePeople(IReadOnlyList<CitationPerson> people, string label)
+    {
+        ArgumentNullException.ThrowIfNull(people);
+        if (people.Count > 100)
+            throw new ArgumentException($"A bibliographic record supports at most 100 {label} entries.");
+        foreach (var person in people)
+        {
+            ArgumentNullException.ThrowIfNull(person);
+            if (string.IsNullOrWhiteSpace(person.Literal) && string.IsNullOrWhiteSpace(person.Family))
+                throw new ArgumentException($"Each {label} requires a family or corporate name.");
+            if (new[] { person.Family, person.Given, person.Literal }.Any(value => value is null || value.Length > 500))
+                throw new ArgumentException($"A {label} name exceeds the 500-character limit.");
+        }
+    }
+
+    private static void ValidateDate(CitationDate value, string label)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Year is < 1 or > 9999)
+            throw new ArgumentException($"The {label} year is outside the supported range.");
+        if (value.Month is < 1 or > 12 || value.Month is not null && value.Year is null)
+            throw new ArgumentException($"The {label} month requires a valid year.");
+        if (value.Day is < 1 or > 31 || value.Day is not null && value.Month is null)
+            throw new ArgumentException($"The {label} day requires a valid month.");
+        if (value is { Year: int year, Month: int month, Day: int day } && day > DateTime.DaysInMonth(year, month))
+            throw new ArgumentException($"The {label} day does not exist in that month.");
+    }
+
+    private static string Clean(string? value) => value?.Trim() ?? string.Empty;
+
+    private static ProjectBibliographicRecordItem BibliographyItem(BibliographicRecord record) => new(
+        record.Id,
+        record.SourceId,
+        record.Kind,
+        record.Title,
+        record.ContainerTitle,
+        record.AuthorsJson,
+        record.EditorsJson,
+        record.TranslatorsJson,
+        record.IssuedYear,
+        record.IssuedMonth,
+        record.IssuedDay,
+        record.Edition,
+        record.Publisher,
+        record.PublisherPlace,
+        record.Institution,
+        record.ThesisType,
+        record.Volume,
+        record.Issue,
+        record.Pages,
+        record.Doi,
+        record.Url,
+        record.AccessedYear,
+        record.AccessedMonth,
+        record.AccessedDay,
+        record.Isbn,
+        record.Notes,
+        record.UpdatedAt);
 
     private async Task<OriginalChunkData> ReadOriginalChunkAsync(
         ProjectSourceOriginalDownload download,

@@ -39,6 +39,7 @@ public sealed class ManuscriptMigrationService(
     public const string SchemaV2MigrationName = "semantic-manuscript-v2";
     public const string SchemaV3MigrationName = "semantic-manuscript-v3";
     public const string SchemaV6MigrationName = "semantic-manuscript-v6";
+    public const string SchemaV7MigrationName = "semantic-manuscript-v7";
     public const string SchemaV2EfMigrationId = "20260730180725_SemanticManuscriptV2";
     private const int MaxAutomaticBackups = 5;
     private readonly string _connectionString = SqliteConnectionSettings.BuildConnectionString(configuration);
@@ -60,6 +61,8 @@ public sealed class ManuscriptMigrationService(
             && await ContainsSchemaV1ManuscriptsAsync(cancellationToken);
         var includesSchemaV5 = needsSchemaV2Upgrade
             && await ContainsSchemaVersionAsync(5, cancellationToken);
+        var includesSchemaV6 = needsSchemaV2Upgrade
+            && await ContainsSchemaVersionAsync(6, cancellationToken);
         var includesPreV5Schema = needsSchemaV2Upgrade
             && (await ContainsSchemaVersionAsync(1, cancellationToken)
                 || await ContainsSchemaVersionAsync(2, cancellationToken)
@@ -121,9 +124,12 @@ public sealed class ManuscriptMigrationService(
 
             if (await ContainsSchemaV1ManuscriptsAsync(cancellationToken))
             {
-                var isV5OnlyUpgrade = includesSchemaV5 && !includesPreV5Schema;
-                activeMigrationName = isV5OnlyUpgrade ? SchemaV6MigrationName : SchemaV3MigrationName;
-                activeSourceVersion = isV5OnlyUpgrade ? 5 : 1;
+                var isV6OnlyUpgrade = includesSchemaV6 && !includesSchemaV5 && !includesPreV5Schema;
+                var isV5OnlyUpgrade = includesSchemaV5 && !includesSchemaV6 && !includesPreV5Schema;
+                activeMigrationName = isV6OnlyUpgrade
+                    ? SchemaV7MigrationName
+                    : isV5OnlyUpgrade ? SchemaV6MigrationName : SchemaV3MigrationName;
+                activeSourceVersion = isV6OnlyUpgrade ? 6 : isV5OnlyUpgrade ? 5 : 1;
                 activeTargetVersion = ManuscriptDocument.CurrentSchemaVersion;
                 await UpgradeSchemaV1Async(
                     backupPath ?? string.Empty,
@@ -976,7 +982,7 @@ public sealed class ManuscriptMigrationService(
                 SELECT 1 FROM Chapters
                 WHERE CASE WHEN json_valid(ManuscriptJson) = 1
                     THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                    ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6)
+                ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7)
                    OR COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '') COLLATE NOCASE != Id COLLATE NOCASE
                    OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
             """
@@ -989,7 +995,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6)
+                            ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7)
                        )
                 """);
         }
@@ -1005,7 +1011,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(AcceptedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                         THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7))
                 """);
         }
 
@@ -1017,7 +1023,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(ProposedManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7))
                 """);
             checks.Add("""
                 EXISTS (
@@ -1035,7 +1041,7 @@ public sealed class ManuscriptMigrationService(
                     WHERE NULLIF(trim(DraftManuscriptJson), '') IS NOT NULL
                       AND CASE WHEN json_valid(DraftManuscriptJson) = 1
                         THEN COALESCE(json_extract(DraftManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7))
                 """);
         }
 
@@ -1046,7 +1052,7 @@ public sealed class ManuscriptMigrationService(
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6))
+                        ELSE 0 END NOT IN (1, 2, 3, 4, 5, 6, 7))
                 """);
         }
 
@@ -1091,7 +1097,8 @@ public sealed class ManuscriptMigrationService(
                     && (journal.MigrationName == MigrationName
                         || journal.MigrationName == SchemaV2MigrationName
                         || journal.MigrationName == SchemaV3MigrationName
-                        || journal.MigrationName == SchemaV6MigrationName),
+                        || journal.MigrationName == SchemaV6MigrationName
+                        || journal.MigrationName == SchemaV7MigrationName),
                 cancellationToken);
         if (completedStructuredMigration)
             return false;

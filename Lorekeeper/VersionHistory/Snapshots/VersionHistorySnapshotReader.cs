@@ -857,6 +857,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         if (schemaVersion >= VersionHistorySnapshotContract.DesignedPagesSchemaVersion)
             ValidateDesignedPages(payload);
+        if (schemaVersion >= VersionHistorySnapshotContract.CitationSchemaVersion)
+            VersionHistoryCitationReferences.Validate(payload);
     }
 
     private static void ValidateRetainedSource(

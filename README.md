@@ -61,7 +61,7 @@ its planned features are not claims about current capabilities.
   boundary without retransmitting or echoing the manuscript.
 - Schema-driven semantic chapter editing with persistent heading levels 1-6,
   intentional line breaks, scene
-  breaks, quotations, list items, project-image figures with alt text and
+  breaks, quotations, ordered and unordered lists with nesting and restarts, project-image figures with alt text and
   captions, direct font/size/line-spacing and paragraph controls, Book Text Styles
   with reusable typography, alignment, indentation, spacing, and pagination,
   one-click paragraph/chapter application, capture-from-paragraph,
@@ -112,7 +112,9 @@ its planned features are not claims about current capabilities.
   with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
   Imports validate the staged file and archive closure before one creative-state
   transaction, then rebuild derived indexes as retryable post-commit work.
-- Local version history schema v9 captures deterministic checkpoints of the creative
+  The `ProjectArchive` settings bound archive input to 8 GiB and expanded content
+  to 16 GiB by default, retaining separate per-entry and manifest limits.
+- Local version history schema v10 captures deterministic checkpoints of the creative
   project in an app-managed Git repository. History includes canonical project,
   narrative, graph, source, asset, manuscript, composition, and publication
   state, including per-source manifests and reusable content-addressed original
@@ -162,8 +164,9 @@ its planned features are not claims about current capabilities.
 - Semantic tables and document-owned footnotes/endnotes in the canonical editor
   model, with stable row/cell/note identities, proportional column widths,
   validated merged cells, reversible note ownership, and matching Read, plain
-  text, Markdown, EPUB, and PDF projections. PDF pagination repeats leading
-  table headers, protects row-span groups, bounds footnote regions, and emits
+  text, Markdown, EPUB, DOCX, and PDF projections. PDF pagination repeats leading
+  table headers, protects row-span groups, reserves footnote space beside references,
+  labels continuation, retains fitting note artwork, and emits
   explicit diagnostics for content it cannot place safely.
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
@@ -352,7 +355,7 @@ its planned features are not claims about current capabilities.
   embedded fonts, output intent, flattened transparency, and exact imported
   template geometry.
 - Streamed `.lorekeeper` project import/export (archive-envelope v1,
-  archive-record v2, manuscript-v6/page-setup/Designed Page model, Core Book,
+  archive-record v3, manuscript-v7/page-setup/Designed Page model, Core Book,
   sparse release overlays, edition chapter snapshots/page overrides,
   exact-target review annotations, complete retained-source closure, covers,
   custom-font binaries, and isolated legacy JSON v1-v31 import adapters) plus TXT, Markdown,

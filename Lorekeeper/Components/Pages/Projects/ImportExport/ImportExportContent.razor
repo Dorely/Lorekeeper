@@ -6,6 +6,7 @@
 @inject IProjectImportExportService Transfers
 @inject IProjectImportJobNotifier Notifier
 @inject IProjectReferenceService References
+@inject ProjectArchiveLimits ArchiveLimits
 
 @if (Project is null)
 {
@@ -164,7 +165,8 @@ else
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
-    private const long MaxImportBytes = ProjectImportExportService.MaximumImportBytes;
+    private long MaximumImportBytes(string fileName) => fileName.EndsWith(".lorekeeper", StringComparison.OrdinalIgnoreCase)
+        ? ArchiveLimits.MaximumCompressedBytes : ArchiveLimits.MaximumLegacyJsonBytes;
 
     private List<ProjectImportJobListItem> _jobs = [];
     private ProjectImportJobDetailView? _selectedJob;
@@ -313,8 +315,8 @@ else
             if (!file.Name.EndsWith(".lorekeeper", StringComparison.OrdinalIgnoreCase)
                 && !file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Choose a .lorekeeper archive or a legacy .json project file.");
-            if (file.Size is <= 0 or > MaxImportBytes)
-                throw new InvalidDataException("The selected import file is empty or exceeds the 1 GiB limit.");
+            if (file.Size <= 0 || file.Size > MaximumImportBytes(file.Name))
+                throw new InvalidDataException($"The selected import file is empty or exceeds its {MaximumImportBytes(file.Name) / 1024d / 1024 / 1024:0.##} GiB limit.");
             _importFile = file;
             _importFileName = file.Name;
         }
@@ -337,7 +339,7 @@ else
         _formError = null;
         try
         {
-            await using var stream = _importFile!.OpenReadStream(maxAllowedSize: MaxImportBytes);
+            await using var stream = _importFile!.OpenReadStream(maxAllowedSize: MaximumImportBytes(_importFileName));
             var job = await Transfers.CreateImportJobAsync(Project.Id, _importFileName, stream);
             _importFileName = string.Empty;
             _importFile = null;

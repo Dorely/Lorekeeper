@@ -34,10 +34,15 @@ public sealed record ManuscriptOperationInput(
     [property: Description("Heading level 1-6 used only by Heading insertions or type changes; it is independent from styleRole.")]
     int? HeadingLevel = null,
     [property: Description("Direct paragraph formatting used only by SetParagraphPresentation. To format a new block in one batch, give InsertBlock an explicit blockId and follow it with SetParagraphPresentation for that ID.")]
-    ParagraphPresentation? ParagraphPresentation = null)
+    ParagraphPresentation? ParagraphPresentation = null,
+    [property: Description("Exact full position from positionsUtf16 plus manuscriptId for ReplaceInlineContent. Offset must be zero; retain the complete document/table/cell or notes path.")]
+    ManuscriptPosition? Position = null,
+    [property: Description("Complete inline content of one existing leaf block for ReplaceInlineContent. Preserve unrelated text, marks, note references, and citation atoms with their stable IDs. Citation items use bibliography IDs read from the project bibliography; source locations are optional verified evidence. At most 1024 inlines and 65536 text characters.")]
+    IReadOnlyList<ManuscriptInline>? InlineContent = null)
 {
     public const string ToolOperationGuidance =
-        "Canonical operations are InsertBlock, ReplaceBlockText, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, and SetParagraphPresentation. " +
+        "Canonical operations are InsertBlock, ReplaceBlockText, ReplaceInlineContent, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, and SetParagraphPresentation. " +
+        "Use ReplaceInlineContent at an exact full position to insert, edit, or remove citation atoms or edit nested table/note text. Retain every unrelated inline atom, mark, and stable ID. Plain text replacement/split/merge/mark operations reject blocks containing citation or note atoms to prevent losing them. " +
         "InsertBlock is additive: it creates a new block and never replaces or removes existing prose. Use ReplaceBlockText as the default for revising one existing block because it preserves that block's stable ID. " +
         "For a multi-block rewrite, account for every source block in the intended range: retain it deliberately, replace its text, or delete it in the same atomic batch; insert only genuinely additional replacement blocks and never append a rewritten section while leaving its superseded source in place. " +
         "Use SetBlockStyle—not SetStyleRole—to apply a Book Text Style. For direct formatting on a new block, give InsertBlock an explicit blockId and follow it in the same batch with SetParagraphPresentation for that ID.";
@@ -51,6 +56,7 @@ public sealed record ManuscriptOperationInput(
                 "replaceblocktext" => new ReplaceManuscriptBlockText(
                     Required(operation.BlockId, "blockId"),
                     operation.Text ?? string.Empty),
+                "replaceinlinecontent" => ReplaceInlineContent(operation),
                 "deleteblock" => new DeleteManuscriptBlock(Required(operation.BlockId, "blockId")),
                 "moveblock" => new MoveManuscriptBlock(
                     Required(operation.BlockId, "blockId"),
@@ -79,6 +85,15 @@ public sealed record ManuscriptOperationInput(
                     $"Unsupported manuscript operation '{operation.Operation}'. {ToolOperationGuidance}"),
             })
             .ToList();
+
+    private static ReplaceManuscriptInlineContent ReplaceInlineContent(ManuscriptOperationInput operation)
+    {
+        var position = operation.Position ?? throw new ArgumentException("position is required.");
+        var content = operation.InlineContent ?? throw new ArgumentException("inlineContent is required.");
+        if (position.Offset != 0 || content.Count > 1024 || content.Sum(inline => (long)inline.Text.Length) > 65536)
+            throw new ArgumentException("ReplaceInlineContent requires offset zero and at most 1024 inlines / 65536 text characters.");
+        return new(position, content);
+    }
 
     private static InsertManuscriptBlock InsertBlock(ManuscriptOperationInput operation)
     {

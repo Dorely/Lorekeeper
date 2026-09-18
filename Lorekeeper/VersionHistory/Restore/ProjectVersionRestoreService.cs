@@ -1097,6 +1097,7 @@ public sealed class ProjectVersionRestoreService(
     {
         if (payload.Project.Project.Id != payload.ProjectId)
             throw new VersionHistoryRestoreException("ProjectIdentityMismatch", "The snapshot project payload does not match its manifest.");
+        VersionHistoryCitationReferences.Validate(payload);
 
         var actIds = payload.Narrative.Acts.Select(item => item.Id).ToHashSet();
         var chapterIds = payload.Narrative.Chapters.Select(item => item.Id).ToHashSet();
@@ -1568,6 +1569,8 @@ public sealed class ProjectVersionRestoreService(
         IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> sourceOriginalBlobs,
         CancellationToken cancellationToken)
     {
+        foreach (var bibliography in sources.UnlinkedBibliographicRecords)
+            AddBibliographicRecord(db, projectId, bibliography);
         if (sources.RetainedSources.Count > 0)
         {
             return await AddRetainedSourcesAsync(
@@ -1787,8 +1790,6 @@ public sealed class ProjectVersionRestoreService(
                     NormalizedStart = location.NormalizedStart, NormalizedLength = location.NormalizedLength, Locator = location.Locator,
                     Quote = location.Quote, VerificationHash = location.VerificationHash, ResolutionState = location.ResolutionState });
         }
-        foreach (var bibliography in sources.UnlinkedBibliographicRecords)
-            AddBibliographicRecord(db, projectId, bibliography);
         return new RetainedSourceBytes(newBytes, reusedBytes);
     }
 
@@ -1838,9 +1839,15 @@ public sealed class ProjectVersionRestoreService(
     private static void AddBibliographicRecord(AppDbContext db, Guid projectId, VersionHistoryBibliographicRecord record) =>
         db.BibliographicRecords.Add(new BibliographicRecord { Id = record.Id, ProjectId = projectId, SourceId = record.SourceId,
             Kind = record.Kind, Title = record.Title, ContainerTitle = record.ContainerTitle, AuthorsJson = record.AuthorsJson,
-            EditorsJson = record.EditorsJson, IssuedYear = record.IssuedYear, Publisher = record.Publisher,
-            PublisherPlace = record.PublisherPlace, Volume = record.Volume, Issue = record.Issue, Pages = record.Pages,
-            Doi = record.Doi, Url = record.Url, AccessedAt = record.AccessedAt, Isbn = record.Isbn, Notes = record.Notes });
+            EditorsJson = record.EditorsJson, TranslatorsJson = record.TranslatorsJson ?? "[]",
+            IssuedYear = record.IssuedYear, IssuedMonth = record.IssuedMonth, IssuedDay = record.IssuedDay,
+            Publisher = record.Publisher, PublisherPlace = record.PublisherPlace, Edition = record.Edition ?? string.Empty,
+            Institution = record.Institution ?? string.Empty, ThesisType = record.ThesisType ?? string.Empty,
+            Volume = record.Volume, Issue = record.Issue, Pages = record.Pages,
+            Doi = record.Doi, Url = record.Url, AccessedYear = record.AccessedYear ?? record.AccessedAt?.Year,
+            AccessedMonth = record.AccessedMonth ?? record.AccessedAt?.Month,
+            AccessedDay = record.AccessedDay ?? record.AccessedAt?.Day,
+            Isbn = record.Isbn, Notes = record.Notes });
 
     private static void AddAssets(AppDbContext db, Guid projectId, VersionHistorySnapshotPayload payload)
     {
@@ -2004,6 +2011,7 @@ public sealed class ProjectVersionRestoreService(
                 NumberChapters = source.NumberChapters,
                 TitlePageMode = source.TitlePageMode,
                 RectoChapterStarts = source.RectoChapterStarts,
+                CitationStyle = source.CitationStyle,
                 OutlineItems = source.OutlineItems.Select(item => new PublicationBookOutlineItem
                 {
                     Id = item.Id,
@@ -2106,6 +2114,7 @@ public sealed class ProjectVersionRestoreService(
                 Bleed = editionData.Bleed,
                 AllowDesignedPageOverrides = editionData.AllowDesignedPageOverrides,
                 RectoChapterStarts = editionData.RectoChapterStarts,
+                CitationStyle = editionData.CitationStyle,
                 InheritsCoreCover = editionData.InheritsCoreCover,
                 EditionSpecificContentEnabled = editionData.EditionSpecificContentEnabled,
                 OverrideFieldsJson = JsonSerializer.Serialize(editionData.OverrideFields),

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Citations;
 
 namespace Lorekeeper.Publish;
 
@@ -75,6 +76,7 @@ public enum PublishExportFormat
     PlainText,
     Markdown,
     Epub,
+    Docx,
 }
 
 public sealed record PublishWorkspaceView(
@@ -152,6 +154,7 @@ public sealed record PublicationEditionView(
     public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
     public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
+    public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
 }
 
 public sealed record PublicationEditionCreate(
@@ -190,7 +193,8 @@ public sealed record PublicationReleaseOverridePatch(
     IReadOnlyList<PublicationEditionOverrideField>? ResetFields = null,
     PrintProjectUse? PrintProjectUse = null,
     PrintIdentifierMode? PrintIdentifierMode = null,
-    PrintCoverSubmissionMode? PrintCoverSubmissionMode = null);
+    PrintCoverSubmissionMode? PrintCoverSubmissionMode = null,
+    CitationStyle? CitationStyle = null);
 
 public sealed record PublicationEditionCompareView(
     PublicationEditionSummary Left,
@@ -243,6 +247,15 @@ public sealed record PublishDocument(
     public IReadOnlyList<PublishFontDocument> Fonts { get; init; } = [];
     public IReadOnlyList<PublishPublicationSectionDocument> PublicationSections { get; init; } = [];
     public PublishCoverDocument? Cover { get; init; }
+    public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
+    public IReadOnlyList<CitationRecord> BibliographicRecords { get; init; } = [];
+    public CitationFormattingResult Citations { get; init; } = new(
+        ICitationFormatter.FormatterIdentity,
+        CitationStyle.Chicago18NotesBibliography,
+        [],
+        "Bibliography",
+        [],
+        []);
     public IReadOnlyDictionary<string, CompositionScene> CoverSurfaceScenes { get; init; } =
         new Dictionary<string, CompositionScene>();
 
@@ -345,6 +358,7 @@ public sealed record PublishDesignedPageDocument(
     Guid Id,
     string Name,
     ManuscriptDocument SemanticManuscript,
+    string AccessibilityDescription,
     long Revision,
     IReadOnlyList<PublishDesignedPageVariantDocument> Variants);
 

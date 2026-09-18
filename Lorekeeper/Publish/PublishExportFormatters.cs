@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Composition;
+using Lorekeeper.Citations;
 using Lorekeeper.Fonts;
 using Lorekeeper.Models;
 
@@ -19,11 +20,12 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
     public byte[] Render(PublishDocument document)
     {
         var sb = new StringBuilder();
-        AppendPublicationSections(sb, document, PublicationSectionAnchor.Front, null, null);
+        var citations = new PublicationCitationResolver(document.Citations.Occurrences);
+        AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.Front, null, null);
 
         foreach (var section in document.Sections)
         {
-            AppendPublicationSections(sb, document, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId);
+            AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId);
             if (section.IncludePage)
             {
                 AppendGap(sb);
@@ -35,25 +37,27 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
 
             foreach (var chapter in section.Chapters)
             {
-                AppendPublicationSections(sb, document, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
+                AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
                 AppendGap(sb);
                 if (chapter.IncludeHeading)
                     AppendHeading(sb, chapter.Title, '=');
                 if (document.Profile.IncludeChapterSynopses)
                     AppendText(sb, chapter.Synopsis);
-                AppendVisualText(sb, document, chapter);
-                AppendPublicationSections(sb, document, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
+                AppendVisualText(sb, document, chapter, citations);
+                AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
             }
-            AppendPublicationSections(sb, document, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId);
+            AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId);
         }
 
-        AppendPublicationSections(sb, document, PublicationSectionAnchor.Back, null, null);
+        AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.Back, null, null);
+        AppendCitationBackMatter(sb, document);
         return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
     }
 
     private static void AppendPublicationSections(
         StringBuilder sb,
         PublishDocument document,
+        PublicationCitationResolver citations,
         PublicationSectionAnchor anchor,
         PublishOutlineTargetKind? targetKind,
         Guid? targetId)
@@ -61,7 +65,8 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         foreach (var item in document.PublicationSections.Where(item => item.Anchor == anchor
             && item.TargetKind == targetKind && item.TargetId == targetId).OrderBy(item => item.LocalOrder))
         {
-            var noteNumbers = SemanticPublishFormatting.NoteNumbers(item.Manuscript);
+            var notes = PublicationNotes.Create(document, new($"publication-section:{item.Id:D}", item.Title, item.Manuscript, item.DesignedPages));
+            var noteNumbers = notes.Numbers;
             AppendMatterStart(sb, item.Title);
             if (item.SystemRole == PublicationSectionSystemRole.Contents)
             {
@@ -73,22 +78,18 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
                 }
                 continue;
             }
-            foreach (var block in item.Manuscript.Content)
+            foreach (var block in notes.Manuscript.Content)
             {
                 if (block.Type == ManuscriptBlockType.DesignedPage
                     && block.DesignedPageId is Guid designedPageId
                     && item.DesignedPages.FirstOrDefault(value => value.Id == designedPageId) is { } designedPage)
                 {
-                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                        AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers));
+                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage with { SemanticManuscript = notes.Placements[block.Id] }))
+                        AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers, citations.ForDocument($"publication-section:{item.Id:D}", [$"placement:{block.Id}"])));
                 }
                 else
-                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(block, imageId => FindAsset(document, imageId), noteNumbers));
+                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(block, imageId => FindAsset(document, imageId), noteNumbers, citations.ForDocument($"publication-section:{item.Id:D}")));
             }
-            AppendText(sb, SemanticPublishFormatting.PlainTextNotes(
-                item.Manuscript,
-                imageId => FindAsset(document, imageId),
-                noteNumbers));
         }
     }
 
@@ -144,28 +145,39 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         sb.AppendLine(text.Trim());
     }
 
-    private static void AppendVisualText(StringBuilder sb, PublishDocument document, PublishChapterDocument chapter)
+    private static void AppendVisualText(
+        StringBuilder sb,
+        PublishDocument document,
+        PublishChapterDocument chapter,
+        PublicationCitationResolver citations)
     {
-        var noteNumbers = SemanticPublishFormatting.NoteNumbers(chapter.Manuscript);
-        foreach (var block in chapter.Manuscript.Content)
+        var notes = PublicationNotes.Create(document, new($"chapter:{chapter.Id:D}", chapter.Title, chapter.Manuscript, chapter.DesignedPages));
+        var noteNumbers = notes.Numbers;
+        foreach (var block in notes.Manuscript.Content)
         {
             if (block.Type == ManuscriptBlockType.DesignedPage
                 && block.DesignedPageId is Guid designedPageId
                 && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } designedPage)
             {
-                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers));
+                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage with { SemanticManuscript = notes.Placements[block.Id] }))
+                    AppendText(sb, SemanticPublishFormatting.PlainTextBlock(projected, imageId => FindAsset(document, imageId), noteNumbers, citations.ForDocument($"chapter:{chapter.Id:D}", [$"placement:{block.Id}"])));
                 continue;
             }
             AppendText(sb, SemanticPublishFormatting.PlainTextBlock(
                 block,
                 imageId => FindAsset(document, imageId),
-                noteNumbers));
+                noteNumbers,
+                citations.ForDocument($"chapter:{chapter.Id:D}")));
         }
-        AppendText(sb, SemanticPublishFormatting.PlainTextNotes(
-            chapter.Manuscript,
-            imageId => FindAsset(document, imageId),
-            noteNumbers));
+    }
+
+    private static void AppendCitationBackMatter(StringBuilder sb, PublishDocument document)
+    {
+        AppendText(sb, PublicationTextBackMatter.Notes(document, markdown: false));
+        if (document.Citations.Bibliography.Count == 0) return;
+        AppendMatterStart(sb, document.Citations.BibliographyTitle);
+        foreach (var entry in document.Citations.Bibliography)
+            AppendText(sb, entry);
     }
 
     private static PublishAssetDocument? FindAsset(PublishDocument document, Guid imageId) =>
@@ -197,15 +209,16 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
     public byte[] Render(PublishDocument document)
     {
         var sb = new StringBuilder();
+        var citations = new PublicationCitationResolver(document.Citations.Occurrences);
         var cover = document.CoverAsset;
         if (cover is not null)
             AppendImage(sb, cover, "Cover");
 
-        AppendPublicationSections(sb, document, PublicationSectionAnchor.Front, null, null);
+        AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.Front, null, null);
 
         foreach (var section in document.Sections)
         {
-            AppendPublicationSections(sb, document, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId);
+            AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId);
             if (section.IncludePage)
             {
                 if (section.IncludeHeading)
@@ -216,25 +229,27 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
 
             foreach (var chapter in section.Chapters)
             {
-                AppendPublicationSections(sb, document, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
+                AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
                 sb.AppendLine();
                 if (chapter.IncludeHeading)
                     sb.Append("### ").AppendLine(EscapeHeading(chapter.Title));
                 if (document.Profile.IncludeChapterSynopses)
                     AppendBlockquote(sb, chapter.Synopsis);
-                AppendVisualMarkdown(sb, document, chapter);
-                AppendPublicationSections(sb, document, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
+                AppendVisualMarkdown(sb, document, chapter, citations);
+                AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id);
             }
-            AppendPublicationSections(sb, document, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId);
+            AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId);
         }
 
-        AppendPublicationSections(sb, document, PublicationSectionAnchor.Back, null, null);
+        AppendPublicationSections(sb, document, citations, PublicationSectionAnchor.Back, null, null);
+        AppendCitationBackMatter(sb, document);
         return Encoding.UTF8.GetBytes(sb.ToString().TrimEnd() + Environment.NewLine);
     }
 
     private static void AppendPublicationSections(
         StringBuilder sb,
         PublishDocument document,
+        PublicationCitationResolver citations,
         PublicationSectionAnchor anchor,
         PublishOutlineTargetKind? targetKind,
         Guid? targetId)
@@ -243,27 +258,24 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             && item.TargetKind == targetKind && item.TargetId == targetId).OrderBy(item => item.LocalOrder))
         {
             sb.AppendLine().Append("## ").AppendLine(EscapeHeading(item.Title));
+            var notes = PublicationNotes.Create(document, new($"publication-section:{item.Id:D}", item.Title, item.Manuscript, item.DesignedPages));
             if (item.SystemRole == PublicationSectionSystemRole.Contents)
             {
                 AppendToc(sb, document);
                 continue;
             }
-            foreach (var block in item.Manuscript.Content)
+            foreach (var block in notes.Manuscript.Content)
             {
                 if (block.Type == ManuscriptBlockType.DesignedPage
                     && block.DesignedPageId is Guid designedPageId
                     && item.DesignedPages.FirstOrDefault(value => value.Id == designedPageId) is { } designedPage)
                 {
-                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                        sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId)));
+                    foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage with { SemanticManuscript = notes.Placements[block.Id] }))
+                        sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId), citations.ForDocument($"publication-section:{item.Id:D}", [$"placement:{block.Id}"]), notes.Numbers));
                 }
                 else
-                    sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(block, imageId => FindAsset(document, imageId)));
+                    sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(block, imageId => FindAsset(document, imageId), citations.ForDocument($"publication-section:{item.Id:D}"), notes.Numbers));
             }
-            foreach (var note in SemanticPublishFormatting.MarkdownNotes(
-                item.Manuscript,
-                imageId => FindAsset(document, imageId)))
-                sb.AppendLine().AppendLine(note);
         }
     }
 
@@ -317,27 +329,38 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
             sb.Append("_").Append(EscapeInline(caption)).AppendLine("_");
     }
 
-    private static void AppendVisualMarkdown(StringBuilder sb, PublishDocument document, PublishChapterDocument chapter)
+    private static void AppendVisualMarkdown(
+        StringBuilder sb,
+        PublishDocument document,
+        PublishChapterDocument chapter,
+        PublicationCitationResolver citations)
     {
-        foreach (var manuscriptBlock in chapter.Manuscript.Content)
+        var notes = PublicationNotes.Create(document, new($"chapter:{chapter.Id:D}", chapter.Title, chapter.Manuscript, chapter.DesignedPages));
+        foreach (var manuscriptBlock in notes.Manuscript.Content)
         {
             if (manuscriptBlock.Type == ManuscriptBlockType.DesignedPage
                 && manuscriptBlock.DesignedPageId is Guid designedPageId
                 && chapter.DesignedPages.FirstOrDefault(item => item.Id == designedPageId) is { } designedPage)
             {
-                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage))
-                    sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId)));
+                foreach (var projected in DesignedPageSemanticProjection.Blocks(designedPage with { SemanticManuscript = notes.Placements[manuscriptBlock.Id] }))
+                    sb.AppendLine().AppendLine(SemanticPublishFormatting.MarkdownBlock(projected, imageId => FindAsset(document, imageId), citations.ForDocument($"chapter:{chapter.Id:D}", [$"placement:{manuscriptBlock.Id}"]), notes.Numbers));
                 continue;
             }
             sb.AppendLine().AppendLine(
                 SemanticPublishFormatting.MarkdownBlock(
                     manuscriptBlock,
-                    imageId => FindAsset(document, imageId)));
+                    imageId => FindAsset(document, imageId),
+                    citations.ForDocument($"chapter:{chapter.Id:D}"), notes.Numbers));
         }
-        foreach (var note in SemanticPublishFormatting.MarkdownNotes(
-            chapter.Manuscript,
-            imageId => FindAsset(document, imageId)))
-            sb.AppendLine().AppendLine(note);
+    }
+
+    private static void AppendCitationBackMatter(StringBuilder sb, PublishDocument document)
+    {
+        sb.AppendLine().AppendLine(PublicationTextBackMatter.Notes(document, markdown: true));
+        if (document.Citations.Bibliography.Count == 0) return;
+        sb.Append("## ").AppendLine(EscapeHeading(document.Citations.BibliographyTitle));
+        foreach (var entry in document.Citations.BibliographyEntries)
+            sb.AppendLine().AppendLine(SemanticPublishFormatting.CitationMarkdown(entry.Runs));
     }
 
     private static IReadOnlyList<string> SplitMarkdownParagraphs(string text)
@@ -462,6 +485,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private List<EpubXhtmlItem> BuildXhtmlItems(PublishDocument document, IReadOnlyList<EpubImageItem> imageItems)
     {
         var items = new List<EpubXhtmlItem>();
+        var citations = new PublicationCitationResolver(document.Citations.Occurrences);
+        var noteBacklinks = new Dictionary<string, string>(StringComparer.Ordinal);
         if (document.Cover is not null || CoverImageHref(imageItems) is not null)
         {
             var viewport = document.Cover is { } cover
@@ -477,13 +502,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         }
 
         var publicationSectionIndex = 0;
-        AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.Front, null, null, ref publicationSectionIndex);
+        AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.Front, null, null, ref publicationSectionIndex, noteBacklinks);
 
         var actIndex = 0;
         var chapterIndex = 0;
         foreach (var section in document.Sections)
         {
-            AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId, ref publicationSectionIndex);
+            AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.BeforeAct, PublishOutlineTargetKind.Act, section.ActId, ref publicationSectionIndex, noteBacklinks);
             actIndex++;
             if (section.IncludePage)
             {
@@ -497,16 +522,17 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
             foreach (var chapter in section.Chapters)
             {
-                AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id, ref publicationSectionIndex);
+                AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.BeforeChapter, PublishOutlineTargetKind.Chapter, chapter.Id, ref publicationSectionIndex, noteBacklinks);
                 chapterIndex++;
                 var chapterId = $"chapter-{chapterIndex.ToString(CultureInfo.InvariantCulture)}";
-                AddChapterItems(items, document, chapter, imageItems, chapterId);
-                AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id, ref publicationSectionIndex);
+                AddChapterItems(items, document, chapter, imageItems, citations, chapterId, noteBacklinks);
+                AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.AfterChapter, PublishOutlineTargetKind.Chapter, chapter.Id, ref publicationSectionIndex, noteBacklinks);
             }
-            AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId, ref publicationSectionIndex);
+            AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.AfterAct, PublishOutlineTargetKind.Act, section.ActId, ref publicationSectionIndex, noteBacklinks);
         }
 
-        AddPublicationSections(items, document, imageItems, PublicationSectionAnchor.Back, null, null, ref publicationSectionIndex);
+        AddPublicationSections(items, document, imageItems, citations, PublicationSectionAnchor.Back, null, null, ref publicationSectionIndex, noteBacklinks);
+        AddCitationBackMatter(items, document, imageItems, citations, noteBacklinks);
         return items;
     }
 
@@ -514,19 +540,21 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         List<EpubXhtmlItem> items,
         PublishDocument document,
         IReadOnlyList<EpubImageItem> imageItems,
+        PublicationCitationResolver citations,
         PublicationSectionAnchor anchor,
         PublishOutlineTargetKind? targetKind,
         Guid? targetId,
-        ref int sectionIndex)
+        ref int sectionIndex,
+        Dictionary<string, string> noteBacklinks)
     {
         foreach (var section in document.PublicationSections.Where(item => item.Anchor == anchor
             && item.TargetKind == targetKind && item.TargetId == targetId).OrderBy(item => item.LocalOrder))
         {
             sectionIndex++;
             var baseId = $"publication-section-{sectionIndex.ToString(CultureInfo.InvariantCulture)}";
-            var noteNumbers = SemanticPublishFormatting.NoteNumbers(section.Manuscript);
-            var noteFile = $"{baseId}-notes.xhtml";
-            var noteBacklinks = new Dictionary<string, string>(StringComparer.Ordinal);
+            var notes = PublicationNotes.Create(document, new($"publication-section:{section.Id:D}", section.Title, section.Manuscript, section.DesignedPages));
+            var noteNumbers = notes.Numbers;
+            const string noteFile = "endnotes.xhtml";
             var segment = new List<ManuscriptBlock>();
             var part = 0;
             var first = true;
@@ -539,12 +567,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     noteBacklinks[noteId] = $"{id}.xhtml#note-ref-{noteId}";
                 var content = generatedContents
                     ? RenderVisibleToc(document)
-                    : RenderSemanticMatterBody(section.Title, string.Concat(segment.Select(block =>
-                        SemanticPublishFormatting.HtmlBlock(
-                            block,
+                    : RenderSemanticMatterBody(section.Title,
+                        SemanticPublishFormatting.HtmlBlocks(
+                            segment,
                             imageId => ImageHref(imageItems, imageId),
                             noteNumbers,
-                            noteFile))));
+                            noteFile,
+                            citations.ForDocument($"publication-section:{section.Id:D}", backlink: $"{id}.xhtml"),
+                            "endnotes.xhtml"));
                 items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", section.Title,
                     RenderXhtmlPage(document, section.Title, content), IncludeInNavigation: first));
                 segment.Clear();
@@ -552,7 +582,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             }
 
             var designedIndex = 0;
-            foreach (var block in section.Manuscript.Content)
+            foreach (var block in notes.Manuscript.Content)
             {
                 if (block.Type != ManuscriptBlockType.DesignedPage || block.DesignedPageId is not Guid designedPageId)
                 {
@@ -567,7 +597,15 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 var id = first ? baseId : $"{baseId}-designed-{++designedIndex}";
                 var viewport = SceneViewport(variant.Scene);
                 var body = new StringBuilder();
-                AppendDesignedPage(body, composition, imageItems);
+                var placedManuscript = notes.Placements[block.Id];
+                foreach (var noteId in SemanticPublishFormatting.ReferencedNoteIds(placedManuscript.Content))
+                    noteBacklinks[noteId] = $"{id}.xhtml#note-ref-{noteId}";
+                AppendDesignedPage(
+                    body,
+                    composition with { SemanticManuscript = placedManuscript },
+                    imageItems,
+                    citations.ForDocument($"publication-section:{section.Id:D}", [$"placement:{block.Id}"], $"{id}.xhtml"),
+                    "endnotes.xhtml", noteNumbers, noteFile);
                 items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", composition.Name,
                     RenderXhtmlPage(document, composition.Name, body.ToString(), viewport, "fixed-layout"),
                     IncludeInNavigation: first,
@@ -577,23 +615,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 first = false;
             }
             Flush();
-            if (section.Manuscript.Notes.Count > 0)
-            {
-                items.Add(new EpubXhtmlItem(
-                    $"{baseId}-notes",
-                    noteFile,
-                    $"{section.Title} notes",
-                    RenderXhtmlPage(
-                        document,
-                        $"{section.Title} notes",
-                        RenderSemanticMatterBody(
-                            $"{section.Title} notes",
-                            SemanticPublishFormatting.HtmlNotes(
-                                section.Manuscript,
-                                imageId => ImageHref(imageItems, imageId),
-                                noteBacklinks))),
-                    IncludeInNavigation: false));
-            }
         }
     }
 
@@ -602,11 +623,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         PublishDocument document,
         PublishChapterDocument chapter,
         IReadOnlyList<EpubImageItem> imageItems,
-        string chapterId)
+        PublicationCitationResolver citations,
+        string chapterId,
+        Dictionary<string, string> noteBacklinks)
     {
-        var noteNumbers = SemanticPublishFormatting.NoteNumbers(chapter.Manuscript);
-        var noteFile = $"{chapterId}-notes.xhtml";
-        var noteBacklinks = new Dictionary<string, string>(StringComparer.Ordinal);
+        var notes = PublicationNotes.Create(document, new($"chapter:{chapter.Id:D}", chapter.Title, chapter.Manuscript, chapter.DesignedPages));
+        var noteNumbers = notes.Numbers;
+        const string noteFile = "endnotes.xhtml";
         var segment = new List<ManuscriptBlock>();
         var part = 0;
         var firstReflow = true;
@@ -634,14 +657,16 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                         segment,
                         firstReflow,
                         noteNumbers,
-                        noteFile)),
+                        noteFile,
+                        citations.ForDocument($"chapter:{chapter.Id:D}", backlink: $"{id}.xhtml"),
+                        "endnotes.xhtml")),
                 IncludeInNavigation: firstReflow));
             segment.Clear();
             firstReflow = false;
         }
 
         var designedIndex = 0;
-        foreach (var block in chapter.Manuscript.Content)
+        foreach (var block in notes.Manuscript.Content)
         {
             if (block.Type != ManuscriptBlockType.DesignedPage
                 || block.DesignedPageId is not Guid designedPageId)
@@ -660,7 +685,15 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 ? "rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"
                 : "rendition:layout-pre-paginated rendition:spread-none";
             var body = new StringBuilder();
-            AppendDesignedPage(body, composition, imageItems);
+            var placedManuscript = notes.Placements[block.Id];
+            foreach (var noteId in SemanticPublishFormatting.ReferencedNoteIds(placedManuscript.Content))
+                noteBacklinks[noteId] = $"{id}.xhtml#note-ref-{noteId}";
+            AppendDesignedPage(
+                body,
+                composition with { SemanticManuscript = placedManuscript },
+                imageItems,
+                citations.ForDocument($"chapter:{chapter.Id:D}", [$"placement:{block.Id}"], $"{id}.xhtml"),
+                "endnotes.xhtml", noteNumbers, noteFile);
             items.Add(new EpubXhtmlItem(
                 id,
                 $"{id}.xhtml",
@@ -671,23 +704,77 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             firstReflow = false;
         }
         FlushReflow();
-        if (chapter.Manuscript.Notes.Count > 0)
+    }
+
+    private static void AddCitationBackMatter(
+        ICollection<EpubXhtmlItem> items,
+        PublishDocument document,
+        IReadOnlyList<EpubImageItem> imageItems,
+        PublicationCitationResolver citations,
+        IReadOnlyDictionary<string, string> noteBacklinks)
+    {
+        var body = new StringBuilder();
+        foreach (var container in PublicationSemanticDocuments.Enumerate(document))
+        {
+            var notes = PublicationNotes.Create(document, container);
+            var citationNotes = document.Citations.Occurrences.Where(citation => citation.Identity.TopLevelContainer == container.Id
+                && citation.NoteRuns is not null).ToList();
+            if (notes.Occurrences.Count == 0 && citationNotes.Count == 0) continue;
+            body.Append("<section><h2>").Append(Html(container.Title)).Append("</h2>");
+            foreach (var group in notes.Occurrences.GroupBy(note => note.Note.Kind))
+            {
+                body.Append("<section><h3>").Append(group.Key == ManuscriptNoteKind.Footnote ? "Footnotes" : "Author notes").Append("</h3><ol>");
+                foreach (var note in group)
+                {
+                    body.Append("<li id=\"note-").Append(note.Note.Id).Append("\" value=\"").Append(note.Number).Append("\">");
+                    body.Append(SemanticPublishFormatting.HtmlBlocks(note.Note.Content, imageId => ImageHref(imageItems, imageId), notes.Numbers,
+                            citation: citations.ForDocument(container.Id, note.PlacementPath, "endnotes.xhtml"), citationHrefPrefix: "endnotes.xhtml"));
+                    if (!noteBacklinks.TryGetValue(note.Note.Id, out var backlink))
+                        throw new InvalidDataException($"Note '{note.Note.Id}' has no exported reference occurrence.");
+                    body.Append("<a role=\"doc-backlink\" aria-label=\"Back to note reference\" href=\"").Append(Html(backlink)).Append("\">↩</a>");
+                    body.Append("</li>");
+                }
+                body.Append("</ol></section>");
+            }
+            if (citationNotes.Count > 0)
+            {
+                body.Append("<section><h3>Citations</h3><ol>");
+                foreach (var citation in citationNotes)
+                {
+                    var anchor = PublicationCitationResolver.Anchor(citation);
+                    body.Append("<li id=\"citation-note-").Append(anchor).Append("\" value=\"").Append(citation.NoteNumber).Append("\">")
+                        .Append(SemanticPublishFormatting.CitationHtml(citation.NoteRuns!));
+                    if (citations.BacklinkFor(citation) is { } backlink)
+                        body.Append(" <a role=\"doc-backlink\" aria-label=\"Back to citation\" href=\"")
+                            .Append(Html(backlink)).Append("#citation-ref-").Append(anchor).Append("\">↩</a>");
+                    body.Append("</li>");
+                }
+                body.Append("</ol></section>");
+            }
+            body.Append("</section>");
+        }
+        if (body.Length > 0)
         {
             items.Add(new EpubXhtmlItem(
-                $"{chapterId}-notes",
-                noteFile,
-                $"{chapter.Title} notes",
-                RenderXhtmlPage(
-                    document,
-                    $"{chapter.Title} notes",
-                    RenderSemanticMatterBody(
-                        $"{chapter.Title} notes",
-                        SemanticPublishFormatting.HtmlNotes(
-                            chapter.Manuscript,
-                            imageId => ImageHref(imageItems, imageId),
-                            noteBacklinks))),
-                IncludeInNavigation: false));
+                "endnotes",
+                "endnotes.xhtml",
+                "Endnotes",
+                RenderXhtmlPage(document, "Endnotes", "<section role=\"doc-endnotes\"><h1>Endnotes</h1>" + body + "</section>")));
         }
+
+        if (document.Citations.Bibliography.Count == 0)
+            return;
+        var bibliography = new StringBuilder("<section class=\"bibliography\" role=\"doc-bibliography\"><h1>")
+            .Append(Html(document.Citations.BibliographyTitle)).Append("</h1>");
+        foreach (var entry in document.Citations.BibliographyEntries)
+            bibliography.Append("<p style=\"margin-left:0.5in;text-indent:-0.5in\">")
+                .Append(SemanticPublishFormatting.CitationHtml(entry.Runs)).Append("</p>");
+        bibliography.Append("</section>");
+        items.Add(new EpubXhtmlItem(
+            "citation-bibliography",
+            "citation-bibliography.xhtml",
+            document.Citations.BibliographyTitle,
+            RenderXhtmlPage(document, document.Citations.BibliographyTitle, bibliography.ToString())));
     }
 
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
@@ -707,7 +794,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             }
             foreach (var imageId in chapter.DesignedPages
                 .SelectMany(composition => composition.Variants)
-                .SelectMany(variant => variant.Scene.Objects)
+                .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
                 .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
                 .Select(item => item.ImageId!.Value))
             {
@@ -724,7 +811,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     assets[asset.Id] = asset;
             }
             foreach (var imageId in section.DesignedPages.SelectMany(composition => composition.Variants)
-                .SelectMany(variant => variant.Scene.Objects)
+                .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
                 .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
                 .Select(item => item.ImageId!.Value))
             {
@@ -734,13 +821,20 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         }
         if (document.Cover is { } composedCover)
         {
-            foreach (var imageId in composedCover.Scene.Objects
+            foreach (var imageId in CompositionSceneResolver.Flatten(composedCover.Scene)
                 .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
                 .Select(item => item.ImageId!.Value))
             {
                 if (document.Assets.FirstOrDefault(asset => asset.Id == imageId) is { } asset)
                     assets[asset.Id] = asset;
             }
+        }
+        foreach (var page in document.Sections.SelectMany(section => section.Chapters).SelectMany(chapter => chapter.DesignedPages)
+            .Concat(document.PublicationSections.SelectMany(section => section.DesignedPages)))
+        foreach (var block in ManuscriptTraversal.EnumerateBlocks(page.SemanticManuscript).Where(block => block.Type == ManuscriptBlockType.Figure))
+        {
+            if (block.ImageId is Guid imageId && document.Assets.FirstOrDefault(asset => asset.Id == imageId) is { } asset)
+                assets[asset.Id] = asset;
         }
         items.AddRange(assets.Values
             .Select(asset => new EpubImageItem($"img-{asset.Id:N}", $"images/{asset.Id:N}.{ImageExtension(asset.ContentType)}", asset, IsCover: false)));
@@ -922,7 +1016,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         IReadOnlyList<ManuscriptBlock> blocks,
         bool includeOpening,
         IReadOnlyDictionary<string, int> noteNumbers,
-        string noteFile)
+        string noteFile,
+        Func<string, FormattedCitationCluster?> citation,
+        string citationHrefPrefix)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<article class=\"chapter-page\">");
@@ -931,12 +1027,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         if (includeOpening && document.Profile.IncludeChapterSynopses)
             AppendTextBlocks(sb, chapter.Synopsis, "synopsis");
         sb.AppendLine("<div class=\"chapter-body\">");
-        foreach (var block in blocks)
-            sb.Append(SemanticPublishFormatting.HtmlBlock(
-                block,
+        sb.Append(SemanticPublishFormatting.HtmlBlocks(
+                blocks,
                 imageId => ImageHref(imageItems, imageId),
                 noteNumbers,
-                noteFile));
+                noteFile,
+                citation,
+                citationHrefPrefix));
         sb.AppendLine("</div>");
         sb.AppendLine("</article>");
         return sb.ToString();
@@ -957,7 +1054,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static void AppendDesignedPage(
         StringBuilder sb,
         PublishDesignedPageDocument composition,
-        IReadOnlyList<EpubImageItem> imageItems)
+        IReadOnlyList<EpubImageItem> imageItems,
+        Func<string, FormattedCitationCluster?> citation,
+        string citationHrefPrefix,
+        IReadOnlyDictionary<string, int> noteNumbers,
+        string noteFile)
     {
         var variant = composition.Variants.FirstOrDefault();
         if (variant is null)
@@ -1000,7 +1101,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             else if (item.Kind == CompositionObjectKind.Text)
             {
                 var text = string.IsNullOrWhiteSpace(item.TextBinding)
-                    ? HtmlBoundCompositionRanges(composition.SemanticManuscript, item.ContentReferences)
+                    ? HtmlBoundCompositionRanges(
+                        composition.SemanticManuscript,
+                        item.ContentReferences,
+                        citation,
+                        citationHrefPrefix, noteNumbers, noteFile)
                     : Html(item.TextBinding);
                 var (tag, epubType) = CompositionTextSemantics(item.SemanticRole);
                 sb.Append('<').Append(tag).Append(" class=\"composition-object composition-text\"");
@@ -1060,7 +1165,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
     private static string HtmlBoundCompositionRanges(
         ManuscriptDocument semantic,
-        IReadOnlyList<ManuscriptRangeReference> references)
+        IReadOnlyList<ManuscriptRangeReference> references,
+        Func<string, FormattedCitationCluster?> citation,
+        string citationHrefPrefix,
+        IReadOnlyDictionary<string, int> noteNumbers,
+        string noteFile)
     {
         var blocks = ManuscriptRangeResolver.ResolveBlocks(semantic, references);
         var sb = new StringBuilder();
@@ -1069,7 +1178,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             if (previousBlockId is not null && !string.Equals(previousBlockId, block.Id, StringComparison.Ordinal))
                 sb.Append("<br />");
-            sb.Append(SemanticPublishFormatting.HtmlInlineContent(block));
+            sb.Append(SemanticPublishFormatting.HtmlInlineContent(
+                block,
+                noteNumbers,
+                noteFile,
+                citation: citation,
+                citationHrefPrefix: citationHrefPrefix));
             previousBlockId = block.Id;
         }
         return sb.ToString();
@@ -1752,6 +1866,11 @@ internal static class DesignedPageSemanticProjection
 
 internal static class SemanticPublishFormatting
 {
+    public static string CitationHtml(IReadOnlyList<CitationRun> runs) => string.Concat(runs.Select(run =>
+        run.Italic ? $"<em>{WebUtility.HtmlEncode(run.Text)}</em>" : WebUtility.HtmlEncode(run.Text)));
+
+    public static string CitationMarkdown(IReadOnlyList<CitationRun> runs) => string.Concat(runs.Select(run =>
+        run.Italic ? $"*{EscapeMarkdown(run.Text)}*" : EscapeMarkdown(run.Text)));
     private static string ImageFitCss(FigureImageFit fit) => fit switch
     {
         FigureImageFit.Cover => "cover",
@@ -1761,13 +1880,15 @@ internal static class SemanticPublishFormatting
 
     public static string PlainText(
         ManuscriptDocument manuscript,
-        Func<Guid, PublishAssetDocument?> asset)
+        Func<Guid, PublishAssetDocument?> asset,
+        Func<string, FormattedCitationCluster?>? citation = null)
     {
+        manuscript = ManuscriptLists.Resolve(manuscript);
         var noteNumbers = NoteNumbers(manuscript);
         var blocks = new List<string>();
         foreach (var block in manuscript.Content)
-            blocks.Add(PlainTextBlock(block, asset, noteNumbers));
-        var notes = PlainTextNotes(manuscript, asset, noteNumbers);
+            blocks.Add(PlainTextBlock(block, asset, noteNumbers, citation));
+        var notes = PlainTextNotes(manuscript, asset, noteNumbers, citation);
         if (!string.IsNullOrEmpty(notes)) blocks.Add(notes);
         return string.Join(Environment.NewLine + Environment.NewLine, blocks);
     }
@@ -1775,28 +1896,37 @@ internal static class SemanticPublishFormatting
     internal static string PlainTextNotes(
         ManuscriptDocument manuscript,
         Func<Guid, PublishAssetDocument?> asset,
-        IReadOnlyDictionary<string, int>? noteNumbers = null)
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        Func<string, FormattedCitationCluster?>? citation = null)
     {
         noteNumbers ??= NoteNumbers(manuscript);
         return string.Join(Environment.NewLine, manuscript.Notes.Select(note =>
-            $"[{noteNumbers[note.Id]}] {string.Join(" ", note.Content.Select(item => PlainTextBlock(item, asset, noteNumbers)))}"));
+            $"[{noteNumbers[note.Id]}] {string.Join(" ", note.Content.Select(item => PlainTextBlock(item, asset, noteNumbers, citation)))}"));
     }
 
     internal static string PlainTextBlock(
         ManuscriptBlock block,
         Func<Guid, PublishAssetDocument?> asset,
-        IReadOnlyDictionary<string, int>? noteNumbers = null)
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        Func<string, FormattedCitationCluster?>? citation = null)
     {
         if (block.Type == ManuscriptBlockType.SceneBreak)
             return "***";
         if (block.Type == ManuscriptBlockType.Table)
             return string.Join("\n", block.Table!.Rows.Select(row => string.Join("\t", row.Cells.Select(cell =>
-                string.Join("\n", cell.Content.Select(child => PlainTextBlock(child, asset, noteNumbers)))))));
-        var text = string.Concat(block.Content.Select(inline => inline.Type == ManuscriptInlineType.NoteReference
-            ? noteNumbers is not null && noteNumbers.TryGetValue(inline.NoteId!, out var number)
+                string.Join("\n", cell.Content.Select(child => PlainTextBlock(child, asset, noteNumbers, citation)))))));
+        var text = string.Concat(block.Content.Select(inline => inline.Type switch
+        {
+            ManuscriptInlineType.NoteReference => noteNumbers is not null && noteNumbers.TryGetValue(inline.NoteId!, out var number)
                 ? $"[{number}]"
-                : "[*]"
-            : inline.Text));
+                : "[*]",
+            ManuscriptInlineType.Citation => citation?.Invoke(inline.Id!)?.InlineText is { } value
+                ? $"[{value}]"
+                : "[citation]",
+            _ => inline.Text,
+        }));
+        if (block.Type == ManuscriptBlockType.ListItem)
+            return $"{new string(' ', (block.List?.Level ?? 0) * 4)}{ManuscriptLists.Marker(block)} {text}";
         if (block.Type != ManuscriptBlockType.Figure)
             return text;
         var image = asset(block.ImageId!.Value);
@@ -1809,36 +1939,45 @@ internal static class SemanticPublishFormatting
 
     public static string Markdown(
         ManuscriptDocument manuscript,
-        Func<Guid, PublishAssetDocument?> asset)
+        Func<Guid, PublishAssetDocument?> asset,
+        Func<string, FormattedCitationCluster?>? citation = null)
     {
+        manuscript = ManuscriptLists.Resolve(manuscript);
         var blocks = new List<string>();
+        var noteNumbers = NoteNumbers(manuscript);
         foreach (var block in manuscript.Content)
-            blocks.Add(MarkdownBlock(block, asset));
-        blocks.AddRange(MarkdownNotes(manuscript, asset));
+            blocks.Add(MarkdownBlock(block, asset, citation, noteNumbers));
+        blocks.AddRange(manuscript.Notes.Select(note => MarkdownNote(note, noteNumbers[note.Id], asset, citation)));
         return string.Join(Environment.NewLine + Environment.NewLine, blocks);
     }
 
-    internal static IReadOnlyList<string> MarkdownNotes(
-        ManuscriptDocument manuscript,
-        Func<Guid, PublishAssetDocument?> asset) =>
-        manuscript.Notes.Select(note =>
-            $"[^{note.Id}]: {string.Join(" ", note.Content.Select(item => MarkdownBlock(item, asset)))}").ToArray();
+    internal static string MarkdownNote(
+        ManuscriptNote note,
+        int number,
+        Func<Guid, PublishAssetDocument?> asset,
+        Func<string, FormattedCitationCluster?>? citation = null) =>
+        $"<a id=\"note-{WebUtility.HtmlEncode(note.Id)}\"></a>\n\n{number}. "
+        + string.Join("\n\n", note.Content.Select(item => MarkdownBlock(item, asset, citation)))
+        + $"\n\n[↩](#note-ref-{Uri.EscapeDataString(note.Id)})";
 
     internal static string MarkdownBlock(
         ManuscriptBlock block,
-        Func<Guid, PublishAssetDocument?> asset)
+        Func<Guid, PublishAssetDocument?> asset,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        IReadOnlyDictionary<string, int>? noteNumbers = null)
     {
         if (!ManuscriptStyleService.BuiltInParagraphRoles.Contains(block.StyleRole))
         {
             if (block.Type == ManuscriptBlockType.Table)
-                return MarkdownTable(block, asset);
+                return MarkdownTable(block, asset, citation, noteNumbers);
             return HtmlBlock(
                 block,
                 imageId => asset(imageId) is { } image
                     ? $"data:{image.ContentType};base64,{Convert.ToBase64String(image.Data)}"
-                    : null);
+                    : null,
+                noteNumbers: noteNumbers, citation: citation);
         }
-        var text = string.Concat(block.Content.Select(MarkdownInline));
+        var text = string.Concat(block.Content.Select(inline => MarkdownInline(inline, citation, noteNumbers)));
         return block.Type switch
         {
             ManuscriptBlockType.Heading =>
@@ -1847,33 +1986,47 @@ internal static class SemanticPublishFormatting
             ManuscriptBlockType.BlockQuote => string.Join(
                 Environment.NewLine,
                 text.Split('\n').Select(line => $"> {line}")),
-            ManuscriptBlockType.ListItem => $"- {text}",
+            ManuscriptBlockType.ListItem => $"{new string(' ', (block.List?.Level ?? 0) * 4)}{(block.List?.Ordered == true ? ManuscriptLists.Marker(block) : "-")} {text}",
             ManuscriptBlockType.Figure => MarkdownFigure(
                 block,
                 text,
                 asset(block.ImageId!.Value)),
-            ManuscriptBlockType.Table => MarkdownTable(block, asset),
+            ManuscriptBlockType.Table => MarkdownTable(block, asset, citation, noteNumbers),
             _ => text,
         };
     }
 
     public static string Html(
         ManuscriptDocument manuscript,
-        Func<Guid, string?> imageHref)
+        Func<Guid, string?> imageHref,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null)
     {
+        manuscript = ManuscriptLists.Resolve(manuscript);
         var noteNumbers = NoteNumbers(manuscript);
         var sb = new StringBuilder();
-        foreach (var block in manuscript.Content)
-            sb.Append(HtmlBlock(block, imageHref, noteNumbers));
-        sb.Append(HtmlNotes(manuscript, imageHref));
+        sb.Append(HtmlBlocks(
+                manuscript.Content,
+                imageHref,
+                noteNumbers,
+                citation: citation,
+                citationHrefPrefix: citationHrefPrefix));
+        sb.Append(HtmlNotes(
+            manuscript,
+            imageHref,
+            citation: citation,
+            citationHrefPrefix: citationHrefPrefix));
         return sb.ToString();
     }
 
     internal static string HtmlNotes(
         ManuscriptDocument manuscript,
         Func<Guid, string?> imageHref,
-        IReadOnlyDictionary<string, string>? backlinkHrefs = null)
+        IReadOnlyDictionary<string, string>? backlinkHrefs = null,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null)
     {
+        manuscript = ManuscriptLists.Resolve(manuscript);
         var noteNumbers = NoteNumbers(manuscript);
         var sb = new StringBuilder();
         foreach (var group in manuscript.Notes.GroupBy(note => note.Kind))
@@ -1886,8 +2039,12 @@ internal static class SemanticPublishFormatting
             foreach (var note in group)
             {
                 sb.Append("<li id=\"note-").Append(WebUtility.HtmlEncode(note.Id)).Append("\">");
-                foreach (var block in note.Content)
-                    sb.Append(HtmlBlock(block, imageHref, noteNumbers));
+                sb.Append(HtmlBlocks(
+                        note.Content,
+                        imageHref,
+                        noteNumbers,
+                        citation: citation,
+                        citationHrefPrefix: citationHrefPrefix));
                 var backlink = backlinkHrefs?.GetValueOrDefault(note.Id)
                     ?? $"#note-ref-{note.Id}";
                 sb.Append("<a href=\"").Append(WebUtility.HtmlEncode(backlink))
@@ -1902,11 +2059,13 @@ internal static class SemanticPublishFormatting
         ManuscriptBlock block,
         Func<Guid, string?> imageHref,
         IReadOnlyDictionary<string, int>? noteNumbers = null,
-        string? noteHrefPrefix = null)
+        string? noteHrefPrefix = null,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null)
     {
-        var content = HtmlInlineContent(block, noteNumbers, noteHrefPrefix);
+        var content = HtmlInlineContent(block, noteNumbers, noteHrefPrefix, citation, citationHrefPrefix);
         var role = WebUtility.HtmlEncode(block.StyleRole);
-        var anchor = $"block-{block.Id:N}";
+        var anchor = WebUtility.HtmlEncode($"block-{block.Id}");
         var language = PublicationLanguage.NormalizeOptional(block.Language) is not { } languageTag
             ? string.Empty
             : $" lang=\"{WebUtility.HtmlEncode(languageTag)}\" xml:lang=\"{WebUtility.HtmlEncode(languageTag)}\"";
@@ -1920,11 +2079,79 @@ internal static class SemanticPublishFormatting
             ManuscriptBlockType.BlockQuote =>
                 $"<blockquote id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</blockquote>",
             ManuscriptBlockType.ListItem =>
-                $"<ul><li id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</li></ul>",
+                HtmlListItem(block, content),
             ManuscriptBlockType.Figure => HtmlFigure(block, content, role, anchor, imageHref),
-            ManuscriptBlockType.Table => HtmlTable(block, anchor, imageHref, noteNumbers, noteHrefPrefix),
+            ManuscriptBlockType.Table => HtmlTable(
+                block,
+                anchor,
+                imageHref,
+                noteNumbers,
+                noteHrefPrefix,
+                citation,
+                citationHrefPrefix),
             _ => $"<p id=\"{anchor}\" data-style-role=\"{role}\"{language}{presentation}>{content}</p>",
         };
+    }
+
+    internal static string HtmlBlocks(
+        IEnumerable<ManuscriptBlock> blocks,
+        Func<Guid, string?> imageHref,
+        IReadOnlyDictionary<string, int>? noteNumbers = null,
+        string? noteHrefPrefix = null,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null)
+    {
+        var result = new StringBuilder();
+        var lists = new Stack<(int Level, string Id, string Tag)>();
+        void CloseList()
+        {
+            var list = lists.Pop();
+            result.Append("</li></").Append(list.Tag).Append('>');
+        }
+        foreach (var block in blocks)
+        {
+            if (block.Type != ManuscriptBlockType.ListItem)
+            {
+                while (lists.Count > 0) CloseList();
+                result.Append(HtmlBlock(block, imageHref, noteNumbers, noteHrefPrefix, citation, citationHrefPrefix));
+                continue;
+            }
+            var level = block.List?.Level ?? 0;
+            var id = block.List?.Id ?? string.Empty;
+            var tag = block.List?.Ordered == true ? "ol" : "ul";
+            while (lists.TryPeek(out var parent) && (parent.Level > level
+                || parent.Level == level && (parent.Id != id || parent.Tag != tag))) CloseList();
+            if (lists.TryPeek(out var current) && current.Level == level)
+                result.Append("</li>");
+            else
+            {
+                result.Append('<').Append(tag);
+                if (tag == "ol") result.Append(" start=\"").Append(block.List!.Start ?? 1).Append('"');
+                if (lists.Count == 0 && level > 0) result.Append(" style=\"margin-left:").Append(level * 2).Append("em\"");
+                result.Append('>');
+                lists.Push((level, id, tag));
+            }
+            result.Append(HtmlListEntry(block, HtmlInlineContent(block, noteNumbers, noteHrefPrefix, citation, citationHrefPrefix)));
+        }
+        while (lists.Count > 0) CloseList();
+        return result.ToString();
+    }
+
+    private static string HtmlListEntry(ManuscriptBlock block, string content)
+    {
+        var value = block.List?.Ordered == true ? $" value=\"{block.List.Start ?? 1}\"" : string.Empty;
+        var language = PublicationLanguage.NormalizeOptional(block.Language) is { } tag
+            ? $" lang=\"{WebUtility.HtmlEncode(tag)}\" xml:lang=\"{WebUtility.HtmlEncode(tag)}\"" : string.Empty;
+        return $"<li id=\"{WebUtility.HtmlEncode("block-" + block.Id)}\"{value} aria-level=\"{(block.List?.Level ?? 0) + 1}\" data-style-role=\"{WebUtility.HtmlEncode(block.StyleRole)}\"{language}{ParagraphPresentationAttribute(block.ParagraphPresentation)}>{content}";
+    }
+
+    private static string HtmlListItem(ManuscriptBlock block, string content)
+    {
+        var ordered = block.List?.Ordered == true;
+        var tag = ordered ? "ol" : "ul";
+        var start = ordered ? $" start=\"{block.List!.Start ?? 1}\"" : string.Empty;
+        var level = block.List?.Level ?? 0;
+        return $"<{tag}{start} style=\"margin-left:{level * 2}em\">{HtmlListEntry(block, content)}</li></{tag}>";
     }
 
     private static string ParagraphPresentationAttribute(ParagraphPresentation? presentation)
@@ -1967,8 +2194,15 @@ internal static class SemanticPublishFormatting
     internal static string HtmlInlineContent(
         ManuscriptBlock block,
         IReadOnlyDictionary<string, int>? noteNumbers = null,
-        string? noteHrefPrefix = null) =>
-        string.Concat(block.Content.Select(inline => HtmlInline(inline, noteNumbers, noteHrefPrefix)));
+        string? noteHrefPrefix = null,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null) =>
+        string.Concat(block.Content.Select(inline => HtmlInline(
+            inline,
+            noteNumbers,
+            noteHrefPrefix,
+            citation,
+            citationHrefPrefix)));
 
     private static string HtmlFigure(
         ManuscriptBlock block,
@@ -2039,20 +2273,25 @@ internal static class SemanticPublishFormatting
 
     private static string MarkdownTable(
         ManuscriptBlock block,
-        Func<Guid, PublishAssetDocument?> asset) =>
+        Func<Guid, PublishAssetDocument?> asset,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        IReadOnlyDictionary<string, int>? noteNumbers = null) =>
         HtmlTable(
             block,
-            $"block-{block.Id:N}",
+            WebUtility.HtmlEncode($"block-{block.Id}"),
             imageId => asset(imageId) is { } image
                 ? $"data:{image.ContentType};base64,{Convert.ToBase64String(image.Data)}"
-                : null);
+                : null,
+            noteNumbers: noteNumbers, citation: citation);
 
     private static string HtmlTable(
         ManuscriptBlock block,
         string anchor,
         Func<Guid, string?> imageHref,
         IReadOnlyDictionary<string, int>? noteNumbers = null,
-        string? noteHrefPrefix = null)
+        string? noteHrefPrefix = null,
+        Func<string, FormattedCitationCluster?>? citation = null,
+        string? citationHrefPrefix = null)
     {
         var table = block.Table
             ?? throw new InvalidOperationException($"Table block {block.Id} has no table payload.");
@@ -2071,8 +2310,13 @@ internal static class SemanticPublishFormatting
                 if (cell.RowSpan > 1) sb.Append(" rowspan=\"").Append(cell.RowSpan).Append('"');
                 if (cell.ColumnSpan > 1) sb.Append(" colspan=\"").Append(cell.ColumnSpan).Append('"');
                 sb.Append('>');
-                foreach (var child in cell.Content)
-                    sb.Append(HtmlBlock(child, imageHref, noteNumbers, noteHrefPrefix));
+                sb.Append(HtmlBlocks(
+                        cell.Content,
+                        imageHref,
+                        noteNumbers,
+                        noteHrefPrefix,
+                        citation,
+                        citationHrefPrefix));
                 sb.Append("</").Append(tag).Append('>');
             }
             sb.Append("</tr>");
@@ -2080,10 +2324,20 @@ internal static class SemanticPublishFormatting
         return sb.Append("</table>").ToString();
     }
 
-    private static string MarkdownInline(ManuscriptInline inline)
+    private static string MarkdownInline(
+        ManuscriptInline inline,
+        Func<string, FormattedCitationCluster?>? citation,
+        IReadOnlyDictionary<string, int>? noteNumbers)
     {
         if (inline.Type == ManuscriptInlineType.NoteReference)
-            return $"[^{EscapeMarkdownLiteral(inline.NoteId!)}]";
+            return HtmlInline(inline, noteNumbers, null, citation, null);
+        if (inline.Type == ManuscriptInlineType.Citation)
+        {
+            var formatted = citation?.Invoke(inline.Id!);
+            return formatted?.NoteNumber is not null
+                ? $"<a id=\"citation-ref-{PublicationCitationResolver.Anchor(formatted)}\"></a>[{EscapeMarkdownLiteral(formatted.InlineText)}](#citation-note-{PublicationCitationResolver.Anchor(formatted)})"
+                : formatted is null ? "[citation]" : CitationMarkdown(formatted.InlineRuns);
+        }
         var hasCode = inline.Marks.Any(mark => mark.Type == ManuscriptMarkType.Code);
         var text = hasCode
             ? $"<code>{EncodeHtmlInlineText(inline.Text)}</code>"
@@ -2115,7 +2369,9 @@ internal static class SemanticPublishFormatting
     private static string HtmlInline(
         ManuscriptInline inline,
         IReadOnlyDictionary<string, int>? noteNumbers,
-        string? noteHrefPrefix)
+        string? noteHrefPrefix,
+        Func<string, FormattedCitationCluster?>? citation,
+        string? citationHrefPrefix)
     {
         if (inline.Type == ManuscriptInlineType.NoteReference)
         {
@@ -2123,6 +2379,20 @@ internal static class SemanticPublishFormatting
             var number = noteNumbers?.GetValueOrDefault(inline.NoteId!) ?? 0;
             var href = $"{noteHrefPrefix}#note-{id}";
             return $"<sup class=\"note-reference\"><a id=\"note-ref-{id}\" href=\"{WebUtility.HtmlEncode(href)}\" role=\"doc-noteref\">{(number == 0 ? "*" : number.ToString(CultureInfo.InvariantCulture))}</a></sup>";
+        }
+        if (inline.Type == ManuscriptInlineType.Citation)
+        {
+            var formatted = citation?.Invoke(inline.Id!);
+            var citationText = formatted is null ? "[citation]" : CitationHtml(formatted.InlineRuns);
+            if (formatted?.NoteNumber is not null)
+            {
+                var anchor = PublicationCitationResolver.Anchor(formatted);
+                var href = $"{citationHrefPrefix}#citation-note-{anchor}";
+                return $"<sup class=\"citation-reference\"><a id=\"citation-ref-{anchor}\" href=\"{WebUtility.HtmlEncode(href)}\" role=\"doc-noteref\">{citationText}</a></sup>";
+            }
+            return formatted is not null
+                ? $"<cite class=\"citation-reference\">{citationText}</cite>"
+                : "<cite class=\"citation-reference citation-reference--missing\">[citation]</cite>";
         }
         var text = EncodeHtmlInlineText(inline.Text);
         foreach (var mark in inline.Marks)
@@ -2214,4 +2484,47 @@ internal static class SemanticPublishFormatting
 
     private static string EscapeMarkdown(string value) =>
         EscapeMarkdownLiteral(value);
+}
+
+internal sealed class PublicationCitationResolver
+{
+    private readonly IReadOnlyDictionary<string, FormattedCitationCluster> _byOccurrence;
+    private readonly Dictionary<string, string> _backlinks = new(StringComparer.Ordinal);
+
+    public PublicationCitationResolver(IEnumerable<FormattedCitationCluster> occurrences)
+    {
+        _byOccurrence = occurrences.ToDictionary(item => Key(item.Identity.TopLevelContainer,
+            item.Identity.PlacementPath, item.Identity.CitationAtomId), StringComparer.Ordinal);
+    }
+
+    public Func<string, FormattedCitationCluster?> ForDocument(string topLevel,
+        IReadOnlyList<string>? placementPath = null, string? backlink = null) =>
+        atomId => Resolve(atomId, topLevel, placementPath ?? [], backlink);
+
+    public FormattedCitationCluster Resolve(string citationAtomId, string topLevel,
+        IReadOnlyList<string> placementPath, string? backlink = null)
+    {
+        if (!_byOccurrence.TryGetValue(Key(topLevel, placementPath, citationAtomId), out var formatted))
+            throw new InvalidDataException($"Citation '{citationAtomId}' has no effective publication occurrence in '{topLevel}'.");
+        if (!string.IsNullOrWhiteSpace(backlink))
+            _backlinks[Anchor(formatted)] = backlink;
+        return formatted;
+    }
+
+    private static string Key(string topLevel, IReadOnlyList<string> path, string atom) =>
+        System.Text.Json.JsonSerializer.Serialize(new { topLevel, placements = path.Where(item => item.StartsWith("placement:", StringComparison.Ordinal)), atom });
+
+    public string? BacklinkFor(FormattedCitationCluster formatted) =>
+        _backlinks.GetValueOrDefault(Anchor(formatted));
+
+    public static string Anchor(FormattedCitationCluster formatted)
+    {
+        var identity = formatted.Identity;
+        var key = string.Join('|',
+            identity.PublicationTarget,
+            identity.TopLevelContainer,
+            string.Join('/', identity.PlacementPath),
+            identity.CitationAtomId);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..20].ToLowerInvariant();
+    }
 }

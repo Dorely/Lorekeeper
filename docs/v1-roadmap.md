@@ -27,9 +27,9 @@ Start here when resuming work, then read the relevant specification below.
 | Field | Current value |
 |---|---|
 | Active milestone | M5 - rich manuscript, citations, bibliography, Word interchange, and output parity; M0, M1, M3, and M4 remain in progress only for their recorded native, installed-package, OAuth, performance, scale, and Mac evidence |
-| Next bounded step | M5B - implement managed citation formatting, publication-wide bibliography/endnote generation, semantic DOCX/Word import, and editable DOCX export on the committed rich-manuscript boundary |
+| Next bounded step | Finish verification and preservation/output review of the unfinished M5B citation and DOCX-export work, then implement semantic DOCX/Word import and complete the remaining feature cleanup before manual acceptance |
 | Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight. M1.1 introduces account-owned OpenAI credentials with a guarded forward migration. M1.2 adds a fully local catalog schema v1 for Astra/Sol/Terra/Luna, rejects account-backed model discovery, resolves catalog efforts/capabilities/usable budgets, provides zero-Test catalog readiness, and preserves fail-closed explicit selections. M1.3 replaces redirect-based authorization with account services, a single-use process-local flow registry, serialized refresh/credential replacement, callback-origin validation, a shared allowlisted OpenAI/GitHub external launcher, mounted Settings polling, and a standalone callback page. A focused responsiveness correction also removes provider-backed semantic indexing from blank project creation and gives the Create action immediate busy feedback. M2 replaces chapter/section-owned compositions with reusable Designed Pages, Core/release content and authored layouts, scoped placement references, release override isolation, a project Pages workspace, independent review/history, guarded migration, and current adapters across search, assistants, portability, EPUB, and Press. M3 adds versioned multi-target authoring batches and journals, transactional sessions and durable receipts, exact-precondition conflicts, process-owned bounded delta history, client-first Undo/Redo, recoverable IndexedDB queues, single-writer leases, mutation fences, and delta-based canvas/page/cover editing. M4 adds immutable retained originals, versioned extractions, durable evidence and bibliography identity, the Sources workspace, DOCX source extraction, streamed `.lorekeeper` archives, staged transactional import, policy-scoped dependency traversal, and history schema v8 source manifests and blobs. M5A adds manuscript v6 recursive tables and document-owned notes, UTF-16 positions, rich editor/history replacement, agent projection v3, archive record 2, history schema 9, EPUB exporter v5, and Press protocol 14 table/note pagination |
-| Next investigation | Implement M5B citations, bibliography, Word import, and DOCX export. Harden Press footnotes to reserve their exact reference page before claiming the two-line co-location rule. Obtain explicit authorization and safe test credentials separately for M1 browser/Electron integration evidence. Retain M0.3/M0.5 native-evidence blockers, M3 latency evidence, M4 native scale evidence, and M0.6 Apple prerequisites; do not perform live OAuth, provider calls, or browser/Electron automation without that authorization |
+| Next investigation | Complete semantic Word file/paste conversion and atomic insertion, then close remaining bounded archive/history/source loading and feature usability gaps. Current M5B code includes managed citations, editable DOCX export, and reference-aware Press footnote reservation; acceptance remains outstanding. Retain M1 live integration, M3 latency, M4 native scale, and platform-specific evidence for the later authorized validation pass |
 | Known external dependencies | Owner source-license decision, unresolved dependency/asset provenance, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
 | Scope boundary for the next session | Implement deterministic M5B code, migrations, independently authored citation/DOCX fixtures, approved conversion/output regressions, and documentation. Do not claim Word pagination/fidelity without Word desktop evidence; do not collect native performance evidence, use live OAuth/provider calls, install an MSIX, create a Store submission, create MAS signing assets, or alter the dispatch-only macOS workflow without separate authorization |
 | Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded license and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. The project-creation responsiveness correction passes the same-change repository gate and browser-host startup smoke, but has no browser/Electron interaction timing because UI automation was not authorized. M2 (2026-09-17) adds guarded/idempotent migration and recovery coverage, release clone/isolation, scoped placement-index restoration, compound cross-container history, JSON v31/manuscript v5/history v7/Press v13 compatibility, semantic-editor build evidence, the full repository gate, and HTTP startup smoke. M3 (2026-09-17) adds deterministic batch hashing/reduction, transactional receipt replay and rollback, multi-target Undo/Redo, recovery-journal, exact-conflict, writer/fence, migration, semantic-editor JavaScript, full-gate, and HTTP-startup evidence. M4 (2026-09-17) adds retained-source migration and re-extraction coverage, archive closure and adversarial validation, streamed staging, commit/index recovery, history-v8 preservation and restore, DOCX source-extraction safety, full-gate, and HTTP-startup evidence; it does not establish native 50-source navigation or multi-GB portability performance. M5A (this 2026-09-17 change) adds v5-to-v6 and direct legacy migration coverage, recursive table/note validation, exact rich authoring/inverse behavior, output semantics, EPUB v5, and Press v14 conformance. Exact reference-page footnote reservation remains open; no browser interaction or native latency/platform evidence is claimed. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists |
@@ -110,7 +110,7 @@ the plan; follow the user's current task and the applicable execution rules.
 | M2 | Complete | Project page library, shared placements, release overrides, safe migration | Existing content survives; shared editing and release isolation work | Guarded migration/recovery, shared-placement, release-isolation, history/restore, import/export, Press, full-gate, and startup evidence in the 2026-09-17 implementation change; browser interaction was not exercised |
 | M3 | In progress | Immediate manual Undo/Redo, recoverable save queue, incremental history | Latency and failure-recovery gates pass | Deterministic implementation and headless recovery regressions are complete; native latency evidence remains blocked on an authorized Electron input surface |
 | M4 | In progress | Full source readers, retained originals, stable evidence links, scalable portability | Dozens of books remain readable, searchable, exportable, and restorable | Deterministic implementation and headless archive/history/import regressions are complete; native 50-source navigation and multi-GB portability evidence remains |
-| M5 | In progress | Rich manuscript, citations/bibliographies, Word paste/file import, DOCX export, output parity | Compatibility fixtures pass across editor, DOCX, EPUB, and Press | M5A deterministic tables/notes and cross-output formats are implemented; exact reference-page footnote reservation plus M5B citations, bibliography, Word import, and DOCX export remain |
+| M5 | In progress | Rich manuscript, citations/bibliographies, Word paste/file import, DOCX export, output parity | Compatibility fixtures pass across editor, DOCX, EPUB, and Press | Citations, bibliography, editable DOCX export, and reference-aware Press footnotes are implemented in the unfinished M5B worktree; semantic Word import/paste, final preservation/output review, and acceptance remain |
 | M6 | Not started | Public repository, donations, onboarding, beta, targeted cleanup | Beta exit criteria pass without unresolved data-loss or release-blocking defects | Publication still requires its explicit execution step |
 | M7 | Not started | Free Windows downloads and paid Microsoft Store edition | Clean install, upgrade, migration, and Store update evidence passes | Requires M0-M6 and Windows platform gates |
 | M8 | Not started | Notarized free Mac download and paid Mac App Store edition | Real-device and sandboxed Store validation passes | Cloud-only Mac access initially; recruit device testers |
@@ -720,15 +720,58 @@ tables and linked notes.
 DOCX support is incomplete until
 these existing paths preserve the richer manuscript.
 
-Deterministic M5A implementation landed on 2026-09-17 with manuscript v6,
-archive record 2, history snapshot 9, agent projection 3, EPUB exporter 5, and
-Press protocol 14. The canonical editor, authoring batches, search/context,
-portable formats, Read/text/Markdown/HTML/EPUB, and Press now preserve recursive
-tables and document-owned notes. Press repeats headers, keeps span groups
-atomic, bounds note regions, emits continuation markers, and generates grouped
-endnotes; reserving the exact reference page before body pagination is still
-open and must be completed before claiming the two-line co-location rule. M5
-therefore remains **In progress** while M5B and that layout hardening remain.
+M5 remains **In progress**. The M5B implementation uses manuscript/archive/history/
+agent/EPUB/Press contracts 7/3/10/4/6/15. Citation styles, bibliography identities,
+source-location references, and nested manuscript content cross archive/history
+boundaries with explicit remapping and ownership validation. Non-structural
+archives retain cited bibliography metadata while reporting omitted source
+evidence. Output fingerprints include cited metadata.
+
+The managed formatter emits semantic runs for the three fixed styles and eight
+supported record kinds. Publication-wide context controls disambiguation,
+bibliography ordering, repeated Chicago references, and occurrence identities.
+Chapter Read uses that same context. Manual cluster editing preserves atom IDs;
+Editor and Publish expose bounded shared bibliography operations. Bibliography
+edits use stale-write checks and project coordination. Evidence detachment rewrites
+affected manuscripts atomically, retaining metadata and locators.
+
+Shared output projections distinguish repeated Designed Page notes across TXT,
+Markdown, EPUB, DOCX, and Press. DOCX retains native footnotes, final endnotes,
+named styles/direct typography, heading levels, image proportions, captions,
+merged tables, and distinct bookmarks for duplicate titles and placements.
+Designed Page artwork resolves placement-specific labels after stored frame
+ranges. Ordered/unordered lists retain nesting and restarts across editor JSON,
+authoring recovery, Word numbering, semantic text/HTML, and Press.
+
+Press reserves reference-aware footnote regions before body flow, bounded to
+40% of usable height, with two lines beside the reference where possible and
+explicit continuation. Table references retain formatted runs, fitting note
+artwork is supported, and oversized atomic content has a named diagnostic.
+Repeated Designed Pages use available space below artwork without changing
+their stored frame offsets. Final authored notes and citation notes share one
+Endnotes section before the applicable bibliography.
+
+Ordinary rich-document typing and citation/note-body edits use nested
+`replaceInlineContent` operations with block fingerprints and complete positions.
+Structural changes retain their exact document fallback. Archive input/expanded
+defaults are configurable at 8/16 GiB, with separate per-entry, manifest, and
+legacy JSON bounds. Streaming export and staged input enforce those bounds;
+archive import avoids aggregate image/font hydration and EF binary tracking.
+
+Deterministic evidence covers nested citation remapping and ownership,
+selective-history closure, rollback after a later mutation fails, receipt replay,
+canonical inverses and Undo/Redo, contributor and missing-field formatting,
+repeated page/backlink identity, DOCX structure, footnote reservation/continuation,
+and poorly compressible archive inputs. These implementation checks do not
+establish manual acceptance, Word desktop compatibility, or native latency.
+
+Remaining work is semantic DOCX and Word-paste insertion through
+`SemanticImportFragment`, final output/preservation review, remaining aggregate
+history/source paths, and affected usability/documentation cleanup. Full automated
+gates, diff review, and isolated HTTP startup precede the clean committed
+implementation checkpoint. Manual acceptance comes next; broader UI, Word
+desktop, live OAuth/provider, and native performance checks await the owner's
+go-ahead. Launch and distribution remain deferred.
 
 ### F. Engineering cleanup (throughout; closure in M6)
 

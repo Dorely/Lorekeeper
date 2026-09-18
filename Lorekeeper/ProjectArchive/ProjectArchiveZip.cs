@@ -66,7 +66,13 @@ public static class ProjectArchiveZip
             file.Length,
             file.Sha256)), warnings);
 
-        using (var archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true))
+        using var manifestBytes = new MemoryStream();
+        using (var manifestLimit = new ProjectArchiveWriteLimitStream(manifestBytes, effectiveLimits.MaximumManifestBytes))
+            ProjectArchiveCanonicalJson.WriteManifest(manifestLimit, manifest);
+        if (checked(files.Sum(file => file.Length) + manifestBytes.Length) > effectiveLimits.MaximumExpandedBytes)
+            throw new ProjectArchiveException("Archive expanded content and manifest exceed the configured byte limit.");
+        using var destinationLimit = new ProjectArchiveWriteLimitStream(destination, effectiveLimits.MaximumCompressedBytes);
+        using (var archive = new ZipArchive(destinationLimit, ZipArchiveMode.Create, leaveOpen: true))
         {
             foreach (var file in files)
             {
@@ -81,7 +87,8 @@ public static class ProjectArchiveZip
             var manifestEntry = archive.CreateEntry(ProjectArchiveContract.ManifestPath, CompressionLevel.Optimal);
             manifestEntry.LastWriteTime = ZipTimestamp;
             await using var manifestStream = manifestEntry.Open();
-            ProjectArchiveCanonicalJson.WriteManifest(manifestStream, manifest);
+            manifestBytes.Position = 0;
+            await manifestBytes.CopyToAsync(manifestStream, cancellationToken);
         }
 
         return manifest;
@@ -97,6 +104,10 @@ public static class ProjectArchiveZip
         effectiveLimits.Validate();
         try
         {
+            if (!source.CanSeek)
+                throw new ProjectArchiveException("Stage non-seekable archive input before validation to keep memory bounded.");
+            if (source.Length > effectiveLimits.MaximumCompressedBytes)
+                throw new ProjectArchiveException("Archive input exceeds its configured compressed byte limit.");
             using var archive = new ZipArchive(source, ZipArchiveMode.Read, leaveOpen: true);
             ValidateZipEntries(archive, effectiveLimits);
             var manifestEntry = archive.Entries.Single(entry => entry.FullName == ProjectArchiveContract.ManifestPath);

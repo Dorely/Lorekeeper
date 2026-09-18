@@ -911,6 +911,8 @@ mod tests {
         let fonts = BTreeMap::from([(FontFace::SerifRegular, font)]);
         let page = LayoutPage {
             kind: PageKind::Body,
+            flow_page_id: None,
+            footnote_height: 0.0,
             width_points: None,
             height_points: None,
             lines: vec![LayoutLine {

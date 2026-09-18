@@ -380,7 +380,9 @@ public sealed class VersionHistorySnapshotWriter(
     private static VersionHistoryBibliographicRecord ToBibliographicRecord(BibliographicRecord record) => new(
         record.Id, record.SourceId, record.Kind, record.Title, record.ContainerTitle, record.AuthorsJson,
         record.EditorsJson, record.IssuedYear, record.Publisher, record.PublisherPlace, record.Volume,
-        record.Issue, record.Pages, record.Doi, record.Url, record.AccessedAt, record.Isbn, record.Notes);
+        record.Issue, record.Pages, record.Doi, record.Url, null, record.Isbn, record.Notes,
+        record.TranslatorsJson, record.IssuedMonth, record.IssuedDay, record.Edition, record.Institution,
+        record.ThesisType, record.AccessedYear, record.AccessedMonth, record.AccessedDay);
 
     internal static string SourceManifestPath(Guid sourceId) => $"sources/{sourceId:N}/source.json";
 

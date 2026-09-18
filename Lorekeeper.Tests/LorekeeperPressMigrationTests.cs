@@ -1095,7 +1095,10 @@ public sealed class LorekeeperPressMigrationTests
                         new PrintArtifactProfileRegistry(),
                         NullLogger<PrintArtifactProfileMigrationService>.Instance),
                     recovery);
-                Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+                var startupProgress = new RecordingProgress<Lorekeeper.Startup.DatabaseStartupMigrationProgress>();
+                Assert.True(
+                    await startupMigration.ApplyAsync(progress: startupProgress),
+                    $"{startupProgress.Last?.Title}: {(await recovery.GetStateAsync()).Error}");
                 var picturePdfPresentation = await db.PublicationBookPdfPresentations.AsTracking()
                     .SingleAsync(item => item.ProjectId == pictureProjectId);
                 picturePdfPresentation.AllowDesignedPageOverrides = true;
@@ -1567,4 +1570,11 @@ public sealed class LorekeeperPressMigrationTests
                 configuration,
                 NullLogger<DatabaseMigrationRecoveryService>.Instance),
             NullLogger<PublicationPressMigrationService>.Instance);
+
+    private sealed class RecordingProgress<T> : IProgress<T>
+    {
+        public T? Last { get; private set; }
+
+        public void Report(T value) => Last = value;
+    }
 }

@@ -156,8 +156,14 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime?>("AccessedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<int?>("AccessedDay")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AccessedMonth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AccessedYear")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("AuthorsJson")
                         .IsRequired()
@@ -174,7 +180,15 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Edition")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("EditorsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Institution")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -185,6 +199,12 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("Issue")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("IssuedDay")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("IssuedMonth")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("IssuedYear")
                         .HasColumnType("INTEGER");
@@ -215,7 +235,15 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<Guid?>("SourceId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ThesisType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TranslatorsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -3797,6 +3825,11 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CitationStyle")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Chicago18NotesBibliography");
+
                     b.Property<string>("Copyright")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -4175,6 +4208,11 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Property<bool>("Bleed")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("CitationStyle")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Chicago18NotesBibliography");
 
                     b.Property<string>("Copyright")
                         .IsRequired()

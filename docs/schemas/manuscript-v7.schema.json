@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lorekeeper.local/schemas/manuscript-v7.schema.json",
+  "title": "Lorekeeper manuscript v7",
+  "$comment": "Interchange structure only. Runtime validation additionally enforces globally unique stable IDs, owner/revision identity, exact one-to-one note references, bibliography and evidence closure, rectangular table spans, content-scope rules, safe URLs, and project-owned Designed Page references.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manuscriptId", "revision", "content", "notes"],
+  "properties": {
+    "schemaVersion": { "const": 7 },
+    "manuscriptId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "content": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+    "notes": { "type": "array", "items": { "$ref": "#/$defs/note" } }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "styleRole", "headingLevel", "imageId", "altText", "decorative", "language", "accessibilityRole", "figurePresentation", "paragraphPresentation", "designedPageId", "publicationField", "table", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["paragraph", "heading", "sceneBreak", "blockQuote", "listItem", "figure", "designedPage", "table"] },
+        "styleRole": { "type": "string", "maxLength": 80, "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$" },
+        "headingLevel": { "type": ["integer", "null"], "minimum": 1, "maximum": 6 },
+        "imageId": { "type": ["string", "null"], "format": "uuid" },
+        "altText": { "type": ["string", "null"] },
+        "decorative": { "type": "boolean" },
+        "language": { "type": ["string", "null"], "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$" },
+        "accessibilityRole": { "enum": ["figure", "illustration", "diagram", "map", "photograph", "ornament", null] },
+        "figurePresentation": { "oneOf": [{ "$ref": "#/$defs/figurePresentation" }, { "type": "null" }] },
+        "paragraphPresentation": { "oneOf": [{ "$ref": "#/$defs/paragraphPresentation" }, { "type": "null" }] },
+        "designedPageId": { "type": ["string", "null"], "format": "uuid" },
+        "publicationField": { "enum": ["title", "subtitle", "author", "publisher", "copyright", "description", "isbn", null] },
+        "table": { "oneOf": [{ "$ref": "#/$defs/table" }, { "type": "null" }] },
+        "list": { "oneOf": [{ "$ref": "#/$defs/list" }, { "type": "null" }] },
+        "content": { "type": "array", "items": { "$ref": "#/$defs/inline" } }
+      }
+    },
+    "list": {
+      "type": "object", "additionalProperties": false, "required": ["id", "ordered", "level", "start"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$" },
+        "ordered": { "type": "boolean" },
+        "level": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "start": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "inline": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "type", "text", "noteId", "citation", "marks"],
+          "properties": {
+            "id": { "type": "null" }, "type": { "const": "text" }, "text": { "type": "string" },
+            "noteId": { "type": "null" }, "citation": { "type": "null" },
+            "marks": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/mark" } }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "type", "text", "noteId", "citation", "marks"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 }, "type": { "const": "noteReference" }, "text": { "const": "" },
+            "noteId": { "type": "string", "minLength": 1 }, "citation": { "type": "null" }, "marks": { "type": "array", "maxItems": 0 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "type", "text", "noteId", "citation", "marks"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 }, "type": { "const": "citation" }, "text": { "const": "" },
+            "noteId": { "type": "null" }, "citation": { "$ref": "#/$defs/citationCluster" }, "marks": { "type": "array", "maxItems": 0 }
+          }
+        }
+      ]
+    },
+    "citationCluster": {
+      "type": "object", "additionalProperties": false, "required": ["items"],
+      "properties": { "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/citationItem" } } }
+    },
+    "citationItem": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bibliographicRecordId", "prefix", "suffix", "locatorLabel", "locatorValue", "sourceLocationId"],
+      "properties": {
+        "bibliographicRecordId": { "type": "string", "format": "uuid" },
+        "prefix": { "type": "string", "maxLength": 1000 }, "suffix": { "type": "string", "maxLength": 1000 },
+        "locatorLabel": { "type": "string", "maxLength": 100 }, "locatorValue": { "type": "string", "maxLength": 500 },
+        "sourceLocationId": { "type": ["string", "null"], "format": "uuid" }
+      }
+    },
+    "mark": {
+      "type": "object", "additionalProperties": false, "required": ["type", "value"],
+      "properties": {
+        "type": { "enum": ["emphasis", "strong", "underline", "strikethrough", "code", "link", "language", "smallCaps", "superscript", "subscript", "characterStyle"] },
+        "value": { "type": ["string", "null"] }
+      }
+    },
+    "note": {
+      "type": "object", "additionalProperties": false, "required": ["id", "kind", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }, "kind": { "enum": ["footnote", "endnote"] },
+        "content": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "table": {
+      "type": "object", "additionalProperties": false, "required": ["id", "columnWidthWeights", "headerRowCount", "rows"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "columnWidthWeights": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 } },
+        "headerRowCount": { "type": "integer", "minimum": 0 },
+        "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/tableRow" } }
+      }
+    },
+    "tableRow": {
+      "type": "object", "additionalProperties": false, "required": ["id", "cells"],
+      "properties": { "id": { "type": "string", "minLength": 1 }, "cells": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/tableCell" } } }
+    },
+    "tableCell": {
+      "type": "object", "additionalProperties": false, "required": ["id", "rowSpan", "columnSpan", "content"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }, "rowSpan": { "type": "integer", "minimum": 1 },
+        "columnSpan": { "type": "integer", "minimum": 1 }, "content": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "figurePresentation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["placement", "widthPercent", "alignment", "textWrap", "fit", "cropXPercent", "cropYPercent", "spacingBeforePoints", "spacingAfterPoints", "startOnNewPage", "keepWithCaption", "captionPlacement"],
+      "properties": {
+        "placement": { "enum": ["inline", "centered", "float", "fullWidth", "fullBleed", "dedicatedPage"] },
+        "widthPercent": { "type": "number", "minimum": 1, "maximum": 100 }, "alignment": { "enum": ["start", "center", "end"] },
+        "textWrap": { "enum": ["none", "start", "end"] }, "fit": { "enum": ["contain", "cover", "stretch"] },
+        "cropXPercent": { "type": "number", "minimum": 0, "maximum": 100 }, "cropYPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "spacingBeforePoints": { "type": "number", "minimum": 0 }, "spacingAfterPoints": { "type": "number", "minimum": 0 },
+        "startOnNewPage": { "type": "boolean" }, "keepWithCaption": { "type": "boolean" },
+        "captionPlacement": { "enum": ["below", "above", "overlay", "hidden"] }
+      }
+    },
+    "paragraphPresentation": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "fontFamilyKey": { "type": ["string", "null"], "minLength": 1 }, "fontSizePoints": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 288 },
+        "fontWeight": { "type": ["integer", "null"], "minimum": 100, "maximum": 900, "multipleOf": 100 }, "italic": { "type": ["boolean", "null"] },
+        "smallCaps": { "type": ["boolean", "null"] }, "lineHeight": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 5 },
+        "alignment": { "enum": ["start", "center", "end", "justify", null] }, "leftIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 },
+        "rightIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 }, "firstLineIndentEm": { "type": ["number", "null"], "minimum": -12, "maximum": 12 },
+        "spacingBeforePoints": { "type": ["number", "null"], "minimum": 0, "maximum": 288 }, "spacingAfterPoints": { "type": ["number", "null"], "minimum": 0, "maximum": 288 },
+        "keepWithNext": { "type": ["boolean", "null"] }, "startOnNewPage": { "type": ["boolean", "null"] }
+      }
+    }
+  }
+}

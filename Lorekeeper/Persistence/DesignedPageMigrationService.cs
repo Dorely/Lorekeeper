@@ -27,6 +27,8 @@ public sealed class DesignedPageMigrationService : IDesignedPageMigrationService
             await ValidateCompletedTransformAsync(db, cancellationToken);
             return;
         }
+        if (!await HasLegacyTableAsync(db, cancellationToken))
+            return;
 
         var legacy = await ReadLegacyCompositionsAsync(db, cancellationToken);
         var variants = await ReadLegacyVariantsAsync(db, cancellationToken);
@@ -124,6 +126,25 @@ public sealed class DesignedPageMigrationService : IDesignedPageMigrationService
         }
         await db.SaveChangesAsync(cancellationToken);
         await ValidateCompletedTransformAsync(db, cancellationToken);
+    }
+
+    private static async Task<bool> HasLegacyTableAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'PageCompositions' LIMIT 1;";
+            return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
     }
 
     internal static string UpgradeManuscript(

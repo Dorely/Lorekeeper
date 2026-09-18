@@ -422,7 +422,7 @@ public sealed class EditorRevisionAgentProcessor(
                 method: (int startBlock = 0, int blockCount = 40) =>
                     ReadAssignedManuscriptAsync(contentTarget, assignedChapterId, startBlock, blockCount),
                 name: "read_assigned_manuscript",
-                description: "Read at most 40 assigned semantic manuscript rows in agent-manuscript-v3 format: stable recursive IDs, exact text, sparse structure, UTF-16 inline marks and positions, table/note metadata, figure/page metadata, total/hasMore metadata, source hash, and required revision token. Designed Page rows carry both their page ID and placement block ID. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
+                description: "Read at most 40 assigned semantic manuscript rows in agent-manuscript-v4 format: stable recursive IDs, exact text, sparse structure, UTF-16 inline marks and positions, table/note metadata, figure/page metadata, total/hasMore metadata, source hash, and required revision token. Designed Page rows carry both their page ID and placement block ID. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
 
             AIFunctionFactory.Create(
                 method: (string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -430,7 +430,7 @@ public sealed class EditorRevisionAgentProcessor(
                 name: "inspect_assigned_manuscript",
                 description:
                     "Validate and structurally search the assigned manuscript by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching agent-manuscript-v3 rows with sparse semantic metadata, pagination, and bounded normalization/schema diagnostics."),
+                    "Returns at most 40 matching agent-manuscript-v4 rows with sparse semantic metadata, pagination, and bounded normalization/schema diagnostics."),
 
             AIFunctionFactory.Create(
                 method: (

@@ -71,7 +71,9 @@ public sealed record VersionHistoryBibliographicRecord(
     Guid Id, Guid? SourceId, BibliographicRecordKind Kind, string Title, string ContainerTitle,
     string AuthorsJson, string EditorsJson, int? IssuedYear, string Publisher, string PublisherPlace,
     string Volume, string Issue, string Pages, string Doi, string Url, DateTime? AccessedAt,
-    string Isbn, string Notes);
+    string Isbn, string Notes, string? TranslatorsJson, int? IssuedMonth, int? IssuedDay,
+    string? Edition, string? Institution, string? ThesisType, int? AccessedYear,
+    int? AccessedMonth, int? AccessedDay);
 
 public sealed record VersionHistorySourceLocation(
     Guid Id, Guid SourceId, Guid ExtractionVersionId, Guid? SourceBlockId, int? PageNumber,

@@ -140,6 +140,7 @@ public static partial class ManuscriptCodec
                 throw new InvalidDataException("Manuscript block IDs must contain only XML-safe characters.");
             if (!Enum.IsDefined(block.Type))
                 throw new InvalidDataException($"Block {block.Id} has an unsupported block type.");
+            ManuscriptLists.Validate(block);
             if (string.IsNullOrWhiteSpace(block.StyleRole))
                 throw new InvalidDataException($"Block {block.Id} has no semantic style role.");
             if (!ManuscriptSemanticRoles.IsValid(block.StyleRole))
@@ -199,7 +200,7 @@ public static partial class ManuscriptCodec
                 if (!Enum.IsDefined(inline.Type))
                     throw new InvalidDataException($"Block {block.Id} contains an unsupported inline type.");
                 if (inline.Type == ManuscriptInlineType.Text
-                    && (inline.Id is not null || inline.NoteId is not null))
+                    && (inline.Id is not null || inline.NoteId is not null || inline.Citation is not null))
                 {
                     throw new InvalidDataException($"Text in block {block.Id} cannot carry atom identity metadata.");
                 }
@@ -284,6 +285,7 @@ public static partial class ManuscriptCodec
         {
             if (block is null || string.IsNullOrWhiteSpace(block.Id) || !ContainsOnlyXmlCharacters(block.Id))
                 throw new InvalidDataException("Nested manuscript block IDs must be non-empty and XML-safe.");
+            ManuscriptLists.Validate(block);
             if (!Enum.IsDefined(block.Type) || string.IsNullOrWhiteSpace(block.StyleRole)
                 || !ManuscriptSemanticRoles.IsValid(block.StyleRole))
                 throw new InvalidDataException($"Nested block {block.Id} has an invalid type or semantic style role.");
@@ -330,7 +332,8 @@ public static partial class ManuscriptCodec
         {
             if (inline is null || inline.Text is null || inline.Marks is null || !Enum.IsDefined(inline.Type))
                 throw new InvalidDataException($"Nested block {block.Id} contains an incomplete inline node.");
-            if (inline.Type == ManuscriptInlineType.Text && (inline.Id is not null || inline.NoteId is not null))
+            if (inline.Type == ManuscriptInlineType.Text
+                && (inline.Id is not null || inline.NoteId is not null || inline.Citation is not null))
                 throw new InvalidDataException($"Text in nested block {block.Id} cannot carry atom identity metadata.");
             if (!ContainsOnlyXmlCharacters(inline.Text) || ContainsBlockDelimiter(inline.Text))
                 throw new InvalidDataException($"Nested block {block.Id} contains invalid text.");
@@ -410,7 +413,7 @@ public static partial class ManuscriptCodec
     internal static bool ContainsBlockDelimiter(string value) =>
         BlankLineRegex().IsMatch(value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'));
 
-    private static bool ContainsOnlyXmlCharacters(string value)
+    internal static bool ContainsOnlyXmlCharacters(string value)
     {
         for (var index = 0; index < value.Length; index++)
         {
@@ -476,7 +479,7 @@ public static partial class ManuscriptCodec
                         block.StyleRole,
                         ManuscriptStyleRoles.Body,
                         StringComparison.OrdinalIgnoreCase)
-                    && block.Content.All(inline => inline.Marks.Count == 0),
+                    && block.Content.All(inline => inline.Type == ManuscriptInlineType.Text && inline.Marks.Count == 0),
                 _ => false,
             });
 

@@ -14,6 +14,17 @@ public static class ManuscriptOperations
         {
             switch (operation)
             {
+                case ReplaceManuscriptInlineContent replaceInline:
+                    if (replaceInline.Position.Offset != 0)
+                        throw new InvalidDataException("Inline-content replacement must address the start of its block.");
+                    var currentDocument = source with { Content = blocks, Notes = notes };
+                    var target = ManuscriptTraversal.Resolve(currentDocument, replaceInline.Position).Block;
+                    var replacement = ManuscriptClone.Block(target with { Content = replaceInline.Content.ToList() });
+                    blocks = ReplaceInlineBlock(blocks, target.Id, replacement);
+                    notes = notes.Select(note => note with { Content = ReplaceInlineBlock(note.Content, target.Id, replacement) }).ToList();
+                    changed.Add(target.Id);
+                    break;
+
                 case PutRichManuscriptBlock put:
                     if (put.Index < 0 || put.Index > blocks.Count)
                         throw new ArgumentOutOfRangeException(nameof(put.Index));
@@ -111,6 +122,7 @@ public static class ManuscriptOperations
                         SliceContent(splitBlock.Content, split.Offset, splitText.Length),
                         splitBlock.StyleRole,
                         headingLevel: splitBlock.HeadingLevel);
+                    tail = tail with { List = splitBlock.List is { } list ? list with { Start = null } : null };
                     blocks.Insert(splitIndex + 1, tail);
                     changed.Add(splitBlock.Id);
                     changed.Add(tail.Id);
@@ -199,6 +211,7 @@ public static class ManuscriptOperations
                         Table = blockType.Type == ManuscriptBlockType.Table && typeIsUnchanged
                             ? current.Table
                             : null,
+                        List = blockType.Type == ManuscriptBlockType.ListItem ? current.List : null,
                         HeadingLevel = blockType.Type == ManuscriptBlockType.Heading
                             ? blockType.HeadingLevel ?? current.HeadingLevel ?? 2
                             : null,
@@ -266,6 +279,18 @@ public static class ManuscriptOperations
         ManuscriptCodec.Validate(result, source.ManuscriptId, result.Revision);
         return (result, changed.ToList());
     }
+
+    private static List<ManuscriptBlock> ReplaceInlineBlock(IEnumerable<ManuscriptBlock> blocks, string id, ManuscriptBlock replacement) =>
+        blocks.Select(block => block.Id == id ? replacement : block.Table is not { } table ? block : block with
+        {
+            Table = table with
+            {
+                Rows = table.Rows.Select(row => row with
+                {
+                    Cells = row.Cells.Select(cell => cell with { Content = ReplaceInlineBlock(cell.Content, id, replacement) }).ToList(),
+                }).ToList(),
+            },
+        }).ToList();
 
     private static HashSet<string> ReferencedNoteIds(IEnumerable<ManuscriptBlock> blocks)
     {
@@ -581,6 +606,8 @@ public static class ManuscriptOperations
     {
         if (block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table)
             throw new InvalidOperationException($"Block {block.Id} does not contain directly editable text.");
+        if (block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
+            throw new InvalidOperationException($"Block {block.Id} contains semantic atoms. Use ReplaceInlineContent at its full position and preserve unrelated atoms.");
     }
 
     private static string DefaultStyle(ManuscriptBlockType type) =>

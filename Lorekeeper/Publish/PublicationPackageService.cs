@@ -75,7 +75,7 @@ public sealed class PublicationPackageService(
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
-    private const string EpubExporterVersion = "lorekeeper-epub-v5";
+    private const string EpubExporterVersion = "lorekeeper-epub-v6";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,

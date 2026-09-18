@@ -40,6 +40,7 @@ public sealed class PruneSupersededRenderJobsMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
+                await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(db, default);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO Projects
                         (Id, ReviewEditsEnabled, ContestModeEnabled, CreatedAt,
@@ -87,6 +88,7 @@ public sealed class PruneSupersededRenderJobsMigrationTests
                         ({Guid.NewGuid()}, {firstEditionOldJobId}, {Guid.NewGuid()}, {Guid.NewGuid()}, 1),
                         ({Guid.NewGuid()}, {firstEditionNewestJobId}, {Guid.NewGuid()}, {Guid.NewGuid()}, 1);
                     """);
+                await DatabaseStartupMigrationService.RemoveCitationCompatibilityColumnsAsync(db, default);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

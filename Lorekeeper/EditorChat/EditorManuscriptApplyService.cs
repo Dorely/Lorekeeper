@@ -63,6 +63,7 @@ public sealed class EditorManuscriptApplyService(
             {
                 insertBlock = converted.Count(operation => operation is InsertManuscriptBlock),
                 replaceBlockText = converted.Count(operation => operation is ReplaceManuscriptBlockText),
+                replaceInlineContent = converted.Count(operation => operation is ReplaceManuscriptInlineContent),
                 deleteBlock = converted.Count(operation => operation is DeleteManuscriptBlock),
                 moveBlock = converted.Count(operation => operation is MoveManuscriptBlock),
                 splitBlock = converted.Count(operation => operation is SplitManuscriptBlock),
@@ -123,6 +124,7 @@ public sealed class EditorManuscriptApplyService(
     private static bool IsTextOrStructureOperation(ManuscriptOperation operation) =>
         operation is InsertManuscriptBlock
             or ReplaceManuscriptBlockText
+            or ReplaceManuscriptInlineContent
             or DeleteManuscriptBlock
             or MoveManuscriptBlock
             or SplitManuscriptBlock
@@ -160,12 +162,8 @@ public sealed class EditorManuscriptApplyService(
         if (document.Content.Count == 0)
             return [new(chapterId, 0, 1)];
 
-        var sourceIndexes = source.Content
-            .Select((block, index) => (block.Id, index))
-            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
-        var resultIndexes = document.Content
-            .Select((block, index) => (block.Id, index))
-            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
+        var sourceIndexes = IndexOwnedBlocks(source);
+        var resultIndexes = IndexOwnedBlocks(document);
         var anchors = new SortedSet<int>();
         foreach (var blockId in changedBlockIds)
         {
@@ -203,6 +201,21 @@ public sealed class EditorManuscriptApplyService(
                 result.Add(new(chapterId, start, count));
                 start += count;
             }
+        }
+        return result;
+    }
+
+    private static Dictionary<string, int> IndexOwnedBlocks(ManuscriptDocument document)
+    {
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < document.Content.Count; index++)
+        {
+            var owned = ManuscriptTraversal.EnumerateBlocks(document with { Content = [document.Content[index]], Notes = [] });
+            foreach (var block in owned) result[block.Id] = index;
+            var noteIds = owned.SelectMany(block => block.Content).Where(inline => inline.Type == ManuscriptInlineType.NoteReference)
+                .Select(inline => inline.NoteId).ToHashSet(StringComparer.Ordinal);
+            foreach (var note in document.Notes.Where(note => noteIds.Contains(note.Id)))
+            foreach (var block in note.Content) result[block.Id] = index;
         }
         return result;
     }

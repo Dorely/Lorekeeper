@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Citations;
 
 namespace Lorekeeper.Models;
 
@@ -101,6 +102,7 @@ public class PublicationEdition
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
     public bool RectoChapterStarts { get; set; }
+    public CitationStyle CitationStyle { get; set; } = CitationStyle.Chicago18NotesBibliography;
     public string PrintArtifactRegistryVersion { get; set; } = string.Empty;
     public string PrintArtifactProfileKey { get; set; } = string.Empty;
     public PrintProjectUse PrintProjectUse { get; set; } = PrintProjectUse.ForSale;

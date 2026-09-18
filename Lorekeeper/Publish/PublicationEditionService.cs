@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Composition;
+using Lorekeeper.Citations;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -303,6 +304,7 @@ public sealed class PublicationEditionService(
         Override(fields, PublicationEditionOverrideField.NumberActs, patch.NumberActs, value => edition.NumberActs = value);
         Override(fields, PublicationEditionOverrideField.NumberChapters, patch.NumberChapters, value => edition.NumberChapters = value);
         Override(fields, PublicationEditionOverrideField.TitlePageMode, patch.TitlePageMode, value => edition.TitlePageMode = value);
+        Override(fields, PublicationEditionOverrideField.CitationStyle, patch.CitationStyle, value => edition.CitationStyle = value);
         Override(fields, PublicationEditionOverrideField.PageWidthInches, patch.PageWidthInches, value => edition.PageWidthInches = value);
         Override(fields, PublicationEditionOverrideField.PageHeightInches, patch.PageHeightInches, value => edition.PageHeightInches = value);
         Override(fields, PublicationEditionOverrideField.PageMarginInches, patch.PageMarginInches, value => edition.PageMarginInches = value);
@@ -833,6 +835,10 @@ public sealed class PublicationEditionService(
                 }),
             })
             .ToListAsync(cancellationToken);
+        var bibliography = await PublicationCitationDependencies.ReadAsync(db, projectId,
+            chapters.Select(item => item.ManuscriptJson)
+                .Concat(publicationSections.Select(item => item.ManuscriptJson))
+                .Concat(compositions.SelectMany(page => page.Contents).Select(item => item.SemanticManuscriptJson)), cancellationToken);
         var referencedStyleRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var referencedBoundFields = new HashSet<PublicationBoundField>();
         foreach (var document in chapters.Select(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
@@ -840,7 +846,7 @@ public sealed class PublicationEditionService(
                 ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision))))
             .Concat(publicationSections.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
         {
-            foreach (var block in document.Content)
+            foreach (var block in ManuscriptTraversal.EnumerateBlocks(document))
             {
                 if (block.PublicationField is { } publicationField)
                     referencedBoundFields.Add(publicationField);
@@ -1090,6 +1096,8 @@ public sealed class PublicationEditionService(
         {
             Project = includeCover ? project : null,
             Edition = canonicalEdition,
+            edition.CitationStyle,
+            Bibliography = bibliography,
             Items = items,
             Acts = acts,
             Chapters = chapters,
@@ -1296,7 +1304,8 @@ public sealed class PublicationEditionService(
         if (!Enum.IsDefined(edition.PrintCoverMode)
             || !Enum.IsDefined(edition.PrintProjectUse) || !Enum.IsDefined(edition.PrintIdentifierMode)
             || !Enum.IsDefined(edition.PrintCoverSubmissionMode)
-            || !Enum.IsDefined(edition.TitlePageMode))
+            || !Enum.IsDefined(edition.TitlePageMode)
+            || !Enum.IsDefined(edition.CitationStyle))
             throw new InvalidOperationException("One or more release settings are invalid.");
         if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
         {
@@ -1467,6 +1476,7 @@ public sealed class PublicationEditionService(
             PrintProjectUse = edition.PrintProjectUse,
             PrintIdentifierMode = edition.PrintIdentifierMode,
             PrintCoverSubmissionMode = edition.PrintCoverSubmissionMode,
+            CitationStyle = edition.CitationStyle,
         };
 
     private static PublicationEditionOutlineItem NewOutlineItem(
@@ -1643,6 +1653,7 @@ public sealed class PublicationEditionService(
             NumberActs = source.NumberActs,
             NumberChapters = source.NumberChapters,
             TitlePageMode = source.TitlePageMode,
+            CitationStyle = source.CitationStyle,
             RectoChapterStarts = source.RectoChapterStarts,
             PrintArtifactRegistryVersion = source.PrintArtifactRegistryVersion,
             PrintArtifactProfileKey = source.PrintArtifactProfileKey,

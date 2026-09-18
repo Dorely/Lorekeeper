@@ -238,10 +238,10 @@ markers are quarantined: pending work restarts from a fresh protected snapshot,
 while an already-applied cutover restores the newest protected source backup in
 the projectless recovery shell.
 
-The current persisted manuscript document is v6. Older v1-v5 documents and
+The current persisted manuscript document is v7. Older v1-v6 documents and
 historical/review payloads are upgraded only at guarded startup or isolated
 versioned import boundaries. `ManuscriptDocument.CurrentSchemaVersion` and
-`docs/schemas/manuscript-v6.schema.json` are the current-format authorities;
+`docs/schemas/manuscript-v7.schema.json` are the current-format authorities;
 names such as `SchemaV3MigrationName` or “manuscript-v3 import” identify
 historical transforms and must not be renamed merely to make prose look
 current. Malformed current manuscripts, structurally invalid documents, and
@@ -249,10 +249,10 @@ malformed non-result audit payloads fail closed into protected recovery. Legacy
 plain text is permitted only in its documented historical audit boundary and
 is preserved byte-for-byte.
 
-The v6 data migration scans chapters, release chapter overrides, publication
+The v7 data migration scans chapters, release chapter overrides, publication
 sections and matter, Designed Page content and predecessor compositions, books,
 contest/revision payloads, and structured audit JSON under one protected
-transaction. It upgrades v5 directly, preserves the historical v1-v4 journal
+transaction. It upgrades v5/v6 directly, preserves the historical v1-v4 journal
 identity for older or mixed payloads, validates normalized-text hashes, and is
 idempotent on restart. Recovery restores the protected source database and
 replays its unapplied EF boundaries without removing columns whose owning
@@ -261,7 +261,7 @@ migration was already recorded.
 The manuscript migration preflight validates contest source snapshots
 independently of the retired `AcceptedManuscriptJson` column, which is absent
 from the current schema. Non-empty candidate proposals and drafts must be
-structured v1-v6 documents; failed, invalid, pending, and running candidates
+structured v1-v7 documents; failed, invalid, pending, and running candidates
 may legitimately retain empty proposal/draft fields, while completed and
 selected candidates require a proposal. Legacy v1 discovery and upgrade also
 includes `DraftManuscriptJson` when that optional column exists. Empty candidate
@@ -306,8 +306,8 @@ Legacy project export v31 is the final JSON format and is import-only. Its
 adapter retains the durable print registry/profile fields, removes finish, and
 accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-at that boundary. New `.lorekeeper` full archives use archive-record schema 2
-and include the current v6
+at that boundary. New `.lorekeeper` full archives use archive-record schema 3
+and include the current v7
 manuscript model, Core/release annotations, the complete retained-source closure,
 page setup, independent Designed
 Pages with Core/release content and authored variants,
@@ -337,6 +337,57 @@ remain working-database data and are excluded. The current archive records only
 field at its input boundary, but current output never writes that alias. Manual
 Undo/Redo is process memory only and therefore is also absent from every export
 without adding database rows.
+
+Archive import allocates explicit bibliography and source-location ID maps before
+rewriting citations in chapters, release overrides, sections/matter, Designed
+Pages, tables, and notes. Missing dependencies or a location belonging to a
+different bibliography source abort the import transaction. Non-structural
+archives retain independent bibliography records and source-linked records cited
+by included manuscripts. Capture checks ownership before omitting source IDs and
+source-location references, while preserving bibliography IDs and textual locators;
+import restores the metadata with newly mapped identities. Core citation
+style and release style/override fields travel through publication export DTOs
+and restore. Citation-schema history snapshots validate the same reference
+closure before restoration.
+
+Bibliography saves and source detachment use the authoring fence and project
+lease. Source changes clear the record's evidence links throughout current
+manuscripts and retained matter in the same database transaction, preserving the
+bibliographic metadata and textual locators. Detachment checks the opened record's
+timestamp; affected authoring generations are invalidated so older history cannot
+restore detached evidence. Metadata-only edits retain manuscript Undo history.
+Review notifications and derived-state refresh follow commit. The shared
+`AuthoringTargetMutationService` routes citation and batch mutations through the
+same owning chapter, section, and Designed Page services.
+
+`ProjectArchiveLimits` is bound once from `ProjectArchive` configuration and shared
+by capture, export, upload, and job processing. Defaults permit 8 GiB compressed
+input and 16 GiB expanded content, with 512 MiB per entry, a 4 MiB manifest, and
+10,000 entries. Legacy JSON retains its separate 1 GiB ceiling. Export bounds
+actual ZIP bytes as they are written and includes manifest bytes in expanded
+accounting. Non-seekable input must pass through bounded temporary staging before
+ZIP validation, avoiding the ZIP reader's aggregate memory fallback. Tests use
+poorly compressible input with small configured limits; this is contract evidence,
+not a native multi-GB memory measurement.
+
+Archive creative state contains binary metadata only. Import validates font
+binaries individually before acquiring the write transaction, then reads and
+saves one image or font face at a time from the validated staged archive. Saved
+binary entities are detached from EF tracking; image lineage is restored from ID
+maps after all images exist. All writes remain inside the import transaction, so
+failure still rolls back the complete import. Legacy JSON remains a bounded
+aggregate compatibility reader.
+
+Intermediate edition-content and publication-section schema transitions restore
+citation compatibility columns after rebuilding their tables and before querying
+with the current EF model. Compatibility columns remain a guarded startup
+transition, not a second runtime schema.
+
+The bibliography migration copies legacy access timestamps into calendar-date
+components. A forward cleanup migration removes the superseded `AccessedAt`
+column without changing prior migration history. Copied predecessor-database
+coverage checks leap-day and absent dates, bibliographic identity and metadata,
+and preservation of the original recovery database.
 
 `PublicationInteriorPagination` caches a derived interior page count together
 with its pagination fingerprint, Press renderer version, and producing profile
@@ -434,7 +485,7 @@ physical jobs are not recovered into the v12 queue.
 | `Lorekeeper/Persistence/DatabaseMigrationRecoveryService.cs` | Protected backup/restore, markers, recovery shell, confirmation, discovery, and pruning. |
 | `Lorekeeper/Persistence/DatabaseStartupMigrationService.cs` | Ordered startup migration/recovery orchestration and readiness-boundary integration. |
 | `Lorekeeper/Persistence/Migrations/` | Immutable EF schema history and current model snapshot; never edit applied files. |
-| `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v6 upgrade across every persisted manuscript-bearing payload. |
+| `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v7 upgrade across every persisted manuscript-bearing payload. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
 | `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-artifact-profile, and edition-content transformations. |
 | `Lorekeeper/ImportExport/ProjectExportModels.cs` | Final JSON v31 portable DTOs and isolated older input adapters. |

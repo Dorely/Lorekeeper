@@ -2,7 +2,7 @@
 
 ## When to read
 
-Read this chapter when a change touches the owned native renderer, protocol v14,
+Read this chapter when a change touches the owned native renderer, protocol v15,
 render requests, deterministic pagination or shaping, Press runtime packaging,
 print-artifact profile registry entries, stock/spine/cover geometry, cover surfaces,
 PDF versions/output intent/color/ink/transparency, tagged Digital PDF,
@@ -97,7 +97,7 @@ effective Core/release title, subtitle, author, spine text, and Description befo
 protocol serialization. Press therefore receives concrete selectable text and
 does not own application metadata-token semantics.
 
-The native `Lorekeeper.Press` project owns protocol v14, shaping, pagination,
+The native `Lorekeeper.Press` project owns protocol v15, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
 The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
@@ -106,20 +106,30 @@ preview surfaces do not delegate layout to a browser-native PDF viewer.
 ### Current M5A rich-layout contract
 
 Press receives the canonical recursive table/note projection and retains stable
-semantic identities in page maps. Citation structure remains M5B work.
+semantic identities in page maps. Protocol v15 carries formatted citation runs,
+resolved list ordinals and nesting, and generated citation back matter. Table
+cells retain inline formatting and note-reference identities. Runtime manifest admission, request
+and response validation, and packaging require the same current protocol.
 It repeats contiguous leading table headers after a break and does not split a
 normal row. A row taller than a page splits only at semantic block boundaries,
 never through a row-span group; an unplaceable atomic group reports
 `UnplaceableTableRowGroup`.
 
-Footnotes occupy no more than 40% of the body area and continue with an explicit
-marker; unbreakable figure content reports `UnplaceableFootnoteContent`.
-Endnotes are generated final back matter grouped by top-level document with
-backlinks to the recorded reference page. Numbering restarts independently for
-each chapter or publication section, and pagination never mutates stored atom
-offsets. Exact reference-page footnote reservation remains an M5 layout
-hardening item: protocol v14 currently places bounded footnote regions after
-the owning top-level semantic flow rather than reflowing earlier body pages.
+Footnotes reserve space before body flow through a bounded pagination pass.
+The region occupies no more than 40% of the usable body area, retains at least
+two note lines with the reference where possible, and labels continuations.
+Reference constraints apply to paragraph lines, table row groups, and figure
+captions. Styled text and fitting note artwork retain their semantic output;
+oversized atomic content reports `UnplaceableFootnoteContent`, and failure to
+stabilize within the pass limit reports `PRESS_FOOTNOTE_NONCONVERGENT`.
+Designed Pages retain their composition and use available space below artwork;
+when that space is insufficient, note content flows onto following eligible
+pages. Repeated placements have separate note identities and backlinks.
+Endnotes form one final section grouped by top-level document, with authored
+notes and citations labelled separately when both occur, followed by the
+nonempty bibliography. Numbering restarts independently for each chapter or
+publication section. Frame ranges continue to use stored text offsets, with
+zero-width reference atoms owned once at range boundaries.
 
 ## Current architecture and invariants
 
@@ -181,7 +191,7 @@ queued or rendering job are deleted immediately, while `press-previews` and
 `version-history` directories older than 24 hours are removed behind a guard
 against racing live operations.
 
-Press protocol v14 owns deterministic layout, English/Latin shaping and glyph
+Press protocol v15 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode
 maps, bounded pagination, headings/TOC, stable block/page maps, inline
 typography, sparse paragraph presentation, flowing Figures, crop positioning,
@@ -399,13 +409,13 @@ claim. The original downloadable PDF retains its text, vectors, and evidence.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v14 request/response, recursive tables/notes, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v15 request/response, recursive tables/notes, scoped render mode, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |
 | `Lorekeeper.Press/src/image.rs` | Bounded raster decoding, alpha/color conversion, crop positioning, and total-ink enforcement. |
 | `Lorekeeper.Press/src/inspect.rs` | Independent post-write geometry, font, color, output-intent, transparency, security, annotation, and tagged-PDF inspection. |
-| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v14 render CLI, and testable library surface. |
+| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v15 render CLI, and testable library surface. |
 | `Lorekeeper.Press/tests/conformance_v12.rs` | Historical-name conformance harness covering the current protocol plus predecessor admission, containment, atomicity, determinism, rich layout, publication, artifact-profile, cover, typography, color, PDF, and negative evidence. |
 | `Lorekeeper.Press/fixtures/` | Frozen full-model, negative protocol, malformed raw-PDF, and test asset fixtures. |
 | `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, canonical print-artifact profile registry, and shared manuscript typography defaults. |

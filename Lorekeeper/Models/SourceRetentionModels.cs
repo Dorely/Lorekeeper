@@ -141,15 +141,23 @@ public sealed class BibliographicRecord
     public string ContainerTitle { get; set; } = string.Empty;
     public string AuthorsJson { get; set; } = "[]";
     public string EditorsJson { get; set; } = "[]";
+    public string TranslatorsJson { get; set; } = "[]";
     public int? IssuedYear { get; set; }
+    public int? IssuedMonth { get; set; }
+    public int? IssuedDay { get; set; }
+    public string Edition { get; set; } = string.Empty;
     public string Publisher { get; set; } = string.Empty;
     public string PublisherPlace { get; set; } = string.Empty;
+    public string Institution { get; set; } = string.Empty;
+    public string ThesisType { get; set; } = string.Empty;
     public string Volume { get; set; } = string.Empty;
     public string Issue { get; set; } = string.Empty;
     public string Pages { get; set; } = string.Empty;
     public string Doi { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
-    public DateTime? AccessedAt { get; set; }
+    public int? AccessedYear { get; set; }
+    public int? AccessedMonth { get; set; }
+    public int? AccessedDay { get; set; }
     public string Isbn { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

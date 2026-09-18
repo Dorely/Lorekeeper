@@ -2,6 +2,8 @@ using Lorekeeper.Authoring;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Sources;
+using Lorekeeper.VersionHistory.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,6 +12,107 @@ namespace Lorekeeper.Tests;
 
 public sealed class AuthoringBatchServiceTests
 {
+    [Fact]
+    public async Task Evidence_detachment_rolls_back_all_citations_and_preserves_bibliographic_metadata()
+    {
+        await using var fixture = await Fixture.CreateAsync(chapterCount: 2);
+        var sourceId = Guid.NewGuid();
+        var extractionId = Guid.NewGuid();
+        var locationId = Guid.NewGuid();
+        var recordId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var updatedAt = new DateTime(2026, 9, 18, 0, 0, 0, DateTimeKind.Utc);
+        await using (var db = fixture.CreateDbContext())
+        {
+            db.PublicationEditions.Add(new() { Id = releaseId, ProjectId = fixture.ProjectId, Name = "Inherited release" });
+            db.IngestSources.Add(new() { Id = sourceId, ProjectId = fixture.ProjectId, Title = "Source", UserInstructions = "" });
+            db.SourceExtractionVersions.Add(new() { Id = extractionId, SourceId = sourceId, Extractor = "fixture", ExtractorVersion = "1", ContentHash = "hash", NormalizedText = "Evidence" });
+            db.SourceLocations.Add(new() { Id = locationId, ProjectId = fixture.ProjectId, SourceId = sourceId, ExtractionVersionId = extractionId, VerificationHash = "hash" });
+            db.BibliographicRecords.Add(new() { Id = recordId, ProjectId = fixture.ProjectId, SourceId = sourceId, Title = "Retained title", Publisher = "Retained publisher", Notes = "Author notes", UpdatedAt = updatedAt });
+            foreach (var chapter in await db.Chapters.AsTracking().ToListAsync())
+            {
+                var manuscript = chapter.Manuscript;
+                chapter.ManuscriptJson = ManuscriptCodec.Serialize(manuscript with
+                {
+                    Content = [manuscript.Content[0] with { Content = [.. manuscript.Content[0].Content,
+                        new() { Id = "citation", Type = ManuscriptInlineType.Citation, Citation = new() { Items =
+                            [new() { BibliographicRecordId = recordId, SourceLocationId = locationId, LocatorLabel = "page", LocatorValue = "42" }] } }] }],
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+        fixture.Manuscripts.FailChapterId = fixture.ChapterIds[1];
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Sources.DetachBibliographicRecordAsync(fixture.ProjectId, recordId, updatedAt));
+        await using (var db = fixture.CreateDbContext())
+        {
+            Assert.Equal(sourceId, (await db.BibliographicRecords.SingleAsync()).SourceId);
+            Assert.All(await db.Chapters.ToListAsync(), chapter => Assert.Equal(locationId,
+                ManuscriptTraversal.EnumerateCitations(chapter.Manuscript).Single().Cluster.Items.Single().SourceLocationId));
+            Assert.Empty(await db.AuthoringTargetGenerations.ToListAsync());
+        }
+        fixture.Manuscripts.FailChapterId = null;
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => fixture.Sources.DetachBibliographicRecordAsync(fixture.ProjectId, recordId, updatedAt.AddDays(-1)));
+        await fixture.Sources.DetachBibliographicRecordAsync(fixture.ProjectId, recordId, updatedAt);
+        await using var verify = fixture.CreateDbContext();
+        var record = await verify.BibliographicRecords.SingleAsync();
+        Assert.Null(record.SourceId);
+        Assert.Equal("Retained title", record.Title);
+        Assert.Equal("Retained publisher", record.Publisher);
+        Assert.Equal("Author notes", record.Notes);
+        Assert.All(await verify.Chapters.ToListAsync(), chapter =>
+        {
+            var item = ManuscriptTraversal.EnumerateCitations(chapter.Manuscript).Single().Cluster.Items.Single();
+            Assert.Equal(recordId, item.BibliographicRecordId);
+            Assert.Equal("42", item.LocatorValue);
+            Assert.Null(item.SourceLocationId);
+        });
+        Assert.Equal(4, await verify.AuthoringTargetGenerations.CountAsync());
+        Assert.Empty(await verify.PublicationEditionChapterOverrides.ToListAsync());
+        Assert.All(await verify.AuthoringTargetGenerations.ToListAsync(), generation => Assert.Equal(1, generation.Generation));
+    }
+
+    [Fact]
+    public async Task Nested_note_edit_replays_receipt_and_round_trips_durable_undo_redo()
+    {
+        await using var fixture = await Fixture.CreateAsync(chapterCount: 1);
+        var chapterId = fixture.ChapterIds.Single();
+        ManuscriptDocument before;
+        await using (var db = fixture.CreateDbContext())
+        {
+            var chapter = await db.Chapters.AsTracking().SingleAsync();
+            before = chapter.Manuscript;
+            before = before with
+            {
+                Content = [before.Content[0] with { Content =
+                    [.. before.Content[0].Content, new() { Id = "reference", Type = ManuscriptInlineType.NoteReference, NoteId = "note" }] }],
+                Notes = [new() { Id = "note", Content = [new() { Id = "note-text", Content = [new() { Text = "Before note" }] }] }],
+            };
+            chapter.ManuscriptJson = ManuscriptCodec.Serialize(before);
+            await db.SaveChangesAsync();
+            var state = await AuthoringPersistence.ReadTargetAsync(db, fixture.ProjectId, $"chapter:{chapterId:D}", "", CancellationToken.None);
+            Assert.Contains("note-text", state.ElementFingerprints!.Keys);
+        }
+        var batch = await fixture.CreateBatchAsync([(chapterId, "Unused")]);
+        var note = ManuscriptTraversal.EnumerateText(before).Single(item => item.Block.Id == "note-text");
+        batch = batch with { Operations = [new(0, "replaceInlineContent", BlockId: note.Block.Id,
+            ExpectedElementFingerprint: AuthoringBatchReducer.Fingerprint(note.Block), Position: note.Start,
+            InlineContent: [new() { Text = "After note" }])] };
+        batch = batch with { RequestHash = AuthoringBatchHash.Compute(batch) };
+        var committed = await fixture.Service.ApplyBatchAsync(batch);
+        var replay = await fixture.Service.ApplyBatchAsync(batch);
+        Assert.Equal(committed.ReceiptId, replay.ReceiptId);
+        Assert.Equal("replaceInlineContent", Assert.Single(committed.Inverse.Operations).Kind);
+        var undo = await fixture.Service.UndoAsync(new(fixture.ProjectId, fixture.SessionId, Guid.NewGuid(), $"chapter:{chapterId:D}", ExpectedGeneration: 0));
+        Assert.Equal(AuthoringBatchStatusV1.Committed, undo.Batch!.Status);
+        await using (var db = fixture.CreateDbContext())
+            Assert.True(ManuscriptCodec.ContentEquals(before, (await db.Chapters.SingleAsync()).Manuscript));
+        var redo = await fixture.Service.RedoAsync(new(fixture.ProjectId, fixture.SessionId, Guid.NewGuid(), $"chapter:{chapterId:D}", ExpectedGeneration: 0));
+        Assert.Equal(AuthoringBatchStatusV1.Committed, redo.Batch!.Status);
+        await using var verify = fixture.CreateDbContext();
+        Assert.Equal("After note", (await verify.Chapters.SingleAsync()).Manuscript.Notes[0].Content[0].Content[0].Text);
+        Assert.Equal(3, await verify.AuthoringBatchReceipts.CountAsync());
+    }
+
     [Fact]
     public async Task ApplyBatchReplaysSameHashAndRejectsReusedIdentityWithDifferentContent()
     {
@@ -103,7 +206,8 @@ public sealed class AuthoringBatchServiceTests
             Guid sessionId,
             IReadOnlyList<Guid> chapterIds,
             TestManuscriptService manuscripts,
-            AuthoringBatchService service)
+            AuthoringBatchService service,
+            ProjectSourcesService sources)
         {
             _directory = directory;
             _options = options;
@@ -112,6 +216,7 @@ public sealed class AuthoringBatchServiceTests
             ChapterIds = chapterIds;
             Manuscripts = manuscripts;
             Service = service;
+            Sources = sources;
         }
 
         public Guid ProjectId { get; }
@@ -119,6 +224,7 @@ public sealed class AuthoringBatchServiceTests
         public IReadOnlyList<Guid> ChapterIds { get; }
         public TestManuscriptService Manuscripts { get; }
         public AuthoringBatchService Service { get; }
+        public ProjectSourcesService Sources { get; }
 
         public static async Task<Fixture> CreateAsync(int chapterCount)
         {
@@ -161,23 +267,25 @@ public sealed class AuthoringBatchServiceTests
                 await db.SaveChangesAsync();
             }
 
+            var projectMutations = new ProjectMutationCoordinator(connectionString);
             var database = new AppDatabaseOperationFactory(
                 new TestDbContextFactory(options),
                 new AppDatabaseWriteCoordinator(),
-                new ProjectMutationCoordinator(connectionString));
+                projectMutations);
             var mutationContext = new AuthoringMutationContextAccessor();
             var manuscripts = new TestManuscriptService(database, mutationContext);
             var history = new AuthoringDeltaHistoryRuntime();
             var service = new AuthoringBatchService(
                 database,
-                manuscripts,
-                null!,
-                null!,
+                new AuthoringTargetMutationService(manuscripts, null!, null!),
                 mutationContext,
                 history,
                 new TestFence(),
                 NullLogger<AuthoringBatchService>.Instance);
-            return new(directory, options, projectId, sessionId, chapterIds, manuscripts, service);
+            var sources = new ProjectSourcesService(database, null!, new AuthoringMutationFence(database, projectMutations, history),
+                new AuthoringTargetMutationService(manuscripts, null!, null!), mutationContext,
+                new AuthoringGenerationService(database, history), new ProjectVersionHistoryUiEvents());
+            return new(directory, options, projectId, sessionId, chapterIds, manuscripts, service, sources);
         }
 
         public async Task<AuthoringBatchV1> CreateBatchAsync(

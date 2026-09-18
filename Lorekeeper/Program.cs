@@ -240,6 +240,7 @@ builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringDeltaHistoryRuntime
     _ => new Lorekeeper.Authoring.AuthoringDeltaHistoryRuntime());
 builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringMutationFence, Lorekeeper.Authoring.AuthoringMutationFence>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringBatchService, Lorekeeper.Authoring.AuthoringBatchService>();
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringTargetMutationService, Lorekeeper.Authoring.AuthoringTargetMutationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringGenerationService, Lorekeeper.Authoring.AuthoringGenerationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
@@ -311,6 +312,7 @@ builder.Services.AddHostedService<IngestJobWorker>();
 // Sources is the retained-source reader and binary delivery boundary. Ingest
 // continues to own extraction, jobs, and source deletion semantics.
 builder.Services.AddScoped<IProjectSourcesService, ProjectSourcesService>();
+builder.Services.AddScoped<Lorekeeper.Citations.CitationAssistantTools>();
 
 // Research
 builder.Services.Configure<WebResearchOptions>(builder.Configuration.GetSection(WebResearchOptions.SectionName));
@@ -330,15 +332,20 @@ builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();
 builder.Services.AddSingleton<IProjectImportJobNotifier, ProjectImportJobNotifier>();
 builder.Services.AddSingleton<IProjectImportFileStore, ProjectImportFileStore>();
 builder.Services.AddScoped<IProjectImportExportService, ProjectImportExportService>();
+var archiveLimits = builder.Configuration.GetSection("ProjectArchive").Get<ProjectArchiveLimits>() ?? new();
+archiveLimits.Validate();
+builder.Services.AddSingleton(archiveLimits);
 builder.Services.AddScoped<ProjectImportJobProcessor>();
 builder.Services.AddHostedService<ProjectImportJobWorker>();
 builder.Services.AddScoped<IProjectDependencyTraversalService, ProjectDependencyTraversalService>();
 builder.Services.AddScoped<IProjectArchiveService, ProjectArchiveService>();
 
 // Publish
+builder.Services.AddSingleton<Lorekeeper.Citations.ICitationFormatter, Lorekeeper.Citations.CitationFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
+builder.Services.AddScoped<IPublishExportFormatter, DocxPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
 builder.Services.AddScoped<IPublicationBookService, PublicationBookService>();
 builder.Services.AddScoped<IPublicationSectionService, PublicationSectionService>();

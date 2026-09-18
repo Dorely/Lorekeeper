@@ -8,6 +8,7 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Publish;
+using Lorekeeper.ProjectArchive;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -19,14 +20,15 @@ public sealed class ProjectImportExportService(
     IProjectImportJobQueue importQueue,
     IProjectImportJobNotifier notifier,
     IProjectImportFileStore? fileStore = null,
-    ILogger<ProjectImportExportService>? logger = null) : IProjectImportExportService
+    ILogger<ProjectImportExportService>? logger = null,
+    ProjectArchiveLimits? archiveLimits = null) : IProjectImportExportService
 {
     // Kept for constructor compatibility while JSON v31 import jobs still own
     // entity-type defaulting. Archive capture intentionally never invokes it.
     private readonly IEntityTypeService _entityTypeService = entityTypeService;
     private readonly IProjectImportFileStore _fileStore = fileStore ?? new ProjectImportFileStore();
     private readonly ILogger<ProjectImportExportService> _logger = logger ?? NullLogger<ProjectImportExportService>.Instance;
-    internal const long MaximumImportBytes = 1024L * 1024 * 1024;
+    private readonly ProjectArchiveLimits _archiveLimits = archiveLimits ?? ProjectArchiveLimits.Default;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -410,7 +412,9 @@ public sealed class ProjectImportExportService(
         ArgumentNullException.ThrowIfNull(content);
         var normalizedFileName = NormalizeImportFileName(fileName);
         var inputKind = InferInputKind(normalizedFileName);
-        var staged = await _fileStore.StageAsync(content, normalizedFileName, MaximumImportBytes, cancellationToken);
+        var maximumBytes = inputKind == ProjectImportInputKind.LegacyJson
+            ? _archiveLimits.MaximumLegacyJsonBytes : _archiveLimits.MaximumCompressedBytes;
+        var staged = await _fileStore.StageAsync(content, normalizedFileName, maximumBytes, cancellationToken);
         try
         {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -800,6 +804,7 @@ public sealed class ProjectImportExportService(
             PrintIdentifierMode = profile.PrintIdentifierMode,
             PrintCoverSubmissionMode = profile.PrintCoverSubmissionMode,
             RectoChapterStarts = profile.RectoChapterStarts,
+            CitationStyle = profile.CitationStyle,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,
             EditionSpecificContentEnabled = profile.EditionSpecificContentEnabled,
@@ -831,6 +836,7 @@ public sealed class ProjectImportExportService(
     {
         AllowDesignedPageOverrides = book.PdfPresentation?.AllowDesignedPageOverrides ?? false,
         RectoChapterStarts = book.RectoChapterStarts,
+        CitationStyle = book.CitationStyle,
     };
 
     private static List<PublicationEditionOverrideField> ParseOverrideFields(string json)

@@ -313,7 +313,7 @@ from the inherited or overridden Description visible in Book details. A cover
 does not own a second back-copy field or editor control.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
-shared `agent-manuscript-v3` projection for its bounded semantic blocks. Core or
+shared `agent-manuscript-v4` projection for its bounded semantic blocks. Core or
 customized section reads retain the persisted source label; live release
 inheritance is labeled inherited. Absolute block indexes, source hash,
 revision, completeness, pagination, Figure semantics, Designed Page references,
@@ -347,7 +347,7 @@ backing opacity and padding as the shared manuscript typography contract.
 It also emits semantic HTML tables with stable header structure and document-
 numbered note references. Each chapter or publication section receives a
 separate linked note document when needed, with occurrence-specific backlinks;
-the EPUB exporter boundary is `lorekeeper-epub-v5`.
+the EPUB exporter boundary is `lorekeeper-epub-v6`.
 
 Artifacts carry source revision/fingerprint, edition settings, assets,
 renderer/profile provenance, validation evidence, and applicable exporter or
@@ -417,24 +417,98 @@ Press. Plain text uses explicit cell separators and numbered note bodies;
 Markdown keeps table and note syntax; HTML uses table, `doc-noteref`, footnote,
 and endnote semantics. Numbering restarts for every top-level chapter or
 publication section, and empty note sections are omitted. Archive record schema
-2 and history snapshot schema 9 preserve the recursive manuscript while their
-record-1/schema-8 predecessor readers validate and adapt older payloads.
+3 and history snapshot schema 10 preserve the recursive manuscript and citation
+metadata; explicit predecessor readers validate and adapt older payloads.
 
 `ICitationFormatter` is managed C# with identity `lorekeeper-citations-v1` and
 the only v1 styles are Chicago Manual of Style 18 notes-and-bibliography, APA 7,
 and MLA 9. Core owns a default style and releases may override it. Formatting,
 work deduplication, APA disambiguation, and bibliography ordering are computed
-from the entire effective publication, including every Designed Page occurrence;
-chapter Read uses that same full context. Final back matter emits endnotes first,
-grouped by top-level document with occurrence-specific backlinks, then the
-applicable nonempty Bibliography, References, or Works Cited.
+from the effective publication. Core/release artifact fingerprints include cited
+records and the effective citation style. Chapter Read formats in the full effective
+publication context and replaces its chapter with the pending preview manuscript.
+The formatter owns semantic runs, including italic titles; DOCX, EPUB, Markdown,
+and Press consume these runs rather than trying to infer formatting from strings.
+`PublicationCitationResolver` resolves document/placement/atom identities without
+depending on output render order. `PublicationSemanticPayload` owns the shared
+Press/Read projection. Notes are traversed at their reference position and belong
+to the owning document occurrence, including when referenced from table cells.
+`PublicationNotes` projects occurrence-specific note IDs and per-document numbering
+without changing stored manuscripts. TXT, Markdown, EPUB, and DOCX share this
+projection, including repeated Designed Pages. TXT/Markdown/EPUB collect notes
+in final Endnotes before the bibliography. Markdown uses explicit semantic links
+and displayed numbers, including inside HTML tables, so a Markdown renderer cannot
+globally renumber chapter-scoped notes. Markdown and EPUB retain occurrence-specific
+return links. DOCX keeps authored footnotes native and collects authored endnotes and
+citations at the end. Press reserves reference-aware note regions and retains
+semantic citation runs. Formatter regressions cover the eight supported record
+kinds, contributor roles, missing metadata, repeated references, cluster ordering,
+and disambiguation; manual output acceptance remains outstanding. They use the
+[Chicago citation guide](https://www.chicagomanualofstyle.org/tools_citationguide/citation-guide-1.html)
+and [MLA title disambiguation guidance](https://style.mla.org/dates-of-works/).
+
+The formatter's missing-field policy retains the bibliographic work and attaches
+a diagnostic containing its ID and the field to repair; it never guesses metadata.
+Title is required at authoring boundaries. The formatter also diagnoses a missing
+title defensively when called directly. The current field matrix is:
+
+| Records | Missing field | Output policy |
+| --- | --- | --- |
+| All | Author/corporate author | Use title; an edited book can use its editors. |
+| All | Issued year | Chicago/APA use `n.d.` where their format requires a date; MLA omits the date. |
+| Book, book chapter | Publisher | Omit publisher and report the missing field. |
+| Book chapter, journal/magazine/newspaper article, web page | Container title | Omit container and report the missing field. |
+| Thesis | Institution, thesis type | Omit missing components and identify each missing field. |
+| Report without publisher | Institution | Omit the unavailable issuing organization and report it. |
+| Web page without DOI | URL | Omit the unavailable link and report it. |
+| All | Optional volume, issue, edition, pages, access date, identifier | Omit absent components; retain supplied locators independently. |
+
+APA clusters sort by contributor, date, and title while retaining each original
+cluster-item ordinal. Plain references to the same contributors share the author
+label and list their years; references with individual locators or affixes remain
+explicit. Anonymous web titles retain italics, and corporate publishers already
+named as the author are omitted. Distinct first authors sharing a surname receive initials
+when those distinguish them. Hyphenated given names retain hyphenated initials.
+Title ordering ignores an initial English article without changing displayed
+capitalization. MLA edited books and chapter containers retain contributor roles,
+translations, editions, and chapter page ranges, following the
+[MLA book examples](https://style.mla.org/works-cited/citations-by-format/books/).
 
 DOCX output remains an effective-publication boundary. Manuscript prose, lists,
 tables, Figures, notes, citations, and bibliography remain editable Word
-structures; Designed Pages become accessibility-described artwork. Import and
-clipboard parsing produce one semantic fragment and commit all staged assets,
-styles, bibliography records, source mappings, and manuscript changes atomically
-at an explicit insertion point.
+structures; Designed Pages become accessibility-described artwork. The
+artwork projection resolves each placement's citation and note labels independently.
+Frame ranges are resolved before substituting display text, preserving stored
+offsets. Zero-width reference atoms at frame boundaries belong to the following
+frame; the final frame also owns trailing atoms. Atom-only blocks require a binding,
+and duplicate bindings are rejected. Publication dependency collection includes
+images and fonts in table cells, notes, semantic page content, and grouped scene
+objects; only referenced font families are loaded for export.
+The formatter preserves six heading levels, image aspect ratios, note blocks, and
+manuscript/placement-based endnote bookmarks. Chicago citation references use the
+shared formatter's numbers and occurrence-based bookmarks, with return links
+from final Endnotes before the bibliography. Documents containing both authored
+endnotes and citation notes label those sequences separately. Named paragraph and
+character styles retain their roles and display names. Direct typography, run
+language, line spacing, hanging indents, and explicit false values survive export;
+unspecified direct properties inherit instead of resetting the named style.
+Page dimensions and margins follow the effective publication profile. Figures
+retain their width and alignment within the available page or table-cell area;
+table headers repeat and rows remain together where Word can place them. Images
+and external links in native footnotes belong to the footnotes package part.
+Export validates those relationships, note references, and unique bookmark
+identities as well as Open XML structure. Core and release manuscript downloads
+wait for pending saves and expose preparation status and cancellation. The
+download surface explains Word pagination, font substitution, and inline-image
+limitations before export.
+Fonts are referenced by family name; desktop font availability and layout remain
+manual compatibility checks. Ordered/unordered lists preserve nesting and explicit
+restarts through shared counters, Word numbering definitions, nested HTML lists,
+and text markers. Cross-output semantics have deterministic regression coverage;
+desktop layout and visual parity remain acceptance work.
+Authoring DOCX import and Word clipboard conversion are not yet
+implemented. Their approved boundary is one semantic fragment and an atomic,
+revision-checked insertion of assets, styles, bibliography, notes, and blocks.
 
 ## Key files and file families
 

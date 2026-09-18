@@ -142,8 +142,6 @@ public sealed class AuthoringJournalMigrationTests
                 null!,
                 null!,
                 null!,
-                null!,
-                null!,
                 NullLogger<AuthoringBatchService>.Instance);
             await Assert.ThrowsAsync<AuthoringIdempotencyException>(() => service.AcknowledgeReceiptAsync(
                 new(projectId, sessionId, batchId, receiptId, "sha256:different")));

@@ -42,6 +42,7 @@ public sealed class ScopedPublicationRenderingMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
+                await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(db, default);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO Projects
                         (Id, ReviewEditsEnabled, ContestModeEnabled, CreatedAt,
@@ -76,6 +77,7 @@ public sealed class ScopedPublicationRenderingMigrationTests
                     "ReadingPdf", "digital.pdf", digitalBytes, digitalHash, now);
                 await InsertLegacyPreparationAsync(db, physicalPreparationId, physicalEditionId, physicalJobId, now);
                 await InsertLegacyPreparationAsync(db, digitalPreparationId, digitalEditionId, digitalJobId, now);
+                await DatabaseStartupMigrationService.RemoveCitationCompatibilityColumnsAsync(db, default);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

@@ -311,6 +311,56 @@
     text-align: center;
 }
 
+.sources-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: rgb(15 23 42 / 0.62);
+}
+
+.sources-dialog {
+    width: min(58rem, 100%);
+    max-height: min(52rem, calc(100vh - 3rem));
+    overflow: auto;
+    border: 1px solid var(--bs-border-color, #d6d8db);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 1rem 3rem rgb(15 23 42 / 0.3);
+}
+
+.sources-dialog > header,
+.sources-dialog > footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.sources-dialog > footer {
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.sources-bibliography-form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+
+.sources-bibliography-form .field {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.sources-bibliography-form .full {
+    grid-column: 1 / -1;
+}
+
 @media (max-width: 1100px) {
     .sources-grid {
         grid-template-columns: minmax(14rem, 0.75fr) minmax(25rem, 1.7fr);
@@ -333,5 +383,9 @@
     .sources-details,
     .sources-contents {
         max-height: none;
+    }
+
+    .sources-bibliography-form {
+        grid-template-columns: 1fr;
     }
 }

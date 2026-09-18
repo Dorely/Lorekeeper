@@ -562,8 +562,9 @@ public class ChapterService(
         var db = databaseOperation.Db;
         var styles = styleCatalog
             ?? await manuscriptStyles.ListAsync(projectId, cancellationToken);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, document, cancellationToken);
         ManuscriptStyleService.ValidateDocumentReferences(document, styles);
-        var directFontKeys = document.Content
+        var directFontKeys = ManuscriptTraversal.EnumerateBlocks(document)
             .Select(block => block.ParagraphPresentation?.FontFamilyKey)
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)

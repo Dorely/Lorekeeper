@@ -985,7 +985,8 @@ public sealed class ProjectImportJobIntegrationTests
         var sourceProject = new Project { Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
         var destination = new Project { Name = "Archive destination", Slug = $"archive-destination-{Guid.NewGuid():N}" };
         db.Projects.AddRange(sourceProject, destination);
-        db.PublicationBooks.Add(new PublicationBook { Project = sourceProject });
+        var publicationBook = new PublicationBook { Project = sourceProject, CitationStyle = Lorekeeper.Citations.CitationStyle.APA7 };
+        db.PublicationBooks.Add(publicationBook);
 
         var originalBytes = Encoding.UTF8.GetBytes("Retained source original bytes.");
         var originalHash = SourceRetentionValidator.Sha256(originalBytes);
@@ -1067,6 +1068,39 @@ public sealed class ProjectImportJobIntegrationTests
         db.SourceOriginalBlobs.Add(blob);
         db.SourceLocations.Add(location);
         db.BibliographicRecords.Add(bibliography);
+        var citedManuscript = CitationPreservationTests.Document(bibliography.Id, location.Id);
+        publicationBook.OutlineItems.Add(new PublicationBookOutlineItem
+        {
+            TargetKind = PublishOutlineTargetKind.Chapter,
+            TargetId = citedManuscript.ManuscriptId,
+            ChapterId = citedManuscript.ManuscriptId,
+        });
+        db.Chapters.Add(new Chapter
+        {
+            Id = citedManuscript.ManuscriptId,
+            Project = sourceProject,
+            Title = "Citations in body, table, and note",
+            ManuscriptJson = ManuscriptCodec.Serialize(citedManuscript),
+            ManuscriptRevision = citedManuscript.Revision,
+        });
+        var originalImage = new PublishAsset
+        {
+            ProjectId = sourceProject.Id,
+            FileName = "original.png",
+            ContentType = "image/png",
+            Data = TinyPng(),
+            Source = PublishAssetSource.Uploaded,
+        };
+        var derivedImage = new PublishAsset
+        {
+            ProjectId = sourceProject.Id,
+            FileName = "derived.png",
+            ContentType = "image/png",
+            Data = TinyPng(),
+            Source = PublishAssetSource.Upscaled,
+            DerivedFromImageId = originalImage.Id,
+        };
+        db.PublishAssets.AddRange(derivedImage, originalImage);
         await db.SaveChangesAsync();
 
         var database = Database(db);
@@ -1103,12 +1137,34 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.Equal(originalBytes, restoredChunk.Blob.Data);
         Assert.Equal(normalizedText, restoredExtraction.NormalizedText);
         Assert.Equal(restoredExtraction.Id, restored.ActiveExtractionVersionId);
-        Assert.Single(await db.SourceLocations.AsNoTracking()
+        var restoredLocation = Assert.Single(await db.SourceLocations.AsNoTracking()
             .Where(item => item.ProjectId == destination.Id && item.SourceId == restored.Id)
             .ToListAsync());
-        Assert.Single(await db.BibliographicRecords.AsNoTracking()
+        var restoredBibliography = Assert.Single(await db.BibliographicRecords.AsNoTracking()
             .Where(item => item.ProjectId == destination.Id && item.SourceId == restored.Id)
             .ToListAsync());
+        Assert.NotEqual(location.Id, restoredLocation.Id);
+        Assert.NotEqual(bibliography.Id, restoredBibliography.Id);
+        var restoredChapter = await db.Chapters.AsNoTracking().SingleAsync(item => item.ProjectId == destination.Id);
+        var restoredCitations = ManuscriptTraversal.EnumerateCitations(restoredChapter.Manuscript);
+        Assert.Equal(3, restoredCitations.Count);
+        Assert.All(restoredCitations, occurrence =>
+        {
+            var item = Assert.Single(occurrence.Cluster.Items);
+            Assert.Equal(restoredBibliography.Id, item.BibliographicRecordId);
+            Assert.Equal(restoredLocation.Id, item.SourceLocationId);
+            Assert.Equal("42", item.LocatorValue);
+        });
+        Assert.Equal(Lorekeeper.Citations.CitationStyle.APA7,
+            (await db.PublicationBooks.AsNoTracking().SingleAsync(item => item.ProjectId == destination.Id)).CitationStyle);
+        var restoredImages = await db.PublishAssets.AsNoTracking()
+            .Where(item => item.ProjectId == destination.Id).ToListAsync();
+        Assert.Equal(2, restoredImages.Count);
+        var restoredOriginal = restoredImages.Single(item => item.FileName == "original.png");
+        var restoredDerived = restoredImages.Single(item => item.FileName == "derived.png");
+        Assert.NotEqual(originalImage.Id, restoredOriginal.Id);
+        Assert.Equal(restoredOriginal.Id, restoredDerived.DerivedFromImageId);
+        Assert.All(restoredImages, item => Assert.Equal(TinyPng(), item.Data));
     }
 
     [Fact]
@@ -1209,7 +1265,7 @@ public sealed class ProjectImportJobIntegrationTests
         var staged = new ProjectImportFileStore().StageAsync(
             stream,
             fileName,
-            ProjectImportExportService.MaximumImportBytes).GetAwaiter().GetResult();
+            ProjectArchiveLimits.Default.MaximumLegacyJsonBytes).GetAwaiter().GetResult();
         return new ProjectImportJob
         {
             ProjectId = projectId,

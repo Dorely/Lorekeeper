@@ -1362,7 +1362,7 @@ public sealed class ManuscriptMigrationIntegrationTests
                     + string.Join(
                         ", ",
                         columns.Select(column =>
-                            $"{column} = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace({column}, '\"schemaVersion\":6', '\"schemaVersion\":1'), '\"schemaVersion\":5', '\"schemaVersion\":1'), '\"schemaVersion\":4', '\"schemaVersion\":1'), '\"schemaVersion\":3', '\"schemaVersion\":1'), '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":6', 'schemaVersion\\\":1'), 'schemaVersion\\\":5', 'schemaVersion\\\":1'), 'schemaVersion\\\":4', 'schemaVersion\\\":1'), 'schemaVersion\\\":3', 'schemaVersion\\\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
+                            $"{column} = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace({column}, '\"schemaVersion\":7', '\"schemaVersion\":1'), '\"schemaVersion\":6', '\"schemaVersion\":1'), '\"schemaVersion\":5', '\"schemaVersion\":1'), '\"schemaVersion\":4', '\"schemaVersion\":1'), '\"schemaVersion\":3', '\"schemaVersion\":1'), '\"schemaVersion\":2', '\"schemaVersion\":1'), 'schemaVersion\\\":7', 'schemaVersion\\\":1'), 'schemaVersion\\\":6', 'schemaVersion\\\":1'), 'schemaVersion\\\":5', 'schemaVersion\\\":1'), 'schemaVersion\\\":4', 'schemaVersion\\\":1'), 'schemaVersion\\\":3', 'schemaVersion\\\":1'), 'schemaVersion\\\":2', 'schemaVersion\\\":1')"))
                     + ";";
                 await command.ExecuteNonQueryAsync();
             }

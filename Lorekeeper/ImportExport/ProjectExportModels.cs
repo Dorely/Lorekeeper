@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
+using Lorekeeper.Citations;
 
 namespace Lorekeeper.ImportExport;
 
@@ -432,6 +433,7 @@ public sealed record ProjectExportPublicationEdition(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool RectoChapterStarts { get; init; }
     public List<PublicationEditionOverrideField> OverrideFields { get; init; } = [];
+    public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
     public bool InheritsCoreCover { get; init; }
     public bool EditionSpecificContentEnabled { get; init; }
     public List<ProjectExportEditionChapterOverride> ChapterOverrides { get; init; } = [];
@@ -484,6 +486,7 @@ public sealed record ProjectExportPublicationBook(
     [JsonIgnore]
     public IReadOnlyList<ProjectExportPublicationImagePlacement> LegacyImagePlacements => ImagePlacements ?? [];
     public bool AllowDesignedPageOverrides { get; init; }
+    public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool RectoChapterStarts { get; init; }
 }

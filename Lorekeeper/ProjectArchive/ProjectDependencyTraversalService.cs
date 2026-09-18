@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Lorekeeper.Authoring;
+using Lorekeeper.Citations;
 using Lorekeeper.ImportExport;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -66,8 +68,10 @@ public interface IProjectDependencyTraversalService
 public sealed class ProjectDependencyTraversalService(
     IAuthoringMutationFence authoringFence,
     IAppDatabaseOperationFactory database,
-    IProjectImportExportService legacyExport) : IProjectDependencyTraversalService
+    IProjectImportExportService legacyExport,
+    ProjectArchiveLimits? archiveLimits = null) : IProjectDependencyTraversalService
 {
+    private readonly ProjectArchiveLimits _limits = archiveLimits ?? ProjectArchiveLimits.Default;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false,
@@ -101,12 +105,19 @@ public sealed class ProjectDependencyTraversalService(
                 ? ProjectExportKind.NonStructural
                 : ProjectExportKind.Full;
             var creative = await legacyExport.CaptureArchiveDocumentAsync(projectId, exportKind, cancellationToken);
-            var cleanCreative = RemoveBinaryPayloads(creative.Document);
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            var db = operation.Db;
+            var manuscripts = ProjectCitationRemapping.Manuscripts(creative.Document).ToList();
+            foreach (var manuscript in manuscripts)
+                await CitationReferenceValidator.ValidateAsync(db, projectId, manuscript, cancellationToken);
+            var citedIds = manuscripts.SelectMany(ManuscriptTraversal.EnumerateCitations)
+                .SelectMany(occurrence => occurrence.Cluster.Items).Select(item => item.BibliographicRecordId).Distinct().ToArray();
+            var exportedDocument = policy == ProjectDependencyTraversalPolicy.NonStructuralArchive
+                ? ProjectCitationRemapping.OmitSourceEvidence(creative.Document) : creative.Document;
+            var cleanCreative = RemoveBinaryPayloads(exportedDocument);
             await CaptureJsonAsync(files, capture, cleanCreative["project"]!, "project/project.json", "project-record", cancellationToken);
             await CaptureJsonAsync(files, capture, cleanCreative, "project/creative-state.json", "creative-state", cancellationToken);
 
-            await using var operation = await database.OpenReadAsync(cancellationToken);
-            var db = operation.Db;
             var warnings = new List<string>();
             if (await db.ProjectReferences.AsNoTracking().AnyAsync(reference => reference.ReferencingProjectId == projectId, cancellationToken))
                 warnings.Add(ProjectArchiveWarningCodes.OutgoingProjectLinksOmitted);
@@ -114,9 +125,8 @@ public sealed class ProjectDependencyTraversalService(
             if (policy == ProjectDependencyTraversalPolicy.NonStructuralArchive)
             {
                 warnings.Add(ProjectArchiveWarningCodes.SourceEvidenceOmittedNonStructuralExport);
-                // A bibliography record without a source file is independent
-                // creative research metadata, not source evidence.
-                await CaptureBibliographyAsync(files, capture, db, projectId, null, cancellationToken);
+                // Keep cited metadata even when its retained source is omitted.
+                await CaptureBibliographyAsync(files, capture, db, projectId, null, cancellationToken, citedIds);
             }
             else
             {
@@ -140,7 +150,7 @@ public sealed class ProjectDependencyTraversalService(
         }
     }
 
-    private static async Task CaptureSourceClosureAsync(
+    private async Task CaptureSourceClosureAsync(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         AppDbContext db,
@@ -211,7 +221,7 @@ public sealed class ProjectDependencyTraversalService(
         await CaptureBibliographyAsync(files, capture, db, projectId, null, cancellationToken);
     }
 
-    private static async Task CaptureSourceExtractionsAsync(
+    private async Task CaptureSourceExtractionsAsync(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         AppDbContext db,
@@ -286,7 +296,7 @@ public sealed class ProjectDependencyTraversalService(
         }
     }
 
-    private static async Task CaptureSourceLocationsAsync(
+    private async Task CaptureSourceLocationsAsync(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         AppDbContext db,
@@ -312,16 +322,18 @@ public sealed class ProjectDependencyTraversalService(
         }
     }
 
-    private static async Task CaptureBibliographyAsync(
+    private async Task CaptureBibliographyAsync(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         AppDbContext db,
         Guid projectId,
         Guid? sourceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid[]? includedLinkedIds = null)
     {
+        var additionalIds = includedLinkedIds ?? [];
         var ids = await db.BibliographicRecords.AsNoTracking()
-            .Where(record => record.ProjectId == projectId && record.SourceId == sourceId)
+            .Where(record => record.ProjectId == projectId && (record.SourceId == sourceId || additionalIds.Contains(record.Id)))
             .OrderBy(record => record.Id)
             .Select(record => record.Id)
             .ToListAsync(cancellationToken);
@@ -332,15 +344,19 @@ public sealed class ProjectDependencyTraversalService(
                 .Select(record => new BibliographicRecordRecord(record.Id, record.SourceId, record.Kind,
                     record.Title, record.ContainerTitle, record.AuthorsJson, record.EditorsJson, record.IssuedYear,
                     record.Publisher, record.PublisherPlace, record.Volume, record.Issue, record.Pages,
-                    record.Doi, record.Url, record.AccessedAt, record.Isbn, record.Notes, record.CreatedAt,
-                    record.UpdatedAt))
+                    record.Doi, record.Url, null, record.Isbn, record.Notes, record.CreatedAt,
+                    record.UpdatedAt, record.TranslatorsJson, record.IssuedMonth, record.IssuedDay,
+                    record.Edition, record.Institution, record.ThesisType, record.AccessedYear,
+                    record.AccessedMonth, record.AccessedDay))
                 .SingleAsync(cancellationToken);
+            if (includedLinkedIds is not null)
+                item = item with { SourceId = null };
             var root = sourceId is Guid idForPath ? $"sources/{idForPath:N}/bibliography" : "bibliography";
             await CaptureJsonAsync(files, capture, item, $"{root}/{id:N}.json", "bibliographic-record", cancellationToken);
         }
     }
 
-    private static async Task CaptureCreativeBinariesAsync(
+    private async Task CaptureCreativeBinariesAsync(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         AppDbContext db,
@@ -406,7 +422,7 @@ public sealed class ProjectDependencyTraversalService(
         }
     }
 
-    private static Task CaptureJsonAsync<T>(
+    private Task CaptureJsonAsync<T>(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         T value,
@@ -415,7 +431,7 @@ public sealed class ProjectDependencyTraversalService(
         CancellationToken cancellationToken) =>
         CaptureJsonCoreAsync(files, capture, value, path, kind, cancellationToken);
 
-    private static async Task CaptureJsonCoreAsync<T>(
+    private async Task CaptureJsonCoreAsync<T>(
         ICollection<ProjectArchiveFileDescriptor> files,
         ProjectArchiveTemporaryCapture capture,
         T value,
@@ -423,10 +439,10 @@ public sealed class ProjectDependencyTraversalService(
         string kind,
         CancellationToken cancellationToken)
     {
-        files.Add(await capture.CaptureJsonAsync(value, path, kind, ProjectArchiveLimits.Default.MaximumEntryBytes, JsonOptions, cancellationToken));
+        files.Add(await capture.CaptureJsonAsync(value, path, kind, _limits.MaximumEntryBytes, JsonOptions, cancellationToken));
     }
 
-    private static async Task<ProjectArchiveFileDescriptor> CaptureBinaryAsync(
+    private async Task<ProjectArchiveFileDescriptor> CaptureBinaryAsync(
         ProjectArchiveTemporaryCapture capture,
         byte[] data,
         string path,
@@ -434,10 +450,10 @@ public sealed class ProjectDependencyTraversalService(
         string mediaType,
         CancellationToken cancellationToken)
     {
-        if (data.LongLength > ProjectArchiveLimits.Default.MaximumEntryBytes)
+        if (data.LongLength > _limits.MaximumEntryBytes)
             throw new ProjectArchiveException("A binary archive record exceeds its configured byte limit.");
         await using var stream = new MemoryStream(data, writable: false);
-        return await capture.CaptureAsync(stream, path, kind, mediaType, ProjectArchiveLimits.Default.MaximumEntryBytes, cancellationToken);
+        return await capture.CaptureAsync(stream, path, kind, mediaType, _limits.MaximumEntryBytes, cancellationToken);
     }
 
     private sealed record SourceRecord(Guid Id, string Title, string SourceKind, string Description, string Synopsis,
@@ -467,6 +483,8 @@ public sealed class ProjectDependencyTraversalService(
     private sealed record BibliographicRecordRecord(Guid Id, Guid? SourceId, BibliographicRecordKind Kind,
         string Title, string ContainerTitle, string AuthorsJson, string EditorsJson, int? IssuedYear,
         string Publisher, string PublisherPlace, string Volume, string Issue, string Pages, string Doi,
-        string Url, DateTime? AccessedAt, string Isbn, string Notes, DateTime CreatedAt, DateTime UpdatedAt);
+        string Url, DateTime? AccessedAt, string Isbn, string Notes, DateTime CreatedAt, DateTime UpdatedAt,
+        string TranslatorsJson, int? IssuedMonth, int? IssuedDay, string Edition, string Institution,
+        string ThesisType, int? AccessedYear, int? AccessedMonth, int? AccessedDay);
     private sealed record BinaryRecord(Guid Id, string ContentType, byte[] Data);
 }

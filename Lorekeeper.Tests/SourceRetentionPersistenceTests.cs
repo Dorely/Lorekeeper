@@ -14,6 +14,74 @@ public sealed class SourceRetentionPersistenceTests
     private const string PreviousMigration = "20260917203529_AuthoringBatchJournalV37";
 
     [Fact]
+    public async Task CopiedBibliographyUpgradePreservesDatesAndRemovesSupersededTimestamp()
+    {
+        await using var predecessor = new SqliteConnection("Data Source=:memory:");
+        await using var copy = new SqliteConnection("Data Source=:memory:");
+        await predecessor.OpenAsync();
+        await copy.OpenAsync();
+        var predecessorOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(predecessor).Options;
+        var copyOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(copy).Options;
+        var projectId = Guid.NewGuid();
+        var datedId = Guid.NewGuid();
+        var undatedId = Guid.NewGuid();
+        var now = new DateTime(2024, 2, 29, 23, 45, 12, DateTimeKind.Utc);
+        await using (var db = new AppDbContext(predecessorOptions, NullLogger<AppDbContext>.Instance))
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20260917223833_StagedProjectImportLifecycleM4");
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO Projects
+                    (Id, ReviewEditsEnabled, ContestModeEnabled, CreatedAt,
+                     IncludeCurrentChapterInContext, Name, ProjectGuidance, Slug, UpdatedAt)
+                VALUES ({{projectId}}, 1, 0, {{now}}, 1, 'Date preservation', '', 'date-preservation', {{now}});
+                """);
+            foreach (var id in new[] { datedId, undatedId })
+            {
+                DateTime? accessedAt = id == datedId ? now : null;
+                await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                    INSERT INTO BibliographicRecords
+                        (Id, ProjectId, SourceId, Kind, Title, ContainerTitle, AuthorsJson, EditorsJson,
+                         IssuedYear, Publisher, PublisherPlace, Volume, Issue, Pages, Doi, Url,
+                         AccessedAt, Isbn, Notes, CreatedAt, UpdatedAt)
+                    VALUES ({{id}}, {{projectId}}, NULL, 'WebPage', 'Preserved title', '', '[]', '[]',
+                            2023, 'Publisher', '', '', '', '', '', 'https://example.org/work',
+                            {{accessedAt}}, '', 'Preserved notes', {{now}}, {{now}});
+                    """);
+            }
+        }
+
+        predecessor.BackupDatabase(copy);
+        await using (var db = new AppDbContext(copyOptions, NullLogger<AppDbContext>.Instance))
+        {
+            await db.Database.MigrateAsync();
+            var records = await db.BibliographicRecords.ToDictionaryAsync(record => record.Id);
+            Assert.Equal(2, records.Count);
+            Assert.Equal(2024, records[datedId].AccessedYear);
+            Assert.Equal(2, records[datedId].AccessedMonth);
+            Assert.Equal(29, records[datedId].AccessedDay);
+            Assert.Null(records[undatedId].AccessedYear);
+            Assert.Null(records[undatedId].AccessedMonth);
+            Assert.Null(records[undatedId].AccessedDay);
+            Assert.All(records.Values, record =>
+            {
+                Assert.Equal(projectId, record.ProjectId);
+                Assert.Null(record.SourceId);
+                Assert.Equal("Preserved title", record.Title);
+                Assert.Equal("Preserved notes", record.Notes);
+                Assert.Equal("[]", record.TranslatorsJson);
+            });
+            await using var command = copy.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('BibliographicRecords') WHERE name = 'AccessedAt'";
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+        }
+
+        // The copied upgrade must not mutate the predecessor used for recovery.
+        await using var original = predecessor.CreateCommand();
+        original.CommandText = "SELECT COUNT(*) FROM BibliographicRecords WHERE AccessedAt IS NOT NULL";
+        Assert.Equal(1L, await original.ExecuteScalarAsync());
+    }
+
+    [Fact]
     public void AvailableOriginalUsesBoundedContentAddressedChunksAndIncrementalHashValidation()
     {
         var bytes = new byte[SourceOriginal.MaximumChunkBytes + 1];

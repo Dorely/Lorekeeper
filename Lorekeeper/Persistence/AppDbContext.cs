@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Citations;
 using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -1366,6 +1367,9 @@ public class AppDbContext(
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.PrintCoverMode).HasConversion<string>();
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
+            entity.Property(e => e.CitationStyle)
+                .HasConversion<string>()
+                .HasDefaultValue(CitationStyle.Chicago18NotesBibliography);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.Property(e => e.PublicationSectionOrderJson).HasDefaultValue("{}");
 
@@ -1408,6 +1412,9 @@ public class AppDbContext(
         {
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
+            entity.Property(e => e.CitationStyle)
+                .HasConversion<string>()
+                .HasDefaultValue(CitationStyle.Chicago18NotesBibliography);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.Project)
                 .WithOne(e => e.PublicationBook)

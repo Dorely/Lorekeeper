@@ -1213,6 +1213,7 @@ public sealed class DesignedPageService(
         };
         ValidateSemanticFragment(semantic);
         var semanticJson = ManuscriptCodec.Serialize(semantic);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, semantic, cancellationToken);
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, scene, cancellationToken);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         var sceneJson = SerializeAndValidate(scene, semanticJson);
@@ -1323,6 +1324,7 @@ public sealed class DesignedPageService(
         if (applied.ChangedBlockIds.Count == 0)
             return new DesignedPageSemanticMutationResult(content, []);
         var document = applied.Document with { Revision = checked(content.Revision + 1) };
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, document, cancellationToken);
         var manuscriptJson = ManuscriptCodec.Serialize(document);
         foreach (var variant in content.Variants)
         {
@@ -1360,6 +1362,7 @@ public sealed class DesignedPageService(
         if (content.Revision != expectedRevision)
             throw new DesignedPageRevisionConflictException(expectedRevision, content.Revision);
         var replacement = document with { ManuscriptId = content.Id, Revision = checked(content.Revision + 1) };
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, replacement, cancellationToken);
         var manuscriptJson = ManuscriptCodec.Serialize(replacement);
         foreach (var variant in content.Variants)
         {
@@ -1558,6 +1561,7 @@ public sealed class DesignedPageService(
         var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
         var preview = ManuscriptOperations.Apply(current, ManuscriptOperationInput.ToOperations(operations)).Document;
         ValidateSemanticFragment(preview);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, preview, cancellationToken);
         var previewJson = ManuscriptCodec.Serialize(preview);
         foreach (var variant in composition.Variants)
         {
@@ -1625,6 +1629,7 @@ public sealed class DesignedPageService(
         var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
         var applied = ManuscriptOperations.Apply(current, ManuscriptOperationInput.ToOperations(inputs));
         ValidateSemanticFragment(applied.Document);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, applied.Document, cancellationToken);
         var semanticJson = ManuscriptCodec.Serialize(applied.Document);
         foreach (var variant in composition.Variants)
         {
@@ -1698,6 +1703,7 @@ public sealed class DesignedPageService(
             : ManuscriptOperations.Apply(current, ManuscriptOperationInput.ToOperations(semanticOperations));
         ValidateSemanticFragment(applied.Document);
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, scene, cancellationToken);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, applied.Document, cancellationToken);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         _ = SerializeAndValidate(scene, ManuscriptCodec.Serialize(applied.Document));
         foreach (var other in await db.DesignedPageVariants.AsNoTracking()
@@ -1777,6 +1783,7 @@ public sealed class DesignedPageService(
             : ManuscriptOperations.Apply(current, ManuscriptOperationInput.ToOperations(payload.SemanticOperations));
         ValidateSemanticFragment(applied.Document);
         var semanticJson = ManuscriptCodec.Serialize(applied.Document);
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, projectId, applied.Document, cancellationToken);
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, payload.Scene, cancellationToken);
         await ValidateSceneAssetsAsync(projectId, payload.Scene, cancellationToken);
         var sceneJson = SerializeAndValidate(payload.Scene, semanticJson);

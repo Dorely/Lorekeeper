@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::path::{Component, Path};
+use std::sync::Arc;
 
 use hypher::{Lang, hyphenate};
 use serde_json::Value;
@@ -30,6 +32,97 @@ const MAX_JOB_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAGES: usize = 10_000;
 type RenderResult<T> = Result<T, Box<RenderResponse>>;
+
+#[derive(Clone, Default)]
+struct FootnotePlan {
+    heights: HashMap<usize, f32>,
+    earliest_references: HashMap<String, usize>,
+    chunks: HashMap<usize, Vec<FootnoteChunk>>,
+}
+
+#[derive(Clone)]
+struct FootnoteChunk {
+    note_id: String,
+    number: usize,
+    reference_page: usize,
+    offset: usize,
+    units: Vec<FootnoteUnit>,
+}
+
+#[derive(Clone)]
+struct FootnoteUnit {
+    lines: Vec<LayoutLine>,
+    images: Vec<LayoutImage>,
+    shapes: Vec<LayoutShape>,
+    height: f32,
+}
+
+struct LayoutPass {
+    layout: LayoutDocument,
+    footnotes: Vec<NumberedNote>,
+}
+
+/// Owns flow-page creation so every page receives its reserved note region.
+#[derive(Default)]
+struct FlowPages {
+    pages: Vec<LayoutPage>,
+    next_flow_id: usize,
+    plan: Arc<FootnotePlan>,
+    footnotes: Vec<NumberedNote>,
+}
+
+impl FlowPages {
+    fn push(&mut self, mut page: LayoutPage) {
+        let index = self.next_flow_id;
+        self.next_flow_id += 1;
+        page.flow_page_id = Some(index);
+        page.footnote_height = self.plan.heights.get(&index).copied().unwrap_or(0.0);
+        self.pages.push(page);
+    }
+
+    fn extend(&mut self, pages: impl IntoIterator<Item = LayoutPage>) {
+        for page in pages {
+            self.push(page);
+        }
+    }
+}
+
+impl From<Vec<LayoutPage>> for FlowPages {
+    fn from(pages: Vec<LayoutPage>) -> Self {
+        let mut result = Self::default();
+        result.extend(pages);
+        result
+    }
+}
+
+impl Deref for FlowPages {
+    type Target = Vec<LayoutPage>;
+    fn deref(&self) -> &Self::Target {
+        &self.pages
+    }
+}
+
+impl DerefMut for FlowPages {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.pages
+    }
+}
+
+impl<'a> IntoIterator for &'a mut FlowPages {
+    type Item = &'a mut LayoutPage;
+    type IntoIter = std::slice::IterMut<'a, LayoutPage>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.pages.iter_mut()
+    }
+}
+
+impl<'a> IntoIterator for &'a FlowPages {
+    type Item = &'a LayoutPage;
+    type IntoIter = std::slice::Iter<'a, LayoutPage>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.pages.iter()
+    }
+}
 
 fn registry_sha256() -> String {
     Sha256::digest(include_bytes!("../assets/print-artifact-profiles-v1.json"))
@@ -1237,7 +1330,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 14,
+        protocol_version: 15,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -1470,7 +1563,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
-                "protocolVersion": 14,
+                "protocolVersion": 15,
                 "rendererVersion": env!("CARGO_PKG_VERSION"),
                 "jobId": request.job_id,
                 "pageCount": layout.pages.len(),
@@ -1496,6 +1589,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             let fallback;
             let runs = if line.runs.is_empty() {
                 fallback = vec![LayoutRun {
+                    note_reference_id: None,
                     text: line.text.clone(), face: FontFace::SerifRegular, underline: false,
                     strikethrough: false, baseline_shift_em: 0.0, size_scale: 1.0,
                     language: None,
@@ -1511,6 +1605,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                     "baselineShiftEm": run.baseline_shift_em,
                     "sizeScale": run.size_scale,
                     "language": run.language,
+                    "noteReferenceId": run.note_reference_id,
                 });
                 if let Some(fonts) = fonts.as_ref() {
                     let size = line.size * run.size_scale;
@@ -1573,7 +1668,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 14,
+            "protocolVersion": 15,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1689,18 +1784,18 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    // Protocols v12 and v13 remain boundary readers so historical saved jobs
-    // stay renderable; all responses use the current v14 contract.
-    if !matches!(request.protocol_version, 12..=14) {
+    // Protocols v12-v14 remain boundary readers so historical saved jobs stay
+    // renderable; all responses use the current v15 contract.
+    if !matches!(request.protocol_version, 12..=15) {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 12, 13, or 14.",
+            "Lorekeeper Press requires protocol version 12, 13, 14, or 15.",
         );
     }
     if request.protocol_version >= 13 && contains_legacy_designed_page_contract(&request.document) {
         return reject(
             "PRESS_LEGACY_DESIGNED_PAGE_CONTRACT",
-            "Protocols 13 and 14 require designedPages and designedPageId; legacy composition fields are accepted only by the v12 adapter.",
+            "Protocols 13 through 15 require designedPages and designedPageId; legacy composition fields are accepted only by the v12 adapter.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -2386,6 +2481,34 @@ fn paginate_with_cancellation(
     job_root: Option<&Path>,
     tolerance: LayoutTolerance,
 ) -> RenderResult<LayoutDocument> {
+    let mut plan = Arc::new(FootnotePlan::default());
+    for _ in 0..64 {
+        check_layout_cancellation(job_root)?;
+        let mut pass = paginate_once(request, job_root, tolerance, plan.clone())?;
+        if pass.footnotes.is_empty() {
+            return Ok(pass.layout);
+        }
+        let next = plan_footnotes(&pass.layout, &pass.footnotes, request, &plan)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        if footnote_plans_equal(&plan, &next) {
+            paint_footnotes(&mut pass.layout.pages, &next, &request.trim);
+            normalize_paint_orders(&mut pass.layout.pages);
+            return Ok(pass.layout);
+        }
+        plan = Arc::new(next);
+    }
+    reject(
+        "PRESS_FOOTNOTE_NONCONVERGENT",
+        "Reference-aware footnote layout did not converge within its bounded pagination passes.",
+    )
+}
+
+fn paginate_once(
+    request: &RenderRequest,
+    job_root: Option<&Path>,
+    tolerance: LayoutTolerance,
+    plan: Arc<FootnotePlan>,
+) -> RenderResult<LayoutPass> {
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
     let leading_page_count =
         usize::from(request.profile == "generic-digital-pdf-v1" && request.cover.is_some());
@@ -2404,7 +2527,10 @@ fn paginate_with_cancellation(
             "Trim, margin, typography, widow, or orphan values are outside supported bounds.",
         );
     }
-    let mut pages = Vec::new();
+    let mut pages = FlowPages {
+        plan,
+        ..FlowPages::default()
+    };
     let mut diagnostics = Vec::new();
     let mut page_map = Vec::new();
     let mut body_start_page = None;
@@ -2558,20 +2684,14 @@ fn paginate_with_cancellation(
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                let mut numbered_notes = prepare_numbered_notes(
-                    &mut blocks,
-                    chapter
-                        .get("notes")
-                        .and_then(Value::as_array)
-                        .map(Vec::as_slice)
-                        .unwrap_or_default(),
-                )
-                .map_err(|diagnostic| {
-                    Box::new(RenderResponse::failed(
-                        "rejected",
-                        diagnostic.with_source("chapter", string(chapter, "id")),
-                    ))
-                })?;
+                let (mut numbered_notes, numbered_pages) =
+                    prepare_numbered_notes(&mut blocks, chapter, request.protocol_version)
+                        .map_err(|diagnostic| {
+                            Box::new(RenderResponse::failed(
+                                "rejected",
+                                diagnostic.with_source("chapter", string(chapter, "id")),
+                            ))
+                        })?;
                 let include_chapter_heading = chapter
                     .get("includeHeading")
                     .and_then(Value::as_bool)
@@ -2648,20 +2768,23 @@ fn paginate_with_cancellation(
                     ));
                     if block_type.eq_ignore_ascii_case("DesignedPage") {
                         let composition_id = designed_page_id(&block, request.protocol_version);
-                        let composition = chapter
-                            .get("designedPages")
-                            .or_else(|| (request.protocol_version == 12).then(|| chapter.get("pageCompositions")).flatten())
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                            .find(|item| string(item, "id") == composition_id)
-                            .ok_or_else(|| Box::new(RenderResponse::failed(
+                        let composition = numbered_pages.get(&block_id).or_else(|| find_designed_page(
+                            chapter,
+                            &block,
+                            &composition_id,
+                            request.protocol_version,
+                        ))
+                        .ok_or_else(|| {
+                            Box::new(RenderResponse::failed(
                                 "rejected",
                                 Diagnostic::error(
                                     "PRESS_COMPOSITION_MISSING",
-                                    format!("Designed Page {block_id} references a missing composition."),
+                                    format!(
+                                        "Designed Page {block_id} references a missing composition."
+                                    ),
                                 ),
-                            )))?;
+                            ))
+                        })?;
                         let rendered = designed_pages(
                             composition,
                             document,
@@ -2702,9 +2825,10 @@ fn paginate_with_cancellation(
                     }
                     if block_type.eq_ignore_ascii_case("Table") {
                         features.insert("rich-table".to_owned());
-                        let first_page = append_semantic_table(&mut pages, &block, trim).map_err(
-                            |diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)),
-                        )?;
+                        let first_page = append_semantic_table(&mut pages, &block, document, trim)
+                            .map_err(|diagnostic| {
+                                Box::new(RenderResponse::failed("rejected", diagnostic))
+                            })?;
                         assign_semantic_order_since(
                             &mut pages,
                             &semantic_snapshot,
@@ -2951,6 +3075,7 @@ fn paginate_with_cancellation(
                             let content_runs = block_runs(document, &block, &style);
                             append_list_item_with_gap(
                                 &mut pages,
+                                &list_marker(&block),
                                 &text,
                                 &content_runs,
                                 trim,
@@ -2997,23 +3122,22 @@ fn paginate_with_cancellation(
                         });
                     }
                 }
-                append_footnotes(&mut pages, &numbered_notes, trim).map_err(|diagnostic| {
-                    Box::new(RenderResponse::failed(
-                        "rejected",
-                        diagnostic.with_source("chapter", string(chapter, "id")),
-                    ))
-                })?;
+                pages.footnotes.extend(
+                    numbered_notes
+                        .iter()
+                        .filter(|note| note.kind == "Footnote")
+                        .cloned(),
+                );
                 let chapter_endnotes = numbered_notes
                     .drain(..)
                     .filter(|note| note.kind == "Endnote")
                     .collect::<Vec<_>>();
-                if !chapter_endnotes.is_empty() {
-                    endnote_groups.push(EndnoteGroup {
-                        container_id: string(chapter, "id"),
-                        title: chapter_title.clone(),
-                        notes: chapter_endnotes,
-                    });
-                }
+                endnote_groups.push(EndnoteGroup {
+                    container_id: string(chapter, "id"),
+                    citation_container_id: format!("chapter:{}", string(chapter, "id")),
+                    title: chapter_title.clone(),
+                    notes: chapter_endnotes,
+                });
                 if let Some(page) = pages.get_mut(chapter_page_index) {
                     page.bookmark = (!chapter_title.is_empty()).then_some(chapter_title.clone());
                 }
@@ -3065,12 +3189,15 @@ fn paginate_with_cancellation(
     )?;
     let mut toc_converged = toc_index.is_none();
     if let Some(index) = toc_index {
-        let (replacements, converged) =
+        let (mut replacements, converged) =
             build_toc_pages(&chapter_entries, body_start_page.unwrap_or(1), trim)
                 .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
         toc_converged = converged;
         let toc_page_count = replacements.len();
         let delta = toc_page_count - 1;
+        for page in &mut replacements {
+            page.flow_page_id = None;
+        }
         pages.splice(index..=index, replacements);
         for page in &mut pages[index..index + toc_page_count] {
             for line in &mut page.lines {
@@ -3086,7 +3213,14 @@ fn paginate_with_cancellation(
             *page += delta;
         }
     }
-    append_endnotes(&mut pages, &mut endnote_groups, &page_map, trim);
+    if let Some(last_reserved) = pages.plan.heights.keys().max().copied() {
+        while pages.next_flow_id <= last_reserved {
+            pages.push(empty_body_page());
+        }
+    }
+    append_endnotes(&mut pages, &mut endnote_groups, &page_map, document, trim)
+        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+    append_bibliography(&mut pages, document, trim, &mut diagnostics);
     if request.cover.is_some() {
         features.insert("dedicated-cover".to_owned());
     }
@@ -3100,18 +3234,21 @@ fn paginate_with_cancellation(
     }
     normalize_paint_orders(&mut pages);
     assign_page_labels(&mut pages, body_start_page.unwrap_or(1));
-    Ok(LayoutDocument {
-        pages,
-        page_map,
-        features: features.into_iter().collect(),
-        diagnostics,
-        toc_converged,
+    Ok(LayoutPass {
+        layout: LayoutDocument {
+            pages: pages.pages,
+            page_map,
+            features: features.into_iter().collect(),
+            diagnostics,
+            toc_converged,
+        },
+        footnotes: pages.footnotes,
     })
 }
 
 #[allow(clippy::too_many_arguments)]
 fn append_inline_illustration(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     trim: &crate::model::Trim,
     semantic_id: &str,
     caption: &str,
@@ -3129,6 +3266,17 @@ fn append_inline_illustration(
     caption_placement: &str,
     keep_with_caption: bool,
 ) {
+    if let Some(earliest) = caption_runs
+        .iter()
+        .filter_map(|run| run.note_reference_id.as_ref())
+        .filter_map(|id| pages.plan.earliest_references.get(id))
+        .max()
+        .copied()
+    {
+        while pages.next_flow_id <= earliest {
+            pages.push(empty_body_page());
+        }
+    }
     let margin = trim.margin_inches * 72.0;
     let page_height = trim.height_inches * 72.0;
     let available_width = trim.width_inches * 72.0 - margin * 2.0;
@@ -3188,6 +3336,7 @@ fn append_inline_illustration(
         page.lines
             .last()
             .map_or(available_height, |line| line.y - line.size * 1.6 - margin)
+            - page.footnote_height
     });
     if remaining_height < required_height {
         pages.push(empty_body_page());
@@ -3570,6 +3719,8 @@ fn designed_page(
     }
     let mut page = LayoutPage {
         kind: PageKind::Designed,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: Some(scene_width),
         height_points: Some(scene_height),
         lines: Vec::new(),
@@ -3854,6 +4005,7 @@ fn designed_page(
                     for (index, (_, reference_runs)) in resolved.into_iter().enumerate() {
                         if index > 0 {
                             runs.push(LayoutRun {
+                                note_reference_id: None,
                                 text: separators[index - 1].to_owned(),
                                 face,
                                 underline: false,
@@ -4319,10 +4471,44 @@ fn flatten_composition_objects(scene: &Value) -> Result<Vec<Value>, Diagnostic> 
     Ok(result)
 }
 
+fn is_reference_atom(span: &Value) -> bool {
+    matches!(
+        string(span, "type").to_ascii_lowercase().as_str(),
+        "citation" | "notereference"
+    )
+}
+
+fn source_block_text(block: &Value) -> String {
+    if string(block, "type").eq_ignore_ascii_case("SceneBreak") {
+        return typography::defaults().scene_break.text.clone();
+    }
+    block["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|span| !is_reference_atom(span))
+        .map(|span| span["text"].as_str().unwrap_or(""))
+        .collect()
+}
+
+fn range_contains_atom(start: usize, end: usize, length: usize, offset: usize) -> bool {
+    offset >= start && (offset < end || offset == end && end == length)
+}
+
 fn resolve_content_reference(
     semantic_blocks: &[Value],
     reference: &Value,
 ) -> Result<String, Diagnostic> {
+    Ok(display_block_text(&resolve_content_reference_block(
+        semantic_blocks,
+        reference,
+    )?))
+}
+
+fn resolve_content_reference_block(
+    semantic_blocks: &[Value],
+    reference: &Value,
+) -> Result<Value, Diagnostic> {
     let block_id = string(reference, "blockId");
     let block = semantic_blocks
         .iter()
@@ -4333,37 +4519,57 @@ fn resolve_content_reference(
                 format!("Composition content reference '{block_id}' does not exist."),
             )
         })?;
-    let text = display_block_text(block);
-    let utf16_len = text.encode_utf16().count();
-    let start = reference
-        .get("startOffset")
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
-        .unwrap_or(0);
-    let end = reference
-        .get("endOffset")
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
-        .unwrap_or(utf16_len);
-    if end < start || end > utf16_len {
-        return Err(Diagnostic::error(
+    let source_text = source_block_text(block);
+    let length = source_text.encode_utf16().count();
+    let start = reference["startOffset"].as_u64().unwrap_or(0) as usize;
+    let end = reference["endOffset"]
+        .as_u64()
+        .map_or(length, |value| value as usize);
+    let invalid = || {
+        Diagnostic::error(
             "PRESS_COMPOSITION_RANGE_INVALID",
-            format!("Composition content reference '{block_id}' has an invalid range."),
-        ));
+            format!(
+                "Composition content reference '{block_id}' has an invalid Unicode text range."
+            ),
+        )
+    };
+    if end < start
+        || end > length
+        || start == end && length != 0
+        || utf16_offset_to_byte(&source_text, start).is_none()
+        || utf16_offset_to_byte(&source_text, end).is_none()
+    {
+        return Err(invalid());
     }
-    let start_byte = utf16_offset_to_byte(&text, start).ok_or_else(|| {
-        Diagnostic::error(
-            "PRESS_COMPOSITION_RANGE_INVALID",
-            format!("Composition content reference '{block_id}' splits a Unicode character."),
-        )
-    })?;
-    let end_byte = utf16_offset_to_byte(&text, end).ok_or_else(|| {
-        Diagnostic::error(
-            "PRESS_COMPOSITION_RANGE_INVALID",
-            format!("Composition content reference '{block_id}' splits a Unicode character."),
-        )
-    })?;
-    Ok(text[start_byte..end_byte].to_owned())
+    let mut cursor = 0;
+    let mut content = Vec::new();
+    for span in block["content"].as_array().into_iter().flatten() {
+        if is_reference_atom(span) {
+            if range_contains_atom(start, end, length, cursor) {
+                content.push(span.clone());
+            }
+            continue;
+        }
+        let text = span["text"].as_str().unwrap_or("");
+        let span_start = cursor;
+        cursor += text.encode_utf16().count();
+        let from = start.max(span_start);
+        let to = end.min(cursor);
+        if to <= from {
+            continue;
+        }
+        let from = utf16_offset_to_byte(text, from - span_start).ok_or_else(invalid)?;
+        let to = utf16_offset_to_byte(text, to - span_start).ok_or_else(invalid)?;
+        let mut sliced = span.clone();
+        sliced["text"] = Value::String(text[from..to].to_owned());
+        content.push(sliced);
+    }
+    let mut result = block.clone();
+    result["content"] = Value::Array(content);
+    if start > 0 && string(block, "type").eq_ignore_ascii_case("ListItem") {
+        result["type"] = Value::String("Paragraph".to_owned());
+    }
+    Ok(result)
 }
 
 fn resolve_content_reference_runs(
@@ -4372,67 +4578,10 @@ fn resolve_content_reference_runs(
     reference: &Value,
     style: &BlockStyle,
 ) -> Result<(String, Vec<LayoutRun>), Diagnostic> {
-    let text = resolve_content_reference(semantic_blocks, reference)?;
-    let block_id = string(reference, "blockId");
-    let block = semantic_blocks
-        .iter()
-        .find(|block| string(block, "id") == block_id)
-        .ok_or_else(|| {
-            Diagnostic::error(
-                "PRESS_COMPOSITION_REFERENCE_MISSING",
-                format!("Composition content reference '{block_id}' does not exist."),
-            )
-        })?;
-    let full_text = display_block_text(block);
-    let start = reference
-        .get("startOffset")
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
-        .unwrap_or(0);
-    let end = reference
-        .get("endOffset")
-        .and_then(Value::as_u64)
-        .map(|value| value as usize)
-        .unwrap_or_else(|| full_text.encode_utf16().count());
-    let mut cursor = 0usize;
-    let mut sliced_spans = Vec::new();
-    for span in block
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let source = span.get("text").and_then(Value::as_str).unwrap_or("");
-        let span_len = source.encode_utf16().count();
-        let span_start = cursor;
-        let span_end = cursor + span_len;
-        cursor = span_end;
-        let slice_start = start.max(span_start);
-        let slice_end = end.min(span_end);
-        if slice_end <= slice_start {
-            continue;
-        }
-        let relative_start = slice_start - span_start;
-        let relative_end = slice_end - span_start;
-        let start_byte = utf16_offset_to_byte(source, relative_start).ok_or_else(|| {
-            Diagnostic::error(
-                "PRESS_COMPOSITION_RANGE_INVALID",
-                format!("Composition content reference '{block_id}' splits a Unicode character."),
-            )
-        })?;
-        let end_byte = utf16_offset_to_byte(source, relative_end).ok_or_else(|| {
-            Diagnostic::error(
-                "PRESS_COMPOSITION_RANGE_INVALID",
-                format!("Composition content reference '{block_id}' splits a Unicode character."),
-            )
-        })?;
-        let mut sliced = span.clone();
-        sliced["text"] = Value::String(source[start_byte..end_byte].to_owned());
-        sliced_spans.push(sliced);
-    }
-    let mut sliced_block = block.clone();
-    sliced_block["content"] = Value::Array(sliced_spans);
-    Ok((text, block_runs(document, &sliced_block, style)))
+    let block = resolve_content_reference_block(semantic_blocks, reference)?;
+    let text = display_block_text(&block);
+    let runs = display_block_runs(document, &block, style, &text);
+    Ok((text, runs))
 }
 
 fn validate_semantic_coverage(
@@ -4451,7 +4600,7 @@ fn validate_semantic_coverage(
                     format!("Composition content reference '{block_id}' does not exist."),
                 )
             })?;
-        let text = display_block_text(block);
+        let text = source_block_text(block);
         let utf16_len = text.encode_utf16().count();
         let start = reference
             .get("startOffset")
@@ -4465,10 +4614,10 @@ fn validate_semantic_coverage(
             .unwrap_or(utf16_len);
         resolve_content_reference(semantic_blocks, reference)?;
         let entry = ranges.entry(block_id.clone()).or_default();
-        if entry
-            .iter()
-            .any(|(existing_start, existing_end)| start < *existing_end && *existing_start < end)
-        {
+        if entry.iter().any(|(existing_start, existing_end)| {
+            start < *existing_end && *existing_start < end
+                || (start, end) == (*existing_start, *existing_end)
+        }) {
             return Err(Diagnostic::error(
                 "PRESS_COMPOSITION_RANGE_OVERLAP",
                 format!("Composition content reference '{block_id}' overlaps another frame."),
@@ -4478,13 +4627,25 @@ fn validate_semantic_coverage(
     }
     let mut unplaced = 0;
     for block in semantic_blocks {
-        let text = display_block_text(block);
-        if text.trim().is_empty() {
-            continue;
-        }
+        let text = source_block_text(block);
         let block_id = string(block, "id");
         let mut block_ranges = ranges.remove(&block_id).unwrap_or_default();
         block_ranges.sort_unstable();
+        let mut atom_offset = 0;
+        let has_unplaced_atom = block["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|span| {
+                if is_reference_atom(span) {
+                    !block_ranges.iter().any(|(start, end)| {
+                        range_contains_atom(*start, *end, text.encode_utf16().count(), atom_offset)
+                    })
+                } else {
+                    atom_offset += span["text"].as_str().unwrap_or("").encode_utf16().count();
+                    false
+                }
+            });
         let mut cursor = 0;
         let mut has_gap = false;
         for (start, end) in block_ranges {
@@ -4497,7 +4658,7 @@ fn validate_semantic_coverage(
             cursor = end;
         }
         let cursor_byte = utf16_offset_to_byte(&text, cursor).expect("validated cursor");
-        if has_gap || !text[cursor_byte..].trim().is_empty() {
+        if has_unplaced_atom || has_gap || !text[cursor_byte..].trim().is_empty() {
             unplaced += 1;
         }
     }
@@ -4679,6 +4840,8 @@ fn split_facing_spread(page: LayoutPage, leaf_width: f32) -> Vec<LayoutPage> {
             let mut image_map = vec![None; page.images.len()];
             let mut leaf = LayoutPage {
                 kind: page.kind,
+                flow_page_id: None,
+                footnote_height: 0.0,
                 width_points: None,
                 height_points: None,
                 lines,
@@ -4788,11 +4951,13 @@ enum LeafSide {
 fn blank_page() -> LayoutPage {
     LayoutPage {
         kind: PageKind::Blank,
+        flow_page_id: None,
+        footnote_height: 0.0,
         ..empty_body_page()
     }
 }
 
-fn ensure_next_leaf(pages: &mut Vec<LayoutPage>, side: LeafSide) {
+fn ensure_next_leaf(pages: &mut FlowPages, side: LeafSide) {
     let next_page_is_recto = (pages.len() + 1) % 2 == 1;
     let needs_blank = match side {
         LeafSide::Recto => !next_page_is_recto,
@@ -4821,17 +4986,7 @@ fn chapter_begins_with_facing_spread(chapter: &Value, protocol_version: u32) -> 
         return false;
     }
     let composition_id = designed_page_id(block, protocol_version);
-    chapter
-        .get("designedPages")
-        .or_else(|| {
-            (protocol_version == 12)
-                .then(|| chapter.get("pageCompositions"))
-                .flatten()
-        })
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .find(|composition| string(composition, "id") == composition_id)
+    find_designed_page(chapter, block, &composition_id, protocol_version)
         .and_then(|composition| composition.get("variants"))
         .and_then(Value::as_array)
         .and_then(|variants| variants.first())
@@ -4941,7 +5096,7 @@ fn warn_front_matter_side(
 
 #[allow(clippy::too_many_arguments)]
 fn append_publication_sections(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     document: &Value,
     anchor: &str,
     target_id: Option<&str>,
@@ -4980,20 +5135,15 @@ fn append_publication_sections(
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let mut numbered_notes = prepare_numbered_notes(
-            &mut blocks,
-            section
-                .get("notes")
-                .and_then(Value::as_array)
-                .map(Vec::as_slice)
-                .unwrap_or_default(),
-        )
-        .map_err(|diagnostic| {
-            Box::new(RenderResponse::failed(
-                "rejected",
-                diagnostic.with_source("publication-section", section_id.clone()),
-            ))
-        })?;
+        let (mut numbered_notes, numbered_pages) =
+            prepare_numbered_notes(&mut blocks, section, protocol_version).map_err(
+                |diagnostic| {
+                    Box::new(RenderResponse::failed(
+                        "rejected",
+                        diagnostic.with_source("publication-section", section_id.clone()),
+                    ))
+                },
+            )?;
         let begins_with_flowing_content = blocks
             .first()
             .is_some_and(|block| !string(block, "type").eq_ignore_ascii_case("DesignedPage"));
@@ -5018,13 +5168,12 @@ fn append_publication_sections(
             }
             if block_type.eq_ignore_ascii_case("DesignedPage") {
                 let composition_id = designed_page_id(block, protocol_version);
-                let composition = section
-                    .get("designedPages")
-                    .or_else(|| (protocol_version == 12).then(|| section.get("pageCompositions")).flatten())
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .find(|item| string(item, "id") == composition_id)
+                let composition = numbered_pages.get(&block_id).or_else(|| find_designed_page(
+                    section,
+                    block,
+                    &composition_id,
+                    protocol_version,
+                ))
                     .ok_or_else(|| {
                         Box::new(RenderResponse::failed(
                             "rejected",
@@ -5100,7 +5249,7 @@ fn append_publication_sections(
             previous_was_designed_page = false;
             if block_type.eq_ignore_ascii_case("Table") {
                 let first_page =
-                    append_semantic_table(pages, block, trim).map_err(|diagnostic| {
+                    append_semantic_table(pages, block, document, trim).map_err(|diagnostic| {
                         Box::new(RenderResponse::failed(
                             "rejected",
                             diagnostic.with_source("publication-section", section_id.clone()),
@@ -5343,6 +5492,7 @@ fn append_publication_sections(
                 let content_runs = block_runs(document, block, &style);
                 append_list_item_with_gap(
                     pages,
+                    &list_marker(block),
                     &text,
                     &content_runs,
                     trim,
@@ -5379,23 +5529,22 @@ fn append_publication_sections(
                 });
             }
         }
-        append_footnotes(pages, &numbered_notes, trim).map_err(|diagnostic| {
-            Box::new(RenderResponse::failed(
-                "rejected",
-                diagnostic.with_source("publication-section", section_id.clone()),
-            ))
-        })?;
+        pages.footnotes.extend(
+            numbered_notes
+                .iter()
+                .filter(|note| note.kind == "Footnote")
+                .cloned(),
+        );
         let section_endnotes = numbered_notes
             .drain(..)
             .filter(|note| note.kind == "Endnote")
             .collect::<Vec<_>>();
-        if !section_endnotes.is_empty() {
-            endnote_groups.push(EndnoteGroup {
-                container_id: section_id,
-                title: string(section, "title"),
-                notes: section_endnotes,
-            });
-        }
+        endnote_groups.push(EndnoteGroup {
+            citation_container_id: format!("publication-section:{section_id}"),
+            container_id: section_id,
+            title: string(section, "title"),
+            notes: section_endnotes,
+        });
     }
     Ok(toc_index)
 }
@@ -5466,6 +5615,8 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
     }
     LayoutPage {
         kind: PageKind::Body,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: None,
         height_points: None,
         lines,
@@ -5552,7 +5703,7 @@ fn build_toc_pages_with_limit(
     let available_width = (trim.width_inches - trim.margin_inches * 2.0) * 72.0;
     let mut previous_page_count = None;
     for _ in 0..maximum_passes {
-        let mut pages = vec![toc_page(false, trim)];
+        let mut pages = FlowPages::from(vec![toc_page(false, trim)]);
         for (title, chapter_page) in entries {
             let folio = chapter_page.saturating_sub(body_start_page) + 1;
             let text = format!("{title}  ·  {folio}");
@@ -5612,6 +5763,8 @@ fn build_toc_pages_with_limit(
         if pages.len().is_multiple_of(2) {
             pages.push(LayoutPage {
                 kind: PageKind::Blank,
+                flow_page_id: None,
+                footnote_height: 0.0,
                 width_points: None,
                 height_points: None,
                 lines: Vec::new(),
@@ -5625,7 +5778,7 @@ fn build_toc_pages_with_limit(
             });
         }
         if previous_page_count == Some(pages.len()) {
-            return Ok((pages, true));
+            return Ok((pages.pages, true));
         }
         previous_page_count = Some(pages.len());
     }
@@ -5645,6 +5798,8 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
     let runs = single_run(text, FontFace::SansBold);
     LayoutPage {
         kind: PageKind::Body,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: None,
         height_points: None,
         lines: vec![LayoutLine {
@@ -5894,6 +6049,7 @@ struct NumberedNote {
 
 struct EndnoteGroup {
     container_id: String,
+    citation_container_id: String,
     title: String,
     notes: Vec<NumberedNote>,
 }
@@ -5987,44 +6143,94 @@ fn normalized_alignment(value: &str) -> String {
 
 fn prepare_numbered_notes(
     blocks: &mut [Value],
-    notes: &[Value],
-) -> Result<Vec<NumberedNote>, Diagnostic> {
-    let mut note_by_id = HashMap::new();
-    for note in notes {
-        let id = string(note, "id");
-        if id.is_empty() || note_by_id.insert(id.clone(), note).is_some() {
-            return Err(Diagnostic::error(
-                "PRESS_NOTE_INVALID",
-                "Notes require unique, non-empty stable IDs.",
-            ));
-        }
-    }
+    container: &Value,
+    protocol_version: u32,
+) -> Result<(Vec<NumberedNote>, HashMap<String, Value>), Diagnostic> {
+    let notes = container["notes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let note_by_id = index_notes(notes)?;
     let mut counts = HashMap::<String, usize>::new();
     let mut seen = HashSet::new();
     let mut numbered = Vec::new();
+    let mut pages = HashMap::new();
+    let scope = string(container, "id");
     for block in blocks {
         let root_block_id = string(block, "id");
+        if string(block, "type").eq_ignore_ascii_case("DesignedPage") {
+            let page_id = designed_page_id(block, protocol_version);
+            if let Some(source) = find_designed_page(container, block, &page_id, protocol_version) {
+                let mut page = source.clone();
+                let page_notes = page["semanticNotes"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let page_index = index_notes(&page_notes)?;
+                let mut page_seen = HashSet::new();
+                let mut semantic = page["semanticBlocks"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                for child in &mut semantic {
+                    number_block_note_references(
+                        child,
+                        &root_block_id,
+                        &format!("{scope}/{root_block_id}"),
+                        &page_index,
+                        &mut counts,
+                        &mut page_seen,
+                        &mut numbered,
+                    )?;
+                }
+                validate_note_coverage(page_seen.len(), page_index.len())?;
+                page["semanticBlocks"] = Value::Array(semantic);
+                pages.insert(root_block_id.clone(), page);
+            }
+            continue;
+        }
         number_block_note_references(
             block,
             &root_block_id,
+            &scope,
             &note_by_id,
             &mut counts,
             &mut seen,
             &mut numbered,
         )?;
     }
-    if seen.len() != note_by_id.len() {
+    validate_note_coverage(seen.len(), note_by_id.len())?;
+    Ok((numbered, pages))
+}
+
+fn index_notes(notes: &[Value]) -> Result<HashMap<String, &Value>, Diagnostic> {
+    let mut result = HashMap::new();
+    for note in notes {
+        let id = string(note, "id");
+        if id.is_empty() || result.insert(id, note).is_some() {
+            return Err(Diagnostic::error(
+                "PRESS_NOTE_INVALID",
+                "Notes require unique, non-empty stable IDs.",
+            ));
+        }
+    }
+    Ok(result)
+}
+
+fn validate_note_coverage(referenced: usize, owned: usize) -> Result<(), Diagnostic> {
+    if referenced != owned {
         return Err(Diagnostic::error(
             "PRESS_NOTE_INVALID",
             "Every note must have exactly one reference in its semantic document.",
         ));
     }
-    Ok(numbered)
+    Ok(())
 }
 
 fn number_block_note_references(
     block: &mut Value,
     root_block_id: &str,
+    scope: &str,
     notes: &HashMap<String, &Value>,
     counts: &mut HashMap<String, usize>,
     seen: &mut HashSet<String>,
@@ -6055,18 +6261,30 @@ fn number_block_note_references(
                     format!("Note '{note_id}' has an unsupported kind."),
                 ));
             }
-            let number = counts.get(&kind).copied().unwrap_or_default() + 1;
+            let number = note
+                .get("number")
+                .and_then(Value::as_u64)
+                .map(|number| number as usize)
+                .unwrap_or_else(|| counts.get(&kind).copied().unwrap_or_default() + 1);
+            if number == 0 || number > 1_000_000 {
+                return Err(Diagnostic::error(
+                    "PRESS_NOTE_INVALID",
+                    "A note number is outside the supported bounds.",
+                ));
+            }
             counts.insert(kind.clone(), number);
             let object = inline.as_object_mut().ok_or_else(|| {
                 Diagnostic::error("PRESS_NOTE_INVALID", "A note reference is not an object.")
             })?;
             object.insert("text".to_owned(), Value::String(number.to_string()));
+            let occurrence_id = format!("{scope}/{note_id}");
+            object.insert("noteId".to_owned(), Value::String(occurrence_id.clone()));
             object.insert(
                 "marks".to_owned(),
                 serde_json::json!([{ "type": "Superscript", "value": null }]),
             );
             numbered.push(NumberedNote {
-                id: note_id,
+                id: occurrence_id,
                 kind,
                 number,
                 reference_block_id: root_block_id.to_owned(),
@@ -6100,6 +6318,7 @@ fn number_block_note_references(
                     number_block_note_references(
                         nested,
                         root_block_id,
+                        scope,
                         notes,
                         counts,
                         seen,
@@ -6128,118 +6347,354 @@ fn resolve_note_reference_pages(
     }
 }
 
-fn note_text(note: &NumberedNote) -> String {
-    note.content
-        .iter()
-        .map(display_block_text)
-        .filter(|text| !text.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn append_footnotes(
-    pages: &mut Vec<LayoutPage>,
+fn plan_footnotes(
+    layout: &LayoutDocument,
     notes: &[NumberedNote],
-    trim: &crate::model::Trim,
-) -> Result<(), Diagnostic> {
-    let notes = notes
-        .iter()
-        .filter(|note| note.kind == "Footnote")
-        .collect::<Vec<_>>();
-    if notes.is_empty() {
-        return Ok(());
+    request: &RenderRequest,
+    previous: &FootnotePlan,
+) -> Result<FootnotePlan, Diagnostic> {
+    let trim = &request.trim;
+    let mut note_trim = trim.clone();
+    note_trim.body_font_size_points = (trim.body_font_size_points * 0.8).max(7.0);
+    note_trim.body_line_height = 1.1;
+    let maximum = (trim.height_inches - 2.0 * trim.margin_inches) * 72.0 * 0.4;
+    let step = note_trim.body_font_size_points * 1.1;
+    let gutter = step;
+    let capacity = ((maximum - gutter) / step).floor() as usize;
+    if capacity < 2 {
+        return Err(Diagnostic::error(
+            "UnplaceableFootnoteContent",
+            "The footnote region cannot hold two note lines.",
+        ));
     }
-    let mut style = BlockStyle::body(trim);
-    style.size = (trim.body_font_size_points * 0.8).max(7.0);
-    style.line_height = 1.1;
-    style.space_before = 1.0;
-    style.space_after = 1.0;
-    let maximum_lines = ((remaining_line_capacity(&empty_body_page(), trim, &style) as f32) * 0.4)
-        .floor()
-        .max(2.0) as usize;
+    let mut result = FootnotePlan {
+        earliest_references: previous.earliest_references.clone(),
+        ..FootnotePlan::default()
+    };
     for note in notes {
-        if note
-            .content
+        let (reference, reference_page) = layout
+            .pages
             .iter()
-            .any(|block| string(block, "type").eq_ignore_ascii_case("Figure"))
-        {
-            return Err(Diagnostic::error(
-                "UnplaceableFootnoteContent",
-                format!(
-                    "Footnote {} contains an unbreakable figure that cannot be placed in the bounded footnote region.",
-                    note.number
-                ),
-            ));
-        }
-        let text = format!("{}. {}", note.number, note_text(note));
-        let wrapped = wrap(&text, 92);
-        let mut offset = 0usize;
-        let mut continuation = false;
-        while offset < wrapped.len() {
-            let existing_footnote_lines = pages.last().map_or(0, |page| {
+            .enumerate()
+            .find_map(|(index, page)| {
                 page.lines
                     .iter()
-                    .filter(|line| line.semantic_parent_id.as_deref() == Some("footnotes"))
-                    .count()
-            });
-            let remaining_page_lines = pages.last().map_or(0, |page| {
-                if page.kind == PageKind::Body {
-                    remaining_line_capacity(page, trim, &style)
-                } else {
-                    0
-                }
-            });
-            let bounded_remaining = maximum_lines.saturating_sub(existing_footnote_lines);
-            if bounded_remaining == 0 || remaining_page_lines == 0 {
-                pages.push(empty_body_page());
-                continuation = true;
-                continue;
+                    .any(|line| {
+                        line.runs
+                            .iter()
+                            .any(|run| run.note_reference_id.as_deref() == Some(note.id.as_str()))
+                    })
+                    .then_some(page.flow_page_id.map(|id| (id, index + 1)))
+                    .flatten()
+            })
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "UnplaceableFootnoteContent",
+                    format!(
+                        "Footnote {} has no identifiable rendered reference.",
+                        note.number
+                    ),
+                )
+            })?;
+        result
+            .earliest_references
+            .entry(note.id.clone())
+            .and_modify(|value| *value = (*value).max(reference))
+            .or_insert(reference);
+        let units = footnote_units(note, &request.document, &note_trim)?;
+        let mut offset = 0;
+        let mut page_id = reference;
+        while offset < units.len() {
+            if page_id >= MAX_PAGES {
+                return Err(Diagnostic::error(
+                    "UnplaceableFootnoteContent",
+                    "Footnote continuation exceeds the page limit.",
+                ));
             }
-            let take = (wrapped.len() - offset)
-                .min(bounded_remaining)
-                .min(remaining_page_lines);
-            if take == 0 {
-                pages.push(empty_body_page());
-                continuation = true;
-                continue;
-            }
-            let chunk = if continuation {
-                let marker = format!("Footnote {} (continued) ", note.number);
-                format!("{marker}{}", wrapped[offset..offset + take].join(" "))
-            } else {
-                wrapped[offset..offset + take].join(" ")
-            };
-            let snapshot = pages
+            let page = layout
+                .pages
                 .iter()
-                .map(|page| (page.lines.len(), page.images.len()))
-                .collect::<Vec<_>>();
-            append_styled_text(pages, &chunk, trim, &style);
-            assign_semantic_order_since(
-                pages,
-                &snapshot,
-                100_000 + note.number as i32,
-                &format!("footnote-{}", note.id),
-                Some("footnotes"),
-                None,
-            );
+                .find(|page| page.flow_page_id == Some(page_id));
+            if page.is_some_and(|page| matches!(page.kind, PageKind::Blank | PageKind::Cover)) {
+                page_id += 1;
+                continue;
+            }
+            let page_maximum =
+                page.filter(|page| page.kind == PageKind::Designed)
+                    .map_or(maximum, |page| {
+                        let bottom = page
+                            .lines
+                            .iter()
+                            .filter(|line| !line.artifact)
+                            .map(|line| line.y - line.size * 0.3)
+                            .chain(page.images.iter().map(|image| image.y))
+                            .chain(page.shapes.iter().map(|shape| shape.y))
+                            .fold(trim.height_inches * 72.0, f32::min);
+                        maximum.min((bottom - trim.margin_inches * 72.0).max(0.0))
+                    });
+            let used = result.chunks.get(&page_id).map_or(0.0, |chunks| {
+                chunks
+                    .iter()
+                    .map(|chunk| {
+                        chunk.units.iter().map(|unit| unit.height).sum::<f32>()
+                            + if chunk.offset > 0 { step } else { 0.0 }
+                    })
+                    .sum::<f32>()
+            });
+            let continuation_height = if offset > 0 { step } else { 0.0 };
+            let remaining = page_maximum - gutter - used - continuation_height;
+            let minimum = if units[offset].images.is_empty()
+                && units
+                    .get(offset + 1)
+                    .is_none_or(|unit| unit.images.is_empty())
+            {
+                (units.len() - offset).min(2)
+            } else {
+                1
+            };
+            let minimum_height = units[offset..offset + minimum]
+                .iter()
+                .map(|unit| unit.height)
+                .sum::<f32>();
+            if minimum_height + gutter + continuation_height > maximum {
+                return Err(Diagnostic::error(
+                    "UnplaceableFootnoteContent",
+                    format!(
+                        "Footnote {} has content too tall for its bounded region.",
+                        note.number
+                    ),
+                ));
+            }
+            if remaining < minimum_height {
+                if offset == 0 && page.is_none_or(|page| page.kind == PageKind::Body) {
+                    result
+                        .earliest_references
+                        .insert(note.id.clone(), page_id + 1);
+                }
+                page_id += 1;
+                continue;
+            }
+            let mut take = 0;
+            let mut height = 0.0;
+            for unit in &units[offset..] {
+                let next_height = unit.height;
+                if height + next_height > remaining {
+                    break;
+                }
+                height += next_height;
+                take += 1;
+            }
+            result
+                .chunks
+                .entry(page_id)
+                .or_default()
+                .push(FootnoteChunk {
+                    note_id: note.id.clone(),
+                    number: note.number,
+                    reference_page,
+                    offset,
+                    units: units[offset..offset + take].to_vec(),
+                });
+            result
+                .heights
+                .insert(page_id, gutter + used + height + continuation_height);
             offset += take;
-            continuation = offset < wrapped.len();
+            page_id += 1;
         }
     }
-    Ok(())
+    Ok(result)
+}
+
+fn footnote_line_height(line: &LayoutLine) -> f32 {
+    line.size
+        * line
+            .runs
+            .iter()
+            .map(|run| run.size_scale)
+            .fold(1.0, f32::max)
+        * 1.2
+}
+
+fn footnote_plans_equal(left: &FootnotePlan, right: &FootnotePlan) -> bool {
+    left.heights == right.heights
+        && left.earliest_references == right.earliest_references
+        && left.chunks.len() == right.chunks.len()
+        && left.chunks.iter().all(|(page, chunks)| {
+            right.chunks.get(page).is_some_and(|other| {
+                chunks.len() == other.len()
+                    && chunks.iter().zip(other).all(|(a, b)| {
+                        a.note_id == b.note_id
+                            && a.offset == b.offset
+                            && a.units.len() == b.units.len()
+                    })
+            })
+        })
+}
+
+fn paint_footnotes(pages: &mut [LayoutPage], plan: &FootnotePlan, trim: &crate::model::Trim) {
+    let size = (trim.body_font_size_points * 0.8).max(7.0);
+    let step = size * 1.1;
+    let mut marker_pages = FlowPages::from(vec![empty_body_page()]);
+    let mut style = BlockStyle::body(trim);
+    style.size = size;
+    append_styled_text(&mut marker_pages, "Footnote", trim, &style);
+    let marker_template = marker_pages[0].lines[0].clone();
+    for page in pages {
+        let Some(chunks) = page.flow_page_id.and_then(|id| plan.chunks.get(&id)) else {
+            continue;
+        };
+        let mut y = trim.margin_inches * 72.0 + page.footnote_height - step;
+        for chunk in chunks {
+            let semantic_id = format!("footnote-{}", chunk.note_id);
+            let order = Some(100_000 + chunk.number as i32);
+            if chunk.offset > 0 {
+                let mut marker = marker_template.clone();
+                marker.text = format!("Footnote {} (continued)", chunk.number);
+                marker.runs = single_run(&marker.text, FontFace::SerifRegular);
+                marker.y = y - step * 0.8;
+                marker.semantic_id = Some(semantic_id.clone());
+                marker.semantic_parent_id = Some("footnotes".to_owned());
+                marker.reading_order = order;
+                marker.link_page = Some(chunk.reference_page);
+                page.lines.push(marker);
+                y -= step;
+            }
+            for unit in &chunk.units {
+                for template in &unit.lines {
+                    let mut line = template.clone();
+                    line.y += y;
+                    line.semantic_id = Some(semantic_id.clone());
+                    line.semantic_parent_id = Some("footnotes".to_owned());
+                    line.reading_order = order;
+                    line.link_page = Some(chunk.reference_page);
+                    page.lines.push(line);
+                }
+                for template in &unit.images {
+                    let mut image = template.clone();
+                    image.y += y;
+                    image.semantic_id = Some(semantic_id.clone());
+                    image.semantic_parent_id = Some("footnotes".to_owned());
+                    image.reading_order = order;
+                    page.images.push(image);
+                }
+                for template in &unit.shapes {
+                    let mut shape = template.clone();
+                    shape.y += y;
+                    shape.semantic_id = Some(semantic_id.clone());
+                    shape.semantic_parent_id = Some("footnotes".to_owned());
+                    page.shapes.push(shape);
+                }
+                y -= unit.height;
+            }
+        }
+    }
+}
+
+fn footnote_units(
+    note: &NumberedNote,
+    document: &Value,
+    trim: &crate::model::Trim,
+) -> Result<Vec<FootnoteUnit>, Diagnostic> {
+    let mut units = Vec::new();
+    for (index, block) in note.content.iter().enumerate() {
+        let mut template = FlowPages::from(vec![empty_body_page()]);
+        let fragment = NumberedNote {
+            content: vec![block.clone()],
+            ..note.clone()
+        };
+        append_note_blocks(&mut template, &fragment, document, trim, index == 0)?;
+        for page in template.pages {
+            if page.images.is_empty() && page.shapes.is_empty() {
+                for mut line in page.lines.into_iter().filter(|line| !line.artifact) {
+                    let height = footnote_line_height(&line);
+                    line.y = -height * 0.8;
+                    units.push(FootnoteUnit {
+                        lines: vec![line],
+                        images: vec![],
+                        shapes: vec![],
+                        height,
+                    });
+                }
+            } else {
+                let top = page
+                    .lines
+                    .iter()
+                    .map(|line| line.y + line.size * 0.9)
+                    .chain(page.images.iter().map(|image| image.y + image.height))
+                    .chain(page.shapes.iter().map(|shape| shape.y + shape.height))
+                    .fold(0.0, f32::max);
+                let bottom = page
+                    .lines
+                    .iter()
+                    .map(|line| line.y - line.size * 0.3)
+                    .chain(page.images.iter().map(|image| image.y))
+                    .chain(page.shapes.iter().map(|shape| shape.y))
+                    .fold(top, f32::min);
+                let mut unit = FootnoteUnit {
+                    lines: page.lines,
+                    images: page.images,
+                    shapes: page.shapes,
+                    height: top - bottom + 2.0,
+                };
+                unit.lines.retain(|line| !line.artifact);
+                for line in &mut unit.lines {
+                    line.y -= top;
+                }
+                for image in &mut unit.images {
+                    image.y -= top;
+                }
+                for shape in &mut unit.shapes {
+                    shape.y -= top;
+                }
+                units.push(unit);
+            }
+        }
+    }
+    Ok(units)
 }
 
 fn append_endnotes(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     groups: &mut [EndnoteGroup],
     page_map: &[PageMapEntry],
+    document: &Value,
     trim: &crate::model::Trim,
-) {
-    if !groups.iter().any(|group| !group.notes.is_empty()) {
-        return;
+) -> Result<(), Diagnostic> {
+    let citation_groups = document["citationBackMatter"]["notes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut has_heading = false;
+    for citation in &citation_groups {
+        if citation["entries"]
+            .as_array()
+            .is_some_and(|entries| !entries.is_empty())
+            && !groups
+                .iter()
+                .any(|group| group.citation_container_id == string(citation, "containerId"))
+        {
+            return Err(Diagnostic::error(
+                "PRESS_CITATION_CONTAINER_MISSING",
+                "Citation endnotes reference an absent publication document.",
+            ));
+        }
     }
-    pages.push(centered_page("Endnotes", "", trim));
-    for group in groups.iter_mut().filter(|group| !group.notes.is_empty()) {
+    for group in groups {
+        let citation_entries = citation_groups
+            .iter()
+            .filter(|citation| {
+                let id = string(citation, "containerId");
+                id == group.citation_container_id
+            })
+            .flat_map(|citation| citation["entries"].as_array().into_iter().flatten())
+            .collect::<Vec<_>>();
+        if group.notes.is_empty() && citation_entries.is_empty() {
+            continue;
+        }
+        if !has_heading {
+            pages.push(centered_page("Endnotes", "", trim));
+            has_heading = true;
+        }
         resolve_note_reference_pages(&mut group.notes, page_map, &group.container_id);
         let heading = if group.title.trim().is_empty() {
             "Untitled document"
@@ -6249,40 +6704,196 @@ fn append_endnotes(
         let mut heading_style = BlockStyle::chapter_heading(trim);
         heading_style.size = (trim.body_font_size_points * 1.2).max(11.0);
         append_styled_text(pages, heading, trim, &heading_style);
+        let mixed = !group.notes.is_empty() && !citation_entries.is_empty();
+        if mixed {
+            append_styled_text(pages, "Author notes", trim, &heading_style);
+        }
         for note in &group.notes {
-            let mut style = BlockStyle::body(trim);
-            style.first_line_indent = -18.0;
-            style.indent = 18.0;
             let snapshot = pages
                 .iter()
                 .map(|page| (page.lines.len(), page.images.len()))
                 .collect::<Vec<_>>();
-            append_styled_text(
-                pages,
-                &format!("{}. {}", note.number, note_text(note)),
-                trim,
-                &style,
-            );
+            append_note_blocks(pages, note, document, trim, true)?;
+            let semantic_id = format!("endnote-{}", note.id);
             assign_semantic_order_since(
                 pages,
                 &snapshot,
                 200_000 + note.number as i32,
-                &format!("endnote-{}", note.id),
+                &semantic_id,
                 Some(&format!("endnotes-{}", group.container_id)),
                 None,
             );
             if let Some(reference_page) = note.reference_page {
                 for page in pages.iter_mut().rev() {
-                    if let Some(line) = page.lines.iter_mut().rev().find(|line| {
-                        line.semantic_id.as_deref() == Some(&format!("endnote-{}", note.id))
-                    }) {
+                    if let Some(line) = page
+                        .lines
+                        .iter_mut()
+                        .rev()
+                        .find(|line| line.semantic_id.as_deref() == Some(&semantic_id))
+                    {
                         line.link_page = Some(reference_page);
                         break;
                     }
                 }
             }
         }
+        if mixed {
+            append_styled_text(pages, "Citations", trim, &heading_style);
+        }
+        for entry in citation_entries {
+            let number = entry["number"]
+                .as_u64()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "*".to_owned());
+            let mut style = BlockStyle::body(trim);
+            style.first_line_indent = -18.0;
+            style.indent = 18.0;
+            let mut runs = single_run(&format!("{number}. "), style.face);
+            runs.extend(citation_layout_runs(entry, &style));
+            let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+            append_styled_runs(pages, &text, &runs, trim, &style, None);
+        }
     }
+    Ok(())
+}
+
+fn append_note_blocks(
+    pages: &mut FlowPages,
+    note: &NumberedNote,
+    document: &Value,
+    trim: &crate::model::Trim,
+    include_number: bool,
+) -> Result<(), Diagnostic> {
+    for (index, block) in note.content.iter().enumerate() {
+        let block_type = string(block, "type");
+        let mut style = block_style(document, block, trim);
+        if include_number && index == 0 && matches!(block_type.as_str(), "Figure" | "Table") {
+            append_styled_text(pages, &format!("{}.", note.number), trim, &style);
+        }
+        if block_type.eq_ignore_ascii_case("Table") {
+            append_semantic_table(pages, block, document, trim)?;
+            continue;
+        }
+        if block_type.eq_ignore_ascii_case("Figure") {
+            let presentation = &block["presentation"];
+            let caption = block_text(block);
+            let runs = block_runs(document, block, &style);
+            let alignment = match string(presentation, "alignment").as_str() {
+                "Start" => "left",
+                "End" => "right",
+                _ => "center",
+            };
+            let caption_placement = string(presentation, "captionPlacement");
+            append_inline_illustration(
+                pages,
+                trim,
+                &string(block, "id"),
+                &caption,
+                &runs,
+                &style,
+                string(block, "assetId"),
+                presentation["widthPercent"].as_f64().unwrap_or(100.0) as f32,
+                presentation["cropXPercent"].as_f64().unwrap_or(50.0) as f32,
+                presentation["cropYPercent"].as_f64().unwrap_or(50.0) as f32,
+                alignment,
+                "None",
+                layout_image_fit(&string(presentation, "fit")),
+                presentation["spacingBeforePoints"].as_f64().unwrap_or(6.0) as f32,
+                presentation["spacingAfterPoints"].as_f64().unwrap_or(6.0) as f32,
+                if caption_placement.is_empty() {
+                    "Below"
+                } else {
+                    &caption_placement
+                },
+                true,
+            );
+            if let Some(image) = pages.last_mut().and_then(|page| page.images.last_mut()) {
+                image.alt_text = block["altText"].as_str().map(str::to_owned);
+                image.decorative = block["decorative"].as_bool().unwrap_or(false);
+                image.language = block["language"].as_str().map(str::to_owned);
+                image.accessibility_role = block["accessibilityRole"].as_str().map(str::to_owned);
+            }
+            continue;
+        }
+        let text = display_block_text(block);
+        let mut runs = display_block_runs(document, block, &style, &text);
+        if include_number && index == 0 {
+            style.indent += 18.0;
+            style.first_line_indent = -18.0;
+            runs.splice(0..0, single_run(&format!("{}. ", note.number), style.face));
+        }
+        let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+        append_styled_runs(
+            pages,
+            &text,
+            &runs,
+            trim,
+            &style,
+            block["language"].as_str(),
+        );
+    }
+    Ok(())
+}
+
+fn append_bibliography(
+    pages: &mut FlowPages,
+    document: &Value,
+    trim: &crate::model::Trim,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(back_matter) = document.get("citationBackMatter") else {
+        return;
+    };
+    for item in back_matter["diagnostics"].as_array().into_iter().flatten() {
+        let code = string(item, "code");
+        let message = string(item, "message");
+        if !code.is_empty() && !message.is_empty() {
+            diagnostics.push(Diagnostic::warning(&code, message));
+        }
+    }
+    let entries = back_matter["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if entries.is_empty() {
+        return;
+    }
+    let title = string(back_matter, "bibliographyTitle");
+    pages.push(centered_page(
+        if title.trim().is_empty() {
+            "Bibliography"
+        } else {
+            &title
+        },
+        "",
+        trim,
+    ));
+    let mut style = BlockStyle::body(trim);
+    style.first_line_indent = -36.0;
+    style.indent = 36.0;
+    for entry in entries {
+        let runs = citation_layout_runs(&entry, &style);
+        let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+        append_styled_runs(pages, &text, &runs, trim, &style, None);
+    }
+}
+
+fn citation_layout_runs(entry: &Value, style: &BlockStyle) -> Vec<LayoutRun> {
+    entry
+        .get("runs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|run| {
+            single_run(
+                &string(run, "text"),
+                style.face.with_weight(
+                    style.font_weight,
+                    run.get("italic").and_then(Value::as_bool).unwrap_or(false),
+                ),
+            )
+        })
+        .collect()
 }
 
 fn validate_table_grid(
@@ -6357,8 +6968,9 @@ fn validate_table_grid(
 }
 
 fn append_semantic_table(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     block: &Value,
+    document: &Value,
     trim: &crate::model::Trim,
 ) -> Result<usize, Diagnostic> {
     let table = block.get("table").ok_or_else(|| {
@@ -6444,6 +7056,15 @@ fn append_semantic_table(
                 "A table row span extends past the final row.",
             ));
         }
+        if let Some(earliest) = rows[row_index..group_end]
+            .iter()
+            .filter_map(|row| earliest_note_reference_page(row, &pages.plan))
+            .max()
+        {
+            while pages.next_flow_id <= earliest {
+                pages.push(empty_body_page());
+            }
+        }
         let group_lines = rows[row_index..group_end]
             .iter()
             .map(|row| table_row_estimated_lines(row, &weights, total_weight))
@@ -6491,6 +7112,7 @@ fn append_semantic_table(
                         let page = append_table_row(
                             pages,
                             header,
+                            document,
                             &weights,
                             total_weight,
                             trim,
@@ -6502,6 +7124,7 @@ fn append_semantic_table(
                 let page = append_table_cell_texts(
                     pages,
                     &segment,
+                    document,
                     &weights,
                     total_weight,
                     trim,
@@ -6526,6 +7149,7 @@ fn append_semantic_table(
                     let page = append_table_row(
                         pages,
                         header,
+                        document,
                         &weights,
                         total_weight,
                         trim,
@@ -6541,7 +7165,7 @@ fn append_semantic_table(
             } else {
                 &body_style
             };
-            let page = append_table_row(pages, row, &weights, total_weight, trim, style);
+            let page = append_table_row(pages, row, document, &weights, total_weight, trim, style);
             first_page.get_or_insert(page);
             row_index += 1;
         }
@@ -6549,9 +7173,31 @@ fn append_semantic_table(
     Ok(first_page.unwrap_or_else(|| pages.len().max(1)))
 }
 
+fn earliest_note_reference_page(value: &Value, plan: &FootnotePlan) -> Option<usize> {
+    if string(value, "type").eq_ignore_ascii_case("NoteReference") {
+        return plan
+            .earliest_references
+            .get(&string(value, "noteId"))
+            .copied();
+    }
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| earliest_note_reference_page(item, plan))
+            .max(),
+        Value::Object(fields) => fields
+            .values()
+            .filter_map(|item| earliest_note_reference_page(item, plan))
+            .max(),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn append_table_row(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     row: &Value,
+    document: &Value,
     weights: &[usize],
     total_weight: usize,
     trim: &crate::model::Trim,
@@ -6560,6 +7206,7 @@ fn append_table_row(
     append_table_cell_texts(
         pages,
         &table_row_cell_texts(row),
+        document,
         weights,
         total_weight,
         trim,
@@ -6572,14 +7219,14 @@ fn table_row_estimated_lines(row: &Value, weights: &[usize], total_weight: usize
 }
 
 fn table_cell_texts_estimated_lines(
-    cells: &[(String, usize)],
+    cells: &[(String, usize, Vec<Value>)],
     weights: &[usize],
     total_weight: usize,
 ) -> usize {
     let mut column = 0usize;
     cells
         .iter()
-        .map(|(text, span)| {
+        .map(|(text, span, _)| {
             let weight = weights
                 .iter()
                 .skip(column)
@@ -6595,7 +7242,7 @@ fn table_cell_texts_estimated_lines(
         .max(1)
 }
 
-fn table_row_cell_texts(row: &Value) -> Vec<(String, usize)> {
+fn table_row_cell_texts(row: &Value) -> Vec<(String, usize, Vec<Value>)> {
     row.get("cells")
         .and_then(Value::as_array)
         .into_iter()
@@ -6604,14 +7251,17 @@ fn table_row_cell_texts(row: &Value) -> Vec<(String, usize)> {
             (
                 table_cell_text(cell),
                 cell.get("columnSpan").and_then(Value::as_u64).unwrap_or(1) as usize,
+                cell["content"].as_array().cloned().unwrap_or_default(),
             )
         })
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_table_cell_texts(
-    pages: &mut Vec<LayoutPage>,
-    cells: &[(String, usize)],
+    pages: &mut FlowPages,
+    cells: &[(String, usize, Vec<Value>)],
+    document: &Value,
     weights: &[usize],
     total_weight: usize,
     trim: &crate::model::Trim,
@@ -6621,7 +7271,7 @@ fn append_table_cell_texts(
     let available_characters = 80usize.saturating_sub(separator_width).max(cells.len() * 4);
     let mut column = 0usize;
     let mut wrapped = Vec::with_capacity(cells.len());
-    for (text, span) in cells {
+    for (text, span, blocks) in cells {
         let weight = weights
             .iter()
             .skip(column)
@@ -6630,7 +7280,29 @@ fn append_table_cell_texts(
             .max(1);
         column = column.saturating_add(*span);
         let width = (available_characters.saturating_mul(weight) / total_weight).max(4);
-        wrapped.push((wrap(text, width), width));
+        let mut source_runs = Vec::new();
+        for (index, block) in blocks.iter().enumerate() {
+            if index > 0 {
+                source_runs.extend(single_run(" / ", style.face));
+            }
+            source_runs.extend(display_block_runs(
+                document,
+                block,
+                style,
+                &display_block_text(block),
+            ));
+        }
+        let mut offset = 0;
+        let lines = wrap(text, width)
+            .iter()
+            .map(|line| {
+                (
+                    line.clone(),
+                    runs_for_line(text, &source_runs, line, &mut offset),
+                )
+            })
+            .collect::<Vec<_>>();
+        wrapped.push((lines, width));
     }
     let line_count = wrapped
         .iter()
@@ -6638,22 +7310,31 @@ fn append_table_cell_texts(
         .max()
         .unwrap_or(1)
         .max(1);
-    let text = (0..line_count)
-        .map(|line_index| {
-            wrapped
-                .iter()
-                .map(|(lines, width)| {
-                    let value = lines.get(line_index).map(String::as_str).unwrap_or("");
-                    format!("{value:<width$}", width = *width)
-                })
-                .collect::<Vec<_>>()
-                .join(" | ")
-                .trim_end()
-                .to_owned()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    append_styled_text(pages, &text, trim, style)
+    let mut runs = Vec::new();
+    for line_index in 0..line_count {
+        if line_index > 0 {
+            runs.extend(single_run("\n", style.face));
+        }
+        for (cell_index, (lines, width)) in wrapped.iter().enumerate() {
+            if cell_index > 0 {
+                runs.extend(single_run(" | ", style.face));
+            }
+            let length = if let Some((text, cell_runs)) = lines.get(line_index) {
+                runs.extend(cell_runs.iter().cloned());
+                text.chars().count()
+            } else {
+                0
+            };
+            if cell_index + 1 < wrapped.len() {
+                runs.extend(single_run(
+                    &" ".repeat(width.saturating_sub(length)),
+                    style.face,
+                ));
+            }
+        }
+    }
+    let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+    append_styled_runs(pages, &text, &runs, trim, style, None)
 }
 
 fn table_row_has_row_span(row: &Value) -> bool {
@@ -6664,7 +7345,7 @@ fn table_row_has_row_span(row: &Value) -> bool {
         .any(|cell| cell.get("rowSpan").and_then(Value::as_u64).unwrap_or(1) > 1)
 }
 
-fn table_row_semantic_segments(row: &Value) -> Vec<Vec<(String, usize)>> {
+fn table_row_semantic_segments(row: &Value) -> Vec<Vec<(String, usize, Vec<Value>)>> {
     let cells = row
         .get("cells")
         .and_then(Value::as_array)
@@ -6687,7 +7368,16 @@ fn table_row_semantic_segments(row: &Value) -> Vec<Vec<(String, usize)>> {
                         .map(display_block_text)
                         .unwrap_or_default();
                     let span = cell.get("columnSpan").and_then(Value::as_u64).unwrap_or(1) as usize;
-                    (text, span)
+                    (
+                        text,
+                        span,
+                        cell["content"]
+                            .as_array()
+                            .and_then(|content| content.get(block_index))
+                            .cloned()
+                            .into_iter()
+                            .collect(),
+                    )
                 })
                 .collect()
         })
@@ -6725,12 +7415,13 @@ fn table_text(block: &Value) -> String {
 }
 
 fn append_styled_text(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     text: &str,
     trim: &crate::model::Trim,
     style: &BlockStyle,
 ) -> usize {
     let runs = vec![LayoutRun {
+        note_reference_id: None,
         text: text.to_owned(),
         face: style.face,
         underline: false,
@@ -6743,7 +7434,7 @@ fn append_styled_text(
 }
 
 fn append_styled_runs(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     text: &str,
     source_runs: &[LayoutRun],
     trim: &crate::model::Trim,
@@ -6753,8 +7444,10 @@ fn append_styled_runs(
     append_styled_runs_with_gap(pages, text, source_runs, trim, style, language, 0.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_list_item_with_gap(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
+    marker: &str,
     display_text: &str,
     content_runs: &[LayoutRun],
     trim: &crate::model::Trim,
@@ -6762,7 +7455,7 @@ fn append_list_item_with_gap(
     language: Option<&str>,
     previous_space_after: f32,
 ) -> usize {
-    let bullet = typography::defaults().list_item.bullet.as_str();
+    let bullet = marker;
     let content_text = display_text.strip_prefix(bullet).unwrap_or(display_text);
     let mut content_style = style.clone();
     content_style.first_line_indent = 0.0;
@@ -6837,7 +7530,7 @@ fn line_baseline_offset_points(size: f32, fallback_face: FontFace, runs: &[Layou
 }
 
 fn append_styled_runs_with_gap(
-    pages: &mut Vec<LayoutPage>,
+    pages: &mut FlowPages,
     text: &str,
     source_runs: &[LayoutRun],
     trim: &crate::model::Trim,
@@ -6942,6 +7635,23 @@ fn append_styled_runs_with_gap(
                 )
                 .min(remaining_lines);
             }
+        }
+        if let Some(permitted) = wrapped_runs[offset..offset + take].iter().position(|runs| {
+            runs.iter()
+                .filter_map(|run| run.note_reference_id.as_ref())
+                .any(|id| {
+                    pages
+                        .plan
+                        .earliest_references
+                        .get(id)
+                        .is_some_and(|earliest| *earliest >= pages.next_flow_id)
+                })
+        }) {
+            if permitted < trim.minimum_orphan_lines {
+                pages.push(empty_body_page());
+                continue;
+            }
+            take = permitted;
         }
         let page_number = pages.len();
         let page = pages.last_mut().expect("body page");
@@ -7141,7 +7851,7 @@ fn remaining_line_capacity_with_gap(
     style: &BlockStyle,
     previous_space_after: f32,
 ) -> usize {
-    let bottom = trim.margin_inches * 72.0;
+    let bottom = trim.margin_inches * 72.0 + page.footnote_height;
     let step = style.size * style.line_height.max(1.0);
     let first = next_flow_baseline_with_gap(page, trim, style, true, previous_space_after);
     if first - style.size * 0.30 < bottom {
@@ -7248,6 +7958,7 @@ fn runs_for_line(
     }
     if output.is_empty() && !line.is_empty() {
         output.push(LayoutRun {
+            note_reference_id: None,
             text: line.to_owned(),
             face: FontFace::SerifRegular,
             underline: false,
@@ -7263,6 +7974,8 @@ fn runs_for_line(
 fn empty_body_page() -> LayoutPage {
     LayoutPage {
         kind: PageKind::Body,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: None,
         height_points: None,
         lines: Vec::new(),
@@ -7469,6 +8182,14 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.alignment = normalized_alignment(&defaults.text_align);
             style.semantic_role = LayoutSemanticRole::ListItem;
             style.indent = defaults.left_indent_em * style.size;
+            style.indent += block
+                .get("list")
+                .and_then(|list| list.get("level"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(8) as f32
+                * 1.5
+                * style.size;
             style.first_line_indent = -defaults.hanging_indent_em * style.size;
             style.space_before = defaults.space_before_points;
             style.space_after = defaults.space_after_points;
@@ -7725,6 +8446,9 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                 (0.0, 1.0)
             };
             let run = LayoutRun {
+                note_reference_id: string(span, "type")
+                    .eq_ignore_ascii_case("NoteReference")
+                    .then(|| string(span, "noteId")),
                 text,
                 face: regular_face(family).with_weight(weight, italic),
                 underline: has("Underline") || has("Link"),
@@ -7737,13 +8461,39 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                     * inline_scale,
                 language,
             };
+            let runs =
+                if let Some(citation_runs) = span.get("citationRuns").and_then(Value::as_array) {
+                    citation_runs
+                        .iter()
+                        .map(|citation_run| LayoutRun {
+                            text: string(citation_run, "text"),
+                            face: regular_face(family).with_weight(
+                                weight,
+                                citation_run
+                                    .get("italic")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false)
+                                    || italic,
+                            ),
+                            ..run.clone()
+                        })
+                        .collect()
+                } else {
+                    vec![run]
+                };
             if small_caps {
-                Some(synthetic_small_caps(
-                    run,
-                    typography::defaults().inline.small_caps.lowercase_scale,
-                ))
+                Some(
+                    runs.into_iter()
+                        .flat_map(|run| {
+                            synthetic_small_caps(
+                                run,
+                                typography::defaults().inline.small_caps.lowercase_scale,
+                            )
+                        })
+                        .collect(),
+                )
             } else {
-                Some(vec![run])
+                Some(runs)
             }
         })
         .flatten()
@@ -7811,6 +8561,7 @@ fn regular_face(family: FontFamily) -> FontFace {
 fn single_run(text: &str, face: FontFace) -> Vec<LayoutRun> {
     (!text.is_empty())
         .then(|| LayoutRun {
+            note_reference_id: None,
             text: text.to_owned(),
             face,
             underline: false,
@@ -7823,11 +8574,20 @@ fn single_run(text: &str, face: FontFace) -> Vec<LayoutRun> {
         .collect()
 }
 
+fn list_marker(block: &Value) -> String {
+    let list = &block["list"];
+    if list["ordered"].as_bool().unwrap_or(false) {
+        format!("{}. ", list["start"].as_u64().unwrap_or(1))
+    } else {
+        typography::defaults().list_item.bullet.clone()
+    }
+}
+
 fn display_block_text(block: &Value) -> String {
     let text = block_text(block);
     match string(block, "type").to_ascii_lowercase().as_str() {
         "scenebreak" => typography::defaults().scene_break.text.clone(),
-        "listitem" => format!("{}{text}", typography::defaults().list_item.bullet),
+        "listitem" => format!("{}{text}", list_marker(block)),
         _ => text,
     }
 }
@@ -7840,6 +8600,10 @@ fn display_block_runs(
 ) -> Vec<LayoutRun> {
     match string(block, "type").to_ascii_lowercase().as_str() {
         "scenebreak" => single_run(display_text, style.face),
+        "listitem" => single_run(&list_marker(block), style.face)
+            .into_iter()
+            .chain(block_runs(document, block, style))
+            .collect(),
         _ => block_runs(document, block, style),
     }
 }
@@ -7854,6 +8618,13 @@ fn block_has_marks(block: &Value) -> bool {
             span.get("marks")
                 .and_then(Value::as_array)
                 .is_some_and(|marks| !marks.is_empty())
+                || span
+                    .get("citationRuns")
+                    .and_then(Value::as_array)
+                    .is_some_and(|runs| {
+                        runs.iter()
+                            .any(|run| run.get("italic").and_then(Value::as_bool).unwrap_or(false))
+                    })
         })
 }
 
@@ -7942,6 +8713,8 @@ fn dedicated_figure_page_with_layout(
     let image_height = available_height * 0.75;
     LayoutPage {
         kind: PageKind::Designed,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: None,
         height_points: None,
         lines: caption_lines
@@ -8025,6 +8798,8 @@ fn dedicated_figure_page_with_layout(
 fn blank_cover_layout(width: f32, height: f32) -> LayoutPage {
     LayoutPage {
         kind: PageKind::Cover,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: Some(width),
         height_points: Some(height),
         lines: Vec::new(),
@@ -8204,6 +8979,8 @@ fn cover_layout(
     }
     Ok(LayoutPage {
         kind: PageKind::Cover,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: Some(width),
         height_points: Some(height),
         lines,
@@ -8300,6 +9077,8 @@ fn digital_cover_layout(
     )?);
     Ok(LayoutPage {
         kind: PageKind::Cover,
+        flow_page_id: None,
+        footnote_height: 0.0,
         width_points: None,
         height_points: None,
         lines,
@@ -8733,10 +9512,12 @@ fn cover_text_lines(
         .collect())
 }
 
-fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim, leading_page_count: usize) {
+fn start_recto(pages: &mut FlowPages, trim: &crate::model::Trim, leading_page_count: usize) {
     if trim.recto_chapter_starts && (leading_page_count + pages.len() + 1).is_multiple_of(2) {
         pages.push(LayoutPage {
             kind: PageKind::Blank,
+            flow_page_id: None,
+            footnote_height: 0.0,
             width_points: None,
             height_points: None,
             lines: Vec::new(),
@@ -8905,6 +9686,31 @@ fn designed_page_id(value: &Value, protocol_version: u32) -> String {
     } else {
         current
     }
+}
+
+fn find_designed_page<'a>(
+    container: &'a Value,
+    placement: &Value,
+    designed_page_id: &str,
+    protocol_version: u32,
+) -> Option<&'a Value> {
+    let placement_id = string(placement, "id");
+    container
+        .get("designedPages")
+        .or_else(|| {
+            (protocol_version == 12)
+                .then(|| container.get("pageCompositions"))
+                .flatten()
+        })
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|composition| {
+            string(composition, "id") == designed_page_id
+                && (protocol_version < 15
+                    || string(composition, "placementId").is_empty()
+                    || string(composition, "placementId") == placement_id)
+        })
 }
 
 fn contains_legacy_designed_page_contract(value: &Value) -> bool {
@@ -9082,6 +9888,7 @@ mod tests {
             "W".repeat(80)
         );
         let runs = vec![LayoutRun {
+            note_reference_id: None,
             text: text.clone(),
             face: FontFace::SerifRegular,
             underline: false,
@@ -9090,7 +9897,7 @@ mod tests {
             size_scale: 1.0,
             language: None,
         }];
-        let mut pages = Vec::new();
+        let mut pages = FlowPages::default();
         append_styled_runs(&mut pages, &text, &runs, &trim, &style, None);
         let available = (trim.width_inches - 2.0 * trim.margin_inches) * 72.0;
 
@@ -9115,7 +9922,7 @@ mod tests {
     #[test]
     fn paragraph_releases_float_exclusion_below_image_and_on_later_pages() {
         let trim = standard_trim();
-        let mut pages = vec![empty_body_page()];
+        let mut pages = FlowPages::from(vec![empty_body_page()]);
         append_inline_illustration(
             &mut pages,
             &trim,
@@ -9176,7 +9983,7 @@ mod tests {
             minimum_widow_lines: 2,
             minimum_orphan_lines: 2,
         };
-        let mut pages = Vec::new();
+        let mut pages = FlowPages::default();
         append_styled_text(
             &mut pages,
             &"A measured sentence fills a narrow page safely. ".repeat(20),
@@ -9211,7 +10018,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 14,
+            protocol_version: 15,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,
@@ -9433,10 +10240,11 @@ mod tests {
             style.alignment = alignment.to_owned();
             let display_text = display_block_text(&block);
             let content_runs = block_runs(&Value::Null, &block, &style);
-            let mut pages = vec![empty_body_page()];
+            let mut pages = FlowPages::from(vec![empty_body_page()]);
             let snapshot = vec![(0usize, 0usize)];
             append_list_item_with_gap(
                 &mut pages,
+                marker,
                 &display_text,
                 &content_runs,
                 &trim,
@@ -9544,7 +10352,7 @@ mod tests {
             minimum_widow_lines: 2,
             minimum_orphan_lines: 2,
         };
-        let mut pages = vec![empty_body_page()];
+        let mut pages = FlowPages::from(vec![empty_body_page()]);
         let chapter_heading = BlockStyle::chapter_heading(&trim);
         append_styled_text(&mut pages, "Chapter heading", &trim, &chapter_heading);
         let heading = BlockStyle {
@@ -9636,6 +10444,7 @@ mod tests {
         assert!((regular - expected_regular).abs() < 0.0001);
 
         let scaled_runs = vec![LayoutRun {
+            note_reference_id: None,
             text: "large".to_owned(),
             face: FontFace::SansRegular,
             underline: false,
@@ -9653,6 +10462,7 @@ mod tests {
 
         let mixed_runs = vec![
             LayoutRun {
+                note_reference_id: None,
                 text: "base".to_owned(),
                 face: regular_face,
                 underline: false,
@@ -9662,6 +10472,7 @@ mod tests {
                 language: None,
             },
             LayoutRun {
+                note_reference_id: None,
                 text: "subscript".to_owned(),
                 face: FontFace::SansRegular,
                 underline: false,
@@ -10377,9 +11188,10 @@ mod tests {
             "type": "Table",
             "table": {"id": "table", "columnWidthWeights": [1], "headerRowCount": 1, "rows": rows}
         });
-        let mut pages = vec![empty_body_page()];
+        let mut pages = FlowPages::from(vec![empty_body_page()]);
 
-        append_semantic_table(&mut pages, &block, &standard_trim()).expect("table layout");
+        append_semantic_table(&mut pages, &block, &Value::Null, &standard_trim())
+            .expect("table layout");
 
         assert!(pages.len() > 1);
         assert!(
@@ -10403,9 +11215,13 @@ mod tests {
             }]}
         });
 
-        let diagnostic =
-            append_semantic_table(&mut vec![empty_body_page()], &block, &standard_trim())
-                .expect_err("oversized row must fail");
+        let diagnostic = append_semantic_table(
+            &mut FlowPages::from(vec![empty_body_page()]),
+            &block,
+            &Value::Null,
+            &standard_trim(),
+        )
+        .expect_err("oversized row must fail");
 
         assert_eq!(&*diagnostic.code, "UnplaceableTableRowGroup");
     }
@@ -10424,9 +11240,9 @@ mod tests {
                     ]}]
             }]}
         });
-        let mut pages = vec![empty_body_page()];
+        let mut pages = FlowPages::from(vec![empty_body_page()]);
 
-        append_semantic_table(&mut pages, &block, &standard_trim())
+        append_semantic_table(&mut pages, &block, &Value::Null, &standard_trim())
             .expect("semantic block boundaries make the row splittable");
 
         assert!(pages.len() > 1);
@@ -10459,7 +11275,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 14,
+            protocol_version: 15,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             render_scope: RenderScope::Book,

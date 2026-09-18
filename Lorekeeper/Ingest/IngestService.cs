@@ -835,14 +835,15 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
 
     public async Task DeleteSourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
     {
-        var usage = await GetSourceDeletionUsageAsync(sourceId, cancellationToken);
-        if (usage.HasLiveUsages)
-            throw new InvalidOperationException("Source deletion is blocked until every reported source usage is explicitly resolved or detached.");
-
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         operation.ShareWithNestedOperations();
         var source = await operation.Repositories.Ingest.GetSourceAsync(sourceId, cancellationToken);
         if (source is null) return;
+        // Check under the same write lease as deletion so a new bibliography or
+        // evidence reference cannot appear between the usage check and the delete.
+        var usage = await GetSourceDeletionUsageAsync(sourceId, cancellationToken);
+        if (usage.HasLiveUsages)
+            throw new InvalidOperationException("Source deletion is blocked until every reported source usage is explicitly resolved or detached.");
         await vectors.DeleteBySourceAsync("ingest_source", source.VectorSourceId, Project.ScopeKey(source.ProjectId), cancellationToken);
         await contextIndexing.DeleteIngestSourceAsync(source.ProjectId, sourceId, cancellationToken);
         await graphSync.RemoveSourceAsync(source.ProjectId, sourceId, cancellationToken);

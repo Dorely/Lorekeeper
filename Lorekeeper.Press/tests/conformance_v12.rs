@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 14);
+    assert_eq!(value["protocolVersion"], 15);
     assert_eq!(value["rendererVersion"], "2.1.10");
     assert_eq!(
         value["profiles"],
@@ -65,7 +65,7 @@ fn v12_fixture_is_read_at_the_boundary_and_returns_the_current_protocol() {
         String::from_utf8_lossy(&output.stdout),
         stderr(&output)
     );
-    assert_eq!(response(&output)["protocolVersion"], 14);
+    assert_eq!(response(&output)["protocolVersion"], 15);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn v13_fixture_uses_current_designed_page_names() {
     );
     let output = job.render();
     assert!(output.status.success(), "stderr={}", stderr(&output));
-    assert_eq!(response(&output)["protocolVersion"], 14);
+    assert_eq!(response(&output)["protocolVersion"], 15);
 }
 
 #[test]
@@ -114,12 +114,322 @@ fn v14_fixture_renders_rich_tables_and_note_atoms() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 14);
+    assert_eq!(response["protocolVersion"], 15);
     assert!(response["pageMap"].as_array().is_some_and(|entries| {
         entries
             .iter()
             .any(|entry| entry["blockId"] == "table-block-a")
     }));
+}
+
+#[test]
+fn v15_footnote_artwork_fits_or_reports_unplaceable_content() {
+    for (width, fits) in [(20, true), (100, false)] {
+        let mut job = PreparedJob::from_fixture_with_profile(
+            "rich-content-v14.json",
+            "generic-digital-pdf-v1",
+        );
+        job.request["protocolVersion"] = json!(15);
+        job.request["document"]["sections"][0]["chapters"][0]["notes"][0]["content"] = json!([{
+            "id":"note-image", "type":"Figure", "assetId":"90000000-0000-0000-0000-000000000001",
+            "altText":"An illustration in a note", "decorative":false,
+            "presentation":{"widthPercent":width,"captionPlacement":"Below","fit":"Contain"},
+            "content":[{"type":"Text","text":"A retained caption.","marks":[]}]
+        }]);
+        job.write_request();
+        if fits {
+            let trace = job.layout_trace();
+            let image = trace["pages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|page| page["images"].as_array().unwrap())
+                .find(|image| image["semanticParentId"] == "footnotes")
+                .expect("retained note artwork");
+            assert_eq!(image["altText"], "An illustration in a note");
+            assert!(image["y"].as_f64().unwrap() >= 54.0);
+        }
+        let output = job.render();
+        if fits {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        } else {
+            assert!(has_diagnostic(
+                &response(&output),
+                "UnplaceableFootnoteContent"
+            ));
+        }
+    }
+}
+
+#[test]
+fn v15_footnotes_reserve_space_at_references_and_continue_with_styled_table_atoms() {
+    let mut job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    job.request["protocolVersion"] = json!(15);
+    let chapter = &mut job.request["document"]["sections"][0]["chapters"][0];
+    let atom = chapter["blocks"][0]["content"]
+        .as_array_mut()
+        .unwrap()
+        .pop()
+        .unwrap();
+    chapter["blocks"][1]["table"]["rows"][1]["cells"][1]["content"][0]["content"] = json!([
+        {"type":"Text","text":"Styled evidence", "marks":[{"type":"Emphasis"}]}, atom
+    ]);
+    chapter["notes"][0]["content"][0]["content"][0]["text"] = json!(
+        "A long retained note with citation formatting and measured line wrapping. ".repeat(90)
+    );
+    chapter["notes"][0]["content"][0]["content"][0]["marks"] = json!([{"type":"Emphasis"}]);
+    job.write_request();
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().unwrap();
+    let reference_page = pages
+        .iter()
+        .position(|page| {
+            page["lines"].as_array().unwrap().iter().any(|line| {
+                line["runs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|run| run["noteReferenceId"].as_str().is_some())
+            })
+        })
+        .expect("table reference retains identity");
+    let mut continuation = false;
+    for (index, page) in pages.iter().enumerate() {
+        let lines = page["lines"].as_array().unwrap();
+        let notes = lines
+            .iter()
+            .filter(|line| line["semanticParentId"] == "footnotes")
+            .collect::<Vec<_>>();
+        if notes.is_empty() {
+            continue;
+        }
+        assert!(
+            index >= reference_page,
+            "notes cannot precede their reference"
+        );
+        if index == reference_page {
+            assert!(notes.len() >= 2, "reference page notes: {notes:?}");
+        }
+        let top = notes
+            .iter()
+            .map(|line| line["y"].as_f64().unwrap())
+            .fold(0.0, f64::max);
+        assert!(top <= 54.0 + (648.0 - 108.0) * 0.4, "40% reservation bound");
+        for line in lines
+            .iter()
+            .filter(|line| line["semanticParentId"] != "footnotes" && line["artifact"] != true)
+        {
+            assert!(
+                line["y"].as_f64().unwrap() > top,
+                "body must remain above the note region"
+            );
+        }
+        continuation |= notes
+            .iter()
+            .any(|line| line["text"].as_str().unwrap().contains("(continued)"));
+        assert!(
+            notes
+                .iter()
+                .flat_map(|line| line["runs"].as_array().unwrap())
+                .any(|run| run["face"]
+                    .as_str()
+                    .is_some_and(|face| face.contains("Italic"))),
+            "note italics survive continuation"
+        );
+    }
+    assert!(continuation);
+    assert!(
+        pages[reference_page]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line["semanticParentId"] == "footnotes")
+    );
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+}
+
+#[test]
+fn v15_renders_citation_text_and_generated_back_matter() {
+    let mut job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    job.request["protocolVersion"] = json!(15);
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"][0]["content"]
+        .as_array_mut()
+        .expect("paragraph content")
+        .insert(
+            1,
+            json!({
+                "id": "citation-a",
+                "type": "Citation",
+                "text": "(Nguyen, 2024, p. 42)",
+                "marks": []
+            }),
+        );
+    job.request["document"]["citationBackMatter"] = json!({
+        "notes": [{
+            "containerId": "chapter:20000000-0000-0000-0000-000000000001",
+            "title": "Tables and notes",
+            "entries": [{"number": 1, "runs": [
+                {"text": "Linh Nguyen, "}, {"text": "Maps of Quiet Water", "italic": true}, {"text": ", 42."}
+            ]}]
+        }],
+        "bibliographyTitle": "Bibliography",
+        "entries": [{"runs": [
+            {"text": "Nguyen, Linh. "}, {"text": "Maps of Quiet Water", "italic": true},
+            {"text": ". North Window Press, 2024."}
+        ]}],
+        "diagnostics": []
+    });
+    job.request["document"]["sections"][0]["chapters"][0]["notes"][0]["kind"] = json!("Endnote");
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let text = trace["pages"]
+        .as_array()
+        .expect("layout pages")
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .filter_map(|line| line["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(text.contains("(Nguyen, 2024, p. 42)"));
+    assert_eq!(text.matches("Endnotes").count(), 1);
+    assert!(text.contains("Author notes"));
+    assert!(text.contains("Citations"));
+    assert!(text.find("Endnotes").unwrap() < text.find("Bibliography").unwrap());
+    assert!(text.contains("Linh Nguyen, Maps of Quiet Water, 42."));
+    assert!(text.contains("Bibliography"));
+    assert!(text.contains("Nguyen, Linh. Maps of Quiet Water."));
+}
+
+#[test]
+fn v15_list_markers_preserve_resolved_numbers_and_nesting() {
+    // Typography evidence matrix: semantic list markers and hanging indentation.
+    let mut job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    job.request["protocolVersion"] = json!(15);
+    let chapter = &mut job.request["document"]["sections"][0]["chapters"][0];
+    chapter["notes"] = json!([]);
+    chapter["blocks"] = json!([
+        {"id":"list-first","type":"ListItem","list":{"id":"sequence","ordered":true,"level":0,"start":7},
+            "content":[{"type":"Text","text":"First numbered item","marks":[]}]},
+        {"id":"list-nested","type":"ListItem","list":{"id":"sequence","ordered":true,"level":1,"start":1},
+            "content":[{"type":"Text","text":"Nested numbered item","marks":[]}]},
+        {"id":"list-second","type":"ListItem","list":{"id":"sequence","ordered":true,"level":0,"start":8},
+            "content":[{"type":"Text","text":"Second numbered item","marks":[]}]}
+    ]);
+    job.write_request();
+    let trace = job.layout_trace();
+    let lines = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    let marker = |text: &str| {
+        lines
+            .iter()
+            .find(|line| line["artifact"] == true && line["text"] == text)
+            .unwrap()
+    };
+    assert!(marker("1. ")["x"].as_f64().unwrap() > marker("7. ")["x"].as_f64().unwrap());
+    assert_eq!(marker("8. ")["x"], marker("7. ")["x"]);
+    let output = job.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+}
+
+#[test]
+fn v15_repeated_designed_pages_keep_note_occurrences_and_atom_range_offsets() {
+    // Composition and publication evidence: stored frame offsets exclude reference atoms.
+    let mut job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    job.request["protocolVersion"] = json!(15);
+    let chapter = &mut job.request["document"]["sections"][0]["chapters"][0];
+    chapter["notes"] = json!([]);
+    chapter["blocks"] = json!([
+        {"id":"first-placement","type":"DesignedPage","designedPageId":"shared"},
+        {"id":"second-placement","type":"DesignedPage","designedPageId":"shared"}
+    ]);
+    chapter["designedPages"] = json!([]);
+    for (placement, number) in [("first-placement", 1), ("second-placement", 2)] {
+        chapter["designedPages"].as_array_mut().unwrap().push(json!({
+            "id":"shared", "placementId":placement, "name":"Shared page", "revision":0,
+            "semanticBlocks":[{"id":"copy","type":"Paragraph","content":[
+                {"id":"ref","type":"NoteReference","noteId":"note","text":"","marks":[]},
+                {"type":"Text","text":"Text","marks":[]},
+                {"id":"cite","type":"Citation","text":"(River, 2024)","marks":[]}
+            ]}],
+            "semanticNotes":[{"id":"note","kind":"Endnote","number":number,
+                "content":[{"id":"note-body","type":"Paragraph","content":[{"type":"Text","text":"Repeated page note.","marks":[]}]}]}],
+            "variants":[{"id":"variant","geometryKey":"page","revision":0,"scene":{
+                "schemaVersion":1,
+                "surface":{"kind":"IndependentPage","outputPageMode":"SingleSurface","widthPoints":432,"heightPoints":648,"bleedPoints":0,"safeInsetPoints":24},
+                "layers":[{"id":"layer","name":"Text","order":0,"visible":true}],
+                "objects":[{"id":"frame","layerId":"layer","kind":"Text","visible":true,
+                    "bounds":{"xPercent":10,"yPercent":10,"widthPercent":80,"heightPercent":20},
+                    "contentReferences":[{"blockId":"copy","startOffset":0,"endOffset":4}],
+                    "fontFamilyKey":"serif","fontSizePoints":11,"semanticRole":"Paragraph","readingOrder":1}]
+            }}]
+        }));
+    }
+    job.write_request();
+    let trace = job.layout_trace();
+    let lines = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    for number in [1, 2] {
+        assert!(
+            lines.iter().any(|line| line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(&format!("{number}Text(River, 2024)")))),
+            "missing reference occurrence {number}: {lines:?}"
+        );
+        assert!(lines.iter().any(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(&format!("{number}. Repeated page note.")))
+        }));
+    }
+    for page in job.request["document"]["sections"][0]["chapters"][0]["designedPages"]
+        .as_array_mut()
+        .unwrap()
+    {
+        page["semanticNotes"][0]["kind"] = json!("Footnote");
+    }
+    job.write_request();
+    let trace = job.layout_trace();
+    let designed = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|page| page["kind"] == "DesignedPage")
+        .collect::<Vec<_>>();
+    assert_eq!(designed.len(), 2);
+    for (index, page) in designed.iter().enumerate() {
+        assert!(page["lines"].as_array().unwrap().iter().any(|line| {
+            line["semanticParentId"] == "footnotes"
+                && line["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(&format!("{}.", index + 1))
+        }));
+    }
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -213,7 +523,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 14);
+    assert_eq!(response["protocolVersion"], 15);
     assert_eq!(response["rendererVersion"], "2.1.10");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");

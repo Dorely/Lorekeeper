@@ -20,6 +20,14 @@ public static class ManuscriptRangeResolver
                 var inlineStart = cursor;
                 var inlineEnd = cursor + inline.Text.Length;
                 cursor = inlineEnd;
+                if (inline.Type != ManuscriptInlineType.Text && inlineStart == inlineEnd)
+                {
+                    // At a frame boundary, atoms belong to the following frame. The
+                    // final frame also owns trailing atoms, including atom-only blocks.
+                    if (ContainsAtom(start, end, text.Length, inlineStart))
+                        content.Add(inline);
+                    continue;
+                }
                 var sliceStart = Math.Max(start, inlineStart);
                 var sliceEnd = Math.Min(end, inlineEnd);
                 if (sliceEnd <= sliceStart) continue;
@@ -61,7 +69,8 @@ public static class ManuscriptRangeResolver
                 ranges = [];
                 rangesByBlock.Add(reference.BlockId, ranges);
             }
-            if (ranges.Any(existing => range.Start < existing.End && existing.Start < range.End))
+            if (ranges.Any(existing => range.Start < existing.End && existing.Start < range.End
+                || range == existing))
                 throw new InvalidDataException($"Composition content reference '{reference.BlockId}' overlaps another text frame binding.");
             ranges.Add(range);
         }
@@ -70,16 +79,28 @@ public static class ManuscriptRangeResolver
         foreach (var block in document.Content)
         {
             var text = ManuscriptCodec.Text(block);
-            if (string.IsNullOrWhiteSpace(text))
-                continue;
             rangesByBlock.TryGetValue(block.Id, out var ranges);
             var covered = ranges?.OrderBy(range => range.Start).ToList() ?? [];
+            var atomOffset = 0;
+            foreach (var inline in block.Content)
+            {
+                if (inline.Type != ManuscriptInlineType.Text && inline.Text.Length == 0
+                    && !covered.Any(range => ContainsAtom(range.Start, range.End, text.Length, atomOffset)))
+                {
+                    unplaced.Add(block.Id);
+                    break;
+                }
+                atomOffset += inline.Text.Length;
+            }
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
             var cursor = 0;
             foreach (var range in covered)
             {
                 if (!string.IsNullOrWhiteSpace(text[cursor..range.Start]))
                 {
-                    unplaced.Add(block.Id);
+                    if (!unplaced.Contains(block.Id, StringComparer.Ordinal))
+                        unplaced.Add(block.Id);
                     break;
                 }
                 cursor = range.End;
@@ -92,6 +113,9 @@ public static class ManuscriptRangeResolver
         }
         return unplaced;
     }
+
+    private static bool ContainsAtom(int start, int end, int textLength, int offset) =>
+        offset >= start && (offset < end || offset == end && end == textLength);
 
     private static (int Start, int End) ValidateRange(ManuscriptRangeReference reference, string text)
     {

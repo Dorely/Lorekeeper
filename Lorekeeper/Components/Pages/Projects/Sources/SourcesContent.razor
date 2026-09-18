@@ -1,6 +1,9 @@
 @using Lorekeeper.Components.Pages.Projects
 @using Lorekeeper.Models
 @using Lorekeeper.Sources
+@using Lorekeeper.Citations
+@using Lorekeeper.Manuscripts
+@using System.Text.Json
 @inject IProjectSourcesService Sources
 
 @if (Project is null || _loading)
@@ -217,7 +220,7 @@ else
                 </section>
 
                 <section>
-                    <div class="sources-section-heading">Bibliography <span>@_workspace.Bibliography.Count</span></div>
+                    <div class="sources-section-heading">Bibliography <span>@_workspace.Bibliography.Count</span><button type="button" class="btn btn-link btn-sm" @onclick="CreateBibliography">Add record</button></div>
                     @if (_workspace.Bibliography.Count == 0)
                     {
                         <p class="small text-muted">Bibliographic records may exist without a source.</p>
@@ -229,6 +232,7 @@ else
                             <article class="sources-bibliography">
                                 <strong>@record.Title</strong>
                                 <span>@record.Kind@(record.IssuedYear is int year ? $" · {year}" : string.Empty)</span>
+                                <button type="button" class="btn btn-link btn-sm" @onclick="() => EditBibliography(record)">Edit</button>
                                 @if (record.SourceId is Guid sourceId)
                                 {
                                     <button type="button" class="btn btn-link btn-sm" @onclick="() => RequestDetachBibliography(record)">Detach from source</button>
@@ -275,9 +279,47 @@ else
     </section>
 }
 
+@if (_bibliographyDraft is not null)
+{
+    <div class="sources-dialog-backdrop" role="presentation" @onclick="CloseBibliography">
+        <section class="sources-dialog" role="dialog" aria-modal="true" aria-labelledby="bibliography-editor-title" @onclick:stopPropagation="true">
+            <header><div><span class="sources-kicker">Publication metadata</span><h2 id="bibliography-editor-title">@(_bibliographyDraft.Id is null ? "Add bibliography record" : "Edit bibliography record")</h2></div><button type="button" class="btn-close" aria-label="Close" @onclick="CloseBibliography"></button></header>
+            <div class="sources-bibliography-form">
+                <label class="field"><span>Type</span><select class="form-select" @bind="_bibliographyDraft.Kind">@foreach (var kind in Enum.GetValues<BibliographicRecordKind>()){<option value="@kind">@kind</option>}</select></label>
+                <label class="field"><span>Linked retained source</span><select class="form-select" @bind="_bibliographyDraft.SourceId"><option value="">Independent record</option>@foreach (var source in _workspace.Sources){<option value="@source.Id">@source.Title</option>}</select></label>
+                <label class="field full"><span>Title</span><input class="form-control" @bind="_bibliographyDraft.Title" /></label>
+                <label class="field full"><span>Container title</span><input class="form-control" @bind="_bibliographyDraft.ContainerTitle" /></label>
+                <label class="field full"><span>Authors</span><textarea class="form-control" rows="3" @bind="_bibliographyDraft.Authors"></textarea><small>One per line: “Family, Given” or a corporate name.</small></label>
+                <label class="field full"><span>Editors</span><textarea class="form-control" rows="2" @bind="_bibliographyDraft.Editors"></textarea></label>
+                <label class="field full"><span>Translators</span><textarea class="form-control" rows="2" @bind="_bibliographyDraft.Translators"></textarea></label>
+                <label class="field"><span>Issued year</span><input class="form-control" type="number" min="1" max="9999" @bind="_bibliographyDraft.IssuedYear" /></label>
+                <label class="field"><span>Issued month</span><input class="form-control" type="number" min="1" max="12" @bind="_bibliographyDraft.IssuedMonth" /></label>
+                <label class="field"><span>Issued day</span><input class="form-control" type="number" min="1" max="31" @bind="_bibliographyDraft.IssuedDay" /></label>
+                <label class="field"><span>Edition</span><input class="form-control" @bind="_bibliographyDraft.Edition" /></label>
+                <label class="field"><span>Publisher</span><input class="form-control" @bind="_bibliographyDraft.Publisher" /></label>
+                <label class="field"><span>Publisher place</span><input class="form-control" @bind="_bibliographyDraft.PublisherPlace" /></label>
+                <label class="field"><span>Institution</span><input class="form-control" @bind="_bibliographyDraft.Institution" /></label>
+                <label class="field"><span>Thesis type</span><input class="form-control" @bind="_bibliographyDraft.ThesisType" /></label>
+                <label class="field"><span>Volume</span><input class="form-control" @bind="_bibliographyDraft.Volume" /></label>
+                <label class="field"><span>Issue</span><input class="form-control" @bind="_bibliographyDraft.Issue" /></label>
+                <label class="field"><span>Pages</span><input class="form-control" @bind="_bibliographyDraft.Pages" /></label>
+                <label class="field"><span>DOI</span><input class="form-control" @bind="_bibliographyDraft.Doi" /></label>
+                <label class="field full"><span>URL</span><input class="form-control" type="url" @bind="_bibliographyDraft.Url" /></label>
+                <label class="field"><span>Accessed year</span><input class="form-control" type="number" min="1" max="9999" @bind="_bibliographyDraft.AccessedYear" /></label>
+                <label class="field"><span>Accessed month</span><input class="form-control" type="number" min="1" max="12" @bind="_bibliographyDraft.AccessedMonth" /></label>
+                <label class="field"><span>Accessed day</span><input class="form-control" type="number" min="1" max="31" @bind="_bibliographyDraft.AccessedDay" /></label>
+                <label class="field"><span>ISBN</span><input class="form-control" @bind="_bibliographyDraft.Isbn" /></label>
+                <label class="field full"><span>Notes</span><textarea class="form-control" rows="3" @bind="_bibliographyDraft.Notes"></textarea></label>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_bibliographyError)){<div class="alert alert-danger py-2">@_bibliographyError</div>}
+            <footer><button type="button" class="btn btn-outline-secondary" disabled="@_bibliographySaving" @onclick="CloseBibliography">Cancel</button><button type="button" class="btn btn-primary" disabled="@_bibliographySaving" @onclick="SaveBibliographyAsync">@(_bibliographySaving ? "Saving…" : "Save record")</button></footer>
+        </section>
+    </div>
+}
+
 <ConfirmationDialog IsOpen="@(_detachBibliography is not null)"
                     Title="Detach bibliography record?"
-                    Message="The bibliographic record will remain in this project but will no longer be linked to its source."
+                    Message="The bibliographic metadata and manuscript citations will remain. Links to retained source evidence will be removed from those citations, so that evidence will no longer be available through them. Affected manuscript Undo history will be cleared."
                     ConfirmLabel="Detach record"
                     Busy="_confirmationBusy"
                     OnConfirm="DetachBibliographyAsync"
@@ -317,6 +359,9 @@ else
     private ProjectBibliographicRecordItem? _detachBibliography;
     private Guid? _deleteConfirmationSourceId;
     private Guid? _reextractConfirmationSourceId;
+    private BibliographyDraft? _bibliographyDraft;
+    private string? _bibliographyError;
+    private bool _bibliographySaving;
 
     private ProjectSourceListItem? SelectedSource => _selectedSourceId is Guid id
         ? _workspace.Sources.FirstOrDefault(source => source.Id == id)
@@ -421,6 +466,99 @@ else
     private void RequestDetachBibliography(ProjectBibliographicRecordItem record) => _detachBibliography = record;
     private void RequestReextraction(ProjectSourceListItem source) => _reextractConfirmationSourceId = source.Id;
 
+    private void CreateBibliography()
+    {
+        _bibliographyError = null;
+        _bibliographyDraft = new BibliographyDraft { SourceId = _selectedSourceId };
+    }
+
+    private void EditBibliography(ProjectBibliographicRecordItem record)
+    {
+        _bibliographyError = null;
+        _bibliographyDraft = BibliographyDraft.From(record);
+    }
+
+    private void CloseBibliography()
+    {
+        if (_bibliographySaving) return;
+        _bibliographyDraft = null;
+        _bibliographyError = null;
+    }
+
+    private async Task SaveBibliographyAsync()
+    {
+        if (Project is null || _bibliographyDraft is null) return;
+        _bibliographySaving = true;
+        _bibliographyError = null;
+        try
+        {
+            var draft = _bibliographyDraft;
+            await Sources.SaveBibliographicRecordAsync(Project.Id, new(
+                draft.Id,
+                draft.SourceId,
+                draft.Kind,
+                draft.Title,
+                draft.ContainerTitle,
+                ParsePeople(draft.Authors),
+                ParsePeople(draft.Editors),
+                ParsePeople(draft.Translators),
+                new(draft.IssuedYear, draft.IssuedMonth, draft.IssuedDay),
+                new(draft.AccessedYear, draft.AccessedMonth, draft.AccessedDay),
+                draft.Edition,
+                draft.Publisher,
+                draft.PublisherPlace,
+                draft.Institution,
+                draft.ThesisType,
+                draft.Volume,
+                draft.Issue,
+                draft.Pages,
+                draft.Doi,
+                draft.Url,
+                draft.Isbn,
+                draft.Notes,
+                draft.ExpectedUpdatedAt));
+            _bibliographyDraft = null;
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            _bibliographyError = exception.Message;
+        }
+        finally
+        {
+            _bibliographySaving = false;
+        }
+    }
+
+    private static IReadOnlyList<CitationPerson> ParsePeople(string value) =>
+        value.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line =>
+            {
+                var separator = line.IndexOf(',');
+                return separator > 0
+                    ? new CitationPerson(line[..separator].Trim(), line[(separator + 1)..].Trim())
+                    : new CitationPerson(Literal: line);
+            })
+            .ToArray();
+
+    private static string FormatPeople(string json)
+    {
+        try
+        {
+            return string.Join(Environment.NewLine,
+                (JsonSerializer.Deserialize<List<CitationPerson>>(json, ManuscriptCodec.JsonOptions) ?? [])
+                .Select(person => string.IsNullOrWhiteSpace(person.Literal)
+                    ? string.Join(", ", new[] { person.Family, person.Given }.Where(value => !string.IsNullOrWhiteSpace(value)))
+                    : person.Literal));
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
     private void OpenDeleteConfirmation()
     {
         if (_deleteUsage is { HasLiveUsages: false })
@@ -433,7 +571,7 @@ else
         _confirmationBusy = true;
         try
         {
-            await Sources.DetachBibliographicRecordAsync(Project.Id, _detachBibliography.Id);
+            await Sources.DetachBibliographicRecordAsync(Project.Id, _detachBibliography.Id, _detachBibliography.UpdatedAt);
             _detachBibliography = null;
             await ReloadAsync();
         }
@@ -509,4 +647,66 @@ else
     private static string ExtractionStatusLabel(SourceExtractionStatus status) => status switch { SourceExtractionStatus.Ready => "Ready", SourceExtractionStatus.LegacyImmutable => "Legacy immutable", SourceExtractionStatus.Extracting => "Extracting", _ => "Failed" };
     private static string JobStatusClass(IngestJobStatus status) => status switch { IngestJobStatus.Completed => "resolved", IngestJobStatus.Failed => "unavailable", IngestJobStatus.Running or IngestJobStatus.Queued => "outdated", _ => "ambiguous" };
     private static string EvidenceStateClass(SourceLocationResolutionState state) => state.ToString().ToLowerInvariant();
+
+    private sealed class BibliographyDraft
+    {
+        public Guid? Id { get; set; }
+        public DateTime? ExpectedUpdatedAt { get; set; }
+        public Guid? SourceId { get; set; }
+        public BibliographicRecordKind Kind { get; set; } = BibliographicRecordKind.Book;
+        public string Title { get; set; } = string.Empty;
+        public string ContainerTitle { get; set; } = string.Empty;
+        public string Authors { get; set; } = string.Empty;
+        public string Editors { get; set; } = string.Empty;
+        public string Translators { get; set; } = string.Empty;
+        public int? IssuedYear { get; set; }
+        public int? IssuedMonth { get; set; }
+        public int? IssuedDay { get; set; }
+        public int? AccessedYear { get; set; }
+        public int? AccessedMonth { get; set; }
+        public int? AccessedDay { get; set; }
+        public string Edition { get; set; } = string.Empty;
+        public string Publisher { get; set; } = string.Empty;
+        public string PublisherPlace { get; set; } = string.Empty;
+        public string Institution { get; set; } = string.Empty;
+        public string ThesisType { get; set; } = string.Empty;
+        public string Volume { get; set; } = string.Empty;
+        public string Issue { get; set; } = string.Empty;
+        public string Pages { get; set; } = string.Empty;
+        public string Doi { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+        public string Isbn { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+
+        public static BibliographyDraft From(ProjectBibliographicRecordItem item) => new()
+        {
+            Id = item.Id,
+            ExpectedUpdatedAt = item.UpdatedAt,
+            SourceId = item.SourceId,
+            Kind = item.Kind,
+            Title = item.Title,
+            ContainerTitle = item.ContainerTitle,
+            Authors = FormatPeople(item.AuthorsJson),
+            Editors = FormatPeople(item.EditorsJson),
+            Translators = FormatPeople(item.TranslatorsJson),
+            IssuedYear = item.IssuedYear,
+            IssuedMonth = item.IssuedMonth,
+            IssuedDay = item.IssuedDay,
+            AccessedYear = item.AccessedYear,
+            AccessedMonth = item.AccessedMonth,
+            AccessedDay = item.AccessedDay,
+            Edition = item.Edition,
+            Publisher = item.Publisher,
+            PublisherPlace = item.PublisherPlace,
+            Institution = item.Institution,
+            ThesisType = item.ThesisType,
+            Volume = item.Volume,
+            Issue = item.Issue,
+            Pages = item.Pages,
+            Doi = item.Doi,
+            Url = item.Url,
+            Isbn = item.Isbn,
+            Notes = item.Notes,
+        };
+    }
 }

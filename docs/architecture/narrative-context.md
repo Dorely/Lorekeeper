@@ -123,7 +123,7 @@ from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph
 relationships, project-search results, named manuscript styles, page setup,
 annotations, and canonical entity visuals. The active chapter is loaded once as
-a complete `agent-manuscript-v3` snapshot with source/completeness metadata,
+a complete `agent-manuscript-v4` snapshot with source/completeness metadata,
 revision, source hash, stable block IDs, exact text, sparse UTF-16 marks,
 canonical positions, recursive tables and notes, interned direct paragraph
 formatting, Figures, Designed Pages, and publication bindings. Block rows use absolute indexes as compact overlay
@@ -262,9 +262,16 @@ Every legacy source migrates to an immutable legacy extraction preserving its
 source/chunk/block/page identities, normalized text, evidence, and hashes, with
 original state `OriginalUnavailable`. Extracted text must never be presented as
 a reconstructed original. Bibliographic records are project-owned and may exist
-without a source; detaching a source preserves metadata and marks dependent
-evidence unavailable. Source deletion reports bibliography, manuscript, graph,
+without a source. Bibliography saves acquire the project write lease and edits
+require the `UpdatedAt` value read by the editor, rejecting stale writes.
+Detaching preserves bibliographic metadata and atomically clears dependent
+manuscript evidence links through the owning authoring services. Affected history
+and outstanding assistant generations are invalidated so they cannot restore
+detached evidence; the Sources surface explains evidence availability.
+Source deletion reports bibliography, manuscript, graph,
 assistant-transcript, and job usage before an explicit resolution.
+Its final usage check runs under the deletion write lease, preventing a newly
+created reference from racing the delete.
 
 The project Sources workspace owns upload, contents navigation, bounded
 normalized reading and lexical search, exact evidence-state display, original

@@ -12,7 +12,7 @@ namespace Lorekeeper.Context;
 /// </summary>
 internal static class AgentManuscriptProjection
 {
-    public const string Schema = "agent-manuscript-v3";
+    public const string Schema = "agent-manuscript-v4";
     public const string StylesSchema = "agent-manuscript-styles-v1";
 
     public static string SerializeCurrentChapter(Chapter chapter, ManuscriptSnapshot? snapshot)
@@ -398,6 +398,12 @@ internal static class AgentManuscriptProjection
         IReadOnlyList<(ManuscriptBlock block, int index)> blocks)
     {
         var tables = new JsonArray();
+        var lists = new JsonArray(blocks.Where(item => item.block.List is not null).Select(item => (JsonNode)new JsonObject
+        {
+            ["block"] = item.index,
+            ["list"] = JsonSerializer.SerializeToNode(item.block.List, ContextPayloadJson.Options),
+        }).ToArray());
+        if (lists.Count > 0) payload["lists"] = lists;
         foreach (var (block, index) in blocks.Where(item => item.block.Type == ManuscriptBlockType.Table))
         {
             tables.Add(new JsonObject
@@ -412,7 +418,22 @@ internal static class AgentManuscriptProjection
         if (document.Notes.Count > 0)
             payload["notes"] = JsonSerializer.SerializeToNode(document.Notes, ContextPayloadJson.Options);
 
+        var citations = ManuscriptTraversal.EnumerateCitations(document)
+            .Select(item => new JsonObject
+            {
+                ["containerPath"] = JsonSerializer.SerializeToNode(item.Position.ContainerPath, ContextPayloadJson.Options),
+                ["blockId"] = item.BlockId,
+                ["atomId"] = item.CitationAtomId,
+                ["cluster"] = JsonSerializer.SerializeToNode(item.Cluster, ContextPayloadJson.Options),
+            })
+            .ToArray();
+        if (citations.Length > 0)
+            payload["citations"] = new JsonArray(citations);
+
         var positions = new JsonArray();
+        var inlineContent = new JsonArray();
+        var selectedIds = blocks.SelectMany(item => ManuscriptTraversal.EnumerateBlocks(
+            document with { Content = [item.block], Notes = [] })).Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var segment in ManuscriptTraversal.EnumerateText(document))
         {
             positions.Add(new JsonArray
@@ -421,9 +442,20 @@ internal static class AgentManuscriptProjection
                 segment.Start.BlockOrAtomId,
                 segment.Text.Length,
             });
+            if ((selectedIds.Contains(segment.Block.Id) || segment.Start.ContainerPath[0] == "notes")
+                && (segment.Start.ContainerPath.Count > 1 || segment.Block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text)))
+            {
+                inlineContent.Add(new JsonObject
+                {
+                    ["position"] = JsonSerializer.SerializeToNode(segment.Start, ContextPayloadJson.Options),
+                    ["content"] = JsonSerializer.SerializeToNode(segment.Block.Content, ContextPayloadJson.Options),
+                });
+            }
         }
         if (positions.Count > 0)
             payload["positionsUtf16"] = positions;
+        if (inlineContent.Count > 0)
+            payload["inlineContent"] = inlineContent;
     }
 
     private static JsonObject StylePayload(ManuscriptStyleView style) => new()

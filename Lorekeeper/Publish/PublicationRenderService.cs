@@ -1,3 +1,4 @@
+using static Lorekeeper.Publish.PublicationSemanticPayload;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Security.Cryptography;
@@ -5,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Lorekeeper.Composition;
+using Lorekeeper.Citations;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.Fonts;
 using Lorekeeper.Images;
@@ -1118,8 +1120,8 @@ public sealed class PublicationRenderProcessor(
                 cancellationToken,
                 layoutTraceMode: "pagination");
             var response = await InvokePaginationAsync(jobId, request, cancellationToken);
-            if (response.ProtocolVersion != 14)
-                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 14 is required.");
+            if (response.ProtocolVersion != 15)
+                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 15 is required.");
             if (!string.Equals(response.RendererVersion, rendererVersion, StringComparison.Ordinal))
                 throw new InvalidOperationException("The press renderer returned a different renderer version while paginating the interior.");
             if (!string.Equals(response.JobId, jobId.ToString("N"), StringComparison.Ordinal))
@@ -1321,8 +1323,8 @@ public sealed class PublicationRenderProcessor(
                 _logger.LogDebug("Render job {JobId} progress {Percent}%: {Message}", job.Id, mapped, progress.Message);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 14)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 14 is required.");
+        if (result.ProtocolVersion != 15)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 15 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1808,6 +1810,9 @@ public sealed class PublicationRenderProcessor(
         var missingFontKeys = usedFontKeys.Where(key => !stagedFamilyKeys.Contains(key)).Order().ToArray();
         if (missingFontKeys.Length > 0)
             throw new InvalidOperationException($"Publication content references unavailable fonts: {string.Join(", ", missingFontKeys)}.");
+        var citationLookup = document.Citations.Occurrences.ToDictionary(
+            item => CitationPayloadKey(item.Identity.TopLevelContainer, item.Identity.PlacementPath, item.Identity.CitationAtomId),
+            StringComparer.Ordinal);
         var sections = document.Sections.Select(section => new
         {
             id = section.ActId,
@@ -1815,66 +1820,94 @@ public sealed class PublicationRenderProcessor(
             synopsis = document.Profile.IncludeActSynopses ? section.Synopsis : string.Empty,
             section.IncludePage,
             section.IncludeHeading,
-            chapters = section.Chapters.Select(chapter => new
+            chapters = section.Chapters.Select(chapter =>
             {
-                id = chapter.Id,
-                title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
-                synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
-                chapter.IncludeHeading,
-                blocks = chapter.Manuscript.Content.Select(BlockPayload).ToArray(),
-                notes = chapter.Manuscript.Notes.Select(NotePayload).ToArray(),
-                designedPages = chapter.DesignedPages.Select(composition => new
+                var topLevel = $"chapter:{chapter.Id:D}";
+                var notes = PublicationNotes.Create(document, new(topLevel, chapter.Title, chapter.Manuscript, chapter.DesignedPages));
+                return new
                 {
-                    id = composition.Id,
-                    composition.Name,
-                    revision = composition.Revision,
-                    semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
-                    semanticNotes = composition.SemanticManuscript.Notes.Select(NotePayload).ToArray(),
-                    variants = composition.Variants.Select(variant => new
+                    id = chapter.Id,
+                    title = string.IsNullOrWhiteSpace(chapter.Title) ? "Untitled chapter" : chapter.Title,
+                    synopsis = document.Profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
+                    chapter.IncludeHeading,
+                    blocks = notes.Manuscript.Content.Select(block => BlockPayload(block, topLevel, [], citationLookup)).ToArray(),
+                    notes = notes.Manuscript.Notes.Select(note => NotePayload(note, topLevel, [$"note:{notes.SourceNoteIds[note.Id]}"], citationLookup, notes.Numbers[note.Id])).ToArray(),
+                    designedPages = chapter.Manuscript.Content
+                        .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
+                        .Select(placement =>
                     {
-                        id = variant.Id,
-                        variant.GeometryKey,
-                        variant.Revision,
-                        scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
-                            variant.Scene,
-                            composition.SemanticManuscript)),
+                        var composition = chapter.DesignedPages.Single(item => item.Id == placement.DesignedPageId);
+                        var semantic = notes.Placements[placement.Id];
+                        IReadOnlyList<string> placementPath = [$"placement:{placement.Id}"];
+                        return new
+                        {
+                            id = composition.Id,
+                            placementId = placement.Id,
+                            composition.Name,
+                            revision = composition.Revision,
+                            semanticBlocks = semantic.Content.Select(block => BlockPayload(block, topLevel, placementPath, citationLookup)).ToArray(),
+                            semanticNotes = semantic.Notes.Select(note => NotePayload(note, topLevel, [.. placementPath, $"note:{notes.SourceNoteIds[note.Id]}"], citationLookup, notes.Numbers[note.Id])).ToArray(),
+                            variants = composition.Variants.Select(variant => new
+                            {
+                                id = variant.Id,
+                                variant.GeometryKey,
+                                variant.Revision,
+                                scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
+                                    variant.Scene,
+                                    composition.SemanticManuscript)),
+                            }).ToArray(),
+                        };
                     }).ToArray(),
-                }).ToArray(),
+                };
             }).ToArray(),
         }).ToArray();
         var publicationSectionPayloads = document.PublicationSections
             .OrderBy(item => item.Anchor)
-            .Select(item => new
+            .Select(item =>
             {
-                id = item.Id,
-                coreSectionId = item.CoreSectionId,
-                item.Title,
-                kind = item.Kind.ToString(),
-                systemRole = item.SystemRole.ToString(),
-                anchor = item.Anchor.ToString(),
-                targetKind = item.TargetKind?.ToString(),
-                targetId = item.TargetId,
-                item.LocalOrder,
-                startSide = item.StartSide.ToString(),
-                blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
-                notes = item.Manuscript.Notes.Select(NotePayload).ToArray(),
-                designedPages = item.DesignedPages.Select(composition => new
+                var topLevel = $"publication-section:{item.Id:D}";
+                var notes = PublicationNotes.Create(document, new(topLevel, item.Title, item.Manuscript, item.DesignedPages));
+                return new
                 {
-                    id = composition.Id,
-                    composition.Name,
-                    revision = composition.Revision,
-                    semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
-                    semanticNotes = composition.SemanticManuscript.Notes.Select(NotePayload).ToArray(),
-                    variants = composition.Variants.Select(variant => new
+                    id = item.Id,
+                    coreSectionId = item.CoreSectionId,
+                    item.Title,
+                    kind = item.Kind.ToString(),
+                    systemRole = item.SystemRole.ToString(),
+                    anchor = item.Anchor.ToString(),
+                    targetKind = item.TargetKind?.ToString(),
+                    targetId = item.TargetId,
+                    item.LocalOrder,
+                    startSide = item.StartSide.ToString(),
+                    blocks = notes.Manuscript.Content.Select(block => BlockPayload(block, topLevel, [], citationLookup)).ToArray(),
+                    notes = notes.Manuscript.Notes.Select(note => NotePayload(note, topLevel, [$"note:{notes.SourceNoteIds[note.Id]}"], citationLookup, notes.Numbers[note.Id])).ToArray(),
+                    designedPages = item.Manuscript.Content
+                        .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId is not null)
+                        .Select(placement =>
                     {
-                        id = variant.Id,
-                        variant.GeometryKey,
-                        variant.Revision,
-                        scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
-                            variant.Scene,
-                            composition.SemanticManuscript)),
+                        var composition = item.DesignedPages.Single(page => page.Id == placement.DesignedPageId);
+                        var semantic = notes.Placements[placement.Id];
+                        IReadOnlyList<string> placementPath = [$"placement:{placement.Id}"];
+                        return new
+                        {
+                            id = composition.Id,
+                            placementId = placement.Id,
+                            composition.Name,
+                            revision = composition.Revision,
+                            semanticBlocks = semantic.Content.Select(block => BlockPayload(block, topLevel, placementPath, citationLookup)).ToArray(),
+                            semanticNotes = semantic.Notes.Select(note => NotePayload(note, topLevel, [.. placementPath, $"note:{notes.SourceNoteIds[note.Id]}"], citationLookup, notes.Numbers[note.Id])).ToArray(),
+                            variants = composition.Variants.Select(variant => new
+                            {
+                                id = variant.Id,
+                                variant.GeometryKey,
+                                variant.Revision,
+                                scene = NormalizeSceneLanguages(DesignedPageService.WithDerivedTextSemanticRoles(
+                                    variant.Scene,
+                                    composition.SemanticManuscript)),
+                            }).ToArray(),
+                        };
                     }).ToArray(),
-                }).ToArray(),
+                };
             }).ToArray();
         if (sections.Sum(section => section.chapters.Length) == 0 && publicationSectionPayloads.Length == 0)
             throw new InvalidOperationException("Include at least one chapter or publication section before rendering.");
@@ -1896,7 +1929,7 @@ public sealed class PublicationRenderProcessor(
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 14,
+            protocolVersion = 15,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             renderScope = job.Scope.ToString().ToLowerInvariant(),
@@ -1951,6 +1984,27 @@ public sealed class PublicationRenderProcessor(
                 numberActs = false,
                 numberChapters = false,
                 sections,
+                citationBackMatter = new
+                {
+                    notes = document.Citations.Occurrences
+                        .Where(item => item.NoteText is not null)
+                        .GroupBy(item => item.Identity.TopLevelContainer)
+                        .Select(group => new
+                        {
+                            containerId = group.Key,
+                            title = CitationContainerTitle(document, group.Key),
+                            entries = group.Select(item => new { number = item.NoteNumber, runs = item.NoteRuns }).ToArray(),
+                        }).ToArray(),
+                    document.Citations.BibliographyTitle,
+                    entries = document.Citations.BibliographyEntries.Select(item => new { runs = item.Runs }).ToArray(),
+                    diagnostics = document.Citations.Diagnostics.Select(item => new
+                    {
+                        item.Code,
+                        item.Message,
+                        bibliographicRecordId = item.BibliographicRecordId,
+                        item.Field,
+                    }).ToArray(),
+                },
                 styles = document.NamedStyles.Select(style => new
                 {
                     style.Name,
@@ -2339,61 +2393,6 @@ public sealed class PublicationRenderProcessor(
             && relative != ".."
             && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
     }
-
-    private static object BlockPayload(ManuscriptBlock block) => new
-    {
-        id = block.Id,
-        type = block.Type.ToString(),
-        block.StyleRole,
-        block.HeadingLevel,
-        assetId = block.ImageId,
-        caption = string.Concat(block.Content.Select(inline => inline.Text)),
-        block.Decorative,
-        block.AltText,
-        language = PublicationLanguage.NormalizeOptional(block.Language),
-        accessibilityRole = block.AccessibilityRole.ToString(),
-        presentation = block.FigurePresentation,
-        paragraphPresentation = block.ParagraphPresentation,
-        designedPageId = block.DesignedPageId,
-        table = block.Table is null ? null : new
-        {
-            id = block.Table.Id,
-            columnWidthWeights = block.Table.ColumnWidthWeights.ToArray(),
-            block.Table.HeaderRowCount,
-            rows = block.Table.Rows.Select(row => new
-            {
-                id = row.Id,
-                cells = row.Cells.Select(cell => new
-                {
-                    id = cell.Id,
-                    cell.RowSpan,
-                    cell.ColumnSpan,
-                    content = cell.Content.Select(BlockPayload).ToArray(),
-                }).ToArray(),
-            }).ToArray(),
-        },
-        content = block.Content.Select(inline => new
-        {
-            inline.Id,
-            type = inline.Type.ToString(),
-            inline.Text,
-            inline.NoteId,
-            marks = inline.Marks.Select(mark => new
-            {
-                type = mark.Type.ToString(),
-                value = mark.Type == ManuscriptMarkType.Language
-                    ? PublicationLanguage.NormalizeOptional(mark.Value)
-                    : mark.Value,
-            }).ToArray(),
-        }).ToArray(),
-    };
-
-    private static object NotePayload(ManuscriptNote note) => new
-    {
-        id = note.Id,
-        kind = note.Kind.ToString(),
-        content = note.Content.Select(BlockPayload).ToArray(),
-    };
 
     private static bool IsPressPageMappedBlock(ManuscriptBlock block) =>
         block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table

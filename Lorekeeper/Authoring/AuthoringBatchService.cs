@@ -1,9 +1,7 @@
 using System.Text.Json;
-using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
-using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Authoring;
@@ -12,9 +10,7 @@ public sealed class AuthoringIdempotencyException(string message) : InvalidOpera
 
 internal sealed class AuthoringBatchService(
     IAppDatabaseOperationFactory database,
-    IManuscriptService manuscripts,
-    IPublicationSectionService publicationSections,
-    IDesignedPageService designedPages,
+    IAuthoringTargetMutationService targetMutations,
     IAuthoringMutationContextAccessor mutationContext,
     IAuthoringDeltaHistoryRuntime history,
     IAuthoringMutationFence fence,
@@ -335,19 +331,18 @@ internal sealed class AuthoringBatchService(
         {
             foreach (var target in orderedTargets)
             {
-                var parsed = AuthoringPersistence.ParseTarget(batch.ProjectId, target.TargetId);
                 var before = beforeStates[target.Ordinal];
                 var targetOperations = batch.Operations.Where(item => item.TargetOrdinal == target.Ordinal).ToList();
                 if (allowCanonicalInverseOperations && targetOperations.Any(item => item.Kind.Equals("restoreBlock", StringComparison.OrdinalIgnoreCase)))
                 {
-                    await ReplaceCanonicalDocumentAsync(parsed, before.Revision, reductions[target.Ordinal].Document, cancellationToken);
+                    await targetMutations.ReplaceAsync(batch.ProjectId, target.TargetId, before.Revision, reductions[target.Ordinal].Document, cancellationToken);
                     continue;
                 }
                 var operations = AuthoringBatchReducer.ToManuscriptOperations(
                     ManuscriptCodec.Deserialize(before.ManuscriptJson),
                     targetOperations,
                     allowCanonicalInverseOperations);
-                await ApplyTargetOperationsAsync(parsed, before.Revision, operations, cancellationToken);
+                await targetMutations.ApplyAsync(batch.ProjectId, target.TargetId, before.Revision, operations, cancellationToken);
             }
         }
 
@@ -456,30 +451,7 @@ internal sealed class AuthoringBatchService(
         {
             try
             {
-                var parsed = AuthoringPersistence.ParseTarget(projectId, targetId);
-                switch (parsed.HistoryTarget.Kind)
-                {
-                    case AuthoringHistoryDocumentKind.CoreChapter:
-                    case AuthoringHistoryDocumentKind.EditionChapter:
-                        await manuscripts.RefreshDerivedStateAsync(
-                            parsed.ContentTarget,
-                            parsed.HistoryTarget.DocumentId,
-                            CancellationToken.None);
-                        break;
-                    case AuthoringHistoryDocumentKind.PublicationSection:
-                        await publicationSections.RefreshAuthoringDerivedStateAsync(
-                            new(projectId, parsed.HistoryTarget.EditionId),
-                            parsed.HistoryTarget.DocumentId,
-                            CancellationToken.None);
-                        break;
-                    case AuthoringHistoryDocumentKind.DesignedPageContent:
-                        await designedPages.RefreshAuthoringDerivedStateAsync(
-                            parsed.ContentTarget,
-                            projectId,
-                            parsed.HistoryTarget.DocumentId,
-                            CancellationToken.None);
-                        break;
-                }
+                await targetMutations.RefreshAsync(projectId, targetId, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -489,92 +461,6 @@ internal sealed class AuthoringBatchService(
                     targetId);
             }
         }
-    }
-
-    private async Task ApplyTargetOperationsAsync(
-        ParsedAuthoringTarget target,
-        long expectedRevision,
-        IReadOnlyList<ManuscriptOperation> operations,
-        CancellationToken cancellationToken)
-    {
-        switch (target.HistoryTarget.Kind)
-        {
-            case AuthoringHistoryDocumentKind.CoreChapter:
-            case AuthoringHistoryDocumentKind.EditionChapter:
-                _ = await manuscripts.ApplyPersistedUnderProjectMutationLeaseAsync(
-                    target.ContentTarget,
-                    target.HistoryTarget.DocumentId,
-                    expectedRevision,
-                    operations,
-                    cancellationToken);
-                break;
-            case AuthoringHistoryDocumentKind.PublicationSection:
-                _ = await publicationSections.ApplyAuthoringOperationsAsync(
-                    new(target.HistoryTarget.ProjectId, target.HistoryTarget.EditionId),
-                    target.HistoryTarget.DocumentId,
-                    expectedRevision,
-                    operations,
-                    cancellationToken);
-                break;
-            case AuthoringHistoryDocumentKind.DesignedPageContent:
-                _ = await designedPages.ApplyAuthoringOperationsAsync(
-                    target.ContentTarget,
-                    target.HistoryTarget.ProjectId,
-                    target.HistoryTarget.DocumentId,
-                    expectedRevision,
-                    operations,
-                    cancellationToken);
-                break;
-            default:
-                throw new InvalidOperationException("The authoring target does not support batch manuscript operations.");
-        }
-    }
-
-    private async Task ReplaceCanonicalDocumentAsync(
-        ParsedAuthoringTarget target,
-        long expectedRevision,
-        ManuscriptDocument document,
-        CancellationToken cancellationToken)
-    {
-        if (target.HistoryTarget.Kind is AuthoringHistoryDocumentKind.CoreChapter or AuthoringHistoryDocumentKind.EditionChapter)
-        {
-            _ = await manuscripts.ReplaceDocumentAsync(
-                target.ContentTarget,
-                target.HistoryTarget.DocumentId,
-                expectedRevision,
-                document,
-                cancellationToken);
-            return;
-        }
-        if (target.HistoryTarget.Kind == AuthoringHistoryDocumentKind.PublicationSection)
-        {
-            var sectionTarget = new PublicationSectionTarget(target.HistoryTarget.ProjectId, target.HistoryTarget.EditionId);
-            var current = await publicationSections.GetAsync(sectionTarget, target.HistoryTarget.DocumentId, cancellationToken);
-            _ = await publicationSections.UpsertAsync(sectionTarget, new(
-                current.Id,
-                current.Title,
-                current.Kind,
-                current.Anchor,
-                current.TargetKind,
-                current.TargetId,
-                current.InclusionMode,
-                current.StartSide,
-                ManuscriptCodec.Serialize(document with { ManuscriptId = current.Id, Revision = expectedRevision }),
-                expectedRevision), cancellationToken);
-            return;
-        }
-        if (target.HistoryTarget.Kind == AuthoringHistoryDocumentKind.DesignedPageContent)
-        {
-            _ = await designedPages.ReplaceAuthoringDocumentAsync(
-                target.ContentTarget,
-                target.HistoryTarget.ProjectId,
-                target.HistoryTarget.DocumentId,
-                expectedRevision,
-                document,
-                cancellationToken);
-            return;
-        }
-        throw new InvalidOperationException("The authoring target does not support canonical restore.");
     }
 
     private static string SelectionJson(AuthoringSelectionV1? selection, string targetId)

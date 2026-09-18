@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Authoring;
+using Lorekeeper.Citations;
 using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -32,7 +33,10 @@ public sealed record PublicationBookView(
     ProjectPageSetupView PageSetup,
     int IncludedChapterCount,
     int PublicationSectionCount,
-    long CoverRevision);
+    long CoverRevision)
+{
+    public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
+}
 
 public sealed record ProjectPageSetupView(
     double PageWidthInches,
@@ -72,7 +76,8 @@ public sealed record PublicationBookPatch(
     PublishTitlePageMode? TitlePageMode = null,
     bool? AllowDesignedPageOverrides = null,
     bool? RectoChapterStarts = null,
-    IReadOnlyList<string>? ClearFields = null);
+    IReadOnlyList<string>? ClearFields = null,
+    CitationStyle? CitationStyle = null);
 
 public interface IPublicationBookService
 {
@@ -129,6 +134,7 @@ public sealed class PublicationBookService(
                 item.NumberChapters,
                 item.TitlePageMode,
                 item.RectoChapterStarts,
+                item.CitationStyle,
             }).SingleAsync(cancellationToken);
         var pdfPresentation = await db.PublicationBookPdfPresentations.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
@@ -243,8 +249,12 @@ public sealed class PublicationBookService(
                     CompositionSceneJson = NormalizeCoverSceneJson(bookRows.Cover.CompositionSceneJson),
                 },
         };
+        var bibliography = await PublicationCitationDependencies.ReadAsync(db, projectId,
+            chapters.Select(item => item.ManuscriptJson)
+                .Concat(publicationSections.Select(item => item.ManuscriptJson))
+                .Concat(compositions.Select(item => item.SemanticManuscriptJson)), cancellationToken);
         var payload = JsonSerializer.Serialize(
-            new { core, pdfPresentation, setup, chapters, publicationSections, compositions, assets, styles, fonts, bookRows = normalizedBookRows },
+            new { core, pdfPresentation, setup, chapters, publicationSections, compositions, assets, styles, fonts, bibliography, bookRows = normalizedBookRows },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
@@ -391,6 +401,7 @@ public sealed class PublicationBookService(
         book.NumberChapters = patch.NumberChapters ?? book.NumberChapters;
         book.TitlePageMode = patch.TitlePageMode ?? book.TitlePageMode;
         book.RectoChapterStarts = patch.RectoChapterStarts ?? book.RectoChapterStarts;
+        book.CitationStyle = patch.CitationStyle ?? book.CitationStyle;
         var pdfPresentation = await db.PublicationBookPdfPresentations.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
@@ -975,7 +986,10 @@ public sealed class PublicationBookService(
             await db.PublicationBookOutlineItems.CountAsync(item => item.ProjectId == projectId && item.TargetKind == PublishOutlineTargetKind.Chapter && item.IsIncluded, cancellationToken),
             await db.PublicationSections.CountAsync(item => item.ProjectId == projectId && item.EditionId == null
                 && !item.IsExcluded && item.InclusionMode != PublicationSectionInclusionMode.Omitted, cancellationToken),
-            await db.PublicationBookCoverDesigns.Where(item => item.ProjectId == projectId).Select(item => (long?)item.Revision).SingleOrDefaultAsync(cancellationToken) ?? 0);
+            await db.PublicationBookCoverDesigns.Where(item => item.ProjectId == projectId).Select(item => (long?)item.Revision).SingleOrDefaultAsync(cancellationToken) ?? 0)
+        {
+            CitationStyle = book.CitationStyle,
+        };
     }
 
     private static string Value(string? value, string current, HashSet<string> clear, string name) =>
@@ -991,6 +1005,8 @@ public sealed class PublicationBookService(
             throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the Core Book language.");
         if (!Enum.IsDefined(book.TitlePageMode))
             throw new InvalidOperationException("The Core Book title-page setting is invalid.");
+        if (!Enum.IsDefined(book.CitationStyle))
+            throw new InvalidOperationException("The Core Book citation style is invalid.");
     }
 }
 
@@ -1055,6 +1071,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         effective.NumberActs = Pick(fields, PublicationEditionOverrideField.NumberActs, stored.NumberActs, book.NumberActs);
         effective.NumberChapters = Pick(fields, PublicationEditionOverrideField.NumberChapters, stored.NumberChapters, book.NumberChapters);
         effective.TitlePageMode = Pick(fields, PublicationEditionOverrideField.TitlePageMode, stored.TitlePageMode, book.TitlePageMode);
+        effective.CitationStyle = Pick(fields, PublicationEditionOverrideField.CitationStyle, stored.CitationStyle, book.CitationStyle);
         effective.RectoChapterStarts = effective.Format != PublicationEditionFormat.Epub
             && Pick(fields, PublicationEditionOverrideField.RectoChapterStarts, stored.RectoChapterStarts, book.RectoChapterStarts);
         effective.AllowDesignedPageOverrides = effective.Format == PublicationEditionFormat.DigitalPdf
@@ -1180,6 +1197,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         NumberActs = source.NumberActs,
         NumberChapters = source.NumberChapters,
         TitlePageMode = source.TitlePageMode,
+        CitationStyle = source.CitationStyle,
         RectoChapterStarts = source.RectoChapterStarts,
         PrintArtifactRegistryVersion = source.PrintArtifactRegistryVersion,
         PrintArtifactProfileKey = source.PrintArtifactProfileKey,

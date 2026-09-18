@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Lorekeeper.Citations;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
@@ -115,6 +116,7 @@ public sealed class PublishAssistantTools(
     IPrintArtifactProfileRegistry printArtifactProfiles,
     IPrintGeometryService printGeometry,
     IAppDatabaseOperationFactory database,
+    CitationAssistantTools citationTools,
     IEditionContentService? editionContent = null,
     ICompositionCanvasPreviewService? canvasPreviews = null,
     IDesignedPageService? compositions = null,
@@ -231,7 +233,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null, int blockStart = 0, int blockCount = 30) => ReadPublicationSectionAsync(context, releaseId, sectionId, blockStart, blockCount),
                 name: "read_publication_section",
-                description: "Read one Core or release publication section with a bounded agent-manuscript-v3 semantic projection: compact rows, sparse structure and UTF-16 marks/positions, rich tables and notes, interned paragraph formatting, figure/publication metadata, and designed-page [index, placementBlockId, designedPageId] values. Use the placement block ID to address a repeated occurrence and the page ID with the page-reading tools before editing."),
+                description: "Read one Core or release publication section with a bounded agent-manuscript-v4 semantic projection: compact rows, sparse structure and UTF-16 marks/positions, rich tables and notes, interned paragraph formatting, figure/publication metadata, and designed-page [index, placementBlockId, designedPageId] values. Use the placement block ID to address a repeated occurrence and the page ID with the page-reading tools before editing."),
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
@@ -523,6 +525,9 @@ public sealed class PublishAssistantTools(
             "patch_publication_cover_element", "patch_publication_cover_surface_element", "place_project_image_on_release_cover_surface", "add_project_image_to_release_cover_surface", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
             "export_publication_release",
         };
+        foreach (var tool in citationTools.Build(context.ProjectId, context.TurnCancellationToken, allowMutations: true))
+            tools.Add(tool);
+        currentTools.UnionWith(["list_bibliography", "read_bibliographic_record", "save_bibliographic_record"]);
         return Task.FromResult<IList<AITool>>(tools
             .Where(tool => tool is AIFunction function && currentTools.Contains(function.Name))
             .ToList());

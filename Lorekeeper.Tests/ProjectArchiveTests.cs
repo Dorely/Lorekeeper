@@ -74,6 +74,33 @@ public sealed class ProjectArchiveTests
     }
 
     [Fact]
+    public async Task Configured_limits_bound_incompressible_output_and_manifest_before_import()
+    {
+        var bytes = new byte[128 * 1024];
+        new Random(4217).NextBytes(bytes);
+        await using var capture = ProjectArchiveTemporaryCapture.Create();
+        await using var input = new MemoryStream(bytes);
+        var descriptor = await capture.CaptureAsync(input, "sources/source/original/chunk-0000", "source-original-chunk", "application/octet-stream", bytes.Length);
+        var limits = new ProjectArchiveLimits { MaximumCompressedBytes = 64 * 1024, MaximumExpandedBytes = 1024 * 1024 };
+        await using var rejected = new MemoryStream();
+        await Assert.ThrowsAsync<ProjectArchiveException>(() => ProjectArchiveZip.WriteAsync(rejected, ProjectId, SchemaVersions,
+            ProjectDependencyTraversalPolicy.FullArchive, [descriptor], [], limits));
+        Assert.True(rejected.Length <= limits.MaximumCompressedBytes);
+        var admittedLimits = limits with { MaximumCompressedBytes = 1024 * 1024 };
+        await using var accepted = new MemoryStream();
+        await ProjectArchiveZip.WriteAsync(accepted, ProjectId, SchemaVersions, ProjectDependencyTraversalPolicy.FullArchive, [descriptor], [], admittedLimits);
+        accepted.Position = 0;
+        await ProjectArchiveZip.ReadAsync(accepted, admittedLimits);
+        accepted.Position = 0;
+        await Assert.ThrowsAsync<ProjectArchiveException>(() => ProjectArchiveZip.ReadAsync(accepted, limits));
+        await using var oversizedManifest = new MemoryStream();
+        await Assert.ThrowsAsync<ProjectArchiveException>(() => ProjectArchiveZip.WriteAsync(oversizedManifest, ProjectId, SchemaVersions,
+            ProjectDependencyTraversalPolicy.FullArchive, [descriptor], [], admittedLimits with { MaximumManifestBytes = 10 }));
+        Assert.Equal(0, oversizedManifest.Length);
+        Assert.True(ProjectArchiveLimits.Default.MaximumCompressedBytes > 50L * 100 * 1024 * 1024);
+    }
+
+    [Fact]
     public async Task CaptureOwnsAStableDescriptorAfterItsInputChanges()
     {
         await using var capture = ProjectArchiveTemporaryCapture.Create();

@@ -72,7 +72,7 @@ public static class AssistantWorkflowInstructions
 
     public const string AgentManuscriptProjection = """
         Compact manuscript projection:
-        - agent-manuscript-v3 is the complete model-facing semantic representation; canonical manuscript JSON remains an internal persistence format.
+        - agent-manuscript-v4 is the complete model-facing semantic representation; canonical manuscript JSON remains an internal persistence format.
         - Each blocks row is [absoluteIndex, stableBlockId, exactText]. Absolute indexes locate projected blocks but are never mutation identities; use stable block IDs, secondBlockId where required, and the exact revision for mutations.
         - A block absent from structure has the defaults paragraph, body, and no heading level. Each structure row is [absoluteIndex, blockType, styleRole, optionalHeadingLevel].
         - Each marksUtf16 row is [absoluteIndex, startOffset, endOffset, markType, optionalValue]. Offsets are zero-based UTF-16 code-unit boundaries in exactText; rows can overlap.
@@ -87,7 +87,7 @@ public static class AssistantWorkflowInstructions
         - Classify the requested prose change before building operations: additive work creates genuinely new content; revision work supersedes existing content. InsertBlock is additive only. It never replaces, edits, or removes an existing block, even when its text is a rewritten version of that block.
         - Use ReplaceBlockText as the default for revising one existing text block because it preserves the exact stable block ID. Do not append rewritten prose elsewhere in the manuscript as a shortcut.
         - Before a multi-block rewrite, map every source block in the intended range to one explicit disposition: retain unchanged, replace in place, or delete. Include every replacement and deletion in the same atomic batch, then use InsertBlock only for additional replacement blocks that have no source block to preserve.
-        - Audit the proposed final sequence against the current agent-manuscript-v3 snapshot before submitting it. The rewritten passage must appear once, every intentionally superseded source block must be replaced or deleted, and unrelated blocks, semantic types, styles, marks, tables, notes, Figures, and Designed Pages must remain intact.
+        - Audit the proposed final sequence against the current agent-manuscript-v4 snapshot before submitting it. The rewritten passage must appear once, every intentionally superseded source block must be replaced or deleted, and unrelated blocks, semantic types, styles, marks, tables, notes, Figures, and Designed Pages must remain intact.
         - A terminal Contest proposal or revision-worker mutation cannot inspect its result afterward. Perform this source-block disposition and duplicate-prose audit before returning the proposal or calling the terminal mutation tool.
         """;
 

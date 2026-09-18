@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Authoring;
+using Lorekeeper.Citations;
 using Lorekeeper.Composition;
 using Lorekeeper.Fonts;
 using Lorekeeper.ImportExport;
@@ -21,7 +22,8 @@ public sealed class PublishService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectFontService projectFonts,
     IEnumerable<IPublishExportFormatter> formatters,
-    IAuthoringMutationFence authoringFence) : IPublishService
+    IAuthoringMutationFence authoringFence,
+    ICitationFormatter? citationFormatter = null) : IPublishService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -113,25 +115,26 @@ public sealed class PublishService(
         PublishExportFormat format,
         CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
         var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
             ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
-        if (format == PublishExportFormat.Epub
-            && await db.PublicationEditions.AsNoTracking()
+        if (format == PublishExportFormat.Epub)
+        {
+            await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+            if (await databaseOperation.Db.PublicationEditions.AsNoTracking()
                 .Where(edition => edition.ProjectId == projectId && edition.Id == editionId)
                 .Select(edition => edition.Format)
                 .SingleOrDefaultAsync(cancellationToken) != PublicationEditionFormat.Epub)
-        {
-            throw new InvalidOperationException(
-                "EPUB export is available only from an EPUB release so print ISBN and artifact metadata cannot leak into a digital release.");
+            {
+                throw new InvalidOperationException(
+                    "EPUB export is available only from an EPUB release so print ISBN and artifact metadata cannot leak into a digital release.");
+            }
         }
         var document = await GetDocumentCoreAsync(projectId, editionId, cancellationToken);
 
         return new ProjectExportFile(
             FileName: ExportFileName(document, formatter.FileExtension),
             ContentType: formatter.ContentType,
-            Content: formatter.Render(document));
+            Content: await formatter.RenderAsync(document, cancellationToken));
     }
 
     public Task<ProjectExportFile> ExportCoreAsync(
@@ -157,7 +160,7 @@ public sealed class PublishService(
         return new ProjectExportFile(
             ExportFileName(document, formatter.FileExtension),
             formatter.ContentType,
-            formatter.Render(document));
+            await formatter.RenderAsync(document, cancellationToken));
     }
 
     public Task<PublishDocument> GetDocumentAsync(
@@ -364,37 +367,17 @@ public sealed class PublishService(
         if (coverScene is not null)
             coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
         var coverSurfaceScenes = ReadCoverSurfaceScenes(coverDesign?.SurfaceScenesJson);
-        var coverSceneImageIds = coverScene is null
-            ? []
-            : CompositionSceneResolver.Flatten(coverScene)
-                .Where(item => item.Visible && item.ImageId is not null)
-                .Select(item => item.ImageId!.Value)
-                .ToArray();
-        var referencedAssetIds = sections
-            .SelectMany(section => section.Chapters)
-            .SelectMany(chapter => chapter.Manuscript.Content
-                    .Where(block => block.Type == ManuscriptBlockType.Figure)
-                    .Select(block => block.ImageId!.Value)
-                .Concat(chapter.DesignedPages
-                    .SelectMany(composition => composition.Variants)
-                    .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
-                    .Where(item => item.ImageId is not null)
-                    .Select(item => item.ImageId!.Value)))
-            .Concat(publicationSectionDocuments
-                .SelectMany(item => item.Manuscript.Content)
-                .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId.HasValue)
-                .Select(block => block.ImageId!.Value))
-            .Concat(publicationSectionDocuments
-                .SelectMany(item => item.DesignedPages)
-                .SelectMany(item => item.Variants)
-                .SelectMany(item => CompositionSceneResolver.Flatten(item.Scene))
-                .Where(item => item.ImageId.HasValue)
-                .Select(item => item.ImageId!.Value))
-            .Concat(coverSceneImageIds)
-            .Concat(coverSurfaceScenes.Values
-                .SelectMany(scene => CompositionSceneResolver.Flatten(scene))
-                .Where(item => item.Visible && item.ImageId is not null)
-                .Select(item => item.ImageId!.Value))
+        var effectivePages = sections.SelectMany(section => section.Chapters).SelectMany(chapter => chapter.DesignedPages)
+            .Concat(publicationSectionDocuments.SelectMany(section => section.DesignedPages)).ToList();
+        var effectiveManuscripts = sections.SelectMany(section => section.Chapters).Select(chapter => chapter.Manuscript)
+            .Concat(publicationSectionDocuments.Select(section => section.Manuscript))
+            .Concat(effectivePages.Select(page => page.SemanticManuscript)).ToList();
+        var effectiveScenes = effectivePages.SelectMany(page => page.Variants).Select(variant => variant.Scene)
+            .Concat(coverScene is null ? [] : new[] { coverScene }).Concat(coverSurfaceScenes.Values).ToList();
+        var referencedAssetIds = effectiveManuscripts.SelectMany(ManuscriptTraversal.EnumerateBlocks)
+            .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId.HasValue).Select(block => block.ImageId!.Value)
+            .Concat(effectiveScenes.SelectMany(CompositionSceneResolver.Flatten)
+                .Where(item => item.ImageId.HasValue).Select(item => item.ImageId!.Value))
             .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -423,26 +406,11 @@ public sealed class PublishService(
                 return new PublishManuscriptStyleDocument(style.Name, style.Kind, style.SemanticRole, definition);
             })
             .ToList();
-        var fontFamilies = await db.ProjectFontFamilies.AsNoTracking()
-            .Include(family => family.Faces)
-            .Where(family => family.ProjectId == projectId)
-            .OrderBy(family => family.Id)
-            .ToListAsync(cancellationToken);
         var referencedFontKeys = namedStyles
             .Select(item => item.Definition.FontFamilyKey)
-            .Concat(sections.SelectMany(section => section.Chapters)
-                .SelectMany(chapter => chapter.Manuscript.Content)
+            .Concat(effectiveManuscripts.SelectMany(ManuscriptTraversal.EnumerateBlocks)
                 .Select(block => block.ParagraphPresentation?.FontFamilyKey))
-            .Concat(sections.SelectMany(section => section.Chapters)
-                .SelectMany(chapter => chapter.DesignedPages)
-                .SelectMany(composition => composition.Variants)
-                .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene).Select(item => item.FontFamilyKey)
-                    .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
-            .Concat(coverScene is null
-                ? []
-                : coverScene.Objects.Select(item => item.FontFamilyKey)
-                    .Concat(coverScene.Styles.Select(style => style.FontFamilyKey)))
-            .Concat(coverSurfaceScenes.Values.SelectMany(scene => scene.Objects.Select(item => item.FontFamilyKey)
+            .Concat(effectiveScenes.SelectMany(scene => CompositionSceneResolver.Flatten(scene).Select(item => item.FontFamilyKey)
                 .Concat(scene.Styles.Select(style => style.FontFamilyKey))))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)
@@ -451,6 +419,11 @@ public sealed class PublishService(
             .Where(key => key.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
             .Select(key => Guid.TryParse(key["project:".Length..], out var familyId) ? familyId : Guid.Empty)
             .ToHashSet();
+        var fontFamilies = await db.ProjectFontFamilies.AsNoTracking()
+            .Include(family => family.Faces)
+            .Where(family => family.ProjectId == projectId && referencedFontIds.Contains(family.Id))
+            .OrderBy(family => family.Id)
+            .ToListAsync(cancellationToken);
         foreach (var familyId in referencedFontIds)
         {
             var family = fontFamilies.FirstOrDefault(item => item.Id == familyId)
@@ -499,7 +472,13 @@ public sealed class PublishService(
             }
         }
 
-        return new PublishDocument(
+        var bibliography = (await db.BibliographicRecords.AsNoTracking()
+            .Where(record => record.ProjectId == projectId)
+            .OrderBy(record => record.Id)
+            .ToListAsync(cancellationToken))
+            .Select(CitationRecord.FromEntity)
+            .ToList();
+        var document = new PublishDocument(
             editionId,
             project.Id,
             project.Name,
@@ -524,6 +503,31 @@ public sealed class PublishService(
                     profile.Description,
                     coverDesign.BackgroundColor,
                     coverScene),
+            CitationStyle = profile.CitationStyle,
+            BibliographicRecords = bibliography,
+        };
+        var occurrences = PublicationCitationTraversal.Enumerate(document);
+        var sourceLocationIds = occurrences.SelectMany(item => item.Cluster.Items)
+            .Where(item => item.SourceLocationId.HasValue)
+            .Select(item => item.SourceLocationId!.Value)
+            .Distinct()
+            .ToList();
+        if (sourceLocationIds.Count > 0)
+        {
+            var validLocationIds = await db.SourceLocations.AsNoTracking()
+                .Where(location => location.ProjectId == projectId && sourceLocationIds.Contains(location.Id))
+                .Select(location => location.Id)
+                .ToListAsync(cancellationToken);
+            var missingLocationIds = sourceLocationIds.Except(validLocationIds).ToList();
+            if (missingLocationIds.Count > 0)
+                throw new InvalidDataException($"Publication citations reference missing source locations: {string.Join(", ", missingLocationIds)}.");
+        }
+        return document with
+        {
+            Citations = (citationFormatter ?? new CitationFormatter()).Format(
+                profile.CitationStyle,
+                bibliography,
+                occurrences),
         };
     }
 
@@ -584,6 +588,7 @@ public sealed class PublishService(
         NumberActs = core.NumberActs,
         NumberChapters = core.NumberChapters,
         TitlePageMode = core.TitlePageMode,
+        CitationStyle = core.CitationStyle,
         RectoChapterStarts = core.RectoChapterStarts,
         AllowDesignedPageOverrides = core.AllowDesignedPageOverrides,
         PageWidthInches = core.PageSetup.PageWidthInches,
@@ -772,6 +777,7 @@ public sealed class PublishService(
             PublicationSectionService.ResolveBindings(
                 ManuscriptCodec.Deserialize(content.SemanticManuscriptJson, content.Id, content.Revision),
                 boundValues),
+            content.AccessibilityDescription,
             content.Revision,
             content.Variants
                 .Where(variant => DesignedPageService.VariantMatchesEdition(variant, profile))

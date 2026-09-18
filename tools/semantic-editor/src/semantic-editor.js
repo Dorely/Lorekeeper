@@ -62,6 +62,26 @@ function newBlockId() {
     return crypto.randomUUID().replaceAll("-", "");
 }
 
+function importedTableColumnWeights(element) {
+    const rows = [...element.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr, :scope > tr")];
+    const columns = rows.reduce((maximum, row) => Math.max(maximum,
+        [...row.children]
+            .filter(cell => cell.tagName === "TD" || cell.tagName === "TH")
+            .reduce((total, cell) => total + Math.max(1, Number(cell.getAttribute("colspan") || 1)), 0)), 0);
+    return Array.from({length: Math.max(1, columns)}, () => 1);
+}
+
+function importedTableHeaderRows(element) {
+    const rows = [...element.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr, :scope > tr")];
+    let count = 0;
+    for (const row of rows) {
+        const cells = [...row.children].filter(cell => cell.tagName === "TD" || cell.tagName === "TH");
+        if (cells.length === 0 || cells.some(cell => cell.tagName !== "TH")) break;
+        count++;
+    }
+    return count;
+}
+
 function safeLink(value) {
     const candidate = value?.trim();
     if (!candidate) return null;
@@ -101,6 +121,7 @@ const blockAttrs = {
     accessibilityRole: {default: null},
     presentation: {default: null},
     paragraphPresentation: {default: null},
+    list: {default: null},
     designedPageId: {default: null},
     designedPageName: {default: null},
     designedPageSurfaceLabel: {default: null},
@@ -148,6 +169,7 @@ function textBlockDom(tag, node, extra = {}) {
         class: extra.class || null,
         "data-block-id": node.attrs.id,
         "data-style-role": node.attrs.styleRole,
+        "data-manuscript-list": node.type.name === "list_item" && node.attrs.list ? JSON.stringify(node.attrs.list) : null,
         style: paragraphStyle(node.attrs.paragraphPresentation)
     }, 0];
 }
@@ -156,6 +178,7 @@ function textBlockAttrs(element, defaultRole) {
     return {
         id: element.dataset.blockId,
         styleRole: element.dataset.styleRole || defaultRole,
+        list: parseListMetadata(element.dataset.manuscriptList),
     };
 }
 
@@ -228,6 +251,23 @@ const schema = new Schema({
                 "data-note-kind": node.attrs.kind,
                 title: node.attrs.kind === "endnote" ? "Endnote" : "Footnote"
             }, node.attrs.kind === "endnote" ? "[e]" : "[n]"]
+        },
+        citation: {
+            inline: true,
+            group: "inline",
+            atom: true,
+            selectable: true,
+            attrs: {id: {}, items: {default: []}},
+            parseDOM: [{tag: "cite[data-citation-id]", getAttrs: element => ({
+                id: element.dataset.citationId,
+                items: JSON.parse(element.dataset.citationItems || "[]")
+            })}],
+            toDOM: node => ["cite", {
+                class: "semantic-citation",
+                "data-citation-id": node.attrs.id,
+                "data-citation-items": JSON.stringify(node.attrs.items || []),
+                title: `${node.attrs.items?.length || 0} citation item${node.attrs.items?.length === 1 ? "" : "s"}`
+            }, "[cite]"]
         },
         hard_break: {
             inline: true,
@@ -356,12 +396,16 @@ const schema = new Schema({
                 columnWidthWeights: {default: []},
                 headerRowCount: {default: 0}
             },
-            parseDOM: [{tag: "table[data-table-id]", getAttrs: element => ({
-                id: element.dataset.blockId,
+            parseDOM: [{tag: "table", getAttrs: element => ({
+                id: element.dataset.blockId || newBlockId(),
                 styleRole: "table",
-                tableId: element.dataset.tableId,
-                columnWidthWeights: JSON.parse(element.dataset.columnWidths || "[]"),
-                headerRowCount: Number(element.dataset.headerRows || 0)
+                tableId: element.dataset.tableId || newBlockId(),
+                columnWidthWeights: element.dataset.columnWidths
+                    ? JSON.parse(element.dataset.columnWidths)
+                    : importedTableColumnWeights(element),
+                headerRowCount: element.dataset.headerRows
+                    ? Number(element.dataset.headerRows)
+                    : importedTableHeaderRows(element)
             })}],
             toDOM: node => ["table", {
                 class: "semantic-rich-table",
@@ -375,7 +419,10 @@ const schema = new Schema({
         table_row: {
             content: "table_cell+",
             attrs: {id: {default: null}, header: {default: false}},
-            parseDOM: [{tag: "tr", getAttrs: element => ({id: element.dataset.rowId, header: element.dataset.header === "true"})}],
+            parseDOM: [{tag: "tr", getAttrs: element => ({
+                id: element.dataset.rowId || newBlockId(),
+                header: element.dataset.header === "true" || [...element.children].every(cell => cell.tagName === "TH")
+            })}],
             toDOM: node => ["tr", {"data-row-id": node.attrs.id, "data-header": String(node.attrs.header)}, 0]
         },
         table_cell: {
@@ -383,7 +430,7 @@ const schema = new Schema({
             isolating: true,
             attrs: {id: {default: null}, rowSpan: {default: 1}, columnSpan: {default: 1}, header: {default: false}},
             parseDOM: [{tag: "td, th", getAttrs: element => ({
-                id: element.dataset.cellId,
+                id: element.dataset.cellId || newBlockId(),
                 rowSpan: Number(element.getAttribute("rowspan") || 1),
                 columnSpan: Number(element.getAttribute("colspan") || 1),
                 header: element.tagName.toLowerCase() === "th"
@@ -469,6 +516,12 @@ function inlineFromDomain(inline) {
             kind: inline.kind || "footnote"
         })];
     }
+    if (inline.type === "citation") {
+        return [schema.nodes.citation.create({
+            id: inline.id || newBlockId(),
+            items: structuredClone(inline.citation?.items || [])
+        })];
+    }
     if (!inline.text) return [];
     const marks = (inline.marks || []).flatMap(mark => {
         const name = markTypeToName[mark.type];
@@ -488,6 +541,17 @@ function inlineFromDomain(inline) {
     return nodes;
 }
 
+function parseListMetadata(value) {
+    if (!value) return null;
+    try {
+        const list = JSON.parse(value);
+        return typeof list.id === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(list.id)
+            && typeof list.ordered === "boolean" && Number.isInteger(list.level) && list.level >= 0 && list.level <= 8
+            && (list.start === null || list.ordered && Number.isInteger(list.start) && list.start >= 1 && list.start <= 1000000)
+            ? {id: list.id, ordered: list.ordered, level: list.level, start: list.start} : null;
+    } catch { return null; }
+}
+
 function blockFromDomain(block, noteKinds) {
     const nodeName = blockTypeToNode[block.type] || "paragraph";
     const nodeType = schema.nodes[nodeName];
@@ -502,6 +566,7 @@ function blockFromDomain(block, noteKinds) {
         accessibilityRole: block.accessibilityRole || (nodeName === "figure" ? "figure" : null),
         presentation: block.figurePresentation || null,
         paragraphPresentation: block.paragraphPresentation || null,
+        list: block.list || null,
         designedPageId: block.designedPageId || null,
         designedPageName: block.designedPageName || null,
         designedPageSurfaceLabel: block.designedPageSurfaceLabel || null,
@@ -527,13 +592,12 @@ function blockFromDomain(block, noteKinds) {
     }
     const content = ["scene_break", "designed_page"].includes(nodeName)
         ? null
-        : (block.content || []).flatMap(inline => inline.type === "noteReference"
-            ? [schema.nodes.note_reference.create({
-                id: inline.id || newBlockId(),
-                noteId: inline.noteId,
-                kind: noteKinds.get(inline.noteId) || "footnote"
-            })]
-            : inlineFromDomain(inline));
+        : (block.content || []).flatMap(inline => inlineFromDomain({
+            ...inline,
+            kind: inline.type === "noteReference"
+                ? noteKinds.get(inline.noteId) || "footnote"
+                : inline.kind
+        }));
     return nodeType.create(attrs, content);
 }
 
@@ -588,6 +652,17 @@ function domainBlockFromNode(node) {
                 inlines.push({id: child.attrs.id || newBlockId(), type: "noteReference", text: "", noteId: child.attrs.noteId, marks: []});
                 return;
             }
+            if (child.type.name === "citation") {
+                inlines.push({
+                    id: child.attrs.id || newBlockId(),
+                    type: "citation",
+                    text: "",
+                    noteId: null,
+                    citation: {items: structuredClone(child.attrs.items || [])},
+                    marks: []
+                });
+                return;
+            }
             const marks = child.marks.flatMap(mark => {
                 const type = markNameToType[mark.type.name];
                 if (!type) return [];
@@ -606,6 +681,7 @@ function domainBlockFromNode(node) {
         type: nodeToBlockType[node.type.name] || "paragraph",
         styleRole: node.attrs.styleRole || "body",
         headingLevel: node.type.name === "heading" ? node.attrs.level : null,
+        list: node.type.name === "list_item" ? node.attrs.list || null : null,
         imageId: node.type.name === "figure" ? node.attrs.imageId : null,
         altText: node.type.name === "figure" ? node.attrs.altText : null,
         language: node.attrs.language || null,
@@ -626,7 +702,7 @@ function domainBlockFromNode(node) {
 function domainFromDocument(doc, manuscriptId, revision) {
     const content = [];
     doc.forEach(node => content.push(domainBlockFromNode(node)));
-    return {schemaVersion: 6, manuscriptId, revision, content, notes: structuredClone(doc.attrs.notes || [])};
+    return {schemaVersion: 7, manuscriptId, revision, content, notes: structuredClone(doc.attrs.notes || [])};
 }
 
 export function roundTripManuscriptJson(json) {
@@ -647,10 +723,11 @@ function blockIdPlugin() {
             const referencedNotes = new Set();
             newState.doc.descendants((node, position) => {
                 if (node.type.name === "note_reference") referencedNotes.add(node.attrs.noteId);
-                if ((!node.isBlock && node.type.name !== "note_reference") || node.type.name === "doc") return true;
+                if ((!node.isBlock && !["note_reference", "citation"].includes(node.type.name)) || node.type.name === "doc") return true;
                 const id = node.attrs.id;
                 if (!id || seen.has(id)) {
-                    transaction = transaction.setNodeMarkup(position, undefined, {...node.attrs, id: newBlockId()});
+                    transaction = transaction.setNodeMarkup(position, undefined, {...node.attrs, id: newBlockId(),
+                        ...(node.attrs.list && seen.has(id) ? {list: {...node.attrs.list, start: null}} : {})});
                     changed = true;
                 } else {
                     seen.add(id);
@@ -666,6 +743,32 @@ function blockIdPlugin() {
             return changed ? transaction : null;
         }
     });
+}
+
+function listNumberingPlugin() {
+    return new Plugin({props: {decorations(state) {
+        const decorations = [];
+        const scopes = new Map();
+        state.doc.descendants((node, position) => {
+            if (node.type.name !== "list_item" || !node.attrs.list) return true;
+            const list = node.attrs.list;
+            const owner = state.doc.resolve(position).parent.attrs.id || "document";
+            const key = `${owner}/${list.id}`;
+            const counts = scopes.get(key) || [];
+            const level = Math.max(0, Math.min(8, list.level || 0));
+            counts.length = level + 1;
+            const number = list.start || (counts[level] || 0) + 1;
+            if (list.ordered) counts[level] = number;
+            scopes.set(key, counts);
+            decorations.push(Decoration.node(position, position + node.nodeSize, {
+                "data-list-marker": list.ordered ? `${number}. ` : "• ",
+                "aria-level": String(level + 1),
+                style: `margin-left:${(level + 1) * 1.5}em`
+            }));
+            return false;
+        });
+        return DecorationSet.create(state.doc, decorations);
+    }}});
 }
 
 function initialEditorSelection(doc) {
@@ -759,6 +862,7 @@ function showEditorNotice(root, message) {
 
 function showEditorForm(root, {title, description, submitLabel, fields, validate}) {
     return new Promise(resolve => {
+        const previousFocus = document.activeElement;
         const backdrop = document.createElement("div");
         backdrop.className = "semantic-editor-dialog-backdrop";
         const form = document.createElement("form");
@@ -826,6 +930,7 @@ function showEditorForm(root, {title, description, submitLabel, fields, validate
             if (settled) return;
             settled = true;
             backdrop.remove();
+            if (previousFocus?.isConnected) previousFocus.focus();
             resolve(value);
         };
         form.addEventListener("submit", event => {
@@ -849,6 +954,17 @@ function showEditorForm(root, {title, description, submitLabel, fields, validate
             if (event.key === "Escape") {
                 event.preventDefault();
                 close(null);
+            } else if (event.key === "Tab") {
+                const focusable = [...form.querySelectorAll("input, select, textarea, button")].filter(control => !control.disabled);
+                const first = focusable[0];
+                const last = focusable.at(-1);
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last?.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first?.focus();
+                }
             }
         });
         queueMicrotask(() => controls.values().next().value?.focus());
@@ -871,6 +987,7 @@ function applyBlock(view, nodeName, styleRole, level = 2) {
                 ...node.attrs,
                 id: node.attrs.id || newBlockId(),
                 styleRole,
+                list: nodeName === "list_item" ? node.attrs.list : null,
                 ...(nodeName === "heading" ? {level} : {})
             },
             node.marks);
@@ -1996,7 +2113,7 @@ function pasteNormalizationWarnings(
     const html = event.clipboardData?.getData("text/html");
     if (!html) return [];
     const document = new DOMParser().parseFromString(html, "text/html");
-    const supported = new Set(["P", "BR", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "UL", "OL", "LI", "HR", "FIGURE", "FIGCAPTION", "EM", "I", "STRONG", "B", "U", "S", "DEL", "CODE", "A", "SPAN", "SUP", "SUB"]);
+    const supported = new Set(["P", "BR", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "UL", "OL", "LI", "HR", "FIGURE", "FIGCAPTION", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "EM", "I", "STRONG", "B", "U", "S", "DEL", "CODE", "A", "SPAN", "SUP", "SUB"]);
     const warnings = new Set();
     for (const element of document.body.querySelectorAll("*")) {
         if (!supported.has(element.tagName)) {
@@ -2031,7 +2148,9 @@ function pasteNormalizationWarnings(
             ? new Set(["href"])
             : element.tagName === "SPAN"
                 ? new Set(["lang", "data-character-style", "class"])
-                : element.tagName === "HR"
+                : ["TH", "TD"].includes(element.tagName)
+                    ? new Set(["rowspan", "colspan"])
+                    : element.tagName === "HR"
                     ? new Set(["data-scene-break", "data-style-role"])
                     : new Set();
         if ([...element.attributes].some(attribute => !allowed.has(attribute.name)))
@@ -2088,9 +2207,18 @@ function sanitizePastedSlice(slice, paragraphRoles, characterRoles, imageById) {
                 imageUrl: image.previewUrl
             }, content);
         }
+        const attrs = node.type.name === "table"
+            ? {
+                ...node.attrs,
+                id: newBlockId(),
+                tableId: newBlockId(),
+                columnWidthWeights: node.attrs.columnWidthWeights?.length > 0
+                    ? node.attrs.columnWidthWeights
+                    : Array.from({length: Math.max(1, node.firstChild?.childCount || 1)}, () => 1)
+            }
+            : {...node.attrs, id: newBlockId()};
         return node.type.create({
-            ...node.attrs,
-            id: newBlockId(),
+            ...attrs,
             styleRole
         }, content, sanitizeMarks(node.marks));
     };
@@ -2238,6 +2366,7 @@ function installTypographyRules(root, typography = {}) {
         const bullet = JSON.stringify(current.listItem?.bullet || "• ");
         const hangingIndent = current.listItem?.hangingIndentEm ?? 1;
         rules.push(`${selector(".semantic-list-item")}::before{content:${bullet};position:absolute;left:${-hangingIndent}em;}`);
+        rules.push(`${selector(".semantic-list-item[data-list-marker]")}::before{content:attr(data-list-marker);}`);
         add("hr[data-scene-break]", [
             ...typographyDeclarations(current.sceneBreak, {}, false),
             `margin-top:${current.sceneBreak?.spaceBeforePoints ?? 0}pt`,
@@ -2324,6 +2453,59 @@ function editorialText(doc, manuscriptId, revision) {
         .filter(block => !["sceneBreak", "designedPage"].includes(block.type))
         .map(domainBlockText)
         .join("\n\n");
+}
+
+function changeListLevel(view, delta) {
+    if (view.state.selection.$from.parent.type.name !== "list_item") return false;
+    const {from, to} = view.state.selection;
+    const group = view.state.selection.$from.parent.attrs.list?.id || newBlockId();
+    let transaction = view.state.tr;
+    view.state.doc.nodesBetween(from, to, (node, position) => {
+        if (node.type.name !== "list_item") return true;
+        const list = node.attrs.list || {id: group, ordered: false, level: 0, start: null};
+        transaction = transaction.setNodeMarkup(position, undefined, {...node.attrs,
+            list: {...list, level: Math.max(0, Math.min(8, list.level + delta)), start: null}});
+        return false;
+    });
+    view.dispatch(transaction.scrollIntoView());
+    view.focus();
+    return true;
+}
+
+async function editListFormatting(view, root) {
+    const before = view.state.doc;
+    const {from, to} = view.state.selection;
+    const current = view.state.selection.$from.parent.attrs.list;
+    const values = await showEditorForm(root, {
+        title: "List formatting", submitLabel: "Apply list",
+        fields: [
+            {name: "ordered", label: "Numbered list", type: "checkbox", value: current?.ordered ?? false},
+            {name: "level", label: "Nesting level (0–8)", type: "number", value: current?.level ?? 0},
+            {name: "start", label: "Restart at (leave blank to continue)", type: "number", value: current?.start ?? ""}
+        ],
+        validate: value => !Number.isInteger(Number(value.level)) || Number(value.level) < 0 || Number(value.level) > 8
+            ? "Use a nesting level from 0 through 8."
+            : String(value.start).trim() && (!value.ordered || !Number.isInteger(Number(value.start)) || Number(value.start) < 1 || Number(value.start) > 1000000)
+                ? "A numbered list can restart at a whole number from 1 through 1,000,000." : null
+    });
+    if (!values) return;
+    if (view.state.doc !== before) {
+        showEditorNotice(root, "The manuscript changed. Select the list again before applying formatting.");
+        return;
+    }
+    const group = current?.ordered === values.ordered ? current.id : newBlockId();
+    let transaction = view.state.tr;
+    let first = true;
+    before.nodesBetween(from, to, (node, position) => {
+        if (!node.isTextblock || !schema.nodes.list_item.validContent(node.content)) return true;
+        const start = first && values.ordered && String(values.start).trim() ? Number(values.start) : null;
+        transaction = transaction.setNodeMarkup(position, schema.nodes.list_item, {...node.attrs,
+            styleRole: "list-item", list: {id: group, ordered: values.ordered, level: Number(values.level), start}});
+        first = false;
+        return false;
+    });
+    view.dispatch(transaction.scrollIntoView());
+    view.focus();
 }
 
 function domainBlockText(block) {
@@ -2436,6 +2618,88 @@ async function insertNote(view, root, kind) {
     view.dispatch(view.state.tr
         .replaceSelectionWith(reference)
         .setDocAttribute("notes", notes)
+        .scrollIntoView());
+    view.focus();
+}
+
+export function citationItemsFromForm(values, count, originalItems = []) {
+    const items = [];
+    for (let ordinal = 1; ordinal <= count; ordinal += 1) {
+        const bibliographicRecordId = values[`record${ordinal}`];
+        if (!bibliographicRecordId) continue;
+        const original = originalItems[ordinal - 1];
+        items.push({
+            bibliographicRecordId,
+            prefix: values[`prefix${ordinal}`].trim(),
+            suffix: values[`suffix${ordinal}`].trim(),
+            locatorLabel: values[`locatorLabel${ordinal}`],
+            locatorValue: values[`locatorValue${ordinal}`].trim(),
+            sourceLocationId: original?.bibliographicRecordId === bibliographicRecordId ? original.sourceLocationId ?? null : null
+        });
+    }
+    return items;
+}
+
+async function insertOrEditCitation(view, root, loadBibliography) {
+    const initialDocument = view.state.doc;
+    const initialSelection = view.state.selection;
+    const existing = initialSelection instanceof NodeSelection && initialSelection.node.type.name === "citation"
+        ? initialSelection.node : null;
+    const originalItems = existing?.attrs.items || [];
+    if (!view.state.selection.$from.parent.inlineContent) {
+        showEditorNotice(root, "Place the cursor in a paragraph, list item, figure caption, or table cell first.");
+        return;
+    }
+    let bibliography;
+    try {
+        bibliography = await loadBibliography();
+    } catch (error) {
+        showEditorNotice(root, error?.message || "The bibliography could not be loaded. Try again.");
+        view.focus();
+        return;
+    }
+    if (view.state.doc !== initialDocument) {
+        showEditorNotice(root, "The manuscript changed while the bibliography was loading. Select the citation or insertion point and try again.");
+        view.focus();
+        return;
+    }
+    if (!bibliography.length) {
+        showEditorNotice(root, "Add a bibliographic record in Sources before inserting a citation.");
+        return;
+    }
+    const options = [["", "Choose a record"]].concat(bibliography.map(record => [
+        String(record.id),
+        `${record.title}${record.issuedYear ? ` (${record.issuedYear})` : ""}`
+    ]));
+    const fields = [];
+    const count = Math.max(3, originalItems.length + 1);
+    for (let ordinal = 1; ordinal <= count; ordinal += 1) {
+        const item = originalItems[ordinal - 1];
+        fields.push(
+            {name: `record${ordinal}`, label: ordinal === 1 ? "Source" : `Additional source ${ordinal}`, type: "select", value: item?.bibliographicRecordId || "", options},
+            {name: `prefix${ordinal}`, label: `Prefix ${ordinal}`, type: "text", value: item?.prefix || ""},
+            {name: `locatorLabel${ordinal}`, label: `Locator label ${ordinal}`, type: "text", value: item?.locatorLabel ?? "page"},
+            {name: `locatorValue${ordinal}`, label: `Locator ${ordinal}`, type: "text", value: item?.locatorValue || ""},
+            {name: `suffix${ordinal}`, label: `Suffix ${ordinal}`, type: "text", value: item?.suffix || ""}
+        );
+    }
+    const values = await showEditorForm(root, {
+        title: existing ? "Edit citation" : "Insert citation",
+        description: "Choose bibliography items for this citation cluster. Prefixes, suffixes, and locators stay attached to their individual items. Leave an additional source blank to remove it.",
+        submitLabel: existing ? "Save citation" : "Insert citation",
+        fields,
+        validate: value => !value.record1 ? "Choose at least one bibliographic record." : null
+    });
+    if (!values) { view.focus(); return; }
+    if (view.state.doc !== initialDocument) {
+        showEditorNotice(root, "The manuscript changed while the citation was open. Select the citation or insertion point and try again.");
+        view.focus();
+        return;
+    }
+    const items = citationItemsFromForm(values, count, originalItems);
+    view.dispatch(view.state.tr
+        .setSelection(initialSelection)
+        .replaceSelectionWith(schema.nodes.citation.create({id: existing?.attrs.id || newBlockId(), items}))
         .scrollIntoView());
     view.focus();
 }
@@ -2622,10 +2886,46 @@ function sameFigureProperties(left, right) {
 
 // Translate the ProseMirror semantic document, never its DOM or HTML. The
 // server validates these operations against its pre-state and derives inverses.
+function manuscriptTextBlocks(document) {
+    const result = [];
+    const visit = (blocks, path) => {
+        for (const block of blocks || []) {
+            if (block.table) {
+                for (const row of block.table.rows || [])
+                    for (const cell of row.cells || [])
+                        visit(cell.content, [...path, `table:${block.table.id}`, `row:${row.id}`, `cell:${cell.id}`]);
+            } else result.push({block, path});
+        }
+    };
+    visit(document.content, ["document"]);
+    for (const note of document.notes || []) visit(note.content, ["notes", note.id]);
+    return result;
+}
+
+function inlineAuthoringOperations(before, after) {
+    const structure = document => {
+        const copy = structuredClone(document);
+        copy.revision = 0;
+        for (const {block} of manuscriptTextBlocks(copy)) block.content = [];
+        return copy;
+    };
+    if (!sameJson(structure(before), structure(after))) return null;
+    const previous = new Map(manuscriptTextBlocks(before).map(item => [item.block.id, item]));
+    return manuscriptTextBlocks(after).filter(({block}) => !sameInlineContent(previous.get(block.id).block, block))
+        .map(({block, path}) => ({
+            kind: "replaceInlineContent", blockId: block.id,
+            position: {documentId: before.manuscriptId, containerPath: path, blockOrAtomId: block.id, offset: 0, affinity: "after"},
+            inlineContent: structuredClone(block.content || [])
+        }));
+}
+
 export function authoringOperations(before, after) {
     const hasRichContent = value => (value.notes || []).length > 0
-        || (value.content || []).some(block => block.type === "table");
+        || (value.content || []).some(block => block.type === "table" || block.list
+            || (block.content || []).some(inline => inline.type === "citation"));
     if (hasRichContent(before) || hasRichContent(after)) {
+        const inline = inlineAuthoringOperations(before, after);
+        if (inline !== null) return inline;
         return sameJson(before.content || [], after.content || []) && sameJson(before.notes || [], after.notes || [])
             ? []
             : [{kind: "replaceRichDocument", richDocument: after}];
@@ -2727,6 +3027,10 @@ export function addAuthoringPreconditions(operations, before, after, fingerprint
             operation.expectedDocumentFingerprint = documentFingerprint;
             continue;
         }
+        if (kind === "replaceinlinecontent") {
+            operation.expectedElementFingerprint = fingerprints.get(operation.blockId) || null;
+            continue;
+        }
         const blockId = operation.blockId || operation.placementBlockId;
         if (blockId && beforeById.has(blockId))
             operation.expectedElementFingerprint = beforeById.get(blockId).fingerprint;
@@ -2790,6 +3094,23 @@ function applyAuthoringOperations(view, operations) {
             transaction = transaction
                 .replaceWith(0, view.state.doc.content.size, replacement.content)
                 .setDocAttribute("notes", replacement.attrs.notes || []);
+        } else if (kind === "replaceinlinecontent") {
+            if (operation.position?.containerPath?.[0] === "notes") {
+                const notes = structuredClone(view.state.doc.attrs.notes || []);
+                const note = notes.find(item => item.id === operation.position.containerPath[1]);
+                const block = note?.content.find(item => item.id === operation.blockId);
+                if (!block) throw new Error("The saved note edit no longer matches this manuscript.");
+                block.content = structuredClone(operation.inlineContent);
+                transaction = transaction.setDocAttribute("notes", notes);
+            } else {
+                if (!Number.isInteger(position)) throw new Error("The saved inline edit no longer matches this manuscript.");
+                const node = view.state.doc.nodeAt(position);
+                const noteKinds = new Map((view.state.doc.attrs.notes || []).map(note => [note.id, note.kind]));
+                const content = operation.inlineContent.flatMap(inline => inlineFromDomain({
+                    ...inline, kind: inline.type === "noteReference" ? noteKinds.get(inline.noteId) : inline.kind
+                }));
+                transaction = transaction.replaceWith(position + 1, position + 1 + node.content.size, content);
+            }
         } else if (kind === "deleteblock" || kind === "removedesignedpageplacement") {
             if (!Number.isInteger(position)) continue;
             transaction = transaction.delete(position, position + view.state.doc.nodeAt(position).nodeSize);
@@ -3390,6 +3711,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         selection: initialEditorSelection(initialDocument),
         plugins: [
             blockIdPlugin(),
+            listNumberingPlugin(),
             authoringHistoryAdapter,
             annotationsPlugin,
             gapCursor(),
@@ -3399,8 +3721,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 "Mod-y": () => { void performPersistentHistory(true); return true; },
                 "Mod-b": toggleMark(schema.marks.strong),
                 "Mod-i": toggleMark(schema.marks.em),
-                "Tab": (_state, _dispatch, editorView) => { changeParagraphIndent(editorView, 1.5); return true; },
-                "Shift-Tab": (_state, _dispatch, editorView) => { changeParagraphIndent(editorView, -1.5); return true; },
+                "Tab": (_state, _dispatch, editorView) => { if (!changeListLevel(editorView, 1)) changeParagraphIndent(editorView, 1.5); return true; },
+                "Shift-Tab": (_state, _dispatch, editorView) => { if (!changeListLevel(editorView, -1)) changeParagraphIndent(editorView, -1.5); return true; },
                 "Shift-Enter": insertHardBreak,
                 "Enter": chainCommands(newlineInCode, createParagraphNear, liftEmptyBlock, baseKeymap.Enter)
             }),
@@ -3752,6 +4074,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         button("Table", "Insert semantic table", () => void insertRichTable(view, root)),
         button("Fn", "Insert footnote", () => void insertNote(view, root, "footnote")),
         button("En", "Insert endnote", () => void insertNote(view, root, "endnote")),
+        button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
+            () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
         selectControl("Insert special character", [
             ["", "Ω"],
             ["—", "Em dash —"],
@@ -3779,7 +4103,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
         iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
         iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-        iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view))
+        iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view)),
+        button("List…", "Set list numbering, nesting, or restart", () => void editListFormatting(view, root))
     );
     toolbar.append(
         iconButton("¶…", "Right, first-line, and hanging indents, spacing, and pagination controls", () =>
@@ -3830,6 +4155,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             controlByTitle("Insert semantic table"),
             controlByTitle("Insert footnote"),
             controlByTitle("Insert endnote"),
+            controlByTitle("Insert or edit citation"),
             controlBySelect("Insert special character"),
         ]),
         toolGroup("Paragraph formatting", [

@@ -24,8 +24,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportJobProcessor(
-    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IIngestVectorIndexingService ingestVectorIndexing, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger, IProjectImportFileStore? fileStore = null)
+    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IIngestVectorIndexingService ingestVectorIndexing, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger, IProjectImportFileStore? fileStore = null, ProjectArchiveLimits? archiveLimits = null)
 {
+    private readonly ProjectArchiveLimits _archiveLimits = archiveLimits ?? ProjectArchiveLimits.Default;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() },
@@ -66,6 +67,8 @@ public sealed class ProjectImportJobProcessor(
         public Dictionary<Guid, Guid> IngestSourceChunkMap { get; } = [];
         public Dictionary<Guid, Guid> IngestSourcePageMap { get; } = [];
         public Dictionary<Guid, Guid> IngestSourceBlockMap { get; } = [];
+        public Dictionary<Guid, Guid> BibliographyMap { get; } = [];
+        public Dictionary<Guid, Guid> SourceLocationMap { get; } = [];
         public List<Guid> CreatedActIds { get; } = [];
         public List<Guid> CreatedChapterIds { get; } = [];
         public List<Guid> ContextEntityIdsToReindex { get; } = [];
@@ -121,7 +124,12 @@ public sealed class ProjectImportJobProcessor(
                 if (document.ExportKind == ProjectExportKind.Full)
                 {
                     if (job.InputKind == ProjectImportInputKind.LorekeeperArchive && document.ExportKind == ProjectExportKind.Full)
+                    {
                         await ImportArchiveSourceClosureAsync(job, document, state, cancellationToken);
+                        document = ProjectCitationRemapping.Remap(document, state.BibliographyMap, state.SourceLocationMap);
+                        foreach (var manuscript in ProjectCitationRemapping.Manuscripts(document))
+                            await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, project.Id, manuscript, cancellationToken);
+                    }
                     else
                         await ImportCanonicalIngestSourcesAsync(job, document, state, cancellationToken);
                     await ImportProjectImagesAsync(job, document, state, cancellationToken);
@@ -184,6 +192,15 @@ public sealed class ProjectImportJobProcessor(
                 }
                 else
                 {
+                    if (job.InputKind == ProjectImportInputKind.LorekeeperArchive)
+                    {
+                        await using var archiveInput = _fileStore.OpenRead(new ProjectImportJobFileKey(job.StagedFileKey));
+                        _ = await ProjectArchiveZip.ReadAsync(archiveInput, _archiveLimits, cancellationToken);
+                        archiveInput.Position = 0;
+                        using var archive = new ZipArchive(archiveInput, ZipArchiveMode.Read, leaveOpen: true);
+                        await ImportArchiveBibliographyAsync(db, archive, project.Id,
+                            new Dictionary<Guid, Guid>(), state.BibliographyMap, cancellationToken);
+                    }
                     await ImportProjectImagesAsync(job, document, state, cancellationToken);
                     await StepAsync(job, "Imported project images.", cancellationToken);
                     await StepAsync(job, "Skipped structural outline data for non-structural import.", cancellationToken);
@@ -500,7 +517,7 @@ public sealed class ProjectImportJobProcessor(
     {
         var key = new ProjectImportJobFileKey(job.StagedFileKey);
         await using var input = _fileStore.OpenRead(key);
-        _ = await ProjectArchiveZip.ReadAsync(input, cancellationToken: cancellationToken);
+        _ = await ProjectArchiveZip.ReadAsync(input, _archiveLimits, cancellationToken);
         input.Position = 0;
         using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
         var sourceIds = await ReadArchiveJsonAsync<List<Guid>>(archive, "sources/index.json", cancellationToken);
@@ -598,10 +615,10 @@ public sealed class ProjectImportJobProcessor(
                     extraction.Id, localExtractionId, state, blockMaps, blockExtractionIds, extractionPageNumbers, cancellationToken);
             }
             await ImportArchiveLocationsAsync(db, archive, root, job.ProjectId, exportedSourceId, localSourceId,
-                extractionMaps, extractionRecordsById, blockMaps, blockExtractionIds, extractionPageNumbers, cancellationToken);
+                extractionMaps, extractionRecordsById, blockMaps, blockExtractionIds, extractionPageNumbers, state.SourceLocationMap, cancellationToken);
         }
 
-        await ImportArchiveBibliographyAsync(db, archive, job.ProjectId, sourceMaps, cancellationToken);
+        await ImportArchiveBibliographyAsync(db, archive, job.ProjectId, sourceMaps, state.BibliographyMap, cancellationToken);
         var selections = document.BookBriefCanonSourceIds.Select(id => sourceMaps.GetValueOrDefault(id)).ToArray();
         if (selections.Any(id => id == Guid.Empty))
             throw new InvalidDataException("Archive canonical-source selection is not closed over its source index.");
@@ -611,7 +628,7 @@ public sealed class ProjectImportJobProcessor(
         await operation.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task ImportArchiveOriginalAsync(AppDbContext db, ZipArchive archive, string sourceRoot,
+    private async Task ImportArchiveOriginalAsync(AppDbContext db, ZipArchive archive, string sourceRoot,
         Guid exportedSourceId, Guid localSourceId, CancellationToken cancellationToken)
     {
         var path = $"{sourceRoot}/original/manifest.json";
@@ -681,7 +698,7 @@ public sealed class ProjectImportJobProcessor(
         db.SourceOriginals.Add(local);
     }
 
-    private static async Task ImportArchiveExtractionChildrenAsync(AppDbContext db, ZipArchive archive, string root,
+    private async Task ImportArchiveExtractionChildrenAsync(AppDbContext db, ZipArchive archive, string root,
         Guid exportedSourceId, Guid localSourceId, Guid exportedExtractionId, Guid localExtractionId, ImportState state,
         IDictionary<Guid, Guid> blockMaps, IDictionary<Guid, Guid> blockExtractionIds,
         IDictionary<Guid, HashSet<int>> extractionPageNumbers, CancellationToken cancellationToken)
@@ -736,10 +753,11 @@ public sealed class ProjectImportJobProcessor(
         await MarkCompletedAsync(job, indexedWithoutWarnings, CancellationToken.None);
     }
 
-    private static async Task ImportArchiveLocationsAsync(AppDbContext db, ZipArchive archive, string root, Guid projectId,
+    private async Task ImportArchiveLocationsAsync(AppDbContext db, ZipArchive archive, string root, Guid projectId,
         Guid exportedSourceId, Guid localSourceId, IReadOnlyDictionary<Guid, Guid> extractionMaps,
         IReadOnlyDictionary<Guid, ArchiveExtractionRecord> extractionRecords, IReadOnlyDictionary<Guid, Guid> blockMaps,
         IReadOnlyDictionary<Guid, Guid> blockExtractionIds, IReadOnlyDictionary<Guid, HashSet<int>> extractionPageNumbers,
+        IDictionary<Guid, Guid> locationMap,
         CancellationToken cancellationToken)
     {
         foreach (var entry in ArchiveJsonEntries(archive, $"{root}/locations/"))
@@ -766,7 +784,10 @@ public sealed class ProjectImportJobProcessor(
             {
                 throw new InvalidDataException("A resolved archive location does not match its immutable extraction text.");
             }
-            db.SourceLocations.Add(new SourceLocation { Id = Guid.NewGuid(), ProjectId = projectId, SourceId = localSourceId,
+            var localId = Guid.NewGuid();
+            if (!locationMap.TryAdd(location.Id, localId))
+                throw new InvalidDataException("Archive contains duplicate source locations.");
+            db.SourceLocations.Add(new SourceLocation { Id = localId, ProjectId = projectId, SourceId = localSourceId,
                 ExtractionVersionId = extractionId, SourceBlockId = location.SourceBlockId is Guid value ? blockMaps[value] : null,
                 PageNumber = location.PageNumber, NormalizedStart = location.NormalizedStart, NormalizedLength = location.NormalizedLength,
                 Locator = location.Locator, Quote = location.Quote, VerificationHash = location.VerificationHash,
@@ -774,8 +795,8 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
-    private static async Task ImportArchiveBibliographyAsync(AppDbContext db, ZipArchive archive, Guid projectId,
-        IReadOnlyDictionary<Guid, Guid> sourceMaps, CancellationToken cancellationToken)
+    private async Task ImportArchiveBibliographyAsync(AppDbContext db, ZipArchive archive, Guid projectId,
+        IReadOnlyDictionary<Guid, Guid> sourceMaps, IDictionary<Guid, Guid> bibliographyMap, CancellationToken cancellationToken)
     {
         var entries = ArchiveJsonEntries(archive, "bibliography/")
             .Concat(archive.Entries.Where(entry => entry.FullName.StartsWith("sources/", StringComparison.Ordinal)
@@ -788,12 +809,20 @@ public sealed class ProjectImportJobProcessor(
             if (record.Id == Guid.Empty || !seen.Add(record.Id)
                 || record.SourceId is Guid sourceId && !sourceMaps.TryGetValue(sourceId, out _))
                 throw new InvalidDataException("Archive bibliography is not closed over its source records.");
-            db.BibliographicRecords.Add(new BibliographicRecord { Id = Guid.NewGuid(), ProjectId = projectId,
+            var localId = Guid.NewGuid();
+            bibliographyMap.Add(record.Id, localId);
+            db.BibliographicRecords.Add(new BibliographicRecord { Id = localId, ProjectId = projectId,
                 SourceId = record.SourceId is Guid mapped ? sourceMaps[mapped] : null, Kind = record.Kind, Title = record.Title,
                 ContainerTitle = record.ContainerTitle, AuthorsJson = record.AuthorsJson, EditorsJson = record.EditorsJson,
-                IssuedYear = record.IssuedYear, Publisher = record.Publisher, PublisherPlace = record.PublisherPlace,
+                TranslatorsJson = record.TranslatorsJson ?? "[]", IssuedYear = record.IssuedYear,
+                IssuedMonth = record.IssuedMonth, IssuedDay = record.IssuedDay,
+                Publisher = record.Publisher, PublisherPlace = record.PublisherPlace, Edition = record.Edition ?? string.Empty,
+                Institution = record.Institution ?? string.Empty, ThesisType = record.ThesisType ?? string.Empty,
                 Volume = record.Volume, Issue = record.Issue, Pages = record.Pages, Doi = record.Doi, Url = record.Url,
-                AccessedAt = record.AccessedAt, Isbn = record.Isbn, Notes = record.Notes, CreatedAt = record.CreatedAt, UpdatedAt = record.UpdatedAt });
+                AccessedYear = record.AccessedYear ?? record.AccessedAt?.Year,
+                AccessedMonth = record.AccessedMonth ?? record.AccessedAt?.Month,
+                AccessedDay = record.AccessedDay ?? record.AccessedAt?.Day,
+                Isbn = record.Isbn, Notes = record.Notes, CreatedAt = record.CreatedAt, UpdatedAt = record.UpdatedAt });
         }
     }
 
@@ -801,10 +830,10 @@ public sealed class ProjectImportJobProcessor(
         .Where(entry => entry.FullName.StartsWith(prefix, StringComparison.Ordinal) && entry.FullName.EndsWith(".json", StringComparison.Ordinal))
         .OrderBy(entry => entry.FullName, StringComparer.Ordinal);
 
-    private static async Task<T> ReadArchiveJsonAsync<T>(ZipArchive archive, string path, CancellationToken cancellationToken)
+    private async Task<T> ReadArchiveJsonAsync<T>(ZipArchive archive, string path, CancellationToken cancellationToken)
     {
         var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Archive is missing '{path}'.");
-        if (entry.Length > ProjectArchiveLimits.Default.MaximumEntryBytes)
+        if (entry.Length > _archiveLimits.MaximumEntryBytes)
             throw new InvalidDataException($"Archive record '{path}' exceeds its configured limit.");
         await using var stream = entry.Open();
         return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken)
@@ -831,7 +860,7 @@ public sealed class ProjectImportJobProcessor(
     private sealed record ArchivePageRecord(Guid Id, int PageNumber, string Text, int StartChar, int EndChar, string ExtractionMethod, int Width, int Height, string ImageHash, string RenderSettingsJson, int? VisionProviderId, string VisionModelName, string Diagnostics, DateTime CreatedAt);
     private sealed record ArchiveBlockRecord(Guid Id, Guid? SourcePageId, int Index, string Kind, string Title, string Locator, int? PageNumber, int StartChar, int EndChar, string NormalizedText, string ContentHash, string MetadataJson, DateTime CreatedAt);
     private sealed record ArchiveLocationRecord(Guid Id, Guid SourceId, Guid ExtractionVersionId, Guid? SourceBlockId, int? PageNumber, int NormalizedStart, int NormalizedLength, string Locator, string Quote, string VerificationHash, SourceLocationResolutionState ResolutionState, DateTime CreatedAt);
-    private sealed record ArchiveBibliographyRecord(Guid Id, Guid? SourceId, BibliographicRecordKind Kind, string Title, string ContainerTitle, string AuthorsJson, string EditorsJson, int? IssuedYear, string Publisher, string PublisherPlace, string Volume, string Issue, string Pages, string Doi, string Url, DateTime? AccessedAt, string Isbn, string Notes, DateTime CreatedAt, DateTime UpdatedAt);
+    private sealed record ArchiveBibliographyRecord(Guid Id, Guid? SourceId, BibliographicRecordKind Kind, string Title, string ContainerTitle, string AuthorsJson, string EditorsJson, int? IssuedYear, string Publisher, string PublisherPlace, string Volume, string Issue, string Pages, string Doi, string Url, DateTime? AccessedAt, string Isbn, string Notes, DateTime CreatedAt, DateTime UpdatedAt, string? TranslatorsJson, int? IssuedMonth, int? IssuedDay, string? Edition, string? Institution, string? ThesisType, int? AccessedYear, int? AccessedMonth, int? AccessedDay);
 
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
@@ -871,7 +900,7 @@ public sealed class ProjectImportJobProcessor(
                 throw new InvalidOperationException($"Import edge references missing target node '{edge.To.StableKey}'.");
         }
 
-        ValidateChapterPayloads(document);
+        ValidateChapterPayloads(document, binariesValidatedSeparately: job.InputKind == ProjectImportInputKind.LorekeeperArchive);
         ValidatePublicationPayloads(document);
         ValidateIngestSourcePayloads(document);
         ValidateManuscriptAnnotationPayloads(document);
@@ -908,7 +937,9 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidDataException("Import staging declaration is invalid.");
         var key = new ProjectImportJobFileKey(job.StagedFileKey);
         await using var input = _fileStore.OpenRead(key);
-        var (length, sha256) = await ComputeHashAsync(input, ProjectImportExportService.MaximumImportBytes, cancellationToken);
+        var maximumBytes = job.InputKind == ProjectImportInputKind.LegacyJson
+            ? _archiveLimits.MaximumLegacyJsonBytes : _archiveLimits.MaximumCompressedBytes;
+        var (length, sha256) = await ComputeHashAsync(input, maximumBytes, cancellationToken);
         if (length != job.StagedLength || !string.Equals(sha256, job.StagedSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The staged import file changed after upload.");
         input.Position = 0;
@@ -919,14 +950,14 @@ public sealed class ProjectImportJobProcessor(
                 ?? throw new InvalidOperationException("Import file did not contain a project export document.");
         }
 
-        var archive = await ProjectArchiveZip.ReadAsync(input, cancellationToken: cancellationToken);
+        var archive = await ProjectArchiveZip.ReadAsync(input, _archiveLimits, cancellationToken);
         if (archive.Manifest.Policy is not (ProjectDependencyTraversalPolicy.FullArchive or ProjectDependencyTraversalPolicy.NonStructuralArchive))
             throw new InvalidDataException("History snapshot archives cannot be imported as projects.");
         input.Position = 0;
         using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
         var creative = zip.GetEntry("project/creative-state.json")
             ?? throw new InvalidDataException("Archive is missing its creative-state record.");
-        if (creative.Length > ProjectArchiveLimits.Default.MaximumEntryBytes)
+        if (creative.Length > _archiveLimits.MaximumEntryBytes)
             throw new InvalidDataException("Archive creative-state record exceeds its configured limit.");
         await using var creativeStream = creative.Open();
         var document = await JsonSerializer.DeserializeAsync<ProjectExportDocument>(creativeStream, JsonOptions, cancellationToken)
@@ -941,7 +972,8 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidDataException("Archive manifest project identity does not match project/creative-state.json.");
         }
 
-        return (await PopulateArchiveBinaryPayloadsAsync(zip, document, cancellationToken)) with { IngestSources = [] };
+        await ValidateArchiveBinaryPayloadsAsync(zip, document, cancellationToken);
+        return document with { IngestSources = [] };
     }
 
     private static async Task<(long Length, string Sha256)> ComputeHashAsync(Stream input, long maximumBytes, CancellationToken cancellationToken)
@@ -961,30 +993,46 @@ public sealed class ProjectImportJobProcessor(
         return (total, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
-    private static async Task<ProjectExportDocument> PopulateArchiveBinaryPayloadsAsync(
+    private async Task ValidateArchiveBinaryPayloadsAsync(
         ZipArchive archive,
         ProjectExportDocument document,
         CancellationToken cancellationToken)
     {
-        var images = new List<ProjectExportImage>(document.Images.Count);
         foreach (var image in document.Images)
-            images.Add(image with { Data = await ReadArchiveEntryAsync(archive, $"assets/images/{image.Id:N}", cancellationToken) });
+        {
+            var entry = archive.GetEntry($"assets/images/{image.Id:N}")
+                ?? throw new InvalidDataException($"Archive is missing image {image.Id:N}.");
+            if (entry.Length == 0 || entry.Length > _archiveLimits.MaximumEntryBytes
+                || !image.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Archive image {image.Id:N} is empty, oversized, or has an invalid content type.");
+            if (image.Data is { Length: > 0 })
+                throw new InvalidDataException("Archive creative state must not embed image binaries.");
+        }
 
-        var families = new List<ProjectExportFontFamily>(document.FontFamilies.Count);
         foreach (var family in document.FontFamilies)
         {
-            var faces = new List<ProjectExportFontFace>(family.Faces.Count);
             foreach (var face in family.Faces)
-                faces.Add(face with { Data = await ReadArchiveEntryAsync(archive, $"assets/fonts/{face.Id:N}", cancellationToken) });
-            families.Add(family with { Faces = faces });
+            {
+                if (face.Data is { Length: > 0 })
+                    throw new InvalidDataException("Archive creative state must not embed font binaries.");
+                var data = await ReadArchiveEntryAsync(archive, $"assets/fonts/{face.Id:N}", cancellationToken);
+                ValidateFontBinary(family, face with { Data = data });
+            }
         }
-        return document with { Images = images, FontFamilies = families };
     }
 
-    private static async Task<byte[]> ReadArchiveEntryAsync(ZipArchive archive, string path, CancellationToken cancellationToken)
+    private ZipArchive? OpenImportArchive(ProjectImportJob job)
+    {
+        if (job.InputKind == ProjectImportInputKind.LegacyJson) return null;
+        var input = _fileStore.OpenRead(new ProjectImportJobFileKey(job.StagedFileKey));
+        try { return new ZipArchive(input, ZipArchiveMode.Read); }
+        catch { input.Dispose(); throw; }
+    }
+
+    private async Task<byte[]> ReadArchiveEntryAsync(ZipArchive archive, string path, CancellationToken cancellationToken)
     {
         var entry = archive.GetEntry(path) ?? throw new InvalidDataException($"Archive is missing required binary '{path}'.");
-        if (entry.Length > ProjectArchiveLimits.Default.MaximumEntryBytes || entry.Length > int.MaxValue)
+        if (entry.Length > _archiveLimits.MaximumEntryBytes || entry.Length > int.MaxValue)
             throw new InvalidDataException($"Archive binary '{path}' exceeds an importable size.");
         await using var input = entry.Open();
         using var output = new MemoryStream(checked((int)entry.Length));
@@ -994,7 +1042,9 @@ public sealed class ProjectImportJobProcessor(
         return output.ToArray();
     }
 
-    internal static void ValidateChapterPayloads(ProjectExportDocument document)
+    internal static void ValidateChapterPayloads(ProjectExportDocument document) => ValidateChapterPayloads(document, false);
+
+    private static void ValidateChapterPayloads(ProjectExportDocument document, bool binariesValidatedSeparately)
     {
         document = AdaptLegacyManuscriptStyles(document);
         if (document.FormatVersion >= 8)
@@ -1043,8 +1093,7 @@ public sealed class ProjectImportJobProcessor(
                 }
 
                 var parent = document.Images.First(parentImage => parentImage.Id == parentId);
-                if (parent.Data is null
-                    || parent.Data.Length == 0
+                if ((!binariesValidatedSeparately && (parent.Data is null || parent.Data.Length == 0))
                     || string.IsNullOrWhiteSpace(parent.ContentType)
                     || !parent.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1074,23 +1123,31 @@ public sealed class ProjectImportJobProcessor(
                     throw new InvalidOperationException($"Imported font family '{family.Name}' contains duplicate face variants.");
                 foreach (var face in family.Faces)
                 {
-                    var normalized = ProjectFontBinary.Normalize(face.Data, face.FileName);
-                    if (!string.Equals(
-                            Convert.ToHexStringLower(SHA256.HashData(face.Data)),
-                            face.Sha256,
-                            StringComparison.OrdinalIgnoreCase)
-                        || normalized.Weight != face.Weight
-                        || normalized.Italic != face.Italic
-                        || !string.Equals(normalized.ContentType, face.ContentType, StringComparison.OrdinalIgnoreCase)
-                        || !string.Equals(normalized.FamilyName, family.Name, StringComparison.Ordinal)
-                        || !string.Equals(normalized.SubfamilyName, face.SubfamilyName, StringComparison.Ordinal)
-                        || !string.Equals(normalized.FileName, face.FileName, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException($"Imported font face {face.Id:N} failed binary metadata validation.");
-                    }
+                    if (!binariesValidatedSeparately) ValidateFontBinary(family, face);
                 }
             }
         }
+        ValidateChapterStructure(document);
+    }
+
+    private static void ValidateFontBinary(ProjectExportFontFamily family, ProjectExportFontFace face)
+    {
+        var normalized = ProjectFontBinary.Normalize(face.Data, face.FileName);
+        if (!string.Equals(Convert.ToHexStringLower(SHA256.HashData(face.Data)), face.Sha256, StringComparison.OrdinalIgnoreCase)
+            || normalized.Weight != face.Weight
+            || normalized.Italic != face.Italic
+            || !string.Equals(normalized.ContentType, face.ContentType, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(normalized.FamilyName, family.Name, StringComparison.Ordinal)
+            || !string.Equals(normalized.SubfamilyName, face.SubfamilyName, StringComparison.Ordinal)
+            || !string.Equals(normalized.FileName, face.FileName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Imported font face {face.Id:N} failed binary metadata validation.");
+        }
+    }
+
+    private static void ValidateChapterStructure(ProjectExportDocument document)
+    {
+        var exportedImageIds = document.Images.Select(image => image.Id).ToHashSet();
         var exportedStyles = document.FormatVersion >= 8
             ? document.ManuscriptStyles.Select(style => new ManuscriptStyleView(
                 style.Id,
@@ -1575,6 +1632,8 @@ public sealed class ProjectImportJobProcessor(
         if (document.FormatVersion < 12 || document.FontFamilies.Count == 0)
             return;
 
+        using var archive = OpenImportArchive(job);
+
         var existingNames = await db.ProjectFontFamilies
             .Where(family => family.ProjectId == job.ProjectId)
             .Select(family => family.Name)
@@ -1594,12 +1653,14 @@ public sealed class ProjectImportJobProcessor(
                 RightsDeclaration = importedFamily.RightsDeclaration,
             };
             db.ProjectFontFamilies.Add(family);
+            await db.SaveChangesAsync(cancellationToken);
             foreach (var importedFace in importedFamily.Faces)
             {
-                var normalized = ProjectFontBinary.Normalize(importedFace.Data, importedFace.FileName);
-                family.Faces.Add(new ProjectFontFace
+                var data = archive is null ? importedFace.Data
+                    : await ReadArchiveEntryAsync(archive, $"assets/fonts/{importedFace.Id:N}", cancellationToken);
+                var normalized = ProjectFontBinary.Normalize(data, importedFace.FileName);
+                var face = new ProjectFontFace
                 {
-                    Family = family,
                     FamilyId = family.Id,
                     SubfamilyName = normalized.SubfamilyName,
                     FileName = normalized.FileName,
@@ -1607,9 +1668,14 @@ public sealed class ProjectImportJobProcessor(
                     Weight = normalized.Weight,
                     Italic = normalized.Italic,
                     Data = normalized.Data,
-                });
+                };
+                db.ProjectFontFaces.Add(face);
+                await db.SaveChangesAsync(cancellationToken);
+                db.Entry(face).State = EntityState.Detached;
+                family.Faces.Clear();
             }
             state.FontFamilyMap[importedFamily.Id] = family.Id;
+            db.Entry(family).State = EntityState.Detached;
         }
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -2212,10 +2278,12 @@ public sealed class ProjectImportJobProcessor(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var importedAssets = new Dictionary<Guid, PublishAsset>();
+        using var archive = OpenImportArchive(job);
         foreach (var importedImage in document.Images)
         {
-            if (importedImage.Data.Length == 0 || !importedImage.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            var data = archive is null ? importedImage.Data
+                : await ReadArchiveEntryAsync(archive, $"assets/images/{importedImage.Id:N}", cancellationToken);
+            if (data.Length == 0 || !importedImage.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
                 await AddWarningAsync(job, $"Skipped image {importedImage.FileName}", "The exported image was empty or did not have an image content type.", cancellationToken);
                 continue;
@@ -2234,7 +2302,7 @@ public sealed class ProjectImportJobProcessor(
                 Source = importedImage.Source,
                 FileName = string.IsNullOrWhiteSpace(importedImage.FileName) ? $"imported-image-{localId:N}.png" : importedImage.FileName.Trim(),
                 ContentType = importedImage.ContentType.Trim(),
-                Data = importedImage.Data,
+                Data = data,
                 AltText = importedImage.AltText,
                 Prompt = importedImage.Prompt,
                 GenerationModel = importedImage.GenerationModel,
@@ -2246,20 +2314,22 @@ public sealed class ProjectImportJobProcessor(
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };
-            importedAssets[importedImage.Id] = asset;
             await db.PublishAssets.AddAsync(asset, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            db.Entry(asset).State = EntityState.Detached;
         }
 
         foreach (var importedImage in document.Images)
         {
             if (importedImage.DerivedFromImageId is not Guid exportedSourceId
-                || !importedAssets.TryGetValue(importedImage.Id, out var localAsset)
+                || !state.ImageMap.TryGetValue(importedImage.Id, out var localAssetId)
                 || !state.ImageMap.TryGetValue(exportedSourceId, out var localSourceId))
             {
                 continue;
             }
 
-            localAsset.DerivedFromImageId = localSourceId;
+            await db.PublishAssets.Where(asset => asset.Id == localAssetId && asset.ProjectId == job.ProjectId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.DerivedFromImageId, localSourceId), cancellationToken);
         }
 
         if (state.ImageMap.Count > 0)
@@ -2963,6 +3033,7 @@ public sealed class ProjectImportJobProcessor(
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             RectoChapterStarts = importedEdition.RectoChapterStarts,
+            CitationStyle = importedEdition.CitationStyle,
             OverrideFieldsJson = formatVersion >= 16
                 ? JsonSerializer.Serialize(importedEdition.OverrideFields.Where(Enum.IsDefined))
                 : "[]",
@@ -3453,6 +3524,7 @@ public sealed class ProjectImportJobProcessor(
             NumberChapters = imported.NumberChapters,
             TitlePageMode = imported.TitlePageMode,
             RectoChapterStarts = imported.RectoChapterStarts,
+            CitationStyle = imported.CitationStyle,
             PdfPresentation = new PublicationBookPdfPresentation
             {
                 ProjectId = projectId,

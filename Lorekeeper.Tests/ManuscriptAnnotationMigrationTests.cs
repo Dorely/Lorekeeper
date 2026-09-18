@@ -104,6 +104,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                 await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
                 await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
@@ -150,6 +153,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                     db,
                     CancellationToken.None);
                 await DatabaseStartupMigrationService.RemovePrintArtifactProfileCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
+                await DatabaseStartupMigrationService.RemoveCitationCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
             }
@@ -270,6 +276,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                     db,
                     CancellationToken.None);
                 await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
                 await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(

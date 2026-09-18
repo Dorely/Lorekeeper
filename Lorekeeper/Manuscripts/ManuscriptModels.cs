@@ -5,7 +5,7 @@ namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptDocument
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     [JsonRequired]
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -40,6 +40,7 @@ public sealed record ManuscriptBlock
     public Guid? DesignedPageId { get; init; }
     public PublicationBoundField? PublicationField { get; init; }
     public ManuscriptTable? Table { get; init; }
+    public ManuscriptListItem? List { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
 }
@@ -52,6 +53,7 @@ public sealed record ManuscriptInline
     [JsonRequired]
     public string Text { get; init; } = string.Empty;
     public string? NoteId { get; init; }
+    public ManuscriptCitationCluster? Citation { get; init; }
     [JsonRequired]
     public List<ManuscriptMark> Marks { get; init; } = [];
 }
@@ -72,6 +74,14 @@ public enum ManuscriptBlockType
     Figure,
     DesignedPage,
     Table,
+}
+
+public sealed record ManuscriptListItem
+{
+    public required string Id { get; init; }
+    public bool Ordered { get; init; }
+    public int Level { get; init; }
+    public int? Start { get; init; }
 }
 
 public sealed record ManuscriptTable
@@ -218,6 +228,24 @@ public enum ManuscriptInlineType
 {
     Text,
     NoteReference,
+    Citation,
+}
+
+public sealed record ManuscriptCitationCluster
+{
+    [JsonRequired]
+    public List<ManuscriptCitationItem> Items { get; init; } = [];
+}
+
+public sealed record ManuscriptCitationItem
+{
+    [JsonRequired]
+    public Guid BibliographicRecordId { get; init; }
+    public string Prefix { get; init; } = string.Empty;
+    public string Suffix { get; init; } = string.Empty;
+    public string LocatorLabel { get; init; } = string.Empty;
+    public string LocatorValue { get; init; } = string.Empty;
+    public Guid? SourceLocationId { get; init; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<ManuscriptPositionAffinity>))]
@@ -300,7 +328,12 @@ public sealed record ManuscriptRangeReference(
 [JsonDerivedType(typeof(PutRichManuscriptBlock), "putRichBlock")]
 [JsonDerivedType(typeof(ReplaceManuscriptNotes), "replaceNotes")]
 [JsonDerivedType(typeof(ReplaceManuscriptStructure), "replaceStructure")]
+[JsonDerivedType(typeof(ReplaceManuscriptInlineContent), "replaceInlineContent")]
 public abstract record ManuscriptOperation;
+
+public sealed record ReplaceManuscriptInlineContent(
+    ManuscriptPosition Position,
+    IReadOnlyList<ManuscriptInline> Content) : ManuscriptOperation;
 
 public sealed record PutRichManuscriptBlock(
     int Index,

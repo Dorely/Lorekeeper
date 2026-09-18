@@ -92,7 +92,9 @@ public sealed record AuthoringOperationV1(
     string? Language = null,
     FigureAccessibilityRole? AccessibilityRole = null,
     ManuscriptDocument? RichDocument = null,
-    string? ExpectedDocumentFingerprint = null);
+    string? ExpectedDocumentFingerprint = null,
+    ManuscriptPosition? Position = null,
+    IReadOnlyList<ManuscriptInline>? InlineContent = null);
 
 public sealed record AuthoringSelectionPointV1(
     string TargetId,

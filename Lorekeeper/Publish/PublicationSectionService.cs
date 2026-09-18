@@ -1047,7 +1047,8 @@ public sealed class PublicationSectionService(
         var db = databaseOperation.Db;
         ManuscriptStyleService.ValidateDocumentReferences(
             document, await manuscriptStyles.ListAsync(target.ProjectId, cancellationToken));
-        var imageIds = document.Content
+        await Lorekeeper.Citations.CitationReferenceValidator.ValidateAsync(db, target.ProjectId, document, cancellationToken);
+        var imageIds = ManuscriptTraversal.EnumerateBlocks(document)
             .Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId.HasValue)
             .Select(item => item.ImageId!.Value)
             .Distinct()

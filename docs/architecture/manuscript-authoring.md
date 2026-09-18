@@ -18,7 +18,7 @@ schema/data upgrades.
 
 ## Scope and ownership
 
-This chapter owns the current manuscript v6 document contract, target-aware
+This chapter owns the current manuscript v7 document contract, target-aware
 chapter content, semantic editing operations, the ProseMirror adapter boundary,
 Book Text Styles and direct paragraph presentation, review annotations, and
 in-process manual authoring history. It also owns the manuscript-facing side of Figure
@@ -34,12 +34,12 @@ return.
 
 ## Current architecture and invariants
 
-### Manuscript v6 is the current contract
+### Manuscript v7 is the current contract
 
-Each Core or release-owned chapter persists one format-neutral manuscript v6
+Each Core or release-owned chapter persists one format-neutral manuscript v7
 JSON document plus a monotonic revision. `ManuscriptDocument.CurrentSchemaVersion`
-is `6`, and [`docs/schemas/manuscript-v6.schema.json`](../schemas/manuscript-v6.schema.json)
-is the current interchange schema. The v1 through v5 schemas and identifiers
+is `7`, and [`docs/schemas/manuscript-v7.schema.json`](../schemas/manuscript-v7.schema.json)
+is the current interchange schema. The v1 through v6 schemas and identifiers
 remain only as immutable migration history and isolated versioned import inputs;
 they are not current runtime compatibility paths.
 
@@ -55,7 +55,7 @@ headers are a contiguous leading row count, and row/column spans must cover the
 grid without overlap or gaps. Cells admit paragraphs, list items, and Figures,
 but not nested tables or Designed Pages. Document-owned footnotes and endnotes
 have stable identities and exactly one stable inline reference. Note content
-admits paragraphs, list items, Figures, citations once that atom lands, and
+admits paragraphs, list items, Figures, citations, and
 character formatting, but not tables, Designed Pages, or recursive notes.
 Malformed ownership fails closed instead of being repaired heuristically.
 
@@ -66,7 +66,7 @@ with exact ordinal matches taking priority and ambiguous normalized matches
 failing closed. Mutation responses return the exact stored spelling. Unknown
 custom semantic roles fail validation rather than being guessed.
 
-`ManuscriptSchemaUpgrade` performs strict, lossless older-to-v6 upgrades for
+`ManuscriptSchemaUpgrade` performs strict, lossless older-to-v7 upgrades for
 live and nested historical payloads. Startup migration, import adapters, and
 historical audit readers call that explicit boundary; normal runtime services
 accept only current documents. Malformed current documents or non-result audit
@@ -78,9 +78,9 @@ editing route.
 ### Model-facing manuscript projection
 
 `AgentManuscriptProjection` is the single model-facing manuscript serializer.
-It emits `agent-manuscript-v3` without changing canonical manuscript v6
+It emits `agent-manuscript-v4` without changing canonical manuscript v7
 persistence, import/export, audit rows, or stable-ID mutation contracts. The
-projection repeats identity, v6 schema version, revision, plain-text source
+projection repeats identity, v7 schema version, revision, plain-text source
 hash, source state, completeness, and pagination. Each included block appears
 exactly once as `[absoluteIndex, stableBlockId, exactText]`; absolute indexes
 remain document-relative for bounded and filtered reads but are compact
@@ -496,15 +496,27 @@ and Figures only. Notes have exactly one reference in their owning document and
 admit paragraphs, lists, Figures, citations, and character formatting only.
 Malformed orphan/multiple-reference notes fail closed. Deleting a reference
 deletes its note in the same reversible operation. The semantic editor stores
-tables and note definitions in its document state, serializes the complete rich
-document through one exact-precondition `replaceRichDocument` delta, and treats
+tables and note definitions in its document state. Ordinary inline changes use
+`replaceInlineContent` with a complete manuscript/container/block position and
+the touched block's fingerprint. Nested table and note edits retain unrelated
+content, and the server derives the bounded inverse from the validated pre-state.
+Canonical target snapshots include nested block fingerprints. Structural changes
+still use an exact-document `replaceRichDocument` delta. The editor treats
 paste, structure, formatting, and note insertion as hard history boundaries.
 
-Citation atoms and note atoms in Designed Page semantic content remain M5B work. Citation
+Manuscript v7 adds citation clusters with stable bibliography and optional source-location
+references. Chapter, publication-section, and Designed Page mutation boundaries
+validate project ownership and require each source location to belong to the
+cited record's retained source. The Cite action inserts a cluster or edits a
+selected cluster, retaining its atom ID and source evidence for unchanged records.
+Changing a cited record clears its old evidence link. An open form rejects changes
+if the manuscript changed while it was open. Assistant citation edits use bounded
+`ReplaceInlineContent` operations at full positions; lossy plain-text operations
+reject blocks containing semantic atoms. Complete output parity remains M5B work. Citation
 occurrence identity is publication target, top-level container, complete
 placement path, citation atom, and cluster-item ordinal. Current note numbering
 restarts for every top-level chapter or publication section. Standalone
-manuscript preview uses its own sequence. Press protocol v14 repeats leading
+manuscript preview uses the effective publication citation context. Press protocol v15 repeats leading
 table headers, keeps normal rows and row-span groups atomic, splits oversized
 rows only at semantic block boundaries, bounds footnote regions to 40%, emits
 continuation markers, groups endnotes as generated final matter, and reports
@@ -520,19 +532,21 @@ authoring-page, and v5 independent Designed Page cutovers preserve semantic
 IDs/text, Figures, live pending manuscript state, Picture Page geometry, page
 content/layout, artifacts, and hashes while
 removing obsolete runtime fields through forward migrations. Historical
-migration names and source version numbers remain accurate even though v6 is
+migration names and source version numbers remain accurate even though v7 is
 current.
 
-Legacy project export v31 is import-only. New `.lorekeeper` archives carry v6
+Legacy project export v31 is import-only. New `.lorekeeper` archives carry v7
 manuscripts, Core/release annotation rows, page setup and Designed Page
 aggregates, style definitions, release snapshots, and current publication
 content, including linked image-upscale provenance. Older manuscript inputs are
 accepted only through isolated versioned transformers. Search, context, TXT,
 Markdown, EPUB, Read preview, and
 Press all consume the semantic document or its explicit projection. Archive
-record schema 2, history snapshot schema 9, `agent-manuscript-v3`, EPUB exporter
-v5, and Press protocol v14 are the rich-manuscript boundaries; each retains its
-immediate predecessor reader. A change to
+record schema 3, history snapshot schema 10, `agent-manuscript-v4`, EPUB exporter
+v6, and Press protocol v15 are the current boundaries. Archive/history readers
+adapt predecessor data only at explicit versioned boundaries. Current renderer
+manifests and writers require protocol 15; historical render requests are handled
+only by the explicit protocol reader. A change to
 block meaning, reading order, styles, or direct formatting must be traced across
 every one of those consumers.
 
@@ -546,12 +560,22 @@ The owning revision, derived projections, Review Edits state, artifact freshness
 and process-lifetime manual history are invalidated through the same target-aware
 mutation boundary as other persisted manuscript changes.
 
+Lists carry an optional stable list ID, ordered/unordered kind, level 0–8, and
+explicit restart number. Existing items without metadata remain level-zero bullets.
+`ManuscriptLists` owns validation and output-only counter resolution; body, cell,
+and note counters have separate scopes. Stored restart instructions are unchanged
+by rendering. Splitting an item retains its list and clears the new item's restart.
+The editor preserves this metadata in canonical JSON and owned clipboard markup,
+offers list formatting, and uses Tab/Shift-Tab for list nesting. List text edits
+remain bounded inline operations; structural list changes retain exact document
+preconditions and canonical inverses.
+
 ## Key files and file families
 
 | File or family | Architectural role |
 |---|---|
-| [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v6.schema.json`](../schemas/manuscript-v6.schema.json) | Current v6 document, recursive table/note/inline-reference, Figure, Designed Page reference, presentation, position, and schema contract. |
-| [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v6 serialization remains in `ManuscriptCodec`. |
+| [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v7.schema.json`](../schemas/manuscript-v7.schema.json) | Current v7 document, recursive tables, notes, citations, Figures, Designed Page references, presentation, positions, and schema contract. |
+| [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v7 serialization remains in `ManuscriptCodec`. |
 | [`Lorekeeper/Manuscripts/ManuscriptCodec.cs`](../../Lorekeeper/Manuscripts/ManuscriptCodec.cs), [`ManuscriptOperations.cs`](../../Lorekeeper/Manuscripts/ManuscriptOperations.cs), [`ManuscriptTraversal.cs`](../../Lorekeeper/Manuscripts/ManuscriptTraversal.cs), and inspection/range helpers | Validation, recursive traversal, cloning, normalization, hashing, stable-ID lookup, semantic operations, structural inspection, and exact UTF-16 position resolution. |
 | [`Lorekeeper/Manuscripts/IManuscriptService.cs`](../../Lorekeeper/Manuscripts/IManuscriptService.cs) and [`Lorekeeper/Chapters/`](../../Lorekeeper/Chapters/) | Sole target-aware runtime chapter-manuscript boundary plus chapter lifecycle, copy-on-write release content, projections, and side effects. |
 | [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |

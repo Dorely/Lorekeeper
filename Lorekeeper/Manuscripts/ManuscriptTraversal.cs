@@ -19,6 +19,17 @@ public sealed record ManuscriptNoteOccurrence(
 /// </summary>
 public static class ManuscriptTraversal
 {
+    public static IReadOnlyList<ManuscriptCitationAtomOccurrence> EnumerateCitations(
+        ManuscriptDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var result = new List<ManuscriptCitationAtomOccurrence>();
+        AddCitations(document, document.Content, ["document"], result);
+        foreach (var note in document.Notes)
+            AddCitations(document, note.Content, ["notes", note.Id], result);
+        return result;
+    }
+
     public static IReadOnlyList<ManuscriptNoteOccurrence> NumberNotes(ManuscriptDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -105,6 +116,49 @@ public static class ManuscriptTraversal
         }
     }
 
+    private static void AddCitations(
+        ManuscriptDocument document,
+        IEnumerable<ManuscriptBlock> blocks,
+        IReadOnlyList<string> path,
+        ICollection<ManuscriptCitationAtomOccurrence> result)
+    {
+        foreach (var block in blocks)
+        {
+            if (block.Table is { } table)
+            {
+                foreach (var row in table.Rows)
+                foreach (var cell in row.Cells)
+                {
+                    AddCitations(
+                        document,
+                        cell.Content,
+                        [.. path, $"table:{table.Id}", $"row:{row.Id}", $"cell:{cell.Id}"],
+                        result);
+                }
+                continue;
+            }
+
+            var offset = 0;
+            foreach (var inline in block.Content)
+            {
+                if (inline.Type == ManuscriptInlineType.Citation)
+                {
+                    result.Add(new(
+                        inline.Id!,
+                        inline.Citation!,
+                        block.Id,
+                        new ManuscriptPosition(
+                            document.ManuscriptId,
+                            path,
+                            inline.Id!,
+                            offset,
+                            ManuscriptPositionAffinity.After)));
+                }
+                offset += inline.Text.Length;
+            }
+        }
+    }
+
     private static void AddNoteOccurrences(
         ManuscriptDocument document,
         IEnumerable<ManuscriptBlock> blocks,
@@ -182,6 +236,12 @@ public static class ManuscriptTraversal
     }
 }
 
+public sealed record ManuscriptCitationAtomOccurrence(
+    string CitationAtomId,
+    ManuscriptCitationCluster Cluster,
+    string BlockId,
+    ManuscriptPosition Position);
+
 internal static class RichManuscriptValidator
 {
     public static void Validate(ManuscriptDocument document)
@@ -254,15 +314,45 @@ internal static class RichManuscriptValidator
 
             foreach (var inline in block.Content)
             {
-                if (inline.Type != ManuscriptInlineType.NoteReference)
+                if (inline.Type == ManuscriptInlineType.Citation)
+                {
+                    if (!AddIdentity(inline.Id, identities))
+                        throw new InvalidDataException("Inline citation IDs must be non-empty and globally unique.");
+                    if (inline.Text.Length != 0 || inline.Marks.Count != 0 || inline.NoteId is not null
+                        || inline.Citation is not { Items.Count: > 0 })
+                    {
+                        throw new InvalidDataException("A citation atom must contain only its stable ID and a non-empty citation cluster.");
+                    }
+                    if (inline.Citation.Items.Any(item => item is null
+                        || item.BibliographicRecordId == Guid.Empty
+                        || item.SourceLocationId == Guid.Empty
+                        || item.Prefix is null || item.Prefix.Length > 1_000
+                        || item.Suffix is null || item.Suffix.Length > 1_000
+                        || item.LocatorLabel is null || item.LocatorLabel.Length > 100
+                        || item.LocatorValue is null || item.LocatorValue.Length > 500
+                        || !ManuscriptCodec.ContainsOnlyXmlCharacters(item.Prefix)
+                        || !ManuscriptCodec.ContainsOnlyXmlCharacters(item.Suffix)
+                        || !ManuscriptCodec.ContainsOnlyXmlCharacters(item.LocatorLabel)
+                        || !ManuscriptCodec.ContainsOnlyXmlCharacters(item.LocatorValue)))
+                    {
+                        throw new InvalidDataException("A citation item contains an invalid record, source location, prefix, suffix, or locator.");
+                    }
                     continue;
+                }
+                if (inline.Type != ManuscriptInlineType.NoteReference)
+                {
+                    if (inline.Citation is not null || inline.NoteId is not null || inline.Id is not null)
+                        throw new InvalidDataException("Text runs cannot contain note or citation payloads.");
+                    continue;
+                }
                 if (scope == ManuscriptContentScope.Note)
                     throw new InvalidDataException("Notes cannot contain recursive note references.");
                 if (!AddIdentity(inline.Id, identities))
                     throw new InvalidDataException("Inline note-reference IDs must be non-empty and globally unique.");
                 if (string.IsNullOrWhiteSpace(inline.NoteId)
                     || inline.Text.Length != 0
-                    || inline.Marks.Count != 0)
+                    || inline.Marks.Count != 0
+                    || inline.Citation is not null)
                 {
                     throw new InvalidDataException("A note reference must contain only its stable ID and note ID.");
                 }
@@ -382,6 +472,10 @@ internal static class ManuscriptClone
     private static ManuscriptInline Inline(ManuscriptInline inline) => inline with
     {
         Marks = inline.Marks.Select(mark => mark with { }).ToList(),
+        Citation = inline.Citation is null ? null : inline.Citation with
+        {
+            Items = inline.Citation.Items.Select(item => item with { }).ToList(),
+        },
     };
 }
 
@@ -423,15 +517,26 @@ public static class ManuscriptRichContent
         IReadOnlyDictionary<string, string> noteIds) => block with
         {
             Id = NewId(),
-            Content = block.Content.Select(inline => inline.Type == ManuscriptInlineType.NoteReference
-                ? inline with
+            Content = block.Content.Select(inline => inline.Type switch
+            {
+                ManuscriptInlineType.NoteReference => inline with
                 {
                     Id = NewId(),
                     NoteId = noteIds.GetValueOrDefault(inline.NoteId!)
                         ?? throw new InvalidDataException($"Copied content references missing note '{inline.NoteId}'."),
                     Marks = [],
-                }
-                : inline with { Marks = inline.Marks.Select(mark => mark with { }).ToList() }).ToList(),
+                },
+                ManuscriptInlineType.Citation => inline with
+                {
+                    Id = NewId(),
+                    Citation = inline.Citation! with
+                    {
+                        Items = inline.Citation.Items.Select(item => item with { }).ToList(),
+                    },
+                    Marks = [],
+                },
+                _ => inline with { Marks = inline.Marks.Select(mark => mark with { }).ToList() },
+            }).ToList(),
             Table = block.Table is null ? null : block.Table with
             {
                 Id = NewId(),

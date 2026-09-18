@@ -3,6 +3,7 @@
 @using Lorekeeper.Publish
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Composition
+@using Lorekeeper.Citations
 @implements IAsyncDisposable
 @inject IPublishService Publishing
 @inject IPublicationBookService Books
@@ -323,6 +324,7 @@ else
     private bool _newReleaseNameCustomized;
     private IJSObjectReference? _downloads;
     private readonly CancellationTokenSource _dispose = new();
+    private CancellationTokenSource? _exportCancellation;
     private CancellationTokenSource? _formAutosave;
     private readonly SemaphoreSlim _formSaveGate = new(1, 1);
     private long _formChangeVersion;
@@ -548,6 +550,7 @@ else
                 <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
                 <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
                 <label class="field"><span>Language</span>@LanguageSelect(_coreDraft.Language, false, value => CoreChanged(nameof(CoreDraft.Language), value))</label>
+                <label class="field"><span>Citation style</span>@CitationStyleSelect(_coreDraft.CitationStyle, false, CoreCitationStyleChanged)</label>
                 <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
                 <label class="field full metadata-long-field"><span>Copyright <small>optional</small></span><textarea class="form-control" rows="3" value="@_coreDraft.Copyright" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())"></textarea></label>
                 <label class="field full metadata-long-field"><span>Description <small>optional</small></span><textarea class="form-control" rows="5" value="@_coreDraft.Description" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
@@ -588,6 +591,7 @@ else
             <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareReleaseAsync">@PreparationButton("Prepare files")</button><small>Renders, validates, and packages in one step.</small></div>
             @PreparationStatus()
             @ArtifactDownloads(ReleaseArtifactKinds(_workspace.Edition.Format))
+            @ManuscriptDownloads(_selectedReleaseId)
         </section>
 
         <section class="workspace-card cover-card">
@@ -603,6 +607,7 @@ else
                 @InheritedText("Subtitle", PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle, value => ReleaseText(nameof(ReleaseDraft.Subtitle), value))
                 @InheritedText("Author", PublicationEditionOverrideField.Author, _releaseDraft.Author, value => ReleaseText(nameof(ReleaseDraft.Author), value))
                 @InheritedLanguage()
+                @InheritedCitationStyle()
                 @InheritedText("Publisher", PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher, value => ReleaseText(nameof(ReleaseDraft.Publisher), value))
                 @InheritedLongText("Copyright", PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright, 3, value => ReleaseText(nameof(ReleaseDraft.Copyright), value))
                 @InheritedLongText("Description", PublicationEditionOverrideField.Description, _releaseDraft.Description, 5, value => ReleaseText(nameof(ReleaseDraft.Description), value))
@@ -977,6 +982,11 @@ else
         @LanguageSelect(_releaseDraft.Language, !_releaseOverrides.Contains(PublicationEditionOverrideField.Language), value => ReleaseText(nameof(ReleaseDraft.Language), value))
     </div>;
 
+    private RenderFragment InheritedCitationStyle() => @<div class="inherited-field">
+        <div class="inherited-heading"><label>Citation style</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(PublicationEditionOverrideField.CitationStyle)" @onchange="e => ToggleOverride(PublicationEditionOverrideField.CitationStyle, (bool)e.Value!)" /><span>Customize</span></label></div>
+        @CitationStyleSelect(_releaseDraft.CitationStyle, !_releaseOverrides.Contains(PublicationEditionOverrideField.CitationStyle), ReleaseCitationStyleChanged)
+    </div>;
+
     private RenderFragment LanguageSelect(string Value, bool Disabled, Action<string?> Changed) => @<select class="form-select" disabled="@Disabled" value="@PublicationLanguage.Normalize(Value)" @onchange="e => Changed(e.Value?.ToString())">
         @if (!PublicationLanguage.IsPressSupported(Value))
         {
@@ -986,6 +996,12 @@ else
         {
             <option value="@option.Tag">@option.Label</option>
         }
+    </select>;
+
+    private RenderFragment CitationStyleSelect(CitationStyle Value, bool Disabled, Action<ChangeEventArgs> Changed) => @<select class="form-select" disabled="@Disabled" value="@Value" @onchange="Changed">
+        <option value="@CitationStyle.Chicago18NotesBibliography">Chicago 18 — notes and bibliography</option>
+        <option value="@CitationStyle.APA7">APA 7</option>
+        <option value="@CitationStyle.MLA9">MLA 9</option>
     </select>;
 
     private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>;
@@ -1072,8 +1088,21 @@ else
             <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(readingPdf.Id)" download="@readingPdf.FileName">Save reading PDF</a>
             <button class="btn btn-sm btn-outline-primary" @onclick="() => _previewArtifact = readingPdf">Preview PDF</button>
         }
-        <button class="btn btn-sm btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.Markdown)">Download Markdown</button>
-        <button class="btn btn-sm btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.PlainText)">Download plain text</button>
+        @ManuscriptDownloads(null)
+    </div>;
+
+    private RenderFragment ManuscriptDownloads(Guid? editionId) => @<div>
+        <div class="downloads">
+            <button class="btn btn-sm btn-outline-primary" disabled="@(_exportCancellation is not null)" @onclick="() => ExportManuscriptAsync(PublishExportFormat.Markdown, editionId)">Download Markdown</button>
+            <button class="btn btn-sm btn-outline-primary" disabled="@(_exportCancellation is not null)" @onclick="() => ExportManuscriptAsync(PublishExportFormat.Docx, editionId)">Download DOCX</button>
+            <button class="btn btn-sm btn-outline-primary" disabled="@(_exportCancellation is not null)" @onclick="() => ExportManuscriptAsync(PublishExportFormat.PlainText, editionId)">Download plain text</button>
+            @if (_exportCancellation is not null)
+            {
+                <span role="status">Preparing download…</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _exportCancellation?.Cancel()">Cancel</button>
+            }
+        </div>
+        <p class="small text-muted">DOCX keeps manuscript text editable and Designed Pages as described artwork. Word controls pagination and may substitute unavailable fonts; floating illustrations become inline images.</p>
     </div>;
 
     private PublicationSectionTarget CurrentPublicationSectionTarget() =>
@@ -1591,7 +1620,7 @@ else
         try
         {
             if (_coreDirty)
-                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides, _coreDraft.RectoChapterStarts));
+                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides, _coreDraft.RectoChapterStarts, CitationStyle: _coreDraft.CitationStyle));
             if (_coreOutlineDirty)
                 _core = await Books.SetOutlineSelectionsAsync(Project.Id, _coreSelections.Select(item => new PublicationEditionOutlineItemUpdate(item.Key.Kind, item.Key.Id, item.Value)).ToList(), _core.Revision);
             if (saveVersion == _formChangeVersion)
@@ -1750,7 +1779,8 @@ else
                     ResetFields: reset,
                     PrintProjectUse: _releaseDraft.PrintProjectUse,
                     PrintIdentifierMode: _releaseDraft.PrintIdentifierMode,
-                    PrintCoverSubmissionMode: _releaseDraft.PrintCoverSubmissionMode);
+                    PrintCoverSubmissionMode: _releaseDraft.PrintCoverSubmissionMode,
+                    CitationStyle: CitationValue(PublicationEditionOverrideField.CitationStyle, _releaseDraft.CitationStyle));
                 revision = (await Releases.PatchOverridesAsync(Project.Id, id, patch)).Revision;
             }
             if (_releaseContentDirty)
@@ -1989,6 +2019,7 @@ else
     private string? Value(PublicationEditionOverrideField field, string value) => _releaseOverrides.Contains(field) ? value : null;
     private bool? BoolValue(PublicationEditionOverrideField field, bool value) => _releaseOverrides.Contains(field) ? value : null;
     private double? DesignValue(PublicationEditionOverrideField field, double value) => _releaseOverrides.Contains(field) ? value : null;
+    private CitationStyle? CitationValue(PublicationEditionOverrideField field, CitationStyle value) => _releaseOverrides.Contains(field) ? value : null;
 
     private void ToggleReleaseDesign()
     {
@@ -2020,27 +2051,28 @@ else
         PublicationEditionOverrideField.PageWidthInches or PublicationEditionOverrideField.PageHeightInches
         or PublicationEditionOverrideField.PageMarginInches;
 
-    private async Task SavePendingAsync()
+    private async Task<bool> SavePendingAsync()
     {
         await _formSaveGate.WaitAsync(_dispose.Token);
         try
         {
             if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
-                return;
+                return false;
             if (_sectionPageWorkspace is not null && !await _sectionPageWorkspace.FlushAsync())
-                return;
+                return false;
             if (_coverEditorOpen && _coverWorkspace is not null)
                 await _coverWorkspace.FlushAsync();
             if (_coreDirty || _coreOutlineDirty)
                 await SaveCoreAsync();
             if (_coreDirty || _coreOutlineDirty)
-                return;
+                return false;
             if (_pageSetupDirty)
                 await SavePageSetupAsync();
             if (_pageSetupDirty)
-                return;
+                return false;
             if (_releaseDirty || _releaseContentDirty)
                 await SaveReleaseAsync();
+            return !_releaseDirty && !_releaseContentDirty;
         }
         finally
         {
@@ -2303,16 +2335,30 @@ else
             await LoadCoreAsync();
     }
 
-    private async Task ExportCoreAsync(PublishExportFormat format)
+    private async Task ExportManuscriptAsync(PublishExportFormat format, Guid? editionId)
     {
-        if (Project is null) return;
+        if (Project is null || _exportCancellation is not null) return;
+        var projectId = Project.Id;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_dispose.Token);
+        _exportCancellation = cancellation;
+        _error = null;
         try
         {
+            if (!await SavePendingAsync())
+            {
+                _error ??= "Resolve the save error before downloading this manuscript.";
+                return;
+            }
             _downloads ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
-            var file = await Publishing.ExportCoreAsync(Project.Id, format);
-            await _downloads.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
+            var file = editionId is Guid id
+                ? await Publishing.ExportAsync(projectId, id, format, cancellation.Token)
+                : await Publishing.ExportCoreAsync(projectId, format, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            await _downloads.InvokeVoidAsync("downloadBytes", cancellation.Token, file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { _notice = "Download cancelled."; }
         catch (Exception exception) { _error = exception.Message; }
+        finally { _exportCancellation = null; }
     }
 
     private async Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
@@ -2471,10 +2517,12 @@ else
     }
 
     private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; QueueFormAutosave(); }
+    private void CoreCitationStyleChanged(ChangeEventArgs args) { if (Enum.TryParse<CitationStyle>(args.Value?.ToString(), out var style)) { _coreDraft.CitationStyle = style; _coreDirty = true; QueueFormAutosave(); } }
     private void MarkCoreDirty() { _coreDirty = true; QueueFormAutosave(); }
     private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; QueueFormAutosave(); }
     private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; QueueFormAutosave(); }
     private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void ReleaseCitationStyleChanged(ChangeEventArgs args) { if (Enum.TryParse<CitationStyle>(args.Value?.ToString(), out var style)) { _releaseDraft.CitationStyle = style; _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); } }
     private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
     private void MarkReleaseDirty() { _releaseDirty = true; QueueFormAutosave(); }
     private void MarkReleaseDirty(bool paginationChanged) { if (paginationChanged) InvalidatePreparedCoverPagination(); MarkReleaseDirty(); }
@@ -2801,16 +2849,16 @@ else
     private sealed class CoreDraft
     {
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = "en"; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
-        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; } public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
-        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts };
+        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; } public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; } public CitationStyle CitationStyle { get; set; } = CitationStyle.Chicago18NotesBibliography;
+        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, CitationStyle = item.CitationStyle };
     }
 
     private sealed class ReleaseDraft
     {
         public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintArtifactProfileKey { get; set; } = ""; public PrintCoverMode PrintCoverMode { get; set; } public PrintProjectUse PrintProjectUse { get; set; } public PrintIdentifierMode PrintIdentifierMode { get; set; } public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
-        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
+        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public CitationStyle CitationStyle { get; set; } = CitationStyle.Chicago18NotesBibliography;
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, CitationStyle = item.CitationStyle };
     }
 }

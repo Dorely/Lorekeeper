@@ -284,7 +284,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 14,
+            protocol_version: 15,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -431,6 +431,10 @@ pub struct FontEvidence {
 #[serde(rename_all = "camelCase")]
 pub struct LayoutPage {
     pub kind: PageKind,
+    #[serde(skip)]
+    pub flow_page_id: Option<usize>,
+    #[serde(skip)]
+    pub footnote_height: f32,
     pub width_points: Option<f32>,
     pub height_points: Option<f32>,
     pub lines: Vec<LayoutLine>,
@@ -575,6 +579,8 @@ pub struct LayoutRun {
     pub size_scale: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note_reference_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

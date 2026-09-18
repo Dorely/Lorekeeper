@@ -1070,8 +1070,10 @@ public sealed class ProjectVersionRestoreTests
         }
     }
 
-    [Fact]
-    public async Task RestoreRefusesQueuedWorkAndForceDiscardsBlockedOperationalRows()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestoreRefusesQueuedWorkAndForceDiscardsBlockedOperationalRows(bool withCitations)
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -1156,7 +1158,39 @@ public sealed class ProjectVersionRestoreTests
                 await setup.SaveChangesAsync();
             }
 
+            var recordId = Guid.NewGuid();
+            var manuscript = CitationPreservationTests.Document(recordId, null);
             var payload = CreatePayload(repositoryId, projectId);
+            if (withCitations)
+            {
+                payload = payload with
+                {
+                    Narrative = payload.Narrative with
+                    {
+                        Chapters = [CreateChapter(manuscript.ManuscriptId, "Cited chapter") with
+                        {
+                            ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+                        }],
+                    },
+                    Sources = payload.Sources with
+                    {
+                        UnlinkedBibliographicRecords = [new VersionHistoryBibliographicRecord(
+                            recordId, null, BibliographicRecordKind.Book, "Preserved source", "",
+                            "[]", "[]", 2024, "Publisher", "", "", "", "", "", "", null,
+                            "", "Preserved notes", "[]", 2, 29, "Second", "", "", 2024, 3, 1)],
+                    },
+                    Publication = payload.Publication with
+                    {
+                        PublicationBook = new ProjectExportPublicationBook(
+                            1, "Book", "", "Author", "en", "", "", "", true, false,
+                            false, false, true, true, false, false, PublishTitlePageMode.Automatic, [], null)
+                        { CitationStyle = Lorekeeper.Citations.CitationStyle.APA7 },
+                    },
+                };
+                var snapshotRoot = Path.Combine(root, "citation-snapshot");
+                WriteSnapshotTree(snapshotRoot, payload);
+                payload = new VersionHistorySnapshotReader().Read(snapshotRoot, repositoryId, projectId).Payload;
+            }
             var loaded = new ProjectVersionLoadedCheckpoint(
                 new GitCommitMetadata(
                     headCommit,
@@ -1258,6 +1292,20 @@ public sealed class ProjectVersionRestoreTests
                 Assert.Equal(0, await verify.ContestBatches.CountAsync());
                 Assert.Equal(0, await verify.ProjectVersionOperations.CountAsync());
                 Assert.Equal("Project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
+                if (withCitations)
+                {
+                    var restored = await verify.Chapters.SingleAsync(item => item.ProjectId == projectId);
+                    var citations = ManuscriptTraversal.EnumerateCitations(ManuscriptCodec.Deserialize(restored.ManuscriptJson))
+                        .SelectMany(item => item.Cluster.Items).ToList();
+                    Assert.Equal(3, citations.Count);
+                    Assert.All(citations, item => Assert.Equal(recordId, item.BibliographicRecordId));
+                    var record = await verify.BibliographicRecords.SingleAsync(item => item.ProjectId == projectId);
+                    Assert.Equal("Preserved notes", record.Notes);
+                    Assert.Equal(29, record.IssuedDay);
+                    Assert.Equal(2024, record.AccessedYear);
+                    Assert.Equal(Lorekeeper.Citations.CitationStyle.APA7,
+                        (await verify.PublicationBooks.SingleAsync(item => item.ProjectId == projectId)).CitationStyle);
+                }
             }
         }
         finally

@@ -1012,6 +1012,7 @@ where
                 let fallback;
                 let runs = if line.runs.is_empty() {
                     fallback = vec![LayoutRun {
+                        note_reference_id: None,
                         text: line.text.clone(),
                         face: FontFace::SerifRegular,
                         underline: false,
@@ -2385,6 +2386,7 @@ fn line_outline_edges(
     let fallback;
     let runs = if line.runs.is_empty() {
         fallback = vec![LayoutRun {
+            note_reference_id: None,
             text: line.text.clone(),
             face: FontFace::SerifRegular,
             underline: false,
