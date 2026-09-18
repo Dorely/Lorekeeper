@@ -143,6 +143,13 @@ OpenAI-compatible chat requests share a pooled transport with
 `Agents:ChatRequestTimeoutSeconds` (600 seconds by default). Codex requests use
 the configured Codex timeout.
 
+Codex strict tool-schema preparation hoists local subschema references into
+root-level `$defs`, including repeated contributor types in bibliography tools.
+Recursive references remain references; definitions receive the same required-field
+and object-closure rules as inline schemas. Schema traversal preserves authored
+property names such as `title`. Unresolved or external references fail locally
+before dispatch rather than producing a provider request with dangling references.
+
 The legacy-field handler rewrites request bodies only where the compatibility
 classification requires it. The envelope handler unwraps a non-streaming outer
 gateway object such as Cline's `data`/`success` envelope; standard streaming root

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
@@ -607,9 +608,70 @@ public sealed class CodexChatClient : IChatClient
 
     private static JsonElement PrepareStrictSchema(JsonElement schema)
     {
-        var prepared = EnforceStrictSchema(schema);
+        var prepared = EnforceStrictSchema(HoistSchemaReferences(schema));
         using var doc = JsonDocument.Parse(prepared.GetRawText());
         return doc.RootElement.Clone();
+    }
+
+    private static JsonElement HoistSchemaReferences(JsonElement schema)
+    {
+        var references = new Dictionary<string, string>(StringComparer.Ordinal);
+        var definitions = new JsonObject();
+        var root = JsonNode.Parse(Transform(schema).GetRawText())!.AsObject();
+        if (definitions.Count > 0)
+            root["$defs"] = definitions;
+        return JsonSerializer.SerializeToElement(root);
+
+        JsonElement Transform(JsonElement source) => AIJsonUtilities.TransformSchema(source, new()
+        {
+            TransformSchemaNode = (_, node) =>
+            {
+                if (node is not JsonObject obj)
+                    return node;
+                // Only referenced definitions are retained, all at the tool root.
+                // The SDK traversal distinguishes schema maps from authored fields.
+                obj.Remove("$defs");
+                obj.Remove("definitions");
+                if (obj["$ref"] is not JsonValue value || !value.TryGetValue<string>(out var reference))
+                    return obj;
+                if (reference == "#")
+                    return obj;
+                if (!references.TryGetValue(reference, out var name))
+                {
+                    var target = ResolveSchemaReference(schema, reference);
+                    name = "ref" + references.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    // Register before descending so recursive types remain references.
+                    references.Add(reference, name);
+                    definitions[name] = JsonNode.Parse(Transform(target).GetRawText());
+                }
+                obj["$ref"] = "#/$defs/" + name;
+                return obj;
+            },
+        });
+    }
+
+    private static JsonElement ResolveSchemaReference(JsonElement root, string reference)
+    {
+        if (!reference.StartsWith("#/", StringComparison.Ordinal))
+            throw new InvalidOperationException("Tool schemas must use local JSON-pointer references.");
+        var target = root;
+        foreach (var part in reference[2..].Split('/'))
+        {
+            var key = Uri.UnescapeDataString(part).Replace("~1", "/", StringComparison.Ordinal)
+                .Replace("~0", "~", StringComparison.Ordinal);
+            if (target.ValueKind == JsonValueKind.Object && target.TryGetProperty(key, out var property))
+                target = property;
+            else if (target.ValueKind == JsonValueKind.Array
+                && int.TryParse(key, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var index)
+                && index < target.GetArrayLength())
+                target = target[index];
+            else
+                throw new InvalidOperationException("Tool schema contains an unresolved JSON-pointer reference.");
+        }
+        if (target.ValueKind is not (JsonValueKind.Object or JsonValueKind.True or JsonValueKind.False))
+            throw new InvalidOperationException("Tool schema reference does not identify a schema.");
+        return target;
     }
 
     private static JsonElement EnforceStrictSchema(JsonElement element, bool isPropertiesContainer = false)
@@ -646,7 +708,7 @@ public sealed class CodexChatClient : IChatClient
 
         foreach (var prop in element.EnumerateObject())
         {
-            if (!isPropertiesContainer && (prop.Name == "$defs" || prop.Name == "title"))
+            if (prop.Name == "title")
                 continue;
 
             if (prop.Name == "type" &&
@@ -665,7 +727,7 @@ public sealed class CodexChatClient : IChatClient
             if (prop.Name == "additionalProperties")
                 hasAdditionalProperties = true;
 
-            var recurseAsProperties = prop.Name == "properties";
+            var recurseAsProperties = prop.Name is "properties" or "$defs";
             dict[prop.Name] = prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array
                 ? EnforceStrictSchema(prop.Value, isPropertiesContainer: recurseAsProperties)
                 : prop.Value;
