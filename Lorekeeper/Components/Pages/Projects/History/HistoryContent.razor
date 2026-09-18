@@ -1709,11 +1709,20 @@
         var generation = _comparisonGeneration;
         var baseline = _comparisonBaseline;
         var candidate = _comparisonCandidate;
+        var beforeSha = _comparisonBeforeSha;
+        var afterSha = _comparisonAfterSha;
         try
         {
-            var prepared = await Task.Run(() =>
+            var prepared = await Task.Run(async () =>
             {
                 using var scope = ScopeFactory.CreateScope();
+                if (entry.Key.Area == "sources" && entry.Key.Category == "sources"
+                    && Guid.TryParse(entry.Key.Key, out var sourceId))
+                {
+                    var history = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+                    baseline = (await history.LoadCheckpointForComparisonAsync(project.Id, beforeSha!, cancellationToken, sourceId)).Payload;
+                    candidate = (await history.LoadCheckpointForComparisonAsync(project.Id, afterSha!, cancellationToken, sourceId)).Payload;
+                }
                 var comparer = scope.ServiceProvider.GetRequiredService<IVersionHistorySnapshotComparer>();
                 var exactComparison = comparer.Compare(
                     baseline,

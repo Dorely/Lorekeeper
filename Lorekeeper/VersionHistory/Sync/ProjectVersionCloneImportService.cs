@@ -39,6 +39,7 @@ public sealed class ProjectVersionCloneImportService(
                 exception);
         }
 
+        using var snapshotLease = clone;
         VersionHistoryImportResult imported;
         try
         {

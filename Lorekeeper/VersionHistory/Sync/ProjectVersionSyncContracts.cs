@@ -114,9 +114,16 @@ public sealed record VersionHistoryImportCloneResult(
     string HeadTreeSha,
     VersionHistorySnapshotArtifact Artifact,
     GitHubRepositorySelection Selection,
-    bool InstalledNewRepository = true)
+    bool InstalledNewRepository = true) : IDisposable
 {
+    private Action? _releaseSnapshot;
+
     public VersionHistorySnapshotManifest Manifest => Artifact.Manifest;
+
+    internal void RetainSnapshot(Action release) => _releaseSnapshot = release;
+
+    /// <summary>Release validated staging files after import has consumed the artifact.</summary>
+    public void Dispose() => Interlocked.Exchange(ref _releaseSnapshot, null)?.Invoke();
 }
 
 public interface IProjectVersionSyncService

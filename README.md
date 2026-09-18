@@ -121,6 +121,9 @@ its planned features are not claims about current capabilities.
   chunks; it excludes chats, credentials, jobs, search/vector projections,
   render artifacts, and other operational state. Images and fonts are ordinary
   Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
+  History reviews retain bounded source summaries and load full selected-source
+  comparisons on demand. Restoration validates and applies sources, images, and
+  font faces individually inside one rollback-safe transaction.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination and
   line breaks while preserving the editor's Book Text Styles, heading levels,

@@ -278,7 +278,8 @@ public sealed class ProjectVersionRemoteUpdateService(
         try
         {
             _ = await snapshotWriter.WriteAsync(repositoryId, projectId, stagingPath, cancellationToken);
-            return snapshotReader.Read(stagingPath, repositoryId, projectId).Manifest.ContentHash;
+            return snapshotReader.Read(stagingPath, repositoryId, projectId,
+                new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken }).Manifest.ContentHash;
         }
         finally
         {
@@ -389,7 +390,7 @@ public sealed class ProjectVersionRemoteUpdateService(
                     stagingPath,
                     repositoryId,
                     projectId,
-                    new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
+                    new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true, CancellationToken = cancellationToken });
             }
             catch (OperationCanceledException)
             {

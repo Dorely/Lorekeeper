@@ -570,14 +570,15 @@ public sealed class ProjectVersionRestoreTests
             var extractionId = Guid.NewGuid();
             var bytes = Encoding.UTF8.GetBytes("retained source bytes");
             var hash = VersionHistoryCanonicalJson.Sha256Hex(bytes);
+            var normalized = new string('x', 9000);
             var retained = new VersionHistoryRetainedSource(
                 sourceId, "Source", "artifact", string.Empty, string.Empty, string.Empty,
                 string.Empty, string.Empty, string.Empty, "text/plain", "{}",
                 extractionId,
                 new VersionHistorySourceOriginal(SourceOriginalState.Available, "source.txt", "text/plain",
                     bytes.Length, hash, [new VersionHistorySourceOriginalChunk(Guid.NewGuid(), 0, hash, bytes.Length)]),
-                [new VersionHistorySourceExtraction(extractionId, 0, "test", "1", "{}", SourceRetentionValidator.Sha256("normalized"),
-                    SourceExtractionStatus.Ready, string.Empty, "normalized", [], [], [])],
+                [new VersionHistorySourceExtraction(extractionId, 0, "test", "1", "{}", SourceRetentionValidator.Sha256(normalized),
+                    SourceExtractionStatus.Ready, string.Empty, normalized, [], [], [])],
                 [], []);
             var payload = CreatePayload(repositoryId, projectId) with
             {
@@ -594,17 +595,112 @@ public sealed class ProjectVersionRestoreTests
             Assert.Single(lightweight.Payload.Sources.RetainedSources);
             Assert.Empty(lightweight.Payload.SourceOriginalBlobs);
 
+            var reader = new VersionHistorySnapshotReader();
+            var review = reader.Read(root, repositoryId, projectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceDetails = false, IncludeAssetData = false });
+            Assert.Empty(review.Payload.Sources.RetainedSources);
+            var summary = Assert.Single(review.Payload.Sources.ReviewSummaries!);
+            Assert.Equal(4097, summary.ReadableText.Length);
+            Assert.False(summary.ReadableTextComplete);
+            var expanded = reader.Read(root, repositoryId, projectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceDetails = false, UnboundedSourceReviewId = sourceId });
+            Assert.Equal(normalized, Assert.Single(expanded.Payload.Sources.ReviewSummaries!).ReadableText);
+            Assert.True(Assert.Single(expanded.Payload.Sources.ReviewSummaries!).ReadableTextComplete);
+            var comparer = new VersionHistorySnapshotComparer();
+            Assert.Empty(comparer.Compare(lightweight.Payload, review.Payload).GetArea("sources").Entries);
+            var exact = new VersionHistoryCompareOptions
+            {
+                UnboundedReadableTextEntry = new("sources", "sources", sourceId.ToString("N")),
+            };
+            Assert.Throws<InvalidOperationException>(() => comparer.Compare(review.Payload, expanded.Payload, exact));
+            Assert.Empty(comparer.Compare(lightweight.Payload, expanded.Payload, exact).GetArea("sources").Entries);
+            var changedInactive = lightweight.Payload with
+            {
+                Sources = new VersionHistorySnapshotSourcesArea([retained with
+                {
+                    Extractions = [retained.Extractions[0], retained.Extractions[0] with { Id = Guid.NewGuid(), Ordinal = 1 }],
+                }]),
+            };
+            Assert.Single(comparer.Compare(review.Payload, changedInactive).GetArea("sources").Entries);
+
             var restore = new VersionHistorySnapshotReader().Read(root, repositoryId, projectId,
                 new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
             using var source = restore.Payload.SourceOriginalBlobs[hash].OpenRead();
             using var copy = new MemoryStream();
             source.CopyTo(copy);
             Assert.Equal(bytes, copy.ToArray());
+            Assert.Equal(normalized, Assert.Single(restore.Payload.Sources.RetainedSources).Extractions.Single().NormalizedText);
+            File.AppendAllText(Path.Combine(root, "sources", sourceId.ToString("N"), "source.json"), " ");
+            Assert.Throws<InvalidDataException>(() => restore.Payload.Sources.RetainedSources[0]);
         }
         finally
         {
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    public void PredecessorSourceAdaptsAtTheReaderBoundary(int schemaVersion)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var sourceId = Guid.NewGuid();
+            var legacy = new ProjectExportIngestSource(sourceId, "Legacy", "text", "", "Synopsis", "",
+                "Preserved text", SourceRetentionValidator.Sha256("Preserved text"), "", "", "", null,
+                "text/plain", "{}", DateTime.UnixEpoch, DateTime.UnixEpoch, [], [], []);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid());
+            WriteSnapshotTree(root, payload, (path, bytes) => path == "sources/sources.json"
+                ? VersionHistoryCanonicalJson.Serialize(new { Sources = new[] { legacy } }) : bytes, schemaVersion);
+            var restored = new VersionHistorySnapshotReader().Read(root).Payload;
+            var source = Assert.Single(restored.Sources.RetainedSources);
+            Assert.Equal(sourceId, source.Id);
+            Assert.Equal(SourceOriginalState.OriginalUnavailable, source.Original.State);
+            Assert.Equal("Preserved text", Assert.Single(source.Extractions).NormalizedText);
+            Assert.Equal(SourceExtractionStatus.LegacyImmutable, source.Extractions[0].Status);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RestoreAssetReadsRevalidateFilesAndHonorCancellation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imageId = Guid.NewGuid();
+            byte[] bytes = [1, 2, 3];
+            var image = new VersionHistoryImageAsset(imageId, "image.png", "image/png",
+                $"assets/images/{imageId:N}/content.png", VersionHistoryCanonicalJson.Sha256Hex(bytes), bytes.Length,
+                "Description", PublishAssetSource.Uploaded, "", "", "{}", null, null, null, null, null);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([image], [], []),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = bytes },
+            };
+            WriteSnapshotTree(root, payload);
+            using var cancellation = new CancellationTokenSource();
+            var reader = new VersionHistorySnapshotReader();
+            var restored = reader.Read(root, options: new()
+            {
+                IncludeSourceOriginalBlobs = true, CancellationToken = cancellation.Token,
+            }).Payload;
+            Assert.Equal(bytes, restored.ImageData[imageId]);
+            File.WriteAllBytes(Path.Combine(root, image.BlobPath), [3, 2, 1]);
+            Assert.Throws<InvalidDataException>(() => restored.ImageData[imageId]);
+            cancellation.Cancel();
+            Assert.Throws<OperationCanceledException>(() => restored.ImageData[imageId]);
+            Assert.Throws<OperationCanceledException>(() => reader.Read(root, options: new() { CancellationToken = cancellation.Token }));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 
@@ -1174,6 +1270,16 @@ public sealed class ProjectVersionRestoreTests
                     },
                     Sources = payload.Sources with
                     {
+                        RetainedSources = Enumerable.Range(0, 2).Select(index =>
+                        {
+                            var sourceId = Guid.NewGuid();
+                            var extractionId = Guid.NewGuid();
+                            return new VersionHistoryRetainedSource(sourceId, $"Retained {index}", "text", "", "", "",
+                                "", "", "", "text/plain", "{}", extractionId,
+                                new VersionHistorySourceOriginal(SourceOriginalState.OriginalUnavailable, "source.txt", "text/plain", 0, null, []),
+                                [new VersionHistorySourceExtraction(extractionId, 0, "test", "1", "{}", SourceRetentionValidator.Sha256("Retained text"),
+                                    SourceExtractionStatus.Ready, "", "Retained text", [], [], [])], [], []);
+                        }).ToList(),
                         UnlinkedBibliographicRecords = [new VersionHistoryBibliographicRecord(
                             recordId, null, BibliographicRecordKind.Book, "Preserved source", "",
                             "[]", "[]", 2024, "Publisher", "", "", "", "", "", "", null,
@@ -1188,8 +1294,11 @@ public sealed class ProjectVersionRestoreTests
                     },
                 };
                 var snapshotRoot = Path.Combine(root, "citation-snapshot");
+                Assert.Contains(new VersionHistorySnapshotComparer().Compare(CreatePayload(repositoryId, projectId), payload)
+                    .GetArea("sources").Entries, entry => entry.Category == "bibliography");
                 WriteSnapshotTree(snapshotRoot, payload);
-                payload = new VersionHistorySnapshotReader().Read(snapshotRoot, repositoryId, projectId).Payload;
+                payload = new VersionHistorySnapshotReader().Read(snapshotRoot, repositoryId, projectId,
+                    new() { IncludeSourceOriginalBlobs = true }).Payload;
             }
             var loaded = new ProjectVersionLoadedCheckpoint(
                 new GitCommitMetadata(
@@ -1294,6 +1403,8 @@ public sealed class ProjectVersionRestoreTests
                 Assert.Equal("Project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
                 if (withCitations)
                 {
+                    Assert.Equal(2, await verify.IngestSources.CountAsync(item => item.ProjectId == projectId));
+                    Assert.Equal(2, await verify.SourceExtractionVersions.CountAsync(item => item.NormalizedText == "Retained text"));
                     var restored = await verify.Chapters.SingleAsync(item => item.ProjectId == projectId);
                     var citations = ManuscriptTraversal.EnumerateCitations(ManuscriptCodec.Deserialize(restored.ManuscriptJson))
                         .SelectMany(item => item.Cluster.Items).ToList();
@@ -1635,7 +1746,10 @@ public sealed class ProjectVersionRestoreTests
             }
         }
         else
-            files["sources/sources.json"] = VersionHistoryCanonicalJson.Serialize(payload.Sources);
+        {
+            Assert.Empty(payload.Sources.RetainedSources);
+            files["sources/sources.json"] = VersionHistoryCanonicalJson.Serialize(new { Sources = Array.Empty<ProjectExportIngestSource>() });
+        }
         foreach (var chapter in payload.Narrative.Chapters)
         {
             var chapterDirectory = $"narrative/chapters/{chapter.Id:N}";
@@ -1815,7 +1929,7 @@ public sealed class ProjectVersionRestoreTests
 
         public Task<ProjectVersionLoadedCheckpointLease> LoadCheckpointForRestoreAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(new ProjectVersionLoadedCheckpointLease(checkpoint));
 
-        public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
+        public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default, Guid? unboundedSourceId = null) => Task.FromResult(checkpoint);
 
         private static Task<T> Unsupported<T>() => Task.FromException<T>(new NotSupportedException());
     }

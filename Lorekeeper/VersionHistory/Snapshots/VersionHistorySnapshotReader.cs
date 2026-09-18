@@ -28,6 +28,14 @@ public sealed record VersionHistorySnapshotReadOptions
 
     /// <summary>Only restore/import callers request original source bytes.</summary>
     public bool IncludeSourceOriginalBlobs { get; init; }
+
+    /// <summary>Review callers retain only full-content hashes and bounded text after validation.</summary>
+    public bool IncludeSourceDetails { get; init; } = true;
+
+    /// <summary>Retain full readable text only for the explicitly expanded source comparison.</summary>
+    public Guid? UnboundedSourceReviewId { get; init; }
+
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -36,6 +44,9 @@ public sealed record VersionHistorySnapshotReadOptions
 /// </summary>
 public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 {
+    private const long MaximumRecordBytes = 512L * 1024 * 1024;
+    private const long MaximumManifestBytes = 32L * 1024 * 1024;
+
     public VersionHistorySnapshotArtifact Read(
         string rootDirectory,
         Guid? expectedRepositoryId = null,
@@ -45,10 +56,17 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         if (string.IsNullOrWhiteSpace(rootDirectory))
             throw new ArgumentException("A snapshot directory is required.", nameof(rootDirectory));
 
+        var readOptions = options ?? VersionHistorySnapshotReadOptions.Default;
+        readOptions.CancellationToken.ThrowIfCancellationRequested();
+        if (readOptions.IncludeSourceOriginalBlobs && !readOptions.IncludeSourceDetails)
+            throw new ArgumentException("Restore file leases cannot be combined with review-only source projections.", nameof(options));
+
         var fullRoot = Path.GetFullPath(rootDirectory);
         var manifestPath = ResolveSafePath(fullRoot, VersionHistorySnapshotContract.ManifestFileName);
         if (!File.Exists(manifestPath))
             throw new InvalidDataException("Snapshot manifest.json is missing.");
+        if (new FileInfo(manifestPath).Length > MaximumManifestBytes)
+            throw new InvalidDataException("Snapshot manifest exceeds the 32 MiB limit.");
 
         var manifestBytes = File.ReadAllBytes(manifestPath);
         var manifest = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotManifest>(manifestBytes);
@@ -56,7 +74,6 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException("Snapshot manifest.json is not in canonical form.");
         ValidateManifest(manifest, expectedRepositoryId, expectedProjectId);
 
-        var readOptions = options ?? VersionHistorySnapshotReadOptions.Default;
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var assetFiles = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var sourceBlobFiles = new Dictionary<string, VersionHistorySourceBlobDescriptor>(StringComparer.Ordinal);
@@ -71,14 +88,17 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
             var isAssetBlob = IsAssetBlobPath(path);
             var isSourceBlob = IsSourceBlobPath(path);
+            var isSourceManifest = manifest.SchemaVersion >= 8 && path.StartsWith("sources/", StringComparison.Ordinal)
+                && path.EndsWith("/source.json", StringComparison.Ordinal);
+            readOptions.CancellationToken.ThrowIfCancellationRequested();
             var bytes = ValidateAndReadFile(
                 fullPath,
                 path,
                 entry,
                 payloadHash,
-                retainBytes: !(isAssetBlob || isSourceBlob)
-                    || isAssetBlob && readOptions.IncludeAssetData,
-                out var actualHash);
+                retainBytes: !(isAssetBlob || isSourceBlob || isSourceManifest)
+                    || isAssetBlob && readOptions.IncludeAssetData && !readOptions.IncludeSourceOriginalBlobs,
+                out var actualHash, readOptions.CancellationToken);
             validatedFiles.Add(path, new(entry.Length, actualHash));
             if (isSourceBlob && readOptions.IncludeSourceOriginalBlobs)
                 sourceBlobFiles.Add(path, new VersionHistorySourceBlobDescriptor(actualHash, entry.Length, fullPath));
@@ -108,7 +128,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var chapters = ReadChapters(files, chapterPaths, manifest.SchemaVersion);
         var narrative = narrativeFile.ToArea(chapters);
         var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
-        var sources = ReadSources(files, manifest.SchemaVersion, listedPaths);
+        var sources = ReadSources(files, manifest.SchemaVersion, listedPaths, fullRoot, validatedFiles, readOptions.CancellationToken);
         var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
         assets = AdaptAssetsForSchema(assets, manifest.SchemaVersion);
         var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
@@ -138,14 +158,29 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             composition,
             publication)
         {
-            ImageData = readOptions.IncludeAssetData ? ReadImageData(assetFiles, assets) : new Dictionary<Guid, byte[]>(),
-            FontFaceData = readOptions.IncludeAssetData ? ReadFontData(assetFiles, assets) : new Dictionary<Guid, byte[]>(),
+            ImageData = !readOptions.IncludeAssetData ? new Dictionary<Guid, byte[]>()
+                : readOptions.IncludeSourceOriginalBlobs
+                    ? new AssetBlobDictionary(assets.Images.ToDictionary(image => image.Id, image => image.BlobPath), fullRoot, validatedFiles, readOptions.CancellationToken)
+                    : ReadImageData(assetFiles, assets),
+            FontFaceData = !readOptions.IncludeAssetData ? new Dictionary<Guid, byte[]>()
+                : readOptions.IncludeSourceOriginalBlobs
+                    ? new AssetBlobDictionary(assets.FontFamilies.SelectMany(family => family.Faces).ToDictionary(face => face.Id, face => face.BlobPath), fullRoot, validatedFiles, readOptions.CancellationToken)
+                    : ReadFontData(assetFiles, assets),
             SourceOriginalBlobs = readOptions.IncludeSourceOriginalBlobs
                 ? ReadSourceOriginalBlobDescriptors(sourceBlobFiles, sources)
                 : new Dictionary<string, VersionHistorySourceBlobDescriptor>(StringComparer.Ordinal),
         };
 
         ValidateReferences(payload, manifest.SchemaVersion);
+        if (!readOptions.IncludeSourceDetails)
+            payload = payload with { Sources = sources with
+            {
+                ReviewSummaries = sources.RetainedSources.Select(source =>
+                    VersionHistorySourceReviewSummary.Create(source, source.Id == readOptions.UnboundedSourceReviewId)).ToList(),
+                RetainedSources = [],
+            } };
+        else if (!readOptions.IncludeSourceOriginalBlobs)
+            payload = payload with { Sources = sources with { RetainedSources = sources.RetainedSources.ToList() } };
         return new VersionHistorySnapshotArtifact(fullRoot, manifest, payload);
     }
 
@@ -155,7 +190,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         VersionHistorySnapshotFile entry,
         IncrementalHash payloadHash,
         bool retainBytes,
-        out string actualHash)
+        out string actualHash,
+        CancellationToken cancellationToken)
     {
         using var source = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (source.Length != entry.Length)
@@ -174,6 +210,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var totalRead = 0L;
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var read = source.Read(buffer, 0, buffer.Length);
             if (read == 0)
                 break;
@@ -220,6 +257,9 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException($"Snapshot included areas do not match schema version {manifest.SchemaVersion}.");
         if (manifest.Files.Count == 0)
             throw new InvalidDataException("Snapshot contains no payload files.");
+        if (manifest.Files.Any(file => file.Length < 0 || file.Length > MaximumRecordBytes
+            || !ProjectArchiveManifest.IsSha256(file.Sha256)))
+            throw new InvalidDataException("Snapshot entries require valid hashes and lengths no greater than 512 MiB.");
         if (manifest.Files.Any(file => string.IsNullOrWhiteSpace(file.Path) || file.Path.Equals(VersionHistorySnapshotContract.ManifestFileName, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Snapshot file list contains an invalid manifest entry.");
         if (manifest.Files.Any(file => file.Path.Contains('\\')))
@@ -291,43 +331,108 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     private static VersionHistorySnapshotSourcesArea ReadSources(
         IReadOnlyDictionary<string, byte[]> files,
         int schemaVersion,
-        IReadOnlyList<string> listedPaths)
+        IReadOnlyList<string> listedPaths,
+        string root,
+        IReadOnlyDictionary<string, ValidatedSnapshotFile> validatedFiles,
+        CancellationToken cancellationToken)
     {
         if (schemaVersion <= 7)
         {
-            var legacy = ReadRequired<VersionHistorySnapshotSourcesArea>(files, "sources/sources.json");
+            var legacy = ReadRequired<LegacySnapshotSourcesArea>(files, "sources/sources.json");
             return AdaptLegacySources(legacy, schemaVersion);
         }
 
         var index = ReadRequired<VersionHistorySourceIndex>(files, "sources/index.json");
         if (index.SourceIds.Distinct().Count() != index.SourceIds.Count || index.SourceIds.Any(id => id == Guid.Empty))
             throw new InvalidDataException("Snapshot source index contains duplicate or empty source IDs.");
-        var retained = new List<VersionHistoryRetainedSource>(index.SourceIds.Count);
-        foreach (var sourceId in index.SourceIds.OrderBy(id => id))
+        var retained = new SourceRecordList(index.SourceIds.OrderBy(id => id).ToList(), sourceId =>
         {
-            var manifest = ReadRequired<VersionHistoryRetainedSource>(files, SourceManifestPath(sourceId));
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = SourceManifestPath(sourceId);
+            if (!validatedFiles.TryGetValue(path, out var descriptor))
+                throw new InvalidDataException($"Source manifest {sourceId:N} is missing.");
+            var bytes = ReadValidatedRecord(root, path, descriptor, cancellationToken);
+            var manifest = ReadRequired<VersionHistoryRetainedSource>(new Dictionary<string, byte[]> { [path] = bytes }, path);
             if (manifest.Id != sourceId)
                 throw new InvalidDataException($"Source manifest {sourceId:N} has a mismatched source ID.");
-            retained.Add(manifest);
-        }
+            return manifest;
+        });
 
         var expectedPaths = index.SourceIds.Select(SourceManifestPath).ToHashSet(StringComparer.Ordinal);
         var actualPaths = listedPaths.Where(path => path.StartsWith("sources/", StringComparison.Ordinal)
             && path.EndsWith("/source.json", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
         if (!actualPaths.SetEquals(expectedPaths))
             throw new InvalidDataException("Snapshot source manifests do not exactly match the source index.");
-        return new VersionHistorySnapshotSourcesArea(retained.Select(ToLegacyProjection).ToList())
+        return new VersionHistorySnapshotSourcesArea(retained)
         {
-            RetainedSources = retained,
             UnlinkedBibliographicRecords = index.UnlinkedBibliographicRecords,
         };
+    }
+
+    private sealed class SourceRecordList(IReadOnlyList<Guid> ids, Func<Guid, VersionHistoryRetainedSource> read)
+        : IReadOnlyList<VersionHistoryRetainedSource>
+    {
+        public int Count => ids.Count;
+        public VersionHistoryRetainedSource this[int index] => read(ids[index]);
+        public IEnumerator<VersionHistoryRetainedSource> GetEnumerator()
+        {
+            foreach (var id in ids) yield return read(id);
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // Restore leases keep the validated tree alive. No blob is cached across reads.
+    private sealed class AssetBlobDictionary(
+        IReadOnlyDictionary<Guid, string> paths,
+        string root,
+        IReadOnlyDictionary<string, ValidatedSnapshotFile> files,
+        CancellationToken cancellationToken) : IReadOnlyDictionary<Guid, byte[]>
+    {
+        public int Count => paths.Count;
+        public IEnumerable<Guid> Keys => paths.Keys;
+        public IEnumerable<byte[]> Values => paths.Keys.Select(id => this[id]);
+        public byte[] this[Guid key] => ReadValidatedRecord(root, paths[key], files[paths[key]], cancellationToken);
+        public bool ContainsKey(Guid key) => paths.ContainsKey(key);
+        public bool TryGetValue(Guid key, out byte[] value)
+        {
+            value = paths.ContainsKey(key) ? this[key] : null!;
+            return value is not null;
+        }
+        public IEnumerator<KeyValuePair<Guid, byte[]>> GetEnumerator()
+        {
+            foreach (var id in paths.Keys) yield return new(id, this[id]);
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private static byte[] ReadValidatedRecord(string root, string path, ValidatedSnapshotFile descriptor, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (descriptor.Length > MaximumRecordBytes)
+            throw new InvalidDataException("A snapshot record exceeds the 512 MiB entry limit.");
+        var fullPath = ResolveSafePath(root, path);
+        var info = new FileInfo(fullPath);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length != descriptor.Length)
+            throw new InvalidDataException($"Snapshot file '{path}' changed after validation.");
+        using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var bytes = new byte[checked((int)descriptor.Length)];
+        for (var offset = 0; offset < bytes.Length;)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = stream.Read(bytes, offset, Math.Min(81920, bytes.Length - offset));
+            if (count == 0) throw new InvalidDataException($"Snapshot file '{path}' changed after validation.");
+            offset += count;
+        }
+        if (stream.ReadByte() != -1 || VersionHistoryCanonicalJson.Sha256Hex(bytes) != descriptor.Sha256)
+            throw new InvalidDataException($"Snapshot file '{path}' changed after validation.");
+        return bytes;
     }
 
     // Each predecessor is deliberately routed explicitly. Manifest/file hashes
     // have already been verified before this adapter runs; this isolates old
     // aggregate source shape from the schema-v8 retained-source contract.
     private static VersionHistorySnapshotSourcesArea AdaptLegacySources(
-        VersionHistorySnapshotSourcesArea sources,
+        LegacySnapshotSourcesArea sources,
         int schemaVersion) => schemaVersion switch
         {
             1 => AdaptLegacySourcesCore(sources),
@@ -340,36 +445,15 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             _ => throw new InvalidDataException($"Unsupported legacy source schema {schemaVersion}."),
         };
 
-    private static VersionHistorySnapshotSourcesArea AdaptLegacySourcesCore(VersionHistorySnapshotSourcesArea sources)
+    private sealed record LegacySnapshotSourcesArea(IReadOnlyList<ProjectExportIngestSource> Sources);
+
+    private static VersionHistorySnapshotSourcesArea AdaptLegacySourcesCore(LegacySnapshotSourcesArea sources)
     {
         if (sources.Sources.GroupBy(source => source.Id).Any(group => group.Count() != 1))
             throw new InvalidDataException("Legacy snapshot has duplicate source IDs.");
-        return sources with
-        {
-            RetainedSources = sources.Sources.Select(FromLegacyProjection).ToList(),
-        };
+        return new(sources.Sources.Select(FromLegacyProjection).ToList());
     }
 
-    private static ProjectExportIngestSource ToLegacyProjection(VersionHistoryRetainedSource source)
-    {
-        var active = source.Extractions.SingleOrDefault(extraction => extraction.Id == source.ActiveExtractionVersionId)
-            ?? source.Extractions.OrderBy(extraction => extraction.Ordinal).LastOrDefault();
-        return new ProjectExportIngestSource(
-            source.Id, source.Title, source.SourceKind, source.Description, source.Synopsis,
-            source.UserInstructions, active?.NormalizedText ?? string.Empty, active?.ContentHash ?? string.Empty, source.SourceUrl,
-            source.FinalUrl, source.CanonicalUrl, null, source.ContentType, source.SourceMetadataJson,
-            default, default,
-            active?.Chunks.Select(chunk => new ProjectExportIngestSourceChunk(chunk.Id, chunk.Index, chunk.Title,
-                chunk.HeadingPath, chunk.StartChar, chunk.EndChar, chunk.EstimatedTokenCount,
-                chunk.TokenCountMethod, chunk.TokenEncodingName, chunk.TokenCountIsExact, chunk.Summary,
-                chunk.AgentNotes, chunk.StructureStatus, default, default)).ToList() ?? [],
-            active?.Pages.Select(page => new ProjectExportIngestSourcePage(page.Id, page.PageNumber, page.Text,
-                page.StartChar, page.EndChar, page.ExtractionMethod, page.Width, page.Height, page.ImageHash,
-                page.RenderSettingsJson, null, page.VisionModelName, page.Diagnostics, default)).ToList() ?? [],
-            active?.Blocks.Select(block => new ProjectExportIngestSourceBlock(block.Id, block.SourcePageId,
-                block.Index, block.Kind, block.Title, block.Locator, block.PageNumber, block.StartChar,
-                block.EndChar, block.MetadataJson, default)).ToList() ?? []);
-    }
 
     private static VersionHistoryRetainedSource FromLegacyProjection(ProjectExportIngestSource source)
     {
@@ -784,9 +868,9 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             .Concat(["Project/" + payload.ProjectId.ToString("N")])
             .Concat(payload.Narrative.Acts.Select(act => "Act/" + act.Id.ToString("N")))
             .Concat(payload.Narrative.Chapters.Select(chapter => "Chapter/" + chapter.Id.ToString("N")))
-            .Concat(payload.Sources.Sources.Select(source => "Source/" + source.Id.ToString("N")))
-            .Concat(payload.Sources.Sources.SelectMany(source =>
-                source.Chunks.Select(chunk => "SourceChunk/" + chunk.Id.ToString("N"))))
+            .Concat(payload.Sources.RetainedSources.Select(source => "Source/" + source.Id.ToString("N")))
+            .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Chunks)
+                .Select(chunk => "SourceChunk/" + chunk.Id.ToString("N")))
             .ToHashSet(StringComparer.Ordinal);
         foreach (var edge in payload.Graph.Edges)
         {
@@ -799,8 +883,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 throw new InvalidDataException($"Entity visual references missing graph entity '{example.Entity.StableKey}'.");
         }
 
-        var sourceIds = payload.Sources.Sources.Select(source => source.Id).ToHashSet();
-        if (sourceIds.Count != payload.Sources.Sources.Count)
+        var sourceIds = payload.Sources.RetainedSources.Select(source => source.Id).ToHashSet();
+        if (sourceIds.Count != payload.Sources.RetainedSources.Count)
             throw new InvalidDataException("Snapshot contains duplicate source IDs.");
         if (payload.Narrative.BookBriefCanonSourceIds.Any(sourceId => !sourceIds.Contains(sourceId)))
             throw new InvalidDataException("Book Brief canonical-source selection references a missing source.");

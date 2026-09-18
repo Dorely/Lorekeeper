@@ -158,16 +158,32 @@ public sealed record VersionHistorySnapshotGraphArea(
     IReadOnlyList<ProjectExportEdge> Edges);
 
 public sealed record VersionHistorySnapshotSourcesArea(
-    IReadOnlyList<ProjectExportIngestSource> Sources)
+    IReadOnlyList<VersionHistoryRetainedSource> RetainedSources)
 {
-    /// <summary>
-    /// Schema-v8 retained-source records. The legacy projection remains an
-    /// in-memory compatibility view for old restore and compare consumers; it
-    /// is never written as a sources.json aggregate by v8 writers.
-    /// </summary>
-    public IReadOnlyList<VersionHistoryRetainedSource> RetainedSources { get; init; } = [];
-
     public IReadOnlyList<VersionHistoryBibliographicRecord> UnlinkedBibliographicRecords { get; init; } = [];
+
+    /// <summary>Bounded review-only projections; a payload with these cannot be restored.</summary>
+    public IReadOnlyList<VersionHistorySourceReviewSummary>? ReviewSummaries { get; init; }
+}
+
+public sealed record VersionHistorySourceReviewSummary(Guid Id, string Title, string Hash, string ReadableText)
+{
+    public bool ReadableTextComplete { get; init; }
+
+    internal static VersionHistorySourceReviewSummary Create(VersionHistoryRetainedSource source, bool unbounded = false)
+    {
+        var maximum = unbounded ? int.MaxValue : 4097; // One extra character lets the comparer report truncation.
+        var text = source.Extractions.SingleOrDefault(extraction => extraction.Id == source.ActiveExtractionVersionId)?.NormalizedText ?? string.Empty;
+        var synopsis = string.IsNullOrWhiteSpace(source.Synopsis) ? string.Empty : source.Synopsis[..Math.Min(source.Synopsis.Length, maximum)] + "\n\n";
+        var readable = synopsis.Length >= maximum ? synopsis[..maximum] : synopsis + text[..Math.Min(text.Length, maximum - synopsis.Length)];
+        return new(source.Id, source.Title,
+            VersionHistoryCanonicalJson.Sha256Hex(VersionHistoryCanonicalJson.Serialize(source)), readable)
+        {
+            ReadableTextComplete = string.IsNullOrWhiteSpace(source.Synopsis)
+                ? text.Length <= maximum
+                : (long)source.Synopsis.Length + 2 + text.Length <= maximum,
+        };
+    }
 }
 
 public sealed record VersionHistorySnapshotAssetsArea(
@@ -279,48 +295,6 @@ public sealed record VersionHistorySnapshotPayload(
     /// <summary>Validated original-blob descriptors, populated only for restore/import reads.</summary>
     public IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> SourceOriginalBlobs { get; init; }
         = new Dictionary<string, VersionHistorySourceBlobDescriptor>(StringComparer.Ordinal);
-
-    public ProjectExportDocument ToProjectExportDocument() => new()
-    {
-        ExportKind = ProjectExportKind.Full,
-        Project = Project.Project,
-        PageSetup = Project.PageSetup,
-        BookBrief = Narrative.BookBrief,
-        IngestSources = Sources.Sources.ToList(),
-        BookBriefCanonSourceIds = Narrative.BookBriefCanonSourceIds.ToList(),
-        EntityTypes = Narrative.EntityTypes.ToList(),
-        Images = Assets.Images
-            .Select(image => image.ToProjectExportImage(ImageData.GetValueOrDefault(image.Id) ?? []))
-            .ToList(),
-        FontFamilies = Assets.FontFamilies
-            .Select(family => new ProjectExportFontFamily(
-                family.Id,
-                family.Name,
-                family.Faces.Select(face => new ProjectExportFontFace(
-                    face.Id,
-                    face.SubfamilyName,
-                    face.FileName,
-                    face.ContentType,
-                    face.Weight,
-                    face.Italic,
-                    FontFaceData.GetValueOrDefault(face.Id) ?? [],
-                    face.Sha256)).ToList(),
-                family.EmbeddingRightsConfirmed,
-                family.RightsDeclaration))
-            .ToList(),
-        EntityVisualExamples = Assets.EntityVisualExamples.ToList(),
-        PublicationBook = Publication.PublicationBook,
-        PublicationEditions = Publication.PublicationEditions.ToList(),
-        LegacyPageCompositions = Composition.LegacyPageCompositions?.ToList(),
-        DesignedPages = Composition.DesignedPages.ToList(),
-        PublicationSections = Publication.PublicationSections.ToList(),
-        ManuscriptStyles = Manuscript.Styles.ToList(),
-        Acts = Narrative.Acts.ToList(),
-        Chapters = Narrative.Chapters.ToList(),
-        ManuscriptAnnotations = Narrative.Annotations.ToList(),
-        Nodes = Graph.Nodes.ToList(),
-        Edges = Graph.Edges.ToList(),
-    };
 }
 
 /// <summary>
@@ -356,27 +330,4 @@ public sealed class VersionHistorySourceBlobDescriptor
             81_920,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
     }
-}
-
-internal static class VersionHistorySnapshotConversions
-{
-    public static ProjectExportImage ToProjectExportImage(this VersionHistoryImageAsset image, byte[] data) =>
-        new(
-            image.Id,
-            image.FileName,
-            image.ContentType,
-            data,
-            image.AltText,
-            image.Source,
-            image.Prompt,
-            image.GenerationModel,
-            image.SourceMetadataJson,
-            image.DerivedFromImageId,
-            image.CropXPercent,
-            image.CropYPercent,
-            image.CropWidthPercent,
-            image.CropHeightPercent,
-            DateTime.UnixEpoch,
-            DateTime.UnixEpoch);
-
 }

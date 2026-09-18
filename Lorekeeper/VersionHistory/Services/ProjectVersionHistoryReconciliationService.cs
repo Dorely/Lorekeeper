@@ -587,7 +587,8 @@ public sealed class ProjectVersionHistoryReconciliationService(
             {
                 git.MaterializeTree(repositoryId, temporaryDirectory, commit.Sha, cancellationToken);
                 EnsureNoReparsePointsRecursively(temporaryDirectory);
-                var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, projectId);
+                var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, projectId,
+                    new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken });
                 result.Add(new LoadedCommit(commit, artifact.Manifest));
             }
             finally

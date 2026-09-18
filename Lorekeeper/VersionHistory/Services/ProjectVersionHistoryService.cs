@@ -930,7 +930,7 @@ public sealed class ProjectVersionHistoryService(
             var generated = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
-                projectId);
+                projectId, new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken });
             if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
                 throw new InvalidOperationException("There are no chapter changes to approve.");
 
@@ -1018,7 +1018,7 @@ public sealed class ProjectVersionHistoryService(
             var generated = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
-                projectId);
+                projectId, new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken });
             if (snapshotComparer.Compare(approved.Payload, generated.Payload).IsIdentical)
                 throw new InvalidOperationException("There are no non-manuscript project changes to approve.");
 
@@ -1123,7 +1123,7 @@ public sealed class ProjectVersionHistoryService(
             var generatedManifest = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
-                projectId).Manifest;
+                projectId, new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken }).Manifest;
             var operationId = await StartOperationAsync(status.Repository.RepositoryId, ProjectVersionOperationKind.Checkpoint, requestKey, cancellationToken);
             var authoredAt = DateTimeOffset.UtcNow;
             try
@@ -1204,7 +1204,7 @@ public sealed class ProjectVersionHistoryService(
             var generatedManifest = snapshotReader.Read(
                 generatedRoot,
                 status.Repository.RepositoryId,
-                projectId).Manifest;
+                projectId, new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken }).Manifest;
             var operationId = await StartOperationAsync(status.Repository.RepositoryId, ProjectVersionOperationKind.Checkpoint, requestKey, cancellationToken);
             var authoredAt = DateTimeOffset.UtcNow;
             try
@@ -1784,61 +1784,49 @@ public sealed class ProjectVersionHistoryService(
         if (string.IsNullOrWhiteSpace(status.Repository.HeadCommitSha))
             throw new InvalidOperationException("Review restore requires an approved Git head.");
 
-        var current = await CaptureCurrentSnapshotUnderLeaseAsync(
-            status.Repository.RepositoryId,
-            projectId,
-            cancellationToken);
-
-        var approved = LoadGitCheckpoint(
-            status.Repository.RepositoryId,
-            status.Repository.HeadCommitSha,
-            recordedCheckpoint: null,
-            projectId,
-            cancellationToken);
-        var comparison = snapshotComparer.Compare(approved.Payload, current.Payload);
-        status = status with
+        var temporaryDirectory = CreateTemporaryDirectory();
+        ProjectVersionLoadedCheckpointLease? approvedLease = null;
+        try
         {
-            CurrentContentHash = current.Manifest.ContentHash,
-            Repository = status.Repository with { IsDirty = !comparison.IsIdentical },
-        };
-        var recordedCheckpoint = await LoadRecordedCheckpointUnderLeaseAsync(
-            status.Repository.RepositoryId,
-            approved.Commit.Sha,
-            cancellationToken);
-        return new(
-            status,
-            current,
-            new ProjectVersionLoadedCheckpoint(
-                approved.Commit,
-                approved.Manifest,
-                approved.Payload,
-            recordedCheckpoint is null ? null : ToCheckpointView(recordedCheckpoint)));
+            await snapshotWriter.WriteAsync(status.Repository.RepositoryId, projectId, temporaryDirectory, cancellationToken);
+            EnsureNoReparsePointsRecursively(temporaryDirectory);
+            var current = snapshotReader.Read(temporaryDirectory, status.Repository.RepositoryId, projectId,
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true, CancellationToken = cancellationToken });
+            approvedLease = LoadRestoreGitCheckpoint(status.Repository.RepositoryId, status.Repository.HeadCommitSha,
+                recordedCheckpoint: null, projectId, cancellationToken);
+            var approved = approvedLease.Checkpoint;
+            var comparison = snapshotComparer.Compare(approved.Payload, current.Payload);
+            status = status with
+            {
+                CurrentContentHash = current.Manifest.ContentHash,
+                Repository = status.Repository with { IsDirty = !comparison.IsIdentical },
+            };
+            var recordedCheckpoint = await LoadRecordedCheckpointUnderLeaseAsync(
+                status.Repository.RepositoryId, approved.Commit.Sha, cancellationToken);
+            var retainedLease = approvedLease;
+            return new(status, current,
+                approved with { RecordedCheckpoint = recordedCheckpoint is null ? null : ToCheckpointView(recordedCheckpoint) },
+                () =>
+                {
+                    retainedLease.Dispose();
+                    CleanupTemporaryDirectory(temporaryDirectory);
+                });
+        }
+        catch
+        {
+            approvedLease?.Dispose();
+            CleanupTemporaryDirectory(temporaryDirectory);
+            throw;
+        }
     }
 
-    /// <summary>
-    /// Loads an immutable Git checkpoint while the caller's project mutation
-    /// lease is held. Restore uses this boundary for historical review actions
-    /// so the source snapshot and live token are validated in one serialized
-    /// operation.
-    /// </summary>
-    internal ProjectVersionLoadedCheckpoint LoadCheckpointUnderLease(
+    /// <summary>Loads a restore snapshot under the caller's project mutation lease.</summary>
+    internal ProjectVersionLoadedCheckpointLease LoadCheckpointUnderLease(
         Guid repositoryId,
         string commitSha,
         Guid projectId,
-        CancellationToken cancellationToken)
-    {
-        var loaded = LoadGitCheckpoint(
-            repositoryId,
-            commitSha,
-            recordedCheckpoint: null,
-            projectId,
-            cancellationToken);
-        return new(
-            loaded.Commit,
-            loaded.Manifest,
-            loaded.Payload,
-            RecordedCheckpoint: null);
-    }
+        CancellationToken cancellationToken) =>
+        LoadRestoreGitCheckpoint(repositoryId, commitSha, recordedCheckpoint: null, projectId, cancellationToken);
 
     public async Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(
         Guid projectId,
@@ -1904,7 +1892,8 @@ public sealed class ProjectVersionHistoryService(
     public async Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(
         Guid projectId,
         string commitSha,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? unboundedSourceId = null)
     {
         ValidateProjectId(projectId);
         if (string.IsNullOrWhiteSpace(commitSha))
@@ -1926,7 +1915,7 @@ public sealed class ProjectVersionHistoryService(
                     cancellationToken);
         }
 
-        var loaded = LoadGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken);
+        var loaded = LoadGitCheckpoint(repository.Id, commitSha, recorded, projectId, cancellationToken, unboundedSourceId);
         return new ProjectVersionLoadedCheckpoint(
             loaded.Commit,
             loaded.Manifest,
@@ -2516,10 +2505,12 @@ public sealed class ProjectVersionHistoryService(
         string commitSha,
         ProjectVersionCheckpoint? recordedCheckpoint,
         Guid expectedProjectId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? unboundedSourceId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!reviewCache.TryGetGitCheckpoint(repositoryId, commitSha, out var loaded))
+        LoadedGitCheckpoint loaded;
+        if (unboundedSourceId.HasValue || !reviewCache.TryGetGitCheckpoint(repositoryId, commitSha, out loaded!))
         {
             var commit = git.GetCommitMetadata(repositoryId, commitSha);
             var temporaryDirectory = CreateTemporaryDirectory();
@@ -2531,7 +2522,13 @@ public sealed class ProjectVersionHistoryService(
                     temporaryDirectory,
                     repositoryId,
                     expectedProjectId,
-                    new VersionHistorySnapshotReadOptions { IncludeAssetData = false });
+                    new VersionHistorySnapshotReadOptions
+                    {
+                        IncludeAssetData = false,
+                        IncludeSourceDetails = false,
+                        UnboundedSourceReviewId = unboundedSourceId,
+                        CancellationToken = cancellationToken,
+                    });
                 loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
             }
             finally
@@ -2539,7 +2536,8 @@ public sealed class ProjectVersionHistoryService(
                 CleanupTemporaryDirectory(temporaryDirectory);
             }
 
-            reviewCache.SetGitCheckpoint(repositoryId, commitSha, loaded);
+            if (!unboundedSourceId.HasValue)
+                reviewCache.SetGitCheckpoint(repositoryId, commitSha, loaded);
         }
 
         if (recordedCheckpoint is not null
@@ -2574,7 +2572,7 @@ public sealed class ProjectVersionHistoryService(
                 temporaryDirectory,
                 repositoryId,
                 expectedProjectId,
-                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true, CancellationToken = cancellationToken });
             loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
 
             if (recordedCheckpoint is not null

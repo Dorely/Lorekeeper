@@ -653,6 +653,7 @@ public sealed class ProjectVersionSyncService(
         Guid? installedRepositoryId = null;
         string? installedDestinationPath = null;
         var installedByThisAttempt = false;
+        var snapshotOwnershipTransferred = false;
 
         try
         {
@@ -678,7 +679,8 @@ public sealed class ProjectVersionSyncService(
             var artifact = ReadStrictArtifact(
                 extractionPath,
                 manifest.RepositoryId,
-                manifest.ProjectId);
+                manifest.ProjectId,
+                cancellationToken);
             journalId = await TryStartCloneJournalAsync(manifest.RepositoryId, cancellationToken);
 
             var destinationPath = git.GetRepositoryPath(manifest.RepositoryId);
@@ -723,6 +725,8 @@ public sealed class ProjectVersionSyncService(
                 installedNewRepository);
             if (journalId is Guid completedOperationId)
                 await CompleteOperationAsync(completedOperationId, ProjectVersionOperationStatus.Succeeded, null, null);
+            result.RetainSnapshot(() => DeleteTemporaryDirectory(extractionPath));
+            snapshotOwnershipTransferred = true;
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -750,7 +754,8 @@ public sealed class ProjectVersionSyncService(
         }
         finally
         {
-            DeleteTemporaryDirectory(extractionPath);
+            if (!snapshotOwnershipTransferred)
+                DeleteTemporaryDirectory(extractionPath);
             DeleteTemporaryDirectory(stagingPath);
         }
     }
@@ -1371,7 +1376,8 @@ public sealed class ProjectVersionSyncService(
     private VersionHistorySnapshotArtifact ReadStrictArtifact(
         string extractionPath,
         Guid repositoryId,
-        Guid projectId)
+        Guid projectId,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -1379,7 +1385,7 @@ public sealed class ProjectVersionSyncService(
                 extractionPath,
                 repositoryId,
                 projectId,
-                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true });
+                new VersionHistorySnapshotReadOptions { IncludeSourceOriginalBlobs = true, CancellationToken = cancellationToken });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -1429,7 +1435,8 @@ public sealed class ProjectVersionSyncService(
             var existingArtifact = ReadStrictArtifact(
                 existingExtractionPath,
                 artifact.Manifest.RepositoryId,
-                artifact.Manifest.ProjectId);
+                artifact.Manifest.ProjectId,
+                cancellationToken);
             if (!ManifestIdentityEquals(existingArtifact.Manifest, artifact.Manifest))
                 throw new ProjectVersionSyncException(
                     ProjectVersionSyncErrorCode.RepositoryCollision,

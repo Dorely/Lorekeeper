@@ -169,6 +169,22 @@ streams rather than complete byte arrays. A full historical restore owns a
 scoped materialization lease until its transaction has consumed every validated
 source descriptor; comparison reads do not materialize source originals.
 
+Review payloads retain complete source-content hashes and at most 4,097 text
+characters per source; they cannot be restored. Inactive extraction and unlinked
+bibliography changes participate in comparison. Expanding a source entry reloads
+that checkpoint's complete selected-source text outside the bounded cache.
+Restore leases keep per-source manifests and image/font blobs on disk and recheck
+each file's length and hash when consumed.
+The reader bounds the manifest at 32 MiB and individual records/blobs at 512 MiB;
+it imposes no aggregate library-byte ceiling. The canonical transaction flushes and
+detaches one source, image, or font face at a time; derivative image links follow
+image insertion. Projection repair also loads one source at a time. Scoped review
+restores own the same file lifetimes through commit or rollback. Validated
+clone results similarly own their staging files until the import coordinator
+disposes them after success, cancellation, or failure. Schema-v1-v7
+aggregate sources are adapted only at the versioned reader boundary; the current
+payload and restore applicator have one retained-source representation.
+
 Chats, conversations, messages and composer drafts; provider connections,
 OpenAI account/catalog rows, OAuth tokens, and credentials; the Review Edits workflow toggle, contests,
 candidate drafts, revision jobs, ingest/image/publication jobs and other

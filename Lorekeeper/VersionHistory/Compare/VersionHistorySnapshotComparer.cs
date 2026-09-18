@@ -235,19 +235,31 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         VersionHistoryCompareOptions options)
     {
         var accumulator = new AreaAccumulator("sources");
+        accumulator.Add(CompareItems(options, "bibliography",
+            baseline.Sources.UnlinkedBibliographicRecords, candidate.Sources.UnlinkedBibliographicRecords,
+            record => GuidKey(record.Id), record => record.Title, Hash, metadataHash: Hash));
+        var beforeSources = baseline.Sources.ReviewSummaries
+            ?? baseline.Sources.RetainedSources.Select(source => VersionHistorySourceReviewSummary.Create(source,
+                options.IsUnbounded("sources", GuidKey(source.Id)))).ToList();
+        var afterSources = candidate.Sources.ReviewSummaries
+            ?? candidate.Sources.RetainedSources.Select(source => VersionHistorySourceReviewSummary.Create(source,
+                options.IsUnbounded("sources", GuidKey(source.Id)))).ToList();
+        if (beforeSources.Concat(afterSources).Any(source =>
+            options.IsUnbounded("sources", GuidKey(source.Id)) && !source.ReadableTextComplete))
+            throw new InvalidOperationException("Load the selected source's complete checkpoint text before expanding its comparison.");
         accumulator.Add(CompareItems(
             options,
             "sources",
-            baseline.Sources.Sources,
-            candidate.Sources.Sources,
+            beforeSources,
+            afterSources,
             source => GuidKey(source.Id),
             source => source.Title,
-            Hash,
-            metadataHash: Hash,
-            readableText: source => FormatSourceText(source)));
+            source => source.Hash,
+            metadataHash: source => source.Hash,
+            readableText: source => source.ReadableText));
 
-        var beforeTitles = baseline.Sources.Sources.ToDictionary(source => source.Id, source => source.Title);
-        var afterTitles = candidate.Sources.Sources.ToDictionary(source => source.Id, source => source.Title);
+        var beforeTitles = beforeSources.ToDictionary(source => source.Id, source => source.Title);
+        var afterTitles = afterSources.ToDictionary(source => source.Id, source => source.Title);
         accumulator.Add(CompareItems(
             options,
             "canonical-selections",
@@ -735,11 +747,6 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
                 .OrderBy(item => item.Id)
                 .Select(item => ManuscriptPlainText(item.ManuscriptJson, item.Id, item.Revision))
             ?? []);
-
-    private static string FormatSourceText(ProjectExportIngestSource source) =>
-        string.IsNullOrWhiteSpace(source.Synopsis)
-            ? source.SourceText
-            : $"{source.Synopsis}\n\n{source.SourceText}";
 
     private static string ManuscriptPlainText(string json, Guid id, long revision) =>
         ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(json, id, revision));

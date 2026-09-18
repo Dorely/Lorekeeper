@@ -199,9 +199,10 @@ public sealed class VersionHistorySnapshotWriter(
             cancellationToken);
 
         // Read the emitted tree back through the strict schema boundary. This
-        // makes the writer's returned payload exactly match what a later
-        // compare/restore operation will receive from Git.
-        return new VersionHistorySnapshotReader().Read(fullRoot, repositoryId, projectId);
+        // validates complete preservation while returning a bounded review payload.
+        // Restore owns a separate read lease over this same immutable tree.
+        return new VersionHistorySnapshotReader().Read(fullRoot, repositoryId, projectId,
+            new() { IncludeAssetData = false, IncludeSourceDetails = false, CancellationToken = cancellationToken });
     }
 
     private async Task<SupplementalState> ReadSupplementalStateAsync(

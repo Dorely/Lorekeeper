@@ -78,7 +78,11 @@ public sealed record ProjectVersionStatusView(
 internal sealed record ProjectVersionReviewSnapshotContext(
     ProjectVersionStatusView Status,
     VersionHistorySnapshotArtifact Current,
-    ProjectVersionLoadedCheckpoint Approved);
+    ProjectVersionLoadedCheckpoint Approved,
+    Action Release) : IDisposable
+{
+    public void Dispose() => Release();
+}
 
 /// <summary>
 /// Immutable values captured when a review view is loaded. Approval operations
@@ -536,7 +540,8 @@ public interface IProjectVersionHistoryService
     Task<ProjectVersionLoadedCheckpoint> LoadCheckpointForComparisonAsync(
         Guid projectId,
         string commitSha,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? unboundedSourceId = null);
 }
 
 public enum ProjectVersionReconciliationState

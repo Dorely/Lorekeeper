@@ -27,6 +27,9 @@ public sealed class ProjectVersionHistoryCache
     {
         if (checkpoint.Payload.ImageData.Count != 0 || checkpoint.Payload.FontFaceData.Count != 0)
             throw new InvalidOperationException("Version-history cache entries must not retain binary asset data.");
+        if (checkpoint.Payload.Sources.RetainedSources.Count != 0
+            || checkpoint.Payload.Sources.ReviewSummaries?.Any(source => source.ReadableText.Length > 4097) == true)
+            throw new InvalidOperationException("Version-history cache entries must retain only bounded source summaries.");
 
         _loadedGitCheckpoints[new GitCheckpointCacheKey(repositoryId, commitSha)] = checkpoint;
         Trim(_loadedGitCheckpoints, MaxLoadedGitCheckpointEntries);

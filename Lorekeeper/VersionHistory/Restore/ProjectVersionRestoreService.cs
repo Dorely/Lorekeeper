@@ -74,7 +74,7 @@ public sealed class ProjectVersionRestoreService(
             ?? throw new InvalidOperationException("Scoped review restore requires the project version-history service implementation.");
         await using (var mutationLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
         {
-            var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
+            using var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
             EnsureReviewTokenMatches(context.Status, expectedToken);
 
@@ -166,7 +166,7 @@ public sealed class ProjectVersionRestoreService(
 
         await using (var mutationLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
         {
-            var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
+            using var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
             EnsureReviewTokenMatches(context.Status, expectedToken);
 
@@ -175,17 +175,15 @@ public sealed class ProjectVersionRestoreService(
             ValidateWholePayload(approved.Payload);
             ValidateWholePayload(current.Payload);
             VersionHistorySnapshotPayload sourcePayload;
+            using var historicalLease = historicalCommitSha is null ? null : historyCoordinator.LoadCheckpointUnderLease(
+                context.Status.Repository.RepositoryId, historicalCommitSha, projectId, cancellationToken);
             if (historicalCommitSha is null)
             {
                 sourcePayload = approved.Payload;
             }
             else
             {
-                sourcePayload = historyCoordinator.LoadCheckpointUnderLease(
-                    context.Status.Repository.RepositoryId,
-                    historicalCommitSha,
-                    projectId,
-                    cancellationToken).Payload;
+                sourcePayload = historicalLease!.Checkpoint.Payload;
                 ValidateWholePayload(sourcePayload);
             }
 
@@ -1095,6 +1093,8 @@ public sealed class ProjectVersionRestoreService(
 
     private static void ValidateWholePayload(VersionHistorySnapshotPayload payload)
     {
+        if (payload.Sources.ReviewSummaries is not null)
+            throw new VersionHistoryRestoreException("ReviewOnlySnapshot", "A bounded review projection cannot be used for restoration.");
         if (payload.Project.Project.Id != payload.ProjectId)
             throw new VersionHistoryRestoreException("ProjectIdentityMismatch", "The snapshot project payload does not match its manifest.");
         VersionHistoryCitationReferences.Validate(payload);
@@ -1102,7 +1102,7 @@ public sealed class ProjectVersionRestoreService(
         var actIds = payload.Narrative.Acts.Select(item => item.Id).ToHashSet();
         var chapterIds = payload.Narrative.Chapters.Select(item => item.Id).ToHashSet();
         var imageIds = payload.Assets.Images.Select(item => item.Id).ToHashSet();
-        var sourceIds = payload.Sources.Sources.Select(item => item.Id).ToHashSet();
+        var sourceIds = payload.Sources.RetainedSources.Select(item => item.Id).ToHashSet();
         var editionIds = payload.Publication.PublicationEditions.Select(item => item.Id).ToHashSet();
         var sectionIds = payload.Publication.PublicationSections.Select(item => item.Id).ToHashSet();
         var compositionIds = payload.Composition.DesignedPages.Select(item => item.Id).ToHashSet();
@@ -1133,15 +1133,15 @@ public sealed class ProjectVersionRestoreService(
             throw new VersionHistoryRestoreException("MissingAnnotationDependency", "A target annotation references a missing chapter or edition.");
         if (payload.Narrative.BookBriefCanonSourceIds.Any(id => !sourceIds.Contains(id)))
             throw new VersionHistoryRestoreException("MissingCanonicalSource", "The target Book Brief selection references a missing source.");
-        if (payload.Sources.Sources.GroupBy(item => item.Id).Any(group => group.Count() != 1)
-            || payload.Sources.Sources.Any(source => source.Chunks.GroupBy(item => item.Id).Any(group => group.Count() != 1)
-                || source.Pages.GroupBy(item => item.Id).Any(group => group.Count() != 1)
-                || source.Blocks.GroupBy(item => item.Id).Any(group => group.Count() != 1)
-                || source.Blocks.Any(block => block.SourcePageId is Guid pageId && !source.Pages.Any(page => page.Id == pageId))))
+        if (sourceIds.Count != payload.Sources.RetainedSources.Count
+            || payload.Sources.RetainedSources.Any(source => source.Extractions.GroupBy(item => item.Id).Any(group => group.Count() != 1)
+                || source.ActiveExtractionVersionId is Guid activeId && source.Extractions.All(item => item.Id != activeId)
+                || source.Extractions.Any(extraction => extraction.Blocks.Any(block => block.SourcePageId is Guid pageId
+                    && extraction.Pages.All(page => page.Id != pageId)))))
             throw new VersionHistoryRestoreException("DuplicateSourceIdentity", "The target snapshot contains duplicate or dangling source-child identities.");
-        if (payload.Sources.Sources.SelectMany(source => source.Chunks).GroupBy(item => item.Id).Any(group => group.Count() != 1)
-            || payload.Sources.Sources.SelectMany(source => source.Pages).GroupBy(item => item.Id).Any(group => group.Count() != 1)
-            || payload.Sources.Sources.SelectMany(source => source.Blocks).GroupBy(item => item.Id).Any(group => group.Count() != 1))
+        if (payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Chunks).Select(item => item.Id).GroupBy(id => id).Any(group => group.Count() != 1)
+            || payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Pages).Select(item => item.Id).GroupBy(id => id).Any(group => group.Count() != 1)
+            || payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Blocks).Select(item => item.Id).GroupBy(id => id).Any(group => group.Count() != 1))
             throw new VersionHistoryRestoreException("DuplicateSourceIdentity", "The target snapshot contains duplicate source-child IDs.");
         if (payload.Assets.EntityVisualExamples.Any(item => !imageIds.Contains(item.ImageId)))
             throw new VersionHistoryRestoreException("MissingVisualAsset", "A target visual example references a missing image.");
@@ -1202,8 +1202,9 @@ public sealed class ProjectVersionRestoreService(
             .Concat([EntityTypeService.ProjectNodeType + "/" + payload.ProjectId.ToString("N")])
             .Concat(payload.Narrative.Acts.Select(act => EntityTypeService.ActNodeType + "/" + act.Id.ToString("N")))
             .Concat(payload.Narrative.Chapters.Select(chapter => EntityTypeService.ChapterNodeType + "/" + chapter.Id.ToString("N")))
-            .Concat(payload.Sources.Sources.Select(source => EntityTypeService.SourceNodeType + "/" + source.Id.ToString("N")))
-            .Concat(payload.Sources.Sources.SelectMany(source => source.Chunks.Select(chunk => EntityTypeService.SourceChunkNodeType + "/" + chunk.Id.ToString("N"))))
+            .Concat(payload.Sources.RetainedSources.Select(source => EntityTypeService.SourceNodeType + "/" + source.Id.ToString("N")))
+            .Concat(payload.Sources.RetainedSources.SelectMany(source => source.Extractions).SelectMany(extraction => extraction.Chunks)
+                .Select(chunk => EntityTypeService.SourceChunkNodeType + "/" + chunk.Id.ToString("N")))
             .ToHashSet(StringComparer.Ordinal);
         if (payload.Graph.Nodes.GroupBy(node => node.NodeType + "/" + node.Key, StringComparer.Ordinal).Any(group => group.Count() != 1)
             || payload.Graph.Edges.Any(edge => !knownGraphKeys.Contains(edge.From.StableKey) || !knownGraphKeys.Contains(edge.To.StableKey)))
@@ -1428,6 +1429,11 @@ public sealed class ProjectVersionRestoreService(
                 BodyLineHeight = setup.BodyLineHeight,
             });
 
+        var retainedSourceBytes = await AddSourcesAsync(
+            db, projectId, payload.Sources, payload.SourceOriginalBlobs, cancellationToken);
+        if (retainedSourceBytes.NewBytes > 0 || retainedSourceBytes.ReusedBytes > 0)
+            warnings.Add($"Retained source originals restored: {retainedSourceBytes.NewBytes} new bytes; {retainedSourceBytes.ReusedBytes} reused bytes.");
+        await AddAssetsAsync(db, projectId, payload, cancellationToken);
         AddBookBrief(db, projectId, payload.Narrative.BookBrief, payload.Narrative.BookBriefCanonSourceIds);
         foreach (var entityType in payload.Narrative.EntityTypes)
             db.GraphEntityTypes.Add(new GraphEntityType
@@ -1491,15 +1497,6 @@ public sealed class ProjectVersionRestoreService(
                 ContextBefore = annotation.ContextBefore,
                 ContextAfter = annotation.ContextAfter,
             });
-        var retainedSourceBytes = await AddSourcesAsync(
-            db,
-            projectId,
-            payload.Sources,
-            payload.SourceOriginalBlobs,
-            cancellationToken);
-        if (retainedSourceBytes.NewBytes > 0 || retainedSourceBytes.ReusedBytes > 0)
-            warnings.Add($"Retained source originals restored: {retainedSourceBytes.NewBytes} new bytes; {retainedSourceBytes.ReusedBytes} reused bytes.");
-        AddAssets(db, projectId, payload);
         foreach (var style in payload.Manuscript.Styles)
             db.ManuscriptStyleDefinitions.Add(new ManuscriptStyleDefinition
             {
@@ -1571,113 +1568,7 @@ public sealed class ProjectVersionRestoreService(
     {
         foreach (var bibliography in sources.UnlinkedBibliographicRecords)
             AddBibliographicRecord(db, projectId, bibliography);
-        if (sources.RetainedSources.Count > 0)
-        {
-            return await AddRetainedSourcesAsync(
-                db,
-                projectId,
-                sources,
-                sourceOriginalBlobs,
-                cancellationToken);
-        }
-
-        foreach (var source in sources.Sources)
-        {
-            var entity = new IngestSource
-            {
-                Id = source.Id,
-                ProjectId = projectId,
-                Title = source.Title,
-                SourceKind = source.SourceKind,
-                Description = source.Description,
-                Synopsis = source.Synopsis,
-                UserInstructions = source.UserInstructions,
-                SourceUrl = source.SourceUrl,
-                FinalUrl = source.FinalUrl,
-                CanonicalUrl = source.CanonicalUrl,
-                // Fetch timing is operational provenance, not versioned
-                // creative state. It is intentionally reset on restore/import.
-                FetchedAt = null,
-                ContentType = source.ContentType,
-                SourceMetadataJson = source.SourceMetadataJson,
-                VectorIndexState = VectorIndexState.Stale,
-                ActiveExtractionVersionId = source.Id,
-            };
-            entity.Original = new SourceOriginal
-            {
-                SourceId = entity.Id,
-                State = SourceOriginalState.OriginalUnavailable,
-                FileName = source.Title,
-                MediaType = source.ContentType,
-                Length = 0,
-                Sha256 = null,
-            };
-            var legacyExtraction = new SourceExtractionVersion
-            {
-                Id = source.Id,
-                SourceId = entity.Id,
-                Ordinal = 0,
-                Extractor = "legacy-history",
-                ExtractorVersion = "pre-v8",
-                ContentHash = source.SourceHash,
-                Status = SourceExtractionStatus.LegacyImmutable,
-                Diagnostics = "Adapted from legacy history snapshot.",
-                NormalizedText = source.SourceText,
-            };
-            entity.ExtractionVersions.Add(legacyExtraction);
-            entity.SourceChunks = source.Chunks.Select(chunk => new IngestSourceChunk
-            {
-                Id = chunk.Id,
-                Source = entity,
-                SourceExtractionVersionId = legacyExtraction.Id,
-                Index = chunk.Index,
-                Title = chunk.Title,
-                HeadingPath = chunk.HeadingPath,
-                StartChar = chunk.StartChar,
-                EndChar = chunk.EndChar,
-                EstimatedTokenCount = chunk.EstimatedTokenCount,
-                TokenCountMethod = chunk.TokenCountMethod,
-                TokenEncodingName = chunk.TokenEncodingName,
-                TokenCountIsExact = chunk.TokenCountIsExact,
-                Summary = chunk.Summary,
-                AgentNotes = chunk.AgentNotes,
-                StructureStatus = chunk.StructureStatus,
-            }).ToList();
-            entity.SourcePages = source.Pages.Select(page => new IngestSourcePage
-            {
-                Id = page.Id,
-                Source = entity,
-                SourceExtractionVersionId = legacyExtraction.Id,
-                PageNumber = page.PageNumber,
-                Text = page.Text,
-                StartChar = page.StartChar,
-                EndChar = page.EndChar,
-                ExtractionMethod = page.ExtractionMethod,
-                Width = page.Width,
-                Height = page.Height,
-                ImageHash = page.ImageHash,
-                RenderSettingsJson = page.RenderSettingsJson,
-                VisionModelName = page.VisionModelName,
-                Diagnostics = page.Diagnostics,
-            }).ToList();
-            entity.SourceBlocks = source.Blocks.Select(block => new IngestSourceBlock
-            {
-                Id = block.Id,
-                Source = entity,
-                SourceExtractionVersionId = legacyExtraction.Id,
-                SourcePageId = block.SourcePageId,
-                Index = block.Index,
-                Kind = block.Kind,
-                Title = block.Title,
-                Locator = block.Locator,
-                PageNumber = block.PageNumber,
-                StartChar = block.StartChar,
-                EndChar = block.EndChar,
-                MetadataJson = block.MetadataJson,
-            }).ToList();
-            db.IngestSources.Add(entity);
-        }
-        return new RetainedSourceBytes(0, 0);
+        return await AddRetainedSourcesAsync(db, projectId, sources, sourceOriginalBlobs, cancellationToken);
     }
 
     private static async Task<RetainedSourceBytes> AddRetainedSourcesAsync(
@@ -1687,15 +1578,10 @@ public sealed class ProjectVersionRestoreService(
         IReadOnlyDictionary<string, VersionHistorySourceBlobDescriptor> sourceOriginalBlobs,
         CancellationToken cancellationToken)
     {
-        var existingBlobHashes = (await db.SourceOriginalBlobs.AsNoTracking()
-            .Select(blob => blob.Sha256)
-            .ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
         long newBytes = 0;
         long reusedBytes = 0;
         foreach (var source in sources.RetainedSources)
         {
-            var activeExtraction = source.Extractions.SingleOrDefault(extraction => extraction.Id == source.ActiveExtractionVersionId)
-                ?? throw new VersionHistoryRestoreException("InvalidActiveSourceExtraction", $"Source '{source.Id:N}' has no active extraction.");
             var entity = new IngestSource
             {
                 Id = source.Id, ProjectId = projectId, Title = source.Title, SourceKind = source.SourceKind,
@@ -1723,16 +1609,11 @@ public sealed class ProjectVersionRestoreService(
                     cancellationToken);
                 originalHash!.AppendData(data);
                 originalLength += data.Length;
-                if (existingBlobHashes.Add(reference.BlobSha256))
-                {
-                    var inserted = await db.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT OR IGNORE INTO \"SourceOriginalBlobs\" (\"Sha256\", \"Length\", \"Data\") VALUES ({reference.BlobSha256}, {data.Length}, {data})",
-                        cancellationToken);
-                    if (inserted == 1)
-                        newBytes += data.LongLength;
-                    else
-                        reusedBytes += reference.ByteLength;
-                }
+                var inserted = await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"INSERT OR IGNORE INTO \"SourceOriginalBlobs\" (\"Sha256\", \"Length\", \"Data\") VALUES ({reference.BlobSha256}, {data.Length}, {data})",
+                    cancellationToken);
+                if (inserted == 1)
+                    newBytes += data.LongLength;
                 else
                     reusedBytes += reference.ByteLength;
                 original.Chunks.Add(new SourceOriginalChunk
@@ -1757,7 +1638,7 @@ public sealed class ProjectVersionRestoreService(
                     Id = extraction.Id, SourceId = source.Id, Source = entity, Ordinal = extraction.Ordinal,
                     Extractor = extraction.Extractor, ExtractorVersion = extraction.ExtractorVersion,
                     OptionsJson = extraction.OptionsJson, ContentHash = extraction.ContentHash,
-                    Status = extraction.Status, Diagnostics = extraction.Diagnostics,
+                    Status = extraction.Status, Diagnostics = string.Empty,
                     NormalizedText = extraction.NormalizedText,
                 };
                 foreach (var chunk in extraction.Chunks)
@@ -1772,7 +1653,7 @@ public sealed class ProjectVersionRestoreService(
                         SourceExtractionVersionId = version.Id, SourceExtractionVersion = version, PageNumber = page.PageNumber,
                         Text = page.Text, StartChar = page.StartChar, EndChar = page.EndChar, ExtractionMethod = page.ExtractionMethod,
                         Width = page.Width, Height = page.Height, ImageHash = page.ImageHash, RenderSettingsJson = page.RenderSettingsJson,
-                        VisionModelName = page.VisionModelName, Diagnostics = page.Diagnostics });
+                        VisionModelName = page.VisionModelName, Diagnostics = string.Empty });
                 foreach (var block in extraction.Blocks)
                     version.SourceBlocks.Add(new IngestSourceBlock { Id = block.Id, SourceId = source.Id, Source = entity,
                         SourceExtractionVersionId = version.Id, SourceExtractionVersion = version, SourcePageId = block.SourcePageId,
@@ -1789,6 +1670,13 @@ public sealed class ProjectVersionRestoreService(
                     ExtractionVersionId = location.ExtractionVersionId, SourceBlockId = location.SourceBlockId, PageNumber = location.PageNumber,
                     NormalizedStart = location.NormalizedStart, NormalizedLength = location.NormalizedLength, Locator = location.Locator,
                     Quote = location.Quote, VerificationHash = location.VerificationHash, ResolutionState = location.ResolutionState });
+            // Flush one source inside the existing restore transaction, then release
+            // its extracted text and children before reading the next manifest.
+            await db.SaveChangesAsync(cancellationToken);
+            foreach (var entry in db.ChangeTracker.Entries().Where(entry => entry.Entity is
+                IngestSource or SourceOriginal or SourceOriginalChunk or SourceExtractionVersion
+                or IngestSourceChunk or IngestSourcePage or IngestSourceBlock or SourceLocation or BibliographicRecord).ToList())
+                entry.State = EntityState.Detached;
         }
         return new RetainedSourceBytes(newBytes, reusedBytes);
     }
@@ -1849,13 +1737,13 @@ public sealed class ProjectVersionRestoreService(
             AccessedDay = record.AccessedDay ?? record.AccessedAt?.Day,
             Isbn = record.Isbn, Notes = record.Notes });
 
-    private static void AddAssets(AppDbContext db, Guid projectId, VersionHistorySnapshotPayload payload)
+    private static async Task AddAssetsAsync(AppDbContext db, Guid projectId, VersionHistorySnapshotPayload payload, CancellationToken cancellationToken)
     {
         foreach (var image in payload.Assets.Images)
         {
             if (!payload.ImageData.TryGetValue(image.Id, out var imageData))
                 throw new VersionHistoryRestoreException("MissingImageBlob", $"Image blob is missing for '{image.FileName}'.");
-            db.PublishAssets.Add(new PublishAsset
+            var entity = new PublishAsset
             {
                 Id = image.Id,
                 ProjectId = projectId,
@@ -1867,13 +1755,19 @@ public sealed class ProjectVersionRestoreService(
                 Prompt = image.Prompt,
                 GenerationModel = image.GenerationModel,
                 SourceMetadataJson = image.SourceMetadataJson,
-                DerivedFromImageId = image.DerivedFromImageId,
                 CropXPercent = image.CropXPercent,
                 CropYPercent = image.CropYPercent,
                 CropWidthPercent = image.CropWidthPercent,
                 CropHeightPercent = image.CropHeightPercent,
-            });
+            };
+            db.PublishAssets.Add(entity);
+            await db.SaveChangesAsync(cancellationToken);
+            db.Entry(entity).State = EntityState.Detached;
         }
+        // Link derivatives after every image exists, without retaining their binary data.
+        foreach (var image in payload.Assets.Images.Where(image => image.DerivedFromImageId.HasValue))
+            await db.PublishAssets.Where(asset => asset.Id == image.Id && asset.ProjectId == projectId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(asset => asset.DerivedFromImageId, image.DerivedFromImageId), cancellationToken);
         foreach (var family in payload.Assets.FontFamilies)
         {
             var entity = new ProjectFontFamily
@@ -1884,14 +1778,17 @@ public sealed class ProjectVersionRestoreService(
                 EmbeddingRightsConfirmed = family.EmbeddingRightsConfirmed,
                 RightsDeclaration = family.RightsDeclaration,
             };
-            entity.Faces = family.Faces.Select(face =>
+            db.ProjectFontFamilies.Add(entity);
+            await db.SaveChangesAsync(cancellationToken);
+            db.Entry(entity).State = EntityState.Detached;
+            foreach (var face in family.Faces)
             {
                 if (!payload.FontFaceData.TryGetValue(face.Id, out var faceData))
                     throw new VersionHistoryRestoreException("MissingFontBlob", $"Font blob is missing for '{face.FileName}'.");
-                return new ProjectFontFace
+                var faceEntity = new ProjectFontFace
                 {
                     Id = face.Id,
-                    Family = entity,
+                    FamilyId = family.Id,
                     SubfamilyName = face.SubfamilyName,
                     FileName = face.FileName,
                     ContentType = face.ContentType,
@@ -1899,8 +1796,10 @@ public sealed class ProjectVersionRestoreService(
                     Italic = face.Italic,
                     Data = faceData,
                 };
-            }).ToList();
-            db.ProjectFontFamilies.Add(entity);
+                db.ProjectFontFaces.Add(faceEntity);
+                await db.SaveChangesAsync(cancellationToken);
+                db.Entry(faceEntity).State = EntityState.Detached;
+            }
         }
     }
 
@@ -2360,18 +2259,22 @@ public sealed class ProjectVersionRestoreService(
                 await contextIndexing.ReindexActAsync(act.Id, cancellationToken);
             foreach (var chapter in payload.Narrative.Chapters)
                 await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
-            List<IngestSource> sourceEntities;
+            List<Guid> sourceIds;
             await using (var sourceRead = await database.OpenReadAsync(cancellationToken))
             {
-                sourceEntities = await sourceRead.Db.IngestSources
+                sourceIds = await sourceRead.Db.IngestSources
                     .AsNoTracking()
-                    .Include(source => source.SourceChunks)
-                    .Include(source => source.SourceBlocks)
                     .Where(source => source.ProjectId == projectId)
+                    .Select(source => source.Id)
                     .ToListAsync(cancellationToken);
             }
-            foreach (var source in sourceEntities)
+            foreach (var sourceId in sourceIds)
             {
+                IngestSource source;
+                await using (var sourceRead = await database.OpenReadAsync(cancellationToken))
+                    source = await sourceRead.Db.IngestSources.AsNoTracking()
+                        .Include(item => item.SourceChunks).Include(item => item.SourceBlocks)
+                        .SingleAsync(item => item.Id == sourceId && item.ProjectId == projectId, cancellationToken);
                 await ingestGraphSync.EnsureSourceAsync(source, source.SourceChunks.ToList(), source.SourceBlocks.ToList(), cancellationToken);
                 await contextIndexing.ReindexIngestSourceAsync(source.Id, cancellationToken);
             }
@@ -2395,8 +2298,8 @@ public sealed class ProjectVersionRestoreService(
                 await autoLinks.RefreshSourceAsync(projectId, ProjectSearchSourceTypes.Act, act.Id, cancellationToken);
             foreach (var chapter in payload.Narrative.Chapters)
                 await autoLinks.RefreshSourceAsync(projectId, ProjectSearchSourceTypes.Chapter, chapter.Id, cancellationToken);
-            foreach (var source in payload.Sources.Sources)
-                await autoLinks.RefreshSourceAsync(projectId, ProjectSearchSourceTypes.RawIngestSource, source.Id, cancellationToken);
+            foreach (var sourceId in sourceIds)
+                await autoLinks.RefreshSourceAsync(projectId, ProjectSearchSourceTypes.RawIngestSource, sourceId, cancellationToken);
             foreach (var node in payload.Graph.Nodes)
             {
                 if (Guid.TryParseExact(node.Key, "N", out var entityId))
