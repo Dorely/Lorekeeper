@@ -169,6 +169,17 @@ public sealed class DocxPublishFormatterTests
         };
 
         var bytes = await new DocxPublishFormatter(new UnexpectedPreviewService()).RenderAsync(document);
+        var imported = await new Lorekeeper.Manuscripts.Import.SemanticImportService().ReadDocxAsync(bytes);
+        var importedRecord = Assert.Single(imported.Resources.Bibliography);
+        Assert.NotEqual(record.Id, importedRecord.Id);
+        Assert.Equal(record.Title, importedRecord.Title);
+        var importedCitation = Assert.Single(ManuscriptTraversal.EnumerateCitations(imported.Document));
+        Assert.Equal(importedRecord.Id, importedCitation.Cluster.Items[0].BibliographicRecordId);
+        Assert.Equal("42", importedCitation.Cluster.Items[0].LocatorValue);
+        Assert.Contains(imported.Document.Notes, note => ManuscriptCodec.Text(note.Content[0]).Contains("Editable footnote", StringComparison.Ordinal));
+        Assert.Contains(imported.Document.Notes, note => note.Kind == ManuscriptNoteKind.Endnote
+            && ManuscriptCodec.Text(note.Content[0]).Contains("Editable endnote", StringComparison.Ordinal));
+        Assert.DoesNotContain(ManuscriptTraversal.EnumerateBlocks(imported.Document with { Notes = [] }), block => ManuscriptCodec.Text(block).Contains("Editable endnote", StringComparison.Ordinal));
 
         // HTML table cells in Markdown use the same citation destinations as prose.
         var tableManuscript = ManuscriptClone.Document(manuscript);

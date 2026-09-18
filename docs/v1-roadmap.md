@@ -765,8 +765,14 @@ repeated page/backlink identity, DOCX structure, footnote reservation/continuati
 and poorly compressible archive inputs. These implementation checks do not
 establish manual acceptance, Word desktop compatibility, or native latency.
 
-Remaining work is semantic DOCX and Word-paste insertion through
-`SemanticImportFragment`, final output/preservation review, remaining aggregate
+Semantic DOCX and Word-paste insertion now use `SemanticImportFragment`, bounded
+parsing outside write locks, exact cursor/revision checks, atomic resource
+admission, durable replay, and canonical Undo/Redo. DOCX citation and authored
+endnote metadata round-trip through editable output. Deterministic checks cover
+conversion, malformed input, rollback, replay, and resource preservation. Word
+desktop and clipboard fidelity still require manual acceptance.
+
+Remaining work is final output/preservation review, rich note interaction, remaining aggregate
 history/source paths, and affected usability/documentation cleanup. Full automated
 gates, diff review, and isolated HTTP startup precede the clean committed
 implementation checkpoint. Manual acceptance comes next; broader UI, Word

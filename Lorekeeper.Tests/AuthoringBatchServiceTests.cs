@@ -13,6 +13,69 @@ namespace Lorekeeper.Tests;
 public sealed class AuthoringBatchServiceTests
 {
     [Fact]
+    public async Task SemanticImportResourcesRollbackReplayAndUndoShareTheAuthoringTransaction()
+    {
+        await using var fixture = await Fixture.CreateAsync(chapterCount: 1);
+        var importer = new Lorekeeper.Manuscripts.Import.SemanticImportService();
+        using var bitmap = new SkiaSharp.SKBitmap(2, 2);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using var png = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var fragment = await importer.ReadWordHtmlAsync($"<p class=MsoNormal>Imported text<img src='data:image/png;base64,{Convert.ToBase64String(png.ToArray())}'></p>");
+        var record = Lorekeeper.Citations.CitationRecord.FromEntity(new BibliographicRecord { Title = "Imported bibliography" });
+        fragment.Document.Content[0].Content.Add(new()
+        {
+            Id = "imported-citation", Type = ManuscriptInlineType.Citation,
+            Citation = new() { Items = [new() { BibliographicRecordId = record.Id }] },
+        });
+        var resources = fragment.Resources with { Bibliography = [record] };
+        var batch = await fixture.CreateBatchAsync([(fixture.ChapterIds[0], "unused")]);
+        ManuscriptDocument original;
+        await using (var db = fixture.CreateDbContext()) original = (await db.Chapters.SingleAsync()).Manuscript;
+        batch = batch with
+        {
+            Operations = [new(0, "insertSemanticFragment", SecondBlockId: "import-tail", RichDocument: fragment.Document,
+                Position: new(original.ManuscriptId, ["document"], original.Content[0].Id, 3, ManuscriptPositionAffinity.After),
+                ExpectedDocumentFingerprint: batch.Targets[0].BaseFingerprint)],
+            ImportResources = resources,
+        };
+        batch = batch with { RequestHash = AuthoringBatchHash.Compute(batch) };
+        var stale = batch with { BatchId = Guid.NewGuid(), Targets = [batch.Targets[0] with { ExpectedRevision = batch.Targets[0].ExpectedRevision + 1 }] };
+        stale = stale with { RequestHash = AuthoringBatchHash.Compute(stale) };
+        Assert.Equal(AuthoringBatchStatusV1.Conflict, (await fixture.Service.ApplyBatchAsync(stale)).Status);
+        await using (var db = fixture.CreateDbContext())
+        {
+            Assert.Empty(await db.PublishAssets.ToListAsync());
+            Assert.Empty(await db.BibliographicRecords.ToListAsync());
+        }
+        fixture.Manuscripts.FailChapterId = fixture.ChapterIds[0];
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.ApplyBatchAsync(batch));
+        await using (var db = fixture.CreateDbContext())
+        {
+            Assert.Empty(await db.PublishAssets.ToListAsync());
+            Assert.Empty(await db.ManuscriptStyleDefinitions.ToListAsync());
+            Assert.Empty(await db.BibliographicRecords.ToListAsync());
+            Assert.Empty(await db.AuthoringBatchReceipts.ToListAsync());
+            Assert.True(ManuscriptCodec.ContentEquals(original, (await db.Chapters.SingleAsync()).Manuscript));
+        }
+        fixture.Manuscripts.FailChapterId = null;
+        Assert.Equal(AuthoringBatchStatusV1.Committed, (await fixture.Service.ApplyBatchAsync(batch)).Status);
+        Assert.Equal(AuthoringBatchStatusV1.Replayed, (await fixture.Service.ApplyBatchAsync(batch)).Status);
+        var target = batch.Targets[0].TargetId;
+        _ = await fixture.Service.UndoAsync(new(fixture.ProjectId, fixture.SessionId, Guid.NewGuid(), target, 0));
+        await using (var db = fixture.CreateDbContext())
+            Assert.True(ManuscriptCodec.ContentEquals(original, (await db.Chapters.SingleAsync()).Manuscript));
+        _ = await fixture.Service.RedoAsync(new(fixture.ProjectId, fixture.SessionId, Guid.NewGuid(), target, 0));
+        await using (var db = fixture.CreateDbContext())
+        {
+            Assert.Single(await db.PublishAssets.ToListAsync());
+            Assert.Single(await db.BibliographicRecords.ToListAsync());
+            Assert.Equal(resources.Styles.Count, await db.ManuscriptStyleDefinitions.CountAsync());
+            Assert.Single(ManuscriptTraversal.EnumerateCitations((await db.Chapters.SingleAsync()).Manuscript));
+            Assert.Empty(await db.IngestSources.ToListAsync());
+        }
+    }
+
+    [Fact]
     public async Task Evidence_detachment_rolls_back_all_citations_and_preserves_bibliographic_metadata()
     {
         await using var fixture = await Fixture.CreateAsync(chapterCount: 2);
@@ -281,7 +344,8 @@ public sealed class AuthoringBatchServiceTests
                 mutationContext,
                 history,
                 new TestFence(),
-                NullLogger<AuthoringBatchService>.Instance);
+                NullLogger<AuthoringBatchService>.Instance,
+                new Lorekeeper.Manuscripts.Import.SemanticImportService());
             var sources = new ProjectSourcesService(database, null!, new AuthoringMutationFence(database, projectMutations, history),
                 new AuthoringTargetMutationService(manuscripts, null!, null!), mutationContext,
                 new AuthoringGenerationService(database, history), new ProjectVersionHistoryUiEvents());

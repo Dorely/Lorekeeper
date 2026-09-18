@@ -279,6 +279,10 @@ download, bounded PDF page rendering, deletion impact, and local re-extraction.
 PDF, EPUB, DOCX, text/Markdown, image, and saved-webpage inputs enter through the
 same retained-source boundary. DOCX extraction rejects executable or unsafe
 external relationships and does not infer Word pagination.
+Its package guard is shared with semantic Word authoring import; Sources retains
+its separate extraction budgets and never treats authoring insertion as source
+ingestion. [Manuscript authoring](manuscript-authoring.md) owns the shared guard
+and semantic conversion implementation.
 
 ## Key files and file families
 

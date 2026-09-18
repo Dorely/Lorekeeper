@@ -120,7 +120,8 @@ public sealed record AuthoringBatchV1(
     IReadOnlyList<AuthoringBatchTargetV1> Targets,
     IReadOnlyList<AuthoringOperationV1> Operations,
     AuthoringSelectionTransitionV1? Selection = null,
-    string ProtocolId = AuthoringProtocolV1.ProtocolId);
+    string ProtocolId = AuthoringProtocolV1.ProtocolId,
+    Lorekeeper.Manuscripts.Import.SemanticImportResources? ImportResources = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter<AuthoringBatchStatusV1>))]
 public enum AuthoringBatchStatusV1

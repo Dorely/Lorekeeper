@@ -6,6 +6,7 @@
 @using Lorekeeper.Authoring
 @using Lorekeeper.Diagnostics
 @using Lorekeeper.Sources
+@using Lorekeeper.Manuscripts.Import
 @using Microsoft.EntityFrameworkCore
 @using System.Text.Json
 @implements IAsyncDisposable
@@ -22,6 +23,7 @@
 @inject IAuthoringMutationFence AuthoringFence
 @inject IPerformanceTraceWriter PerformanceTrace
 @inject IProjectSourcesService Sources
+@inject ISemanticImportService SemanticImports
 @inject ILogger<ChapterBodyEditor> Logger
 
 <div class="@RootClass()">
@@ -74,6 +76,29 @@
     private bool _disposing;
     private string? _initializationError;
     private string? _pasteWarning;
+    private CancellationTokenSource? _importCancellation;
+
+    [JSInvokable]
+    public Task<string> ReadWordDocx(byte[] bytes) =>
+        ReadWordAsync(token => SemanticImports.ReadDocxAsync(bytes, token));
+
+    [JSInvokable]
+    public Task<string> ReadWordClipboard(string html, IReadOnlyList<SemanticImportImage> images) =>
+        ReadWordAsync(token => SemanticImports.ReadWordHtmlAsync(html, images, token));
+
+    [JSInvokable]
+    public void CancelWordImport() => _importCancellation?.Cancel();
+
+    private async Task<string> ReadWordAsync(Func<CancellationToken, Task<SemanticImportFragment>> read)
+    {
+        ObjectDisposedException.ThrowIf(_disposed || _disposing, this);
+        if (IsReadOnly || _importCancellation is not null)
+            throw new InvalidOperationException("This editor cannot start another import now.");
+        using var cancellation = new CancellationTokenSource();
+        _importCancellation = cancellation;
+        try { return JsonSerializer.Serialize(await read(cancellation.Token), ManuscriptCodec.JsonOptions); }
+        finally { _importCancellation = null; }
+    }
     private ManuscriptViewLocation? _pendingLocation;
     private IAsyncDisposable? _authoringWriterLease;
     private Guid? _authoringSessionId;
@@ -486,13 +511,18 @@
     }
 
     [JSInvokable]
-    public async Task<AuthoringBatchResultV1> DispatchAuthoringBatch(AuthoringBatchV1 batch)
+    public async Task<JsonElement> DispatchAuthoringBatch(JsonElement payload)
     {
+        var batch = payload.Deserialize<AuthoringBatchV1>(ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The authoring batch is missing.");
         ValidateAuthoringBatch(batch);
         var result = await AuthoringBatches.ApplyBatchAsync(batch);
         if (result.Status is AuthoringBatchStatusV1.Committed or AuthoringBatchStatusV1.Replayed)
+        {
             await AuthoringSaved.InvokeAsync(result);
-        return result;
+            if (batch.ImportResources?.Styles.Count > 0) await StyleCatalogChanged.InvokeAsync();
+        }
+        return JsonSerializer.SerializeToElement(result, ManuscriptCodec.JsonOptions);
     }
 
     [JSInvokable]
@@ -504,17 +534,17 @@
     }
 
     [JSInvokable]
-    public Task<AuthoringHistoryResultV1> OnUndoAuthoringBatch(AuthoringHistoryRequestV1 request)
+    public async Task<JsonElement> OnUndoAuthoringBatch(AuthoringHistoryRequestV1 request)
     {
         ValidateAuthoringHistoryRequest(request);
-        return AuthoringBatches.UndoAsync(request);
+        return JsonSerializer.SerializeToElement(await AuthoringBatches.UndoAsync(request), ManuscriptCodec.JsonOptions);
     }
 
     [JSInvokable]
-    public Task<AuthoringHistoryResultV1> OnRedoAuthoringBatch(AuthoringHistoryRequestV1 request)
+    public async Task<JsonElement> OnRedoAuthoringBatch(AuthoringHistoryRequestV1 request)
     {
         ValidateAuthoringHistoryRequest(request);
-        return AuthoringBatches.RedoAsync(request);
+        return JsonSerializer.SerializeToElement(await AuthoringBatches.RedoAsync(request), ManuscriptCodec.JsonOptions);
     }
 
     [JSInvokable]
@@ -645,14 +675,14 @@
     }
 
     [JSInvokable]
-    public async Task<object> GetAuthoringHistoryState()
+    public async Task<JsonElement> GetAuthoringHistoryState()
     {
         var history = await AuthoringBatches.ReadHistoryStateAsync(new(ProjectId, AuthoringTargetId()));
-        return new
+        return JsonSerializer.SerializeToElement(new
         {
             state = HistoryPayload(history.State),
             cursor = history.Cursor,
-        };
+        }, ManuscriptCodec.JsonOptions);
     }
 
     private static object HistoryPayload(AuthoringHistoryState state) => new
@@ -881,6 +911,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        _importCancellation?.Cancel();
         if (_disposed || _disposing)
             return;
 

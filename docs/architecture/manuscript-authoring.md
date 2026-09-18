@@ -570,10 +570,51 @@ offers list formatting, and uses Tab/Shift-Tab for list nesting. List text edits
 remain bounded inline operations; structural list changes retain exact document
 preconditions and canonical inverses.
 
+### Semantic Word insertion
+
+`ISemanticImportService` owns both DOCX and Word clipboard conversion into
+`SemanticImportFragment`. The exact-pinned Open XML SDK 3.5.1 reads packages;
+AngleSharp 1.8.2 (MIT, standalone parser with no loader or script engine) reads
+clipboard HTML. Parsing, package validation, and image decoding occur outside
+project write locks. Input is capped at 32 MiB (HTML at 4 Mi characters), expanded
+DOCX at 128 MiB, individual parts at 32 MiB, and recoverable fragment JSON at
+24 MiB. Node, nesting, image-pixel, style, and bibliography limits also apply.
+The shared package guard rejects unsafe paths, executable parts, external
+resources, DTDs, malformed ownership, and expansion breaches; ordinary safe
+hyperlinks remain text links. No external resource is fetched.
+
+The editor flushes preceding edits, freezes its exact cursor and revision while
+parsing, and offers cancellation. `insertSemanticFragment` carries the complete
+container/atom position, a stable trailing-block identity, and an exact document
+fingerprint. It splits only the selected paragraph and never replaces a chapter,
+infers chapter divisions, or adds a Sources item. Unsupported cell/note nesting
+is rejected before the local insertion. Distinct imported styles and staged
+images/bibliography join the existing authoring transaction only after its
+preconditions pass. Later validation or mutation failures roll back resources,
+content, and receipts together. Receipt replay returns the original result.
+
+The client journal includes staged resources (image bytes as base64) and restores
+their preview/style catalog before replay. Structural Undo removes the insertion;
+library resources remain available for Redo and normal guarded library management.
+Ordinary later text/citation edits retain nested inline deltas. Authoring interop
+uses the same canonical enum vocabulary as hashes and durable JSON, including
+lowercase note kinds and position affinities.
+
+Conversion retains final revised text, supported named/direct formatting, lists,
+merged tables, images, links, native notes, and available Word citation metadata.
+Unsupported layout and discarded comments/revisions produce a report. Missing
+citation metadata preserves display text with a Bibliography repair instruction;
+Word clipboard conditional fields without usable boundaries retain display text
+and recommend DOCX. Fonts use diagnosed bundled fallbacks. Clipboard data cannot
+recover pictures or metadata that Word did not supply. DOCX endnote and citation
+round-trip metadata is described by the publishing owner. Browser interaction
+and Word desktop compatibility remain manual acceptance work.
+
 ## Key files and file families
 
 | File or family | Architectural role |
 |---|---|
+| [`Lorekeeper/Manuscripts/Import/`](../../Lorekeeper/Manuscripts/Import/) | Semantic fragment contracts, bounded DOCX/Word HTML conversion, shared package guard, resource admission, and exact-position insertion. |
 | [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v7.schema.json`](../schemas/manuscript-v7.schema.json) | Current v7 document, recursive tables, notes, citations, Figures, Designed Page references, presentation, positions, and schema contract. |
 | [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v7 serialization remains in `ManuscriptCodec`. |
 | [`Lorekeeper/Manuscripts/ManuscriptCodec.cs`](../../Lorekeeper/Manuscripts/ManuscriptCodec.cs), [`ManuscriptOperations.cs`](../../Lorekeeper/Manuscripts/ManuscriptOperations.cs), [`ManuscriptTraversal.cs`](../../Lorekeeper/Manuscripts/ManuscriptTraversal.cs), and inspection/range helpers | Validation, recursive traversal, cloning, normalization, hashing, stable-ID lookup, semantic operations, structural inspection, and exact UTF-16 position resolution. |

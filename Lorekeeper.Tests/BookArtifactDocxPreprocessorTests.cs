@@ -43,7 +43,7 @@ public sealed class BookArtifactDocxPreprocessorTests
         }
         bytes = package.ToArray();
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
             CreateSubject().PreprocessAsync(new BookArtifactPreprocessRequest(
                 "unsafe.docx",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

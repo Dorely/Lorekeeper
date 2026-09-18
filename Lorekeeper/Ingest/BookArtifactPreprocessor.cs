@@ -3,9 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.IO.Compression;
-using System.Xml;
-using System.Xml.Linq;
+using Lorekeeper.Manuscripts.Import;
 using DocumentFormat.OpenXml.Packaging;
 using Docnet.Core;
 using Docnet.Core.Models;
@@ -48,7 +46,8 @@ public sealed partial class BookArtifactPreprocessor(
         BookArtifactPreprocessRequest request,
         CancellationToken cancellationToken)
     {
-        ValidateDocxPackage(request.Bytes, cancellationToken);
+        DocxPackageSafety.Validate(request.Bytes, cancellationToken, maximumInputBytes: request.Bytes.Length,
+            maximumExpandedBytes: 512L * 1024 * 1024, maximumPartBytes: 64L * 1024 * 1024);
         using var package = new MemoryStream(request.Bytes, writable: false);
         using var document = WordprocessingDocument.Open(package, false, new OpenSettings
         {
@@ -206,63 +205,6 @@ public sealed partial class BookArtifactPreprocessor(
         return null;
     }
 
-    private static void ValidateDocxPackage(byte[] bytes, CancellationToken cancellationToken)
-    {
-        const long maximumExpandedBytes = 512L * 1024 * 1024;
-        const long maximumPartBytes = 64L * 1024 * 1024;
-        using var input = new MemoryStream(bytes, writable: false);
-        using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
-        if (zip.Entries.Count is 0 or > 10_000)
-            throw new InvalidOperationException("The DOCX package has an invalid entry count.");
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        long expanded = 0;
-        foreach (var entry in zip.Entries)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var path = entry.FullName;
-            if (string.IsNullOrWhiteSpace(path)
-                || path.Contains('\\')
-                || path.StartsWith("/", StringComparison.Ordinal)
-                || path.Split('/').Any(segment => segment is "." or "..")
-                || !names.Add(path.Normalize(NormalizationForm.FormC)))
-            {
-                throw new InvalidOperationException("The DOCX package contains an unsafe or duplicate entry path.");
-            }
-            if ((entry.ExternalAttributes >> 16 & 0xF000) == 0xA000)
-                throw new InvalidOperationException("The DOCX package contains a symbolic link entry.");
-            expanded = checked(expanded + entry.Length);
-            if (entry.Length > maximumPartBytes || expanded > maximumExpandedBytes)
-                throw new InvalidOperationException("The DOCX package exceeds the extraction size limit.");
-            if (path.Contains("/embeddings/", StringComparison.OrdinalIgnoreCase)
-                || path.Contains("/activeX/", StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith("vbaProject.bin", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("The DOCX package contains executable or embedded object content.");
-            }
-            if (path.EndsWith(".rels", StringComparison.OrdinalIgnoreCase))
-                ValidateDocxRelationships(entry);
-        }
-    }
-
-    private static void ValidateDocxRelationships(ZipArchiveEntry entry)
-    {
-        using var source = entry.Open();
-        using var reader = XmlReader.Create(source, new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-            MaxCharactersInDocument = 8L * 1024 * 1024,
-        });
-        var document = XDocument.Load(reader, LoadOptions.None);
-        foreach (var relationship in document.Descendants().Where(element => element.Name.LocalName == "Relationship"))
-        {
-            if (!string.Equals((string?)relationship.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase))
-                continue;
-            var type = (string?)relationship.Attribute("Type") ?? string.Empty;
-            if (!type.EndsWith("/hyperlink", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("The DOCX package contains an unsafe external relationship.");
-        }
-    }
 
     private async Task<BookArtifactPreprocessResult> PreprocessImageAsync(BookArtifactPreprocessRequest request, CancellationToken cancellationToken)
     {

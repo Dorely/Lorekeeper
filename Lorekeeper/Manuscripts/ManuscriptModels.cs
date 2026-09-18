@@ -119,7 +119,7 @@ public sealed record ManuscriptNote
     public List<ManuscriptBlock> Content { get; init; } = [];
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<ManuscriptNoteKind>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<ManuscriptNoteKind>))]
 public enum ManuscriptNoteKind
 {
     Footnote,
@@ -160,7 +160,7 @@ public sealed record ParagraphPresentation
     public bool? StartOnNewPage { get; init; }
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<ParagraphAlignment>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<ParagraphAlignment>))]
 public enum ParagraphAlignment
 {
     Start,
@@ -169,7 +169,7 @@ public enum ParagraphAlignment
     Justify,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigureAccessibilityRole>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigureAccessibilityRole>))]
 public enum FigureAccessibilityRole
 {
     Figure,
@@ -180,7 +180,7 @@ public enum FigureAccessibilityRole
     Ornament,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigurePlacementIntent>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigurePlacementIntent>))]
 public enum FigurePlacementIntent
 {
     Inline,
@@ -191,7 +191,7 @@ public enum FigurePlacementIntent
     DedicatedPage,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigureAlignment>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigureAlignment>))]
 public enum FigureAlignment
 {
     Start,
@@ -199,7 +199,7 @@ public enum FigureAlignment
     End,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigureTextWrap>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigureTextWrap>))]
 public enum FigureTextWrap
 {
     None,
@@ -207,7 +207,7 @@ public enum FigureTextWrap
     End,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigureImageFit>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigureImageFit>))]
 public enum FigureImageFit
 {
     Contain,
@@ -215,7 +215,7 @@ public enum FigureImageFit
     Stretch,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<FigureCaptionPlacement>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<FigureCaptionPlacement>))]
 public enum FigureCaptionPlacement
 {
     Below,
@@ -248,7 +248,7 @@ public sealed record ManuscriptCitationItem
     public Guid? SourceLocationId { get; init; }
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<ManuscriptPositionAffinity>))]
+[JsonConverter(typeof(ManuscriptEnumConverter<ManuscriptPositionAffinity>))]
 public enum ManuscriptPositionAffinity
 {
     Before,

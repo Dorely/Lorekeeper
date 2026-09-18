@@ -142,7 +142,8 @@ public sealed class AuthoringJournalMigrationTests
                 null!,
                 null!,
                 null!,
-                NullLogger<AuthoringBatchService>.Instance);
+                NullLogger<AuthoringBatchService>.Instance,
+                new Lorekeeper.Manuscripts.Import.SemanticImportService());
             await Assert.ThrowsAsync<AuthoringIdempotencyException>(() => service.AcknowledgeReceiptAsync(
                 new(projectId, sessionId, batchId, receiptId, "sha256:different")));
             await service.AcknowledgeReceiptAsync(

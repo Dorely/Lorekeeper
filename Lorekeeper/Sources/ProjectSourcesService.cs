@@ -719,7 +719,7 @@ public sealed class ProjectSourcesService(
             .AnyAsync(source => source.ProjectId == projectId && source.Id == sourceId, cancellationToken);
     }
 
-    private static void ValidateBibliographicRecord(BibliographicRecordInput input)
+    internal static void ValidateBibliographicRecord(BibliographicRecordInput input)
     {
         if (!Enum.IsDefined(input.Kind))
             throw new ArgumentOutOfRangeException(nameof(input), "Choose a supported bibliographic record type.");

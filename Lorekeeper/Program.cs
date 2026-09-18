@@ -240,6 +240,7 @@ builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringDeltaHistoryRuntime
     _ => new Lorekeeper.Authoring.AuthoringDeltaHistoryRuntime());
 builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringMutationFence, Lorekeeper.Authoring.AuthoringMutationFence>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringBatchService, Lorekeeper.Authoring.AuthoringBatchService>();
+builder.Services.AddScoped<Lorekeeper.Manuscripts.Import.ISemanticImportService, Lorekeeper.Manuscripts.Import.SemanticImportService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringTargetMutationService, Lorekeeper.Authoring.AuthoringTargetMutationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringGenerationService, Lorekeeper.Authoring.AuthoringGenerationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();

@@ -506,9 +506,14 @@ manual compatibility checks. Ordered/unordered lists preserve nesting and explic
 restarts through shared counters, Word numbering definitions, nested HTML lists,
 and text markers. Cross-output semantics have deterministic regression coverage;
 desktop layout and visual parity remain acceptance work.
-Authoring DOCX import and Word clipboard conversion are not yet
-implemented. Their approved boundary is one semantic fragment and an atomic,
-revision-checked insertion of assets, styles, bibliography, notes, and blocks.
+DOCX citations include editable content controls and versioned custom XML with
+portable bibliography metadata (source-evidence links omitted). Authored final
+endnotes carry occurrence-specific content controls linked from their references.
+The semantic importer reconstructs these notes and citations with fresh identities;
+it rejects orphaned or duplicate note ownership. Generated endnote presentation
+is not duplicated as body prose. Native Word footnotes/endnotes remain supported
+input. [Manuscript authoring](manuscript-authoring.md) owns DOCX/Word clipboard
+conversion and the atomic, revision-checked semantic-fragment insertion boundary.
 
 ## Key files and file families
 

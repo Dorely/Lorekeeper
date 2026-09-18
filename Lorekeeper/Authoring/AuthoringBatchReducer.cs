@@ -84,7 +84,7 @@ public static class AuthoringBatchReducer
                 catch (InvalidDataException) { return false; }
                 continue;
             }
-            if (kind == "replacerichdocument")
+            if (kind is "replacerichdocument" or "insertsemanticfragment")
             {
                 if (operation.RichDocument is null
                     || string.IsNullOrWhiteSpace(operation.ExpectedDocumentFingerprint)
@@ -365,6 +365,14 @@ public static class AuthoringBatchReducer
     private static ManuscriptOperation ToOperation(ManuscriptDocument current, AuthoringOperationV1 wire)
     {
         var kind = wire.Kind.Trim().ToLowerInvariant();
+        if (kind == "insertsemanticfragment")
+        {
+            var inserted = Lorekeeper.Manuscripts.Import.SemanticImportInsertion.Insert(current,
+                wire.Position ?? throw new ArgumentException("An explicit import position is required."),
+                wire.RichDocument ?? throw new ArgumentException("An import fragment is required."),
+                Required(wire.SecondBlockId, "secondBlockId"));
+            return new ReplaceManuscriptStructure(inserted.Content, inserted.Notes);
+        }
         if (kind == "replaceinlinecontent")
         {
             var position = wire.Position ?? throw new ArgumentException("position is required for ReplaceInlineContent.");
@@ -482,7 +490,7 @@ public static class AuthoringBatchReducer
         var kind = wire.Kind.Trim().ToLowerInvariant();
         if (kind == "replaceinlinecontent")
             return CreateCanonicalDeltaCore(after, before, wire.TargetOrdinal);
-        if (kind == "replacerichdocument")
+        if (kind is "replacerichdocument" or "insertsemanticfragment")
         {
             return
             [

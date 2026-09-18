@@ -13,7 +13,7 @@
     ],
     "gateStatus": "unresolved",
     "admissionSummary": {
-      "admitted": 188,
+      "admitted": 189,
       "unresolved": 40,
       "blocked": 0
     }
@@ -26,7 +26,7 @@
   ],
   "summary": {
     "satisfied": 26,
-    "needs-inclusion": 163,
+    "needs-inclusion": 164,
     "blocked": 0,
     "unresolved-provenance": 39
   },
@@ -75,8 +75,8 @@
     },
     {
       "dependencyCategory": "NuGet",
-      "entries": 68,
-      "admitted": 65,
+      "entries": 69,
+      "admitted": 66,
       "unresolved": 3,
       "blocked": 0
     }
@@ -4915,6 +4915,31 @@
       "sources": [
         "tools/semantic-editor/package-lock.json",
         "tools/semantic-editor/THIRD_PARTY_NOTICES.md"
+      ],
+      "admissionStatus": "admitted",
+      "licenseExpression": "MIT",
+      "selectedLicenseExpression": "MIT",
+      "selectedOrBranches": [],
+      "restrictionClasses": [],
+      "policyDiagnostics": []
+    },
+    {
+      "kind": "nuget-package",
+      "name": "AngleSharp",
+      "version": "1.8.2",
+      "dependencyCategory": "NuGet",
+      "status": "needs-inclusion",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (AngleSharp/1.8.2).",
+      "attributionAction": "Retain the selected license evidence and include the required notice before distribution.",
+      "channels": [
+        "direct-mac",
+        "free-windows",
+        "mac-app-store",
+        "store-windows"
+      ],
+      "sources": [
+        "Lorekeeper/obj/project.assets.json",
+        "nuget:AngleSharp/1.8.2"
       ],
       "admissionStatus": "admitted",
       "licenseExpression": "MIT",

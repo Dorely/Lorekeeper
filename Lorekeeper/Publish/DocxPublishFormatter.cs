@@ -3,10 +3,13 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Xml.Linq;
 using Lorekeeper.Citations;
 using Lorekeeper.Composition;
 using Lorekeeper.Fonts;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Manuscripts.Import;
 using Lorekeeper.Models;
 using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
@@ -49,6 +52,7 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
             AddNumbering(main);
             var context = new BuildContext(main, document, artwork, cancellationToken);
             context.AppendPublication();
+            context.WriteCitationMetadata();
             main.Document.Save();
             ValidateRelationships(main);
 
@@ -331,6 +335,7 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
         private readonly W.Body _body = main.Document?.Body
             ?? throw new InvalidOperationException("DOCX body was not initialized.");
         private readonly PublicationCitationResolver _citations = new(document.Citations.Occurrences);
+        private readonly Dictionary<string, ManuscriptCitationCluster> _citationMetadata = new(StringComparer.Ordinal);
         private readonly List<PendingEndnote> _endnotes = [];
         private readonly Dictionary<string, string> _documentTitles = new(StringComparer.Ordinal);
         private int _nextFootnoteId = 1;
@@ -639,20 +644,40 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
         private void AppendCitation(W.Paragraph paragraph, string atomId, NoteContext notes)
         {
             var citation = _citations.Resolve(atomId, notes.TopLevelId, notes.PlacementPath);
+            var tag = SemanticWordCitationMetadata.TagPrefix + PublicationCitationResolver.Anchor(citation);
+            var cluster = ManuscriptTraversal.EnumerateCitations(notes.Manuscript).Single(item => item.CitationAtomId == atomId).Cluster;
+            _citationMetadata[tag] = cluster with { Items = cluster.Items.Select(item => item with { SourceLocationId = null }).ToList() };
+            var start = paragraph.ChildElements.Count;
             if (citation.NoteText is null)
             {
                 AppendCitationRuns(paragraph, citation.InlineRuns);
-                return;
             }
+            else
+            {
+                var anchor = PublicationCitationResolver.Anchor(citation);
+                var referenceId = NextBookmarkId();
+                paragraph.Append(new W.BookmarkStart { Name = "citation_ref_" + anchor, Id = referenceId });
+                paragraph.Append(new W.Hyperlink(new W.Run(
+                    new W.RunProperties(new W.VerticalTextAlignment { Val = W.VerticalPositionValues.Superscript }),
+                    new W.Text(citation.InlineText)))
+                { Anchor = "citation_" + anchor });
+                paragraph.Append(new W.BookmarkEnd { Id = referenceId });
+            }
+            var display = paragraph.ChildElements.Skip(start).ToList();
+            foreach (var child in display) child.Remove();
+            paragraph.Append(new W.SdtRun(new W.SdtProperties(new W.Tag { Val = tag }, new W.SdtAlias { Val = "Lorekeeper citation" }),
+                new W.SdtContentRun(display)));
+        }
 
-            var anchor = PublicationCitationResolver.Anchor(citation);
-            var referenceId = NextBookmarkId();
-            paragraph.Append(new W.BookmarkStart { Name = "citation_ref_" + anchor, Id = referenceId });
-            paragraph.Append(new W.Hyperlink(new W.Run(
-                new W.RunProperties(new W.VerticalTextAlignment { Val = W.VerticalPositionValues.Superscript }),
-                new W.Text(citation.InlineText)))
-            { Anchor = "citation_" + anchor });
-            paragraph.Append(new W.BookmarkEnd { Id = referenceId });
+        public void WriteCitationMetadata()
+        {
+            if (_citationMetadata.Count == 0) return;
+            var used = _citationMetadata.Values.SelectMany(cluster => cluster.Items).Select(item => item.BibliographicRecordId).ToHashSet();
+            var metadata = new SemanticWordCitationMetadata(1, document.BibliographicRecords.Where(record => used.Contains(record.Id)).ToList(), _citationMetadata);
+            var part = main.AddCustomXmlPart(CustomXmlPartType.CustomXml);
+            using var stream = part.GetStream(FileMode.Create, FileAccess.Write);
+            new XElement(XName.Get("citations", SemanticWordCitationMetadata.Namespace),
+                JsonSerializer.Serialize(metadata, ManuscriptCodec.JsonOptions)).Save(stream);
         }
 
         private static void AppendCitationRuns(W.Paragraph paragraph, IReadOnlyList<CitationRun> runs)
@@ -873,6 +898,7 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
         {
             var citations = document.Citations.Occurrences.Where(citation => citation.NoteRuns is not null).ToList();
             if (_endnotes.Count == 0 && citations.Count == 0) return;
+            var firstEndnoteElement = _body.ChildElements.Count;
             AppendHeading("Endnotes", 1);
             foreach (var (topLevelId, title) in _documentTitles)
             {
@@ -888,12 +914,15 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
                         new W.BookmarkStart { Name = EndnoteAnchor(pending.Context.OccurrencePath, pending.Note.Id), Id = id },
                         new W.Run(new W.Text($"{pending.Number}. ")));
                     _body.Append(paragraph);
+                    var noteContent = new W.SdtContentBlock();
                     foreach (var block in pending.Note.Content)
                     {
                         if (block.Type == ManuscriptBlockType.Table)
                             throw new InvalidDataException("Tables are not permitted in semantic notes.");
-                        AppendBlock(_body, block, pending.Context);
+                        AppendBlock(noteContent, block, pending.Context);
                     }
+                    _body.Append(new W.SdtBlock(new W.SdtProperties(new W.Tag
+                    { Val = "lorekeeper-endnote:" + EndnoteAnchor(pending.Context.OccurrencePath, pending.Note.Id) }), noteContent));
                     _body.Append(new W.Paragraph(new W.BookmarkEnd { Id = id }));
                 }
                 if (authored.Count > 0 && cited.Count > 0) AppendHeading("Citations", 3);
@@ -910,6 +939,12 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
                     _body.Append(paragraph);
                 }
             }
+            var section = new W.SdtContentBlock();
+            foreach (var child in _body.ChildElements.Skip(firstEndnoteElement).ToList())
+            {
+                child.Remove(); section.Append(child);
+            }
+            _body.Append(new W.SdtBlock(new W.SdtProperties(new W.Tag { Val = "lorekeeper-generated-endnotes" }), section));
         }
 
         private string NextBookmarkId() => (++_nextBookmarkId).ToString(System.Globalization.CultureInfo.InvariantCulture);

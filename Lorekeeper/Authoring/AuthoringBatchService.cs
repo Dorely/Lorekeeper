@@ -14,7 +14,8 @@ internal sealed class AuthoringBatchService(
     IAuthoringMutationContextAccessor mutationContext,
     IAuthoringDeltaHistoryRuntime history,
     IAuthoringMutationFence fence,
-    ILogger<AuthoringBatchService> logger) : IAuthoringBatchService
+    ILogger<AuthoringBatchService> logger,
+    Lorekeeper.Manuscripts.Import.ISemanticImportService semanticImports) : IAuthoringBatchService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
 
@@ -292,7 +293,8 @@ internal sealed class AuthoringBatchService(
                 || state.Generation != target.ExpectedGeneration
                 || !string.Equals(state.Fingerprint, target.BaseFingerprint, StringComparison.Ordinal);
             if (state.Generation != target.ExpectedGeneration
-                || stale && !AuthoringBatchReducer.ExactPreconditionsMatch(current, targetOperations))
+                || stale && (targetOperations.Any(item => item.Kind.Equals("insertSemanticFragment", StringComparison.OrdinalIgnoreCase))
+                    || !AuthoringBatchReducer.ExactPreconditionsMatch(current, targetOperations)))
             {
                 conflicts.Add(new(
                     state.Generation != target.ExpectedGeneration ? "GENERATION_CHANGED" : "PRECONDITION_CHANGED",
@@ -326,6 +328,10 @@ internal sealed class AuthoringBatchService(
                 batch.Sequence,
                 historyRequestFingerprint);
         }
+
+        if (batch.ImportResources is { } importedResources)
+            await semanticImports.AdmitAsync(db, batch.ProjectId, importedResources,
+                reductions.Values.Select(item => item.Document).ToList(), cancellationToken);
 
         using (mutationContext.SuppressHistory())
         {
@@ -493,6 +499,16 @@ internal sealed class AuthoringBatchService(
             throw new ArgumentException("An authoring batch cannot name the same target twice.");
         if (batch.Operations.Any(item => item.TargetOrdinal < 0 || item.TargetOrdinal >= batch.Targets.Count))
             throw new ArgumentException("An authoring operation names an unknown target ordinal.");
+        if (batch.ImportResources is { } resources)
+        {
+            if (batch.Targets.Count != 1 || batch.Operations.Count != 1
+                || !batch.Operations[0].Kind.Equals("insertSemanticFragment", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Imported resources require one explicit semantic-fragment insertion.");
+            if (JsonSerializer.SerializeToUtf8Bytes(new { resources, batch.Operations }, JsonOptions).Length
+                > Lorekeeper.Manuscripts.Import.SemanticImportLimits.MaximumFragmentBytes)
+                throw new ArgumentException("The imported authoring payload exceeds the recoverable size limit.");
+            Lorekeeper.Manuscripts.Import.SemanticImportService.ValidateResources(resources);
+        }
         var computed = AuthoringBatchHash.Compute(batch);
         if (!string.Equals(computed, batch.RequestHash, StringComparison.Ordinal))
             throw new AuthoringIdempotencyException("The authoring request hash does not match the canonical batch content.");

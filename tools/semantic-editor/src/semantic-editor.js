@@ -5,6 +5,7 @@ import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineI
 import {GapCursor, gapCursor} from "prosemirror-gapcursor";
 import {closeHistory} from "prosemirror-history";
 import {keymap} from "prosemirror-keymap";
+import {findImportPosition, insertSemanticFragment, journalImportResources} from "./semantic-import.js";
 
 const idsKey = new PluginKey("lorekeeper-block-ids");
 const annotationsKey = new PluginKey("lorekeeper-review-annotations");
@@ -3089,8 +3090,11 @@ function applyAuthoringOperations(view, operations) {
             transaction = Number.isInteger(existing)
                 ? transaction.replaceWith(existing, existing + view.state.doc.nodeAt(existing).nodeSize, replacement)
                 : transaction.insert(positionForIndex(view.state.doc, operation.index), replacement);
-        } else if (kind === "replacerichdocument") {
-            const replacement = documentFromDomain(operation.richDocument);
+        } else if (kind === "replacerichdocument" || kind === "insertsemanticfragment") {
+            const replacement = documentFromDomain(kind === "insertsemanticfragment"
+                ? insertSemanticFragment(domainFromDocument(view.state.doc, operation.position.documentId, 0),
+                    operation.position, operation.richDocument, operation.secondBlockId)
+                : operation.richDocument);
             transaction = transaction
                 .replaceWith(0, view.state.doc.content.size, replacement.content)
                 .setDocAttribute("notes", replacement.attrs.notes || []);
@@ -3201,6 +3205,24 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         namedStyles
             .filter(style => style.kind === "character")
             .map(style => style.semanticRole));
+    const stageImportResources = resources => {
+        if (!resources) return;
+        for (const image of resources.images)
+            imageById.set(String(image.id).toLowerCase(), {id: image.id, previewUrl: `data:${image.contentType};base64,${image.data}`});
+        for (const style of resources.styles) {
+            if (!namedStyles.some(existing => existing.id === style.id)) namedStyles.push({...style, semanticRole: style.role});
+            (String(style.kind).toLowerCase() === "character" ? characterRoles : paragraphRoles).add(style.role);
+        }
+    };
+    const discardImportResources = resources => {
+        if (!resources) return;
+        for (const image of resources.images) imageById.delete(String(image.id).toLowerCase());
+        for (const style of resources.styles) {
+            const index = namedStyles.findIndex(existing => existing.id === style.id);
+            if (index >= 0) namedStyles.splice(index, 1);
+            (String(style.kind).toLowerCase() === "character" ? characterRoles : paragraphRoles).delete(style.role);
+        }
+    };
     hydrateFigureImageUrls(initial, imageById);
     hydrateDesignedPageSummaries(initial, designedPageById);
     let manuscriptId = initial.manuscriptId;
@@ -3266,6 +3288,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
         const pending = await journal.pending();
         pendingJournalCount = pending.length;
+        for (const entry of pending) stageImportResources(entry.batch?.importResources);
         if (pending.length > 0) {
             // The server's next sequence reflects only acknowledged/replayed
             // work. Reserve every recovered journal sequence before a new
@@ -3301,10 +3324,15 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
     }
     let timer = null;
+    hydrateFigureImageUrls(initial, imageById);
     let saveChain = Promise.resolve(true);
     let changeGeneration = 0;
     let savedGeneration = 0;
     let readOnly = false;
+    let importBusy = false;
+    let attachmentDisposed = false;
+    let importCancelled = false;
+    let pendingImport = null;
     let updateFormattingControls = () => {};
     let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
     let performPersistentHistory = async () => false;
@@ -3327,7 +3355,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         });
     };
     const applyEffectiveReadOnly = () => {
-        readOnly = requestedReadOnly || fenceFrozen || historyMoveInFlight;
+        readOnly = requestedReadOnly || fenceFrozen || historyMoveInFlight || importBusy;
         if (!view) return;
         view.setProps({editable: () => !readOnly});
         for (const control of root.querySelectorAll("button, select, input"))
@@ -3468,6 +3496,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 if (retryTarget?.elementFingerprints)
                     elementFingerprints = new Map(Object.entries(retryTarget.elementFingerprints));
                 confirmedDocument = JSON.parse(entry.afterJson);
+                pendingImport = null;
                 confirmedHistory.splice(confirmedHistoryCursor);
                 confirmedHistory.push({
                     inverse: retryResult.inverse?.operations || [],
@@ -3518,6 +3547,9 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 authoringSession = reopened;
                 ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence} = watermarks);
                 replaceDocument(reopenedTarget.manuscriptJson);
+                discardImportResources(entry.batch.importResources);
+                namedStyleRules.update(namedStyles);
+                pendingImport = null;
                 confirmedDocument = JSON.parse(reopenedTarget.manuscriptJson);
                 queuedDocument = structuredClone(confirmedDocument);
                 revision = reopenedTarget.revision;
@@ -3551,7 +3583,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (savedGeneration >= targetGeneration) return !dispatchPaused;
             if (dispatchPaused || !journal.recoverable || !authoringSession) return false;
             const before = queuedDocument;
-            const operations = authoringOperations(before, after);
+            const imported = pendingImport;
+            const operations = imported ? [imported.operation] : authoringOperations(before, after);
             addAuthoringPreconditions(operations, before, after, elementFingerprints, targetVersion.fingerprint);
             if (operations.length === 0) {
                 savedGeneration = Math.max(savedGeneration, targetGeneration);
@@ -3577,10 +3610,12 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                     after: authoringSelection(selection)
                 }
             };
+            if (imported) batch.importResources = imported.resources;
             batch.requestHash = await sha256(canonicalJson({
                 protocolId: batch.protocolId, projectId: batch.projectId, sessionId: batch.sessionId,
                 batchId: batch.batchId, sequence: batch.sequence, actionLabel: batch.actionLabel,
-                targets: batch.targets, operations: batch.operations, selection: batch.selection
+                targets: batch.targets, operations: batch.operations, selection: batch.selection,
+                ...(batch.importResources ? {importResources: batch.importResources} : {})
             }));
             const entry = {
                 key: `${authoringTarget.projectId}|${authoringTarget.targetId}|${batch.batchId}`,
@@ -3640,6 +3675,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 }
                 savedGeneration = Math.max(savedGeneration, targetGeneration);
                 persistentHistoryState = result.history?.state || persistentHistoryState;
+                if (pendingImport === imported) pendingImport = null;
                 lastAcknowledgedSequence = batch.sequence;
                 notifyWriterState();
                 await refreshReviewAnnotations();
@@ -3685,6 +3721,79 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         updateStatus();
         outline.update();
         figureInspector.update();
+    };
+
+    const importWord = async (read) => {
+        if (readOnly || importBusy) return;
+        if (!view.state.selection.empty || !view.state.selection.$from.parent.inlineContent) {
+            showEditorNotice(root, "Place a single cursor in a text paragraph. Word import inserts there without replacing selected content.");
+            return;
+        }
+        const selected = {blockId: view.state.selection.$from.parent.attrs.id, headOffset: view.state.selection.$from.parentOffset};
+        importBusy = true; importCancelled = false; applyEffectiveReadOnly();
+        status.textContent = "Reading Word content…";
+        const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel Word import";
+        cancel.addEventListener("click", () => { importCancelled = true; void dotNetRef.invokeMethodAsync("CancelWordImport"); });
+        root.append(cancel);
+        let stagedResources = null;
+        let applied = false;
+        try {
+            if (!await saveNow()) throw new Error("Save or resolve pending edits before importing Word content.");
+            if (importCancelled || attachmentDisposed) return;
+            const before = domainFromDocument(view.state.doc, manuscriptId, revision);
+            const position = findImportPosition(before, selected.blockId, selected.headOffset);
+            const importVersion = {revision, ...targetVersion};
+            if (!position) throw new Error("The selected import paragraph is no longer available.");
+            const fragment = JSON.parse(await read());
+            if (importCancelled || attachmentDisposed || !root.isConnected) return;
+            if (revision !== importVersion.revision || targetVersion.fingerprint !== importVersion.fingerprint
+                || targetVersion.generation !== importVersion.generation || fenceFrozen || requestedReadOnly)
+                throw new Error("The manuscript changed while Word content was being read. Choose the insertion point again and retry.");
+            const secondBlockId = newBlockId();
+            const after = insertSemanticFragment(before, position, fragment.document, secondBlockId);
+            const resources = journalImportResources(fragment.resources);
+            stageImportResources(resources);
+            stagedResources = resources;
+            namedStyleRules.update(namedStyles);
+            refreshStylePickers();
+            pendingImport = {resources, operation: {kind: "insertSemanticFragment", position,
+                richDocument: fragment.document, secondBlockId, expectedDocumentFingerprint: targetVersion.fingerprint}};
+            const replacement = documentFromDomain(hydrateFigureImageUrls(after, imageById));
+            importBusy = false; applyEffectiveReadOnly();
+            forceAuthoringBoundary = true;
+            view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, replacement.content)
+                .setDocAttribute("notes", replacement.attrs.notes || []).setMeta("uiEvent", "paste"));
+            applied = true;
+            importBusy = true; applyEffectiveReadOnly(); cancel.remove();
+            pendingActionLabel = "Import Word content";
+            if (await saveNow()) {
+                for (const image of resources.images)
+                    imageById.set(String(image.id).toLowerCase(), {id: image.id,
+                        previewUrl: `/projects/${authoringTarget.projectId.replaceAll("-", "")}/images/${image.id.replaceAll("-", "")}/content?maxEdge=640`});
+                if (fragment.report.length) await dotNetRef.invokeMethodAsync("OnPasteNormalized", fragment.report);
+            }
+        } catch (error) {
+            if (!importCancelled) showEditorNotice(root, error?.message || "Word content could not be imported.");
+        } finally {
+            if (stagedResources && !applied) {
+                discardImportResources(stagedResources); pendingImport = null;
+                namedStyleRules.update(namedStyles); refreshStylePickers();
+            }
+            cancel.remove(); importBusy = false;
+            if (!attachmentDisposed && root.isConnected) { applyEffectiveReadOnly(); updateStatus(); view.focus(); }
+        }
+    };
+
+    const chooseWordFile = () => {
+        if (readOnly) return;
+        const input = document.createElement("input"); input.type = "file"; input.accept = ".docx";
+        input.addEventListener("change", () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            if (file.size > 32 * 1024 * 1024) { showEditorNotice(root, "Choose a DOCX file no larger than 32 MiB."); return; }
+            void importWord(async () => dotNetRef.invokeMethodAsync("ReadWordDocx", new Uint8Array(await file.arrayBuffer())));
+        }, {once: true});
+        input.click();
     };
 
     const initialDocument = documentFromDomain(initial);
@@ -3823,6 +3932,19 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             }
         },
         handlePaste(_view, event) {
+            const html = event.clipboardData?.getData("text/html") || "";
+            if (/class=["']?Mso|mso-|urn:schemas-microsoft-com:office|Microsoft Word/i.test(html)) {
+                event.preventDefault();
+                const files = [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
+                void importWord(async () => {
+                    if (html.length > 4 * 1024 * 1024 || files.reduce((size, file) => size + file.size, 0) > 32 * 1024 * 1024)
+                        throw new Error("Word clipboard content exceeds the bounded import limit. Use Import DOCX.");
+                    const images = await Promise.all(files.map(async file => ({id: authoringId(), fileName: file.name,
+                        contentType: file.type, data: new Uint8Array(await file.arrayBuffer())})));
+                    return dotNetRef.invokeMethodAsync("ReadWordClipboard", html, images);
+                });
+                return true;
+            }
             forceAuthoringBoundary = true;
             void saveNow();
             // The first save closes any typing group before the paste. The queued save
@@ -3895,6 +4017,21 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             selectedParagraphStyleRole = value;
         },
         false);
+    const refreshStylePickers = () => {
+        for (const [select, options] of [
+            [stylePicker.querySelector("select"), styleOptions()],
+            [toolbar.querySelector('select[aria-label="Book Text character style"]'),
+                [["", "Character"], ["__remove__", "Remove character style"]].concat(
+                    namedStyles.filter(style => style.kind === "character").map(style => [style.semanticRole, style.name]))]
+        ]) {
+            if (!select) continue;
+            const selected = select.value;
+            select.replaceChildren(...options.map(([value, label]) => {
+                const option = document.createElement("option"); option.value = value; option.textContent = label; return option;
+            }));
+            select.value = options.some(([value]) => value === selected) ? selected : "";
+        }
+    };
     const styleControls = document.createElement("div");
     styleControls.className = "semantic-editor-style-controls";
     styleControls.append(
@@ -4072,6 +4209,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 value === "__remove__" ? null : value || null)),
         iconButton("⁂", "Insert scene break", () => insertSceneBreak(view)),
         button("Table", "Insert semantic table", () => void insertRichTable(view, root)),
+        button("Import DOCX", "Insert Word content at the cursor", chooseWordFile),
         button("Fn", "Insert footnote", () => void insertNote(view, root, "footnote")),
         button("En", "Insert endnote", () => void insertNote(view, root, "endnote")),
         button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
@@ -4652,6 +4790,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (!readOnly) view.focus();
         },
         dispose() {
+            attachmentDisposed = true;
+            importCancelled = true;
             if (timer) clearTimeout(timer);
             if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);

@@ -168,6 +168,14 @@ its planned features are not claims about current capabilities.
   table headers, protects row-span groups, reserves footnote space beside references,
   labels continuation, retains fitting note artwork, and emits
   explicit diagnostics for content it cannot place safely.
+- Import DOCX or paste Word HTML at an explicit manuscript cursor, preserving
+  supported formatting, lists, merged tables, embedded images, links, notes, and
+  available citation metadata. Import reports discarded review/layout information
+  and unresolved citations. One revision-checked, recoverable authoring action
+  inserts the content and its resources; Undo removes the insertion. Import does
+  not split chapters or create a Sources entry. DOCX input is bounded to 32 MiB
+  and the converted recoverable fragment to 24 MiB; use smaller selections for
+  larger documents. Word desktop compatibility remains pending manual acceptance.
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
   Designed Page/spread composition, project font management, and format-aware
