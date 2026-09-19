@@ -110,7 +110,9 @@ its planned features are not claims about current capabilities.
   retain locally readable text and queue lexical/vector indexing without entity
   or relationship extraction; vector indexing uses the configured embedding
   provider. Missing embeddings leave a resumable job, without requiring a chat
-  model. **Convert legacy source** builds a new retained extraction from saved
+  model. Index-only mode hides entity-extraction options but retains model
+  selection and vision settings for PDFs and images that need image reading.
+  **Convert legacy source** builds a new retained extraction from saved
   legacy text, preserving source identity and existing evidence. It cannot recover
   an unavailable original file. Monitor, stop, or resume either operation in
   **Sources → Manage jobs**.

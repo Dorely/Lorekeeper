@@ -26,7 +26,7 @@ else
                     <option value="@IngestJobMode.IndexOnly">Index only</option>
                     <option value="@IngestJobMode.ExtractEntities">Extract entities and relationships</option>
                 </select>
-                <div class="form-text small">Index only retains readable text and indexes it for search using your embedding provider. It does not extract entities or relationships. Scanned PDFs and images require vision extraction.</div>
+                <div class="form-text small">Index only retains readable text and indexes it for search using your embedding provider. It does not extract entities or relationships. PDFs and images can use the selected vision model to read source content.</div>
             </div>
             @if (_mode == IngestJobMode.ExtractEntities && ChatDisabled)
             {
@@ -38,38 +38,48 @@ else
                 <label class="form-label small text-muted">Title</label>
                 <input class="form-control form-control-sm" @bind="_title" @bind:event="oninput" disabled="@IsBatchSelection" />
             </div>
-            <div class="ingest-two">
+            <div class="@(ShowSourceModel ? "ingest-two" : "mb-2")">
                 <div>
                     <label class="form-label small text-muted">Kind</label>
                     <input class="form-control form-control-sm" placeholder="Book, wiki, paper..." @bind="_sourceKind" @bind:event="oninput" disabled="@IsBatchSelection" />
                 </div>
-                <div>
-                    <label class="form-label small text-muted">Model</label>
-                    <select class="form-select form-select-sm" value="@(_providerId?.ToString() ?? string.Empty)" @onchange="OnProviderChanged" disabled="@(_mode == IngestJobMode.IndexOnly)">
-                        <option value="">Select model</option>
-                        @foreach (var provider in _providers)
+                @if (ShowSourceModel)
+                {
+                    <div>
+                        <label class="form-label small text-muted">@(_mode == IngestJobMode.IndexOnly ? "Vision model" : "Model")</label>
+                        <select class="form-select form-select-sm" value="@(_providerId?.ToString() ?? string.Empty)" @onchange="OnProviderChanged">
+                            <option value="">Select model</option>
+                            @foreach (var provider in _providers)
+                            {
+                                <option value="@provider.Id">@ProviderLabel(provider)</option>
+                            }
+                        </select>
+                        @if (_mode == IngestJobMode.IndexOnly)
                         {
-                            <option value="@provider.Id">@ProviderLabel(provider)</option>
+                            <div class="form-text small">Used only for images and PDF pages needing vision. Text-readable PDFs do not require a model.</div>
                         }
-                    </select>
-                </div>
+                    </div>
+                }
             </div>
             <div class="mb-2">
                 <label class="form-label small text-muted">Description</label>
                 <textarea class="form-control form-control-sm" rows="2" @bind="_description" @bind:event="oninput"></textarea>
             </div>
-            <div class="mb-2">
-                <label class="form-label small text-muted">Extraction instructions (optional)</label>
-                <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput" disabled="@(_mode == IngestJobMode.IndexOnly)"></textarea>
-            </div>
-            <div class="mb-2">
-                <label class="form-label small text-muted">Extraction profile</label>
-                <select class="form-select form-select-sm" @bind="_extractionProfile" disabled="@(_mode == IngestJobMode.IndexOnly)">
-                    <option value="@IngestExtractionProfile.Auto">Auto</option>
-                    <option value="@IngestExtractionProfile.StoryWorldbuilding">Story / Worldbuilding</option>
-                    <option value="@IngestExtractionProfile.ResearchNonfiction">Research / Nonfiction</option>
-                </select>
-            </div>
+            @if (_mode == IngestJobMode.ExtractEntities)
+            {
+                <div class="mb-2">
+                    <label class="form-label small text-muted">Extraction instructions (optional)</label>
+                    <textarea class="form-control form-control-sm" rows="4" @bind="_instructions" @bind:event="oninput"></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">Extraction profile</label>
+                    <select class="form-select form-select-sm" @bind="_extractionProfile">
+                        <option value="@IngestExtractionProfile.Auto">Auto</option>
+                        <option value="@IngestExtractionProfile.StoryWorldbuilding">Story / Worldbuilding</option>
+                        <option value="@IngestExtractionProfile.ResearchNonfiction">Research / Nonfiction</option>
+                    </select>
+                </div>
+            }
             <div class="ingest-section-title mt-3">Webpage</div>
             <div class="mb-2">
                 <label class="form-label small text-muted">URL</label>
@@ -155,7 +165,7 @@ else
                 {
                     <div class="ingest-pdf-options">
                         <label class="form-check small">
-                            <input class="form-check-input" type="checkbox" @bind="_pdfForceVision" disabled="@(_mode == IngestJobMode.IndexOnly)" />
+                            <input class="form-check-input" type="checkbox" @bind="_pdfForceVision" />
                             <span class="form-check-label">Read every PDF page with vision</span>
                         </label>
                         <div>
@@ -167,14 +177,14 @@ else
                             <input type="number" class="form-control form-control-sm" min="72" max="300" @bind="_pdfVisionDpi" />
                         </div>
                     </div>
-                    @if (_mode == IngestJobMode.ExtractEntities && _pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
+                    @if (_pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
                     {
                         <div class="form-text small text-warning">The selected provider must pass the vision check before force-vision PDF ingest can start.</div>
                     }
                 }
                 @if (IsBatchSelection)
                 {
-                    <div class="form-text small text-muted mb-2">Files are read sequentially when ingest starts. Description, extraction instructions, model, profile, and PDF settings apply to every file.</div>
+                    <div class="form-text small text-muted mb-2">Files are read sequentially when ingest starts. The selected processing settings apply to every file.</div>
                 }
                 else
                 {
@@ -632,7 +642,9 @@ else
             if (_readingFile) return "Reading the selected source file.";
             if (_mode == IngestJobMode.ExtractEntities && ChatDisabled) return ChatDisabledMessage;
             if (_mode == IngestJobMode.ExtractEntities && _providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
-            if (_mode == IngestJobMode.ExtractEntities && _pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId!.Value)) return "Run Test for the selected model before force-vision PDF ingest.";
+            if ((IsSelectedImageArtifact || (_pdfForceVision && IsSelectedPdfArtifact))
+                && (_providerId is not int visionProviderId || !_visionProviderIds.Contains(visionProviderId)))
+                return "Select a vision-ready model for images or force-vision PDFs. Configure and test it in Settings > Providers if needed.";
             if (!IsBatchSelection && string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
             if (_selectedFiles.Count == 0 && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose one or more source files.";
             if (_selectedFiles.Any(file => file.Size > MaximumFileBytes)) return $"Each source file must be {MaximumFileBytes / 1024 / 1024:N0} MB or smaller.";
@@ -686,6 +698,12 @@ else
 
     private bool IsSelectedPdfArtifact =>
         _selectedFiles.Any(file => string.Equals(Path.GetExtension(file.Name), ".pdf", StringComparison.OrdinalIgnoreCase));
+
+    private bool IsSelectedImageArtifact => _selectedFiles.Any(file =>
+        Path.GetExtension(file.Name).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp");
+
+    private bool ShowSourceModel => _mode == IngestJobMode.ExtractEntities
+        || IsSelectedPdfArtifact || IsSelectedImageArtifact;
 
     private string ArtifactModeLabel =>
         IsSelectedPdfArtifact

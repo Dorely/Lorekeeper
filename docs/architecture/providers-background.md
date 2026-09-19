@@ -419,7 +419,9 @@ database rows.
 Ingest uses an in-process queue, notifier, hosted worker, and scoped processor.
 `ExtractEntities` performs model enrichment; `IndexOnly` and
 `ConvertLegacySource` bypass chat-provider admission and use the existing
-embedding service after local source preparation. Missing embeddings stop these
+embedding service after source preparation. Index-only source preparation may use
+the explicitly selected vision model for images and PDF pages needing vision;
+this does not enable the entity-extraction worker. Missing embeddings stop these
 jobs with an actionable resume message. Conversion publication is idempotent;
 retries after publication only rebuild derived indexes. Entity-extraction
 restart cleans source-owned graph contributions; indexing/conversion restart

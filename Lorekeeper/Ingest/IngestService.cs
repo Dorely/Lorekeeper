@@ -161,11 +161,9 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
                 request.ArtifactFileName ?? title,
                 request.ArtifactContentType,
                 artifactBytes,
-                indexOnly ? null : request.ProviderId,
+                request.ProviderId,
                 request.ExtractionProfile,
-                indexOnly
-                    ? (request.PdfOptions ?? new PdfArtifactIngestOptions()) with { ForceVision = false }
-                    : request.PdfOptions ?? new PdfArtifactIngestOptions()), cancellationToken);
+                request.PdfOptions ?? new PdfArtifactIngestOptions()), cancellationToken);
 
             sourceText = preprocessed.SourceText;
             pageDrafts = preprocessed.Pages;

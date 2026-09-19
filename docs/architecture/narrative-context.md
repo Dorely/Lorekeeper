@@ -209,12 +209,18 @@ results. A single text/Markdown upload remains editable before submission, and
 that edited text is authoritative over its original bytes.
 
 New-source UI defaults to `IndexOnly`; callers that do not supply a mode retain
-the existing `ExtractEntities` behavior. Index-only upload and webpage batches
-use local preprocessing, immutable originals/extractions, bounded text reading
+the existing `ExtractEntities` behavior. Index-only mode hides entity-extraction
+instructions/profile and hides the model selector for text-only inputs; switching
+back restores their selections. PDF/image selections retain the model selector
+for vision reading, and PDFs retain their page-limit and vision/DPI controls.
+Index-only upload and webpage batches
+use artifact preprocessing, immutable originals/extractions, bounded text reading
 blocks, and the durable ingest queue for graph structure plus lexical/vector
-indexing. They never resolve a chat provider, create extraction checkpoints, or
-run entity/relationship extraction. Images and scanned PDFs still require an
-explicit vision-capable extraction path. If embeddings are unavailable, local
+indexing. They never resolve an enrichment chat provider, create entity-extraction
+checkpoints, or run entity/relationship extraction. The explicitly selected model
+can perform vision preprocessing for images, scanned PDFs, or force-vision PDF
+reads through the existing readiness checks; text-readable inputs remain local.
+If embeddings are unavailable, local
 reading and lexical search remain available and the job stops with a resumable
 configuration message.
 
