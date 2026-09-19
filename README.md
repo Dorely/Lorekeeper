@@ -112,6 +112,10 @@ its planned features are not claims about current capabilities.
   provider. Missing embeddings leave a resumable job, without requiring a chat
   model. Index-only mode hides entity-extraction options but retains model
   selection and vision settings for PDFs and images that need image reading.
+  PDF vision is opt-in: leaving it unchecked reads embedded text only, including
+  PDFs with blank or short pages. Pending/failed extractions show their status
+  and diagnostics in Sources; after an interrupted import, restart and choose
+  **Re-extract** to recover embedded text and queue indexing from the retained file.
   **Convert legacy source** builds a new retained extraction from saved
   legacy text, preserving source identity and existing evidence. It cannot recover
   an unavailable original file. Monitor, stop, or resume either operation in

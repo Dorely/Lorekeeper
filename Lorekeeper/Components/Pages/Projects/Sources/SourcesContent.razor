@@ -87,6 +87,10 @@ else
                                 <strong>@source.Title</strong>
                                 <span>@SourceKindLabel(source)</span>
                                 <span class="sources-meta">@source.BlockCount block(s) · @source.PageCount page(s)</span>
+                                @if (source.ExtractionStatus is { } extractionStatus)
+                                {
+                                    <span class="sources-meta">@ExtractionStatusLabel(extractionStatus)</span>
+                                }
                                 <span class="sources-status @OriginalStateClass(source.OriginalState)">@OriginalStateLabel(source.OriginalState)</span>
                             </button>
                         }
@@ -98,8 +102,21 @@ else
                 @if (_reading is null)
                 {
                     <div class="sources-empty-reader">
-                        <h3>Select a source</h3>
-                        <p>Choose a retained source to browse its active normalized extraction.</p>
+                        @if (SelectedSource is { } selected)
+                        {
+                            <h3>@selected.Title</h3>
+                            <p>No extraction is available for this source.</p>
+                            @if (selected.OriginalState == SourceOriginalState.Available)
+                            {
+                                <a class="btn btn-sm btn-outline-primary" href="@OriginalUrl(selected.Id)" download>Download original</a>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => RequestReextraction(selected)">Re-extract</button>
+                            }
+                        }
+                        else
+                        {
+                            <h3>Select a source</h3>
+                            <p>Choose a retained source to browse its active normalized extraction.</p>
+                        }
                     </div>
                 }
                 else
@@ -113,7 +130,7 @@ else
                         @if (SelectedSource is { OriginalState: SourceOriginalState.Available } source)
                         {
                             <a class="btn btn-sm btn-outline-primary" href="@OriginalUrl(source.Id)" download>Download original</a>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => RequestReextraction(source)">Re-extract</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_confirmationBusy || _reading.ExtractionStatus == SourceExtractionStatus.Extracting)" @onclick="() => RequestReextraction(source)">Re-extract</button>
                         }
                         else
                         {
@@ -164,7 +181,18 @@ else
                             }
                             else
                             {
-                                <p class="text-muted">This extraction has no readable blocks.</p>
+                                @if (_reading.ExtractionStatus == SourceExtractionStatus.Extracting)
+                                {
+                                    <p class="text-muted">The original is retained and extraction is still pending. Refresh to check progress. If the application was interrupted, restart it to recover this attempt.</p>
+                                }
+                                else if (_reading.ExtractionStatus == SourceExtractionStatus.Failed)
+                                {
+                                    <p class="text-muted">Extraction did not complete. Review the diagnostic above. Re-extract reads the retained original locally and queues indexing; image-only PDFs need an explicit vision import.</p>
+                                }
+                                else
+                                {
+                                    <p class="text-muted">This extraction has no readable blocks.</p>
+                                }
                             }
                         </article>
                     </div>
@@ -341,7 +369,7 @@ else
 
 <ConfirmationDialog IsOpen="@(_reextractConfirmationSourceId is not null)"
                     Title="Re-extract retained source?"
-                    Message="This creates a new immutable local extraction from the retained original. Existing evidence stays pinned to its prior extraction and may be shown as outdated. No AI enrichment will run."
+                    Message="This creates a new immutable local extraction from the retained original and queues search indexing. Existing evidence stays pinned to its prior extraction and may be shown as outdated. Vision and entity enrichment will not run; vector indexing uses your configured embedding provider."
                     ConfirmLabel="Re-extract source"
                     Busy="_confirmationBusy"
                     OnConfirm="ReextractSourceAsync"

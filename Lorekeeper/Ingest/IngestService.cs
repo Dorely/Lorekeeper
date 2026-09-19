@@ -151,6 +151,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         IReadOnlyList<IngestSourcePageDraft> pageDrafts = [];
         IReadOnlyList<IngestSourceBlockDraft> blockDrafts = [];
         IReadOnlyList<IngestVisualCandidateDraft> visualDrafts = [];
+        var extractionDiagnostics = "Initial inline text extraction.";
 
         var editedTextIsAuthoritative = request.ArtifactBytes is { Length: > 0 }
             && IsEditableTextArtifact(request.ArtifactFileName)
@@ -169,6 +170,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             pageDrafts = preprocessed.Pages;
             blockDrafts = preprocessed.Blocks;
             visualDrafts = preprocessed.Visuals;
+            extractionDiagnostics = preprocessed.Diagnostics;
             if (string.IsNullOrWhiteSpace(sourceKind))
                 sourceKind = preprocessed.SourceKind;
             if (string.IsNullOrWhiteSpace(contentType))
@@ -266,9 +268,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         persistedExtraction.OptionsJson = sourceMetadataJson;
         persistedExtraction.ContentHash = SourceRetentionValidator.Sha256(sourceText);
         persistedExtraction.Status = SourceExtractionStatus.Ready;
-        persistedExtraction.Diagnostics = request.ArtifactBytes is { Length: > 0 }
-            ? "Initial immutable extraction."
-            : "Initial inline text extraction.";
+        persistedExtraction.Diagnostics = extractionDiagnostics;
         persistedExtraction.NormalizedText = sourceText;
         source.SourceKind = sourceKind;
         source.Description = request.Description?.Trim() ?? string.Empty;
@@ -464,7 +464,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             OptionsJson = optionsJson,
             ContentHash = SourceRetentionValidator.Sha256(preprocessed.SourceText),
             Status = SourceExtractionStatus.Ready,
-            Diagnostics = "Local re-extraction from the retained original. Existing evidence remains pinned to prior extractions.",
+            Diagnostics = "Local re-extraction from the retained original. Existing evidence remains pinned to prior extractions. " + preprocessed.Diagnostics,
             NormalizedText = preprocessed.SourceText,
         };
 
@@ -483,9 +483,18 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         source.VectorIndexState = VectorIndexState.Stale;
         source.UpdatedAt = DateTime.UtcNow;
         operation.Repositories.Ingest.UpdateSource(source);
+        var job = new IngestJob
+        {
+            ProjectId = source.ProjectId, SourceId = source.Id,
+            SourceExtractionVersionId = extraction.Id, Mode = IngestJobMode.IndexOnly,
+            Instructions = string.Empty, Status = IngestJobStatus.Queued,
+            TotalSourceChunks = sourceChunks.Count,
+            CurrentMessage = "Queued for indexing after local re-extraction.",
+        };
+        await operation.Repositories.Ingest.AddJobAsync(job, cancellationToken);
         await operation.SaveChangesAsync(cancellationToken);
-        await graphSync.EnsureSourceAsync(source, sourceChunks, sourceBlocks, cancellationToken);
-        await contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken);
+        queue.Enqueue(job.Id);
+        Notify(source.ProjectId, job.Id, IngestJobUpdateKind.Created);
     }
 
     private async Task<RetainedOriginalReextractionInput> ReadRetainedOriginalForReextractionAsync(

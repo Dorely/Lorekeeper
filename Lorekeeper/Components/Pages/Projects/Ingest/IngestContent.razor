@@ -56,7 +56,7 @@ else
                         </select>
                         @if (_mode == IngestJobMode.IndexOnly)
                         {
-                            <div class="form-text small">Used only for images and PDF pages needing vision. Text-readable PDFs do not require a model.</div>
+                            <div class="form-text small">Used for images, or PDFs when vision reading is enabled below. Otherwise PDFs use embedded text only and do not require a model.</div>
                         }
                     </div>
                 }

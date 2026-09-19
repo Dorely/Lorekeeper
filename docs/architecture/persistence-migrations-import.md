@@ -151,6 +151,11 @@ version. Conversion adds all new children and changes the active pointer in one
 transaction, leaving historical extraction/evidence rows and unavailable
 original metadata untouched. Job mode/pinning are operational state and do not
 enter project archive or history payloads.
+Local re-extraction publishes the new extraction and its queued index-only job in
+the same save. Initial preprocessing attempts can exist before a job is created;
+startup recovery marks pre-host interrupted attempts failed without changing
+original bytes or activating incomplete extractions. Reader projections fall
+back to the latest attempt only when no active extraction exists.
 
 ## Current architecture and invariants
 

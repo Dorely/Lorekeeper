@@ -218,8 +218,11 @@ use artifact preprocessing, immutable originals/extractions, bounded text readin
 blocks, and the durable ingest queue for graph structure plus lexical/vector
 indexing. They never resolve an enrichment chat provider, create entity-extraction
 checkpoints, or run entity/relationship extraction. The explicitly selected model
-can perform vision preprocessing for images, scanned PDFs, or force-vision PDF
-reads through the existing readiness checks; text-readable inputs remain local.
+can perform vision preprocessing for images or explicitly enabled PDF vision
+reads through the existing readiness checks. With PDF vision unchecked, only
+embedded text is read: blank/short pages never trigger a model call. Empty pages
+remain represented with diagnostics; a PDF with no readable text fails with an
+actionable vision message rather than indexing page markers as source content.
 If embeddings are unavailable, local
 reading and lexical search remain available and the job stops with a resumable
 configuration message.
@@ -273,7 +276,12 @@ content hash, status/diagnostics, and bounded reading blocks. `SourceLocation`
 is durable evidence with source, extraction, block/page, range, locator, quote,
 and verification hash. Re-extraction verifies an available retained original,
 normalizes it locally before a short atomic publish, creates another immutable
-version with new child identities, and never retargets existing evidence.
+version with new child identities, and never retargets existing evidence. Successful
+local re-extraction atomically queues an index-only job with the new active version.
+When no active extraction exists, Sources displays the latest pending/failed
+attempt, its diagnostics, and original-download/re-extraction actions rather than
+the unselected-reader placeholder. Only genuinely unselected sources show that
+placeholder. Preprocessing diagnostics survive publication into the reader.
 
 Every legacy source migrates to an immutable legacy extraction preserving its
 source/chunk/block/page identities, normalized text, evidence, and hashes, with

@@ -69,6 +69,15 @@ public sealed class ProjectSourcesService(
             .Where(version => activeVersionIds.Contains(version.Id))
             .Select(version => new { version.Id, version.Status })
             .ToDictionaryAsync(version => version.Id, cancellationToken);
+        var pendingStatuses = await db.IngestSources.AsNoTracking()
+            .Where(source => source.ProjectId == projectId && source.ActiveExtractionVersionId == null)
+            .Select(source => new
+            {
+                source.Id,
+                Status = db.SourceExtractionVersions.Where(version => version.SourceId == source.Id)
+                    .OrderByDescending(version => version.Ordinal)
+                    .Select(version => (SourceExtractionStatus?)version.Status).FirstOrDefault(),
+            }).ToDictionaryAsync(item => item.Id, item => item.Status, cancellationToken);
         var blockCounts = await db.IngestSourceBlocks
             .AsNoTracking()
             .Where(block => activeVersionIds.Contains(block.SourceExtractionVersionId))
@@ -144,7 +153,7 @@ public sealed class ProjectSourcesService(
                     source.OriginalLength,
                     source.OriginalHash,
                     source.ActiveExtractionVersionId,
-                    version?.Status,
+                    version?.Status ?? pendingStatuses.GetValueOrDefault(source.Id),
                     source.ActiveExtractionVersionId is Guid activeVersionId && blockCounts.TryGetValue(activeVersionId, out var blocks) ? blocks : 0,
                     source.ActiveExtractionVersionId is Guid pageVersionId && pageCounts.TryGetValue(pageVersionId, out var pages) ? pages : 0,
                     source.UpdatedAt);
@@ -306,16 +315,21 @@ public sealed class ProjectSourcesService(
             .Where(item => item.ProjectId == projectId && item.Id == sourceId)
             .Select(item => new { item.Id, item.Title, item.SourceKind, item.ActiveExtractionVersionId })
             .SingleOrDefaultAsync(cancellationToken);
-        if (source?.ActiveExtractionVersionId is not Guid extractionVersionId)
+        if (source is null)
             return null;
 
+        // A retained original can have a pending or failed first attempt without
+        // an active readable version. Keep that attempt visible to the reader.
         var extraction = await db.SourceExtractionVersions
             .AsNoTracking()
-            .Where(version => version.Id == extractionVersionId && version.SourceId == sourceId)
-            .Select(version => new { version.Status, version.Extractor, version.ExtractorVersion, version.Diagnostics })
-            .SingleOrDefaultAsync(cancellationToken);
+            .Where(version => version.SourceId == sourceId
+                && (source.ActiveExtractionVersionId == null || version.Id == source.ActiveExtractionVersionId))
+            .OrderByDescending(version => version.Ordinal)
+            .Select(version => new { version.Id, version.Status, version.Extractor, version.ExtractorVersion, version.Diagnostics })
+            .FirstOrDefaultAsync(cancellationToken);
         if (extraction is null)
             return null;
+        var extractionVersionId = extraction.Id;
 
         var contents = await db.IngestSourceBlocks
             .AsNoTracking()

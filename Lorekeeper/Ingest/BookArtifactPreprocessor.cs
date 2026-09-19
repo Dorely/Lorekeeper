@@ -354,7 +354,7 @@ public sealed partial class BookArtifactPreprocessor(
         var maxPages = Math.Clamp(request.PdfOptions.MaxPages ?? options.Value.MaxPdfPages, 1, options.Value.MaxPdfPages);
         var dpi = Math.Clamp(request.PdfOptions.VisionDpi ?? options.Value.PdfVisionDpi, 72, 300);
         var maxImagePixels = Math.Clamp(request.PdfOptions.MaxImagePixels ?? options.Value.MaxImagePixels, 250_000, 20_000_000);
-        var embeddedMinChars = Math.Max(0, options.Value.EmbeddedTextMinCharsPerPage);
+        var pagesWithoutText = 0;
         var pages = new List<IngestSourcePageDraft>();
         var blocks = new List<IngestSourceBlockDraft>();
         var visuals = new List<IngestVisualCandidateDraft>();
@@ -382,7 +382,7 @@ public sealed partial class BookArtifactPreprocessor(
             var pageWidth = (int)Math.Ceiling(page.Width);
             var pageHeight = (int)Math.Ceiling(page.Height);
 
-            var useVision = request.PdfOptions.ForceVision || pageText.Length < embeddedMinChars;
+            var useVision = request.PdfOptions.ForceVision;
             byte[]? renderedPageBytes = null;
             if (useVision)
             {
@@ -417,8 +417,12 @@ public sealed partial class BookArtifactPreprocessor(
             }
             else
             {
-                diagnostics = pageText.Length == 0 ? "No embedded page text." : "Read embedded PDF text.";
+                diagnostics = pageText.Length == 0
+                    ? "No embedded page text. Vision reading was not selected."
+                    : "Read embedded PDF text.";
             }
+
+            if (string.IsNullOrWhiteSpace(pageText)) pagesWithoutText++;
 
             if (sb.Length > 0) sb.AppendLine().AppendLine();
             var start = sb.Length;
@@ -474,12 +478,17 @@ public sealed partial class BookArtifactPreprocessor(
                 visuals.Add(renderedVisual! with { MetadataJson = JsonSerializer.Serialize(new { kind = "renderedPage", extractionMethod }) });
         }
 
-        if (sb.Length == 0)
-            throw new InvalidOperationException("The PDF did not contain readable text.");
+        if (pagesWithoutText == documentPages.Count)
+            throw new InvalidOperationException(request.PdfOptions.ForceVision
+                ? "Vision returned no readable text from this PDF. The original is retained."
+                : "This PDF has no embedded text in the selected page range. The original is retained; select a vision-ready model and enable PDF vision reading to index image-only pages.");
 
         var diagnosticsSummary = totalPages > documentPages.Count
             ? $"Read {documentPages.Count:N0} of {totalPages:N0} PDF page(s)."
             : $"Read {documentPages.Count:N0} PDF page(s).";
+        if (pagesWithoutText > 0)
+            diagnosticsSummary += $" {pagesWithoutText:N0} page(s) contain no readable text."
+                + (usedVision ? string.Empty : " Vision reading was not selected; image-only pages are not text-indexed.");
 
         return new BookArtifactPreprocessResult(
             sb.ToString(),

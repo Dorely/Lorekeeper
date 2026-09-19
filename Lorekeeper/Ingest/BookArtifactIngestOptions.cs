@@ -8,7 +8,6 @@ public sealed class BookArtifactIngestOptions
     public int MaxPdfPages { get; set; } = 500;
     public int PdfVisionDpi { get; set; } = 144;
     public int MaxImagePixels { get; set; } = 4_000_000;
-    public int EmbeddedTextMinCharsPerPage { get; set; } = 40;
     public int VisionPageMaxOutputTokens { get; set; } = 6000;
 }
 

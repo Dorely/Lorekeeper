@@ -3,6 +3,7 @@ using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Startup;
 using Microsoft.Extensions.Hosting;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Ingest;
 
@@ -15,6 +16,7 @@ public sealed class IngestJobWorker(
     ILogger<IngestJobWorker> logger) : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(3);
+    private readonly DateTime _startedAt = DateTime.UtcNow;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -43,6 +45,15 @@ public sealed class IngestJobWorker(
     {
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         var repo = operation.Repositories.Ingest;
+        // Initial preprocessing precedes creation of an ingest job. Recover only
+        // attempts from before this host started, never a newly submitted upload.
+        await operation.Db.SourceExtractionVersions
+            .Where(version => version.Status == SourceExtractionStatus.Extracting
+                && version.CreatedAt < _startedAt && version.Source.ActiveExtractionVersionId == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(version => version.Status, SourceExtractionStatus.Failed)
+                .SetProperty(version => version.Diagnostics,
+                    "Extraction was interrupted by an application restart. The original is retained. Re-extract to read its embedded text and queue indexing."), cancellationToken);
         var interrupted = await repo.ListInterruptedJobsAsync(cancellationToken);
         var repairedJobs = new List<(Guid ProjectId, Guid JobId)>();
         foreach (var job in interrupted)
