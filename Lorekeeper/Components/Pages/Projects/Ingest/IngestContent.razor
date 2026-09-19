@@ -169,8 +169,9 @@ else
                             <span class="form-check-label">Read every PDF page with vision</span>
                         </label>
                         <div>
-                            <label class="form-label small text-muted">Max pages</label>
-                            <input type="number" class="form-control form-control-sm" min="1" max="500" @bind="_pdfMaxPages" />
+                            <label class="form-label small text-muted" for="ingest-pdf-page-limit">Page limit (optional)</label>
+                            <input id="ingest-pdf-page-limit" type="number" class="form-control form-control-sm" min="1" placeholder="All pages" @bind="_pdfMaxPages" />
+                            <div class="form-text small">Leave blank to read the entire PDF.</div>
                         </div>
                         <div>
                             <label class="form-label small text-muted">DPI</label>
@@ -598,7 +599,7 @@ else
     private List<BatchIngestResult> _batchResults = [];
     private IngestExtractionProfile _extractionProfile = IngestExtractionProfile.Auto;
     private bool _pdfForceVision;
-    private int _pdfMaxPages = 500;
+    private int? _pdfMaxPages;
     private int _pdfVisionDpi = 144;
     private string _webUrl = string.Empty;
     private bool _webFollowLinks;

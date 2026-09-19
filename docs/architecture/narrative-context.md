@@ -212,7 +212,12 @@ New-source UI defaults to `IndexOnly`; callers that do not supply a mode retain
 the existing `ExtractEntities` behavior. Index-only mode hides entity-extraction
 instructions/profile and hides the model selector for text-only inputs; switching
 back restores their selections. PDF/image selections retain the model selector
-for vision reading, and PDFs retain their page-limit and vision/DPI controls.
+for vision reading, and PDFs retain their optional page-limit and vision/DPI controls.
+An omitted page limit reads the entire PDF in either processing mode and during
+retained-source re-extraction. Only an explicit positive request limit truncates
+the read; there is no global page-count cap. The processor reads pages in order
+without first materializing every parsed page, retaining per-page cancellation
+and the existing file-size and image-pixel bounds.
 Index-only upload and webpage batches
 use artifact preprocessing, immutable originals/extractions, bounded text reading
 blocks, and the durable ingest queue for graph structure plus lexical/vector

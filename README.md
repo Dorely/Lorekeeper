@@ -112,6 +112,8 @@ its planned features are not claims about current capabilities.
   provider. Missing embeddings leave a resumable job, without requiring a chat
   model. Index-only mode hides entity-extraction options but retains model
   selection and vision settings for PDFs and images that need image reading.
+  PDFs read all pages by default, including when re-extracting a retained source;
+  set the optional page limit only for a partial import.
   PDF vision is opt-in: leaving it unchecked reads embedded text only, including
   PDFs with blank or short pages. Pending/failed extractions show their status
   and diagnostics in Sources; after an interrupted import, restart and choose
