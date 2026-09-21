@@ -122,13 +122,8 @@ public class ChatClientFactory(
         IChatClient chatClient = new OpenAIChatToolMetadataClient(
             client.GetChatClient(provider.ModelId).AsIChatClient());
 
-        var maxOutputTokens = LlmWireCompatResolver.ResolveMaxOutputTokens(
-            provider.EndpointUrl,
-            provider.MaxTokensField,
-            provider.MaxOutputTokens);
-
         var pipeline = chatClient.AsBuilder();
-        if (maxOutputTokens is { } budget)
+        if (provider.MaxOutputTokens is > 0 and var budget)
             pipeline.ConfigureOptions(options => options.MaxOutputTokens = budget);
         return ConfigureReasoningEffort(pipeline.Build(), provider.EffectiveReasoningEffort);
     }
@@ -142,9 +137,8 @@ public class ChatClientFactory(
     {
         try
         {
-            // No ChatOptions: several OpenAI-compatible providers reject trivially
-            // small token budgets or extra parameters, so the probe sends plain
-            // input and lets provider defaults apply.
+            // Exercise the configured client, including explicit user overrides.
+            // Unset generation settings remain provider-owned defaults.
             await chatClient.GetResponseAsync("Reply with exactly: ok", cancellationToken: cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

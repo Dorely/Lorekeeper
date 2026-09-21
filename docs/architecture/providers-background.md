@@ -46,7 +46,7 @@ Settings > Providers manages connection cards and nested model rows. Built-in
 OpenAI-compatible presets include OpenAI, two Cline connection modes sharing the
 same endpoint, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral,
 Together, Ollama, LM Studio, and a custom endpoint. Presets pre-fill endpoint,
-authentication, suggested model, token-budget, and compatibility fields; they do
+authentication, suggested model, and compatibility fields; they do
 not bypass the normal persisted provider model or connection tests.
 
 One top-level connection may own shared endpoint/authentication state for multiple
@@ -135,10 +135,14 @@ The current classifications are:
 - Local Ollama and LM Studio endpoints also use the legacy field but receive no
   automatic budget because local model capability is unknown.
 - Other remote OpenAI-compatible endpoints, including OpenRouter and custom
-  gateways, use the standard field and an 8,192-token default output budget.
+  gateways, use the standard field.
 
 Each provider row can override both `MaxOutputTokens` and `MaxTokensField`.
-Readiness probes remain unconstrained and ignore those chat-output settings.
+Unset output limits and reasoning effort are omitted for all OpenAI-compatible
+connections; no sampling settings are added automatically. Presets leave output
+limits blank. Saved numeric limits and reasoning choices remain explicit overrides;
+clearing them restores provider defaults. Codex retains its catalog reasoning
+defaults. Readiness probes use the configured client, including explicit overrides.
 OpenAI-compatible chat requests share a pooled transport with
 `Agents:ChatRequestTimeoutSeconds` (600 seconds by default). Codex requests use
 the configured Codex timeout.

@@ -106,8 +106,8 @@
                 </label>
                 <label>
                     <span>Max output tokens</span>
-                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto" @bind="_newProvider.MaxOutputTokens" />
-                    <small class="field-note">Caps the response budget. Leave blank to auto-apply a per-endpoint default: standard field with 16,384 for generic/unknown gateways, none for OpenAI and local servers.</small>
+                    <input type="number" min="1" step="1" class="form-control" placeholder="Provider default" @bind="_newProvider.MaxOutputTokens" />
+                    <small class="field-note">Optional response budget, including reasoning when counted by the provider. Leave blank to use the provider default.</small>
                 </label>
                 <label>
                     <span>Max input tokens</span>
@@ -1065,8 +1065,8 @@
     {
         <label>
             <span>Max output tokens</span>
-            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="model.MaxOutputTokens" />
-            <small class="field-note">Blank uses the per-endpoint auto default (see add/edit connection notes).</small>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Provider default" @bind="model.MaxOutputTokens" />
+            <small class="field-note">Blank uses the provider default.</small>
         </label>
         <label>
             <span>Max input tokens</span>
@@ -1134,8 +1134,8 @@
                 </label>
                 <label>
                     <span>Max output tokens</span>
-                    <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="draft.MaxOutputTokens" />
-                    <small class="field-note">Blank uses the per-endpoint auto default.</small>
+                    <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Provider default" @bind="draft.MaxOutputTokens" />
+                    <small class="field-note">Blank uses the provider default.</small>
                 </label>
                 <label>
                     <span>Max input tokens</span>
@@ -1224,7 +1224,7 @@
         if (preset.AuthType != AuthType.ApiKey)
             _newProvider.ApiKey = null;
         _newProviderModels = preset.SeededModels;
-        _newProvider.MaxOutputTokens = preset.DefaultMaxOutputTokens;
+        _newProvider.MaxOutputTokens = null;
         if (string.IsNullOrWhiteSpace(_newProvider.ModelId) && preset.SeededModels.Count > 0)
             _newProvider.ModelId = preset.SeededModels[0];
     }

@@ -9,8 +9,7 @@ public sealed record LlmProviderPreset(
     AuthType AuthType,
     IReadOnlyList<string> SeededModels,
     string? KeyManagementUrl = null,
-    string? Note = null,
-    int? DefaultMaxOutputTokens = null);
+    string? Note = null);
 
 /// <summary>
 /// Catalog of built-in OpenAI-compatible provider presets used to pre-fill new
@@ -48,8 +47,7 @@ public static class LlmProviderCatalog
             "cline-pass/kimi-k3",
         ],
             KeyManagementUrl: "https://app.cline.bot/settings",
-            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog.",
-            DefaultMaxOutputTokens: 8192),
+            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog."),
         new("anthropic", "Anthropic (OpenAI-compatible)", "https://api.anthropic.com/v1", AuthType.ApiKey,
         [
             "claude-sonnet-4-5",
@@ -82,8 +80,7 @@ public static class LlmProviderCatalog
             "deepseek-chat",
             "deepseek-reasoner",
         ],
-            KeyManagementUrl: "https://platform.deepseek.com/api_keys",
-            DefaultMaxOutputTokens: 8_192),
+            KeyManagementUrl: "https://platform.deepseek.com/api_keys"),
         new("xai", "xAI", "https://api.x.ai/v1", AuthType.ApiKey,
         [
             "grok-4",
@@ -102,8 +99,7 @@ public static class LlmProviderCatalog
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
             "deepseek-ai/DeepSeek-V3",
         ],
-            KeyManagementUrl: "https://api.together.ai/settings/api-keys",
-            DefaultMaxOutputTokens: 8192),
+            KeyManagementUrl: "https://api.together.ai/settings/api-keys"),
         new("commandcode", "Command Code", "https://api.commandcode.ai/provider/v1", AuthType.ApiKey,
         [
             "deepseek/deepseek-v4-flash",

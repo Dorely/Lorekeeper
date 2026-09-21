@@ -25,22 +25,6 @@ public enum WireMaxTokensField
 /// </summary>
 internal static class LlmWireCompatResolver
 {
-    /// <summary>
-    /// Output-token-budget default for generic OpenAI-compatible gateways. Pi
-    /// uses 16 384 for unknown models, but with the ~38k-token Editor system
-    /// prompt Qwen/Kimi generate at ~17 tok/s so 16k implies ~16 min of
-    /// streaming — well beyond the Cline gateway's ~10 min stream lifetime.
-    /// Bisection: full system no-tools without a budget dies at exactly
-    /// 10 min (B02), with 4096 it finishes in ~53 s (B13); with 40 tools
-    /// standard max_completion_tokens is ignored by the gateway (B12 dies at
-    /// 10 min) while legacy max_tokens is respected (B15 finishes in ~6 min
-    /// with 48k reasoning chars and no transport error). Default is doubled to
-    /// 8192 per user tuning — still safely under the ~10 min gateway cut for
-    /// the measured prompt/throughput, while giving more headroom; set a
-    /// per-row MaxOutputTokens override in Settings > Providers to tune further.
-    /// </summary>
-    public const int DefaultMaxOutputTokens = 8192;
-
     public enum EndpointClass
     {
         /// <summary>OpenAI first-party: OpenAI-standard field name, no auto budget.</summary>
@@ -54,7 +38,7 @@ internal static class LlmWireCompatResolver
         /// would break generation.</summary>
         Local,
 
-        /// <summary>OpenAI-standard field name with the universal output-token budget.</summary>
+        /// <summary>OpenAI-standard field name for generic gateways.</summary>
         GenericCompat,
     }
 
@@ -94,23 +78,6 @@ internal static class LlmWireCompatResolver
             LlmMaxTokensField.Legacy => WireMaxTokensField.Legacy,
             _ => WireMaxTokensField.Standard,
         };
-
-    /// <summary>
-    /// Resolves the effective output-token budget for a provider. Explicit row
-    /// values always win; otherwise OpenAI first-party and local servers send
-    /// none (so provider/model defaults apply), while every other
-    /// non-first-class endpoint gets the universal default.
-    /// </summary>
-    public static int? ResolveMaxOutputTokens(string? endpointUrl, LlmMaxTokensField overrideField, int? rowMaxOutputTokens)
-    {
-        if (rowMaxOutputTokens is > 0)
-            return rowMaxOutputTokens;
-
-        if (Classify(endpointUrl) is EndpointClass.OpenAiFirstParty or EndpointClass.Local)
-            return null;
-
-        return DefaultMaxOutputTokens;
-    }
 
     private static bool IsLocalHost(string host) =>
         host.Equals("localhost", StringComparison.OrdinalIgnoreCase)

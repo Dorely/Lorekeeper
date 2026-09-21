@@ -12,9 +12,8 @@ public class LlmProvider
     public LlmReasoningEffort? ReasoningEffort { get; set; }
 
     /// <summary>
-    /// Explicit output-token budget for chat requests, independent of the
-    /// wire-compat default. When null, the endpoint-based wire-compat
-    /// classification supplies the budget for non-OpenAI providers.
+    /// Explicit output-token budget for compatible chat requests. When null,
+    /// no output limit is sent and provider/model defaults apply.
     /// </summary>
     public int? MaxOutputTokens { get; set; }
 
