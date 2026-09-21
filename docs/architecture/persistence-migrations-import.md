@@ -31,8 +31,9 @@ must never mutate this developer-owned original.
 
 New Contest batches store a versioned immutable task/target/context envelope in
 the existing `ContestBatch.ContextSnapshotJson` field. The envelope records the
-coordinator-established prose task, ordered stable block IDs, expected source
-revision, and captured evidence without requiring a schema migration. Older bare
+coordinator-established prose task, stable boundary anchors, expected source
+revision, captured candidate system prompt, and quoted evidence in envelope v3
+without requiring a schema migration. Older bare
 context snapshots remain valid historical audit payloads; unresolved legacy rows
 are never reinterpreted as new prose-runner input after restart.
 

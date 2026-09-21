@@ -20,7 +20,7 @@ public sealed class ChatConversationModelSelectionMigrationTests
         try
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite($"Data Source={Path.Combine(directory, "chat-model-selection.db")}")
+                .UseSqlite($"Data Source={Path.Combine(directory, "chat-model-selection.db")};Pooling=False")
                 .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             var projectId = Guid.NewGuid();
@@ -74,7 +74,6 @@ public sealed class ChatConversationModelSelectionMigrationTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
         }

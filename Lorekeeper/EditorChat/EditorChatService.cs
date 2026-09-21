@@ -304,11 +304,7 @@ public sealed class EditorChatService(
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             systemPrompt = assembly.Assemble();
-            contestSystemPrompt = new ContextAssembly(
-                assembly.Items
-                    .Where(item => item.Kind != ContextItemKind.CurrentChapter)
-                    .ToList())
-                .Assemble();
+            contestSystemPrompt = EditorContestService.CaptureSystemPrompt(assembly);
             if (!contentTarget.IsCore)
             {
                 var edition = await turnEngine.ReadAsync(
@@ -318,7 +314,7 @@ public sealed class EditorChatService(
                     cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
                 var targetPrompt = $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
                 systemPrompt += targetPrompt;
-                contestSystemPrompt += targetPrompt;
+                contestSystemPrompt += $"\n\n## Selected content target\nPublication release: {edition.Name} ({edition.Id:D}). The captured manuscript and replacement scope belong to this release.";
             }
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
             await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
@@ -702,8 +698,9 @@ public sealed class EditorChatService(
                         .Cast<AIContent>()
                         .ToList();
                     var snapshot = new ContestTurnSnapshot(
-                        BuildContestSnapshotMessages(messages, contestSnapshotToolResults, contestSystemPrompt),
-                        initialEntityVisuals);
+                        BuildContestSnapshotMessages(messages, contestSnapshotToolResults),
+                        initialEntityVisuals,
+                        contestSystemPrompt);
 
                     await foreach (var contestUpdate in contestService.StartContestAsync(
                         projectId,
@@ -865,13 +862,11 @@ public sealed class EditorChatService(
 
     private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(
         IReadOnlyList<ChatMessage> messages,
-        IReadOnlyList<AIContent> pendingToolResults,
-        string contestSystemPrompt)
+        IReadOnlyList<AIContent> pendingToolResults)
     {
         var snapshot = messages
-            .Select((message, index) => index == 0 && message.Role == ChatRole.System
-                ? new ContestChatMessageSnapshot("System", contestSystemPrompt)
-                : ToContestChatMessageSnapshot(message))
+            .Where(message => message.Role != ChatRole.System)
+            .Select(ToContestChatMessageSnapshot)
             .Where(message => !string.IsNullOrWhiteSpace(message.Content))
             .ToList();
 
@@ -912,12 +907,6 @@ public sealed class EditorChatService(
             {
                 case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
                     sb.Append(textContent.Text);
-                    break;
-                case FunctionCallContent functionCall:
-                    if (sb.Length > 0) sb.AppendLine();
-                    sb.AppendLine($"[Tool call: {functionCall.Name} ({functionCall.CallId})]");
-                    sb.AppendLine("Arguments:");
-                    sb.AppendLine(functionCall.Arguments is null ? "{}" : JsonSerializer.Serialize(functionCall.Arguments));
                     break;
                 case FunctionResultContent functionResult:
                     if (sb.Length > 0) sb.AppendLine();

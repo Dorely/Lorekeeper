@@ -138,7 +138,7 @@ public sealed class SystemPromptComposer(
         return builder.ToString();
     }
 
-    private static string ProfessionalIdentityFor(SystemPromptAgentRole role)
+    internal static string ProfessionalIdentityFor(SystemPromptAgentRole role)
     {
         if (role == SystemPromptAgentRole.Images)
         {

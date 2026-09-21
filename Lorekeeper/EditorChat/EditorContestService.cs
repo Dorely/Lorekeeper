@@ -15,13 +15,12 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
-using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorContestService(
-IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IEditorContestMutationContext contestMutationContext, IEditorContestRunRegistry contestRuns, IAuthoringMutationContextAccessor authoringMutationContext, IAuthoringGenerationService authoringGenerations, ILogger<EditorContestService> logger) : IEditorContestService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IEditorContestMutationContext contestMutationContext, IEditorContestRunRegistry contestRuns, IAuthoringMutationContextAccessor authoringMutationContext, IAuthoringGenerationService authoringGenerations, ILogger<EditorContestService> logger) : IEditorContestService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -1004,24 +1003,9 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        Project project;
-        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
-        {
-            project = await readOperation.Repositories.Projects.GetByIdAsync(batch.ProjectId, cancellationToken)
-                ?? throw new InvalidOperationException($"Project {batch.ProjectId} not found.");
-        }
-
-        var brief = await bookBriefs.GetOrCreateAsync(batch.ProjectId, cancellationToken);
-        var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken);
-        var systemPrompt = systemPrompts.Compose(new(
-            project,
-            brief,
-            SystemPromptAgentRole.ContestCandidate,
-            ContestOperatingRules,
-            chapter)).Prompt;
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, systemPrompt),
+            new(ChatRole.System, snapshot.SystemPrompt),
             new(ChatRole.User, BuildContestUserPrompt(batch, candidate, request, snapshot)),
         };
         if (await entityVisualContext.BuildVisionMessageAsync(
@@ -1095,11 +1079,24 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         return response;
     }
 
+    internal static string CaptureSystemPrompt(ContextAssembly assembly)
+    {
+        // Select typed sections, never redact user-authored text by matching words.
+        // The authoritative batch manuscript is supplied once in the user payload.
+        var context = new ContextAssembly(assembly.Items.Where(item => item.Kind is not
+            (ContextItemKind.SystemInstructions or ContextItemKind.AssistantWorkflow or ContextItemKind.CurrentChapter)).ToList());
+        return SystemPromptComposer.ProfessionalIdentityFor(SystemPromptAgentRole.ContestCandidate)
+            + "\n\n" + ContestOperatingRules + "\n\n" + context.Assemble();
+    }
+
     private const string ContestOperatingRules =
         """
         You are one contestant producing an excellent prose revision for comparison.
         You have no tools and cannot mutate project state. The task, target, manuscript, and
-        quoted context evidence in the user message are the complete working material.
+        captured system context and quoted evidence are the complete working material.
+        Project Guidance and the Book Brief are authorial direction. Current active-project
+        canon and explicit author direction take precedence over read-only referenced-project
+        evidence. Never silently promote conflicting source evidence into canon.
 
         Return natural Markdown prose for the replacement span between the two declared anchors.
         You may return any nonzero number of prose paragraphs, including one paragraph or a full
@@ -1158,8 +1155,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         {
             var block = source.Content[index];
             sb.AppendLine($"- Document block {index}: {block.Id} [{block.Type}]");
-            sb.AppendLine("  Exact current block text:");
-            sb.AppendLine(ManuscriptCodec.Text(block));
         }
 
         sb.AppendLine();
@@ -1176,19 +1171,12 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         }
 
         sb.AppendLine("# Current Semantic Manuscript (read-only source)");
-        if (span.StartIndex == 0 && span.EndExclusive == source.Content.Count)
-        {
-            sb.AppendLine("The exact replacement span above is the complete current manuscript; it is not repeated here.");
-        }
-        else
-        {
-            sb.AppendLine(AgentManuscriptProjection.SerializeDocument(
+        sb.AppendLine(AgentManuscriptProjection.SerializeDocument(
                 source,
                 "persisted",
                 chapterId: batch.ChapterId,
                 chapterTitle: batch.ChapterTitle,
                 sourceHash: ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(source))));
-        }
 
         return sb.ToString();
     }

@@ -146,6 +146,12 @@ resetting an explicit preference returns them to included. The chapter header's
 word/token value measures chapter plain text only; Assistant Memory measures
 the full enabled prompt context and is intentionally larger.
 
+Contest candidates retain the enabled automatic context captured by the Editor,
+including writing samples, retrieved canon, references, and chapter annotations.
+Only coordinator identity/tool workflows are replaced; the active manuscript is
+supplied once from the contest's exact captured source rather than duplicated
+from the context feed.
+
 Model-facing structured payloads use the shared compact serializer and
 `AgentPayloadPaginator`. Pagination repeats identity fields, keeps logical JSON
 records intact where possible, and segments only an individually oversized text

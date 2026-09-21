@@ -536,11 +536,14 @@ user opens Review or follows the contest review/lock-notice action. Contest
 configuration and provider controls remain unavailable while candidates exist.
 The lock is restored at startup whenever an unresolved contest exists.
 
-New contests persist a versioned immutable context envelope containing the
-coordinator's explicit task/target fence and its captured text/tool evidence.
-Candidate prompting omits the coordinator system prompt so its tool instructions
-cannot become contestant instructions; captured user, assistant, and tool
-material is quoted as evidence. Each candidate also receives the exact
+New contests persist a version-3 immutable context envelope containing the
+coordinator's explicit task/target fence, captured candidate system prompt, and
+text/read-result evidence. Typed context sections preserve every enabled working
+context item and user direction while replacing coordinator identity and tool
+workflows with contestant instructions and canon precedence. Candidate execution
+does not reread live Project Guidance or Book Brief. Captured user, assistant, and
+read-result material is quoted as evidence; tool calls and reasoning are omitted.
+Each candidate also receives the exact
 batch-source `agent-manuscript-v4` projection once, generated from the canonical
 manuscript stored on the batch. Canonical `OriginalManuscriptJson` remains the
 durable validation/audit source. Legacy context snapshots remain inert audit data

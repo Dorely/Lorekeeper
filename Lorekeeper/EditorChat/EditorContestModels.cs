@@ -24,7 +24,8 @@ public sealed record EditorContestStartRequest(
 
 public sealed record ContestTurnSnapshot(
     IReadOnlyList<ContestChatMessageSnapshot> Messages,
-    IReadOnlyList<EntityVisualContextReference> Visuals);
+    IReadOnlyList<EntityVisualContextReference> Visuals,
+    string SystemPrompt);
 
 public sealed record ContestChatMessageSnapshot(
     string Role,
@@ -41,7 +42,7 @@ public sealed record ContestContextEnvelope(
     EditorContestStartRequest Request,
     ContestTurnSnapshot Snapshot)
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 }
 
 public abstract record EditorContestRunUpdate;
