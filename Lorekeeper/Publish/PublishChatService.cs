@@ -451,7 +451,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     cancellationToken: cancellationToken));
                 continue;
             }
-            var replay = ChatModelHistory.Project(persisted.Role.ToString(), persisted.Content);
+            var replay = ChatModelHistory.Project(persisted.Role.ToString(), persisted.Content, persisted.ResponseMetadataJson, persistedProvider);
             if (replay is not null)
                 messages.Add(replay);
         }
@@ -472,6 +472,19 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     Status = PublishMessageStatus.Pending,
                 };
                 await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, activeAssistant, cancellationToken);
+
+                if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
+                {
+                    yield return new PublishContextTrimmed(compaction);
+                    if (compaction.LimitExceeded)
+                    {
+                        activeAssistant.Status = PublishMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new PublishTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                        yield break;
+                    }
+                }
 
                 ChatRoundCompleted? completedRound = null;
                 await foreach (var update in turnEngine.StreamRoundAsync(readyChat, messages, chatOptions, cancellationToken))
@@ -502,6 +515,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                             break;
                         case ChatRoundFailed failed:
                             activeAssistant.Content = failed.Text;
+                            activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                             if (!string.IsNullOrEmpty(failed.Reasoning))
                                 activeAssistant.Reasoning = failed.Reasoning;
                             activeAssistant.Status = failed.Cancelled
@@ -524,6 +538,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 }
 
                 activeAssistant.Reasoning = completedRound.Reasoning;
+                activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
                 if (completedRound.ToolCalls.Count == 0)
                 {
@@ -543,7 +558,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 await SafePersistAsync(activeAssistant);
                 messages.Add(new ChatMessage(
                     ChatRole.Assistant,
-                    ChatTurnEngine.BuildAssistantContents(completedRound.Text, completedRound.ToolCalls, completedRound.Reasoning)));
+                    ChatTurnEngine.BuildAssistantContents(completedRound.Text, completedRound.ToolCalls, completedRound.Reasoning, completedRound.Metadata)));
 
                 var resultContents = new List<AIContent>();
                 var roundTransientVisuals = new List<PublishAssistantTransientVisual>();
@@ -656,18 +671,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     }
                 }
 
-                if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
-                {
-                    yield return new PublishContextTrimmed(compaction);
-                    if (compaction.LimitExceeded)
-                    {
-                        activeAssistant.Status = PublishMessageStatus.Failed;
-                        activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                        await SafePersistAsync(activeAssistant);
-                        yield return new PublishTurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                        yield break;
-                    }
-                }
 
                 if (iteration == maxIterations - 1)
                 {

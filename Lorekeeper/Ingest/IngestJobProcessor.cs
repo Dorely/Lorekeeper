@@ -7,6 +7,7 @@ using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
@@ -18,7 +19,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestJobProcessor(
-IAppDatabaseOperationFactory database, ILlmProviderService providerService, IChatClientFactory chatClientFactory, ITokenCounter tokenCounter, IngestAgentTools tools, IEntityTypeService entityTypes, IIngestVectorIndexingService ingestVectorIndexing, IIngestGraphSync graphSync, IIngestJobNotifier notifier, IContextIndexingService contextIndexing, IOptions<AgentOptions> options, IOptions<EntityVisualContextOptions> visualOptions, IEntityVisualExampleService entityVisualExamples, IEntityVisualContextService entityVisualContext, ILogger<IngestJobProcessor> logger, IIngestService ingestService)
+IChatContextCompactionService contextCompaction, IAppDatabaseOperationFactory database, ILlmProviderService providerService, IChatClientFactory chatClientFactory, ITokenCounter tokenCounter, IngestAgentTools tools, IEntityTypeService entityTypes, IIngestVectorIndexingService ingestVectorIndexing, IIngestGraphSync graphSync, IIngestJobNotifier notifier, IContextIndexingService contextIndexing, IOptions<AgentOptions> options, IOptions<EntityVisualContextOptions> visualOptions, IEntityVisualExampleService entityVisualExamples, IEntityVisualContextService entityVisualContext, ILogger<IngestJobProcessor> logger, IIngestService ingestService)
 {
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
@@ -666,6 +667,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         CancellationToken cancellationToken)
     {
         var sourceChunk = jobChunk.SourceChunk;
+        var turnProvider = await ResolveJobProviderAsync(job, cancellationToken);
         var aiTools = tools.Build(context);
         var chatOptions = new ChatOptions
         {
@@ -724,6 +726,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
                 var assistantText = new StringBuilder();
                 var pendingCalls = new List<PendingChunkToolCall>();
                 var toolTracker = new StreamingToolCallTracker();
+                var response = new ChatResponseCapture();
                 tokenTracker.BeginAssistantTurn();
                 Exception? streamFailure = null;
 
@@ -748,6 +751,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
 
                         try
                         {
+                            if (enumerator.Current is { } current) response.Observe(current);
                             var contents = enumerator.Current?.Contents;
                             if (contents is null) continue;
 
@@ -810,10 +814,12 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
                     }
                 }
 
+                await RecordResponseAsync(job, assistantText.ToString(), response.Metadata, streamFailure);
+                response.ThrowIfIncomplete();
                 if (streamFailure is not null)
                     ExceptionDispatchInfo.Capture(streamFailure).Throw();
 
-                var assistantMessage = new ChatMessage(ChatRole.Assistant, BuildAssistantContents(assistantText.ToString(), pendingCalls));
+                var assistantMessage = new ChatMessage(ChatRole.Assistant, response.Attach(BuildAssistantContents(assistantText.ToString(), pendingCalls)));
                 messages.Add(assistantMessage);
                 tokenTracker.CommitAssistantMessage();
                 ObserveTokenCount();
@@ -855,6 +861,8 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
                 }
 
                 messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+                if (contextCompaction.TryCompact(messages, turnProvider.ModelId, turnProvider.EffectiveMaxInputTokens) is { LimitExceeded: true })
+                    throw new InvalidOperationException(ChatContextCompaction.LimitExceededMessage);
                 tokenTracker.CommitToolMessage();
                 ObserveTokenCount();
                 if (iteration == maxIterations - 1)
@@ -904,6 +912,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         int maxAttempts,
         CancellationToken cancellationToken)
     {
+        var turnProvider = await ResolveJobProviderAsync(job, cancellationToken);
         var liveSourceChunkId = context.EntityId;
         const int liveSourceChunkIndex = -1;
         var liveTitle = $"Final review: {context.EntityName}";
@@ -937,6 +946,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
             var assistantText = new StringBuilder();
             var pendingCalls = new List<PendingChunkToolCall>();
             var toolTracker = new StreamingToolCallTracker();
+            var response = new ChatResponseCapture();
             Exception? streamFailure = null;
 
             var enumerator = chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken)
@@ -960,6 +970,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
 
                     try
                     {
+                        if (enumerator.Current is { } current) response.Observe(current);
                         var contents = enumerator.Current?.Contents;
                         if (contents is null) continue;
 
@@ -1014,10 +1025,12 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
                 }
             }
 
+            await RecordResponseAsync(job, assistantText.ToString(), response.Metadata, streamFailure);
+            response.ThrowIfIncomplete();
             if (streamFailure is not null)
                 ExceptionDispatchInfo.Capture(streamFailure).Throw();
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantContents(assistantText.ToString(), pendingCalls)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, response.Attach(BuildAssistantContents(assistantText.ToString(), pendingCalls))));
             if (pendingCalls.Count == 0)
             {
                 finalText = assistantText.ToString();
@@ -1052,6 +1065,8 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+            if (contextCompaction.TryCompact(messages, turnProvider.ModelId, turnProvider.EffectiveMaxInputTokens) is { LimitExceeded: true })
+                throw new InvalidOperationException(ChatContextCompaction.LimitExceededMessage);
             if (iteration == maxIterations - 1)
                 throw new InvalidOperationException($"Final ingest review for entity {context.EntityName} hit configured cap of {maxIterations} iterations without producing a final response.");
         }
@@ -2028,6 +2043,19 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         }
     }
 
+    private async Task RecordResponseAsync(IngestJob job, string text, ChatResponseMetadata metadata, Exception? failure)
+    {
+        metadata.Incomplete = failure is not null || metadata.FailureMessage is not null;
+        await AddEventAsync(new IngestJobEvent
+        {
+            JobId = job.Id,
+            EventType = "llm.response",
+            Level = metadata.OutputLimitReached || failure is not null ? IngestJobEventLevel.Warning : IngestJobEventLevel.Debug,
+            Message = metadata.OutputLimitReached ? ChatResponseMetadata.OutputLimitMessage : "Model round response retained.",
+            PayloadJson = JsonSerializer.Serialize(new { text, metadata, error = failure?.Message }),
+        }, CancellationToken.None);
+    }
+
     private static List<AIContent> BuildAssistantContents(string text, IReadOnlyList<PendingChunkToolCall> calls)
     {
         if (calls.Count == 0) return BuildTextOnlyAssistantContents(text);
@@ -2182,29 +2210,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
 
         private static void AppendMessage(StringBuilder sb, ChatMessage message)
         {
-            sb.Append(message.Role).AppendLine(":");
-            foreach (var content in message.Contents)
-                AppendContent(sb, content);
-        }
-
-        private static void AppendContent(StringBuilder sb, AIContent content)
-        {
-            switch (content)
-            {
-                case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
-                    sb.AppendLine(textContent.Text);
-                    break;
-                case FunctionCallContent functionCall:
-                    AppendToolCall(
-                        sb,
-                        functionCall.CallId ?? string.Empty,
-                        functionCall.Name,
-                        functionCall.Arguments is null ? "{}" : ToolCallArguments.Serialize(functionCall.Arguments));
-                    break;
-                case FunctionResultContent functionResult:
-                    AppendToolResult(sb, functionResult.CallId ?? string.Empty, functionResult.Result?.ToString() ?? string.Empty);
-                    break;
-            }
+            sb.Append(ChatModelHistory.FormatForTokenCount([message]));
         }
 
         private static void AppendToolCall(StringBuilder sb, string callId, string name, string argumentsJson)

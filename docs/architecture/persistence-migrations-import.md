@@ -37,6 +37,18 @@ without requiring a schema migration. Older bare
 context snapshots remain valid historical audit payloads; unresolved legacy rows
 are never reinterpreted as new prose-runner input after restart.
 
+The forward `PreserveChatResponseProtocol` migration adds nullable
+`ResponseMetadataJson` to all six conversational message families, revision-worker
+messages, and contest candidates. Version 1 stores reasoning protocol separately
+from display text, plus connection ID, model ID, a SHA-256 endpoint fingerprint,
+finish reason, incomplete status, and usage. It stores no credentials or raw
+endpoint URL. Existing rows remain null; legacy/foreign-model prose is quoted
+history, and protocol is restored only to the originating connection/model.
+Ingest rounds retain equivalent response data and partial prose in existing job
+event payloads. These operational records remain outside canonical version history
+and portable project creative-state exports. Migration coverage verifies old
+transcripts and exact opaque metadata storage.
+
 ## Scope and ownership
 
 `AppDbContext` owns the EF model and relationships for projects, Book Briefs,

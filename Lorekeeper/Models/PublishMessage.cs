@@ -10,6 +10,9 @@ public class PublishMessage
     public int Order { get; set; }
     public PublishMessageRole Role { get; set; }
     public string Content { get; set; } = string.Empty;
+    /// <summary>Versioned provider protocol, provenance, finish reason, and usage. Not display text.</summary>
+    public string? ResponseMetadataJson { get; set; }
+
     public string ToolCallsJson { get; set; } = "[]";
     public string Reasoning { get; set; } = string.Empty;
     public string? ToolCallId { get; set; }

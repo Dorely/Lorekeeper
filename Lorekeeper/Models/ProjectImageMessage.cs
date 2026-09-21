@@ -13,9 +13,12 @@ public class ProjectImageMessage
 
     public string Content { get; set; } = string.Empty;
 
+    /// <summary>Versioned provider protocol, provenance, finish reason, and usage. Not display text.</summary>
+    public string? ResponseMetadataJson { get; set; }
+
     public string ToolCallsJson { get; set; } = "[]";
 
-    /// <summary>Model reasoning streamed alongside this assistant row. Echoed back within the turn; dropped from cross-turn replay.</summary>
+    /// <summary>Displayed reasoning. Provider protocol is stored separately in ResponseMetadataJson.</summary>
     public string Reasoning { get; set; } = string.Empty;
 
 

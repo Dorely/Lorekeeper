@@ -142,7 +142,8 @@ Unset output limits and reasoning effort are omitted for all OpenAI-compatible
 connections; no sampling settings are added automatically. Presets leave output
 limits blank. Saved numeric limits and reasoning choices remain explicit overrides;
 clearing them restores provider defaults. Codex retains its catalog reasoning
-defaults. Readiness probes use the configured client, including explicit overrides.
+defaults. Readiness probes use the configured client, including explicit overrides,
+and reject empty or output-truncated answers.
 OpenAI-compatible chat requests share a pooled transport with
 `Agents:ChatRequestTimeoutSeconds` (600 seconds by default). Codex requests use
 the configured Codex timeout.
@@ -161,6 +162,19 @@ payloads pass through. These handlers compose, so supporting one compatibility
 quirk cannot silently disable the other. The raw-HTTP vision probe follows the
 same envelope policy. Unknown streamed OpenAI-compatible tool-call extensions are
 preserved and restored on the correlated assistant/tool-result request.
+
+OpenAI-compatible chat uses `OpenAIChatProtocolClient`, the single adapter for
+response protocol preservation. It captures buffered and fragmented streamed
+`reasoning_content`, `reasoning`, and `reasoning_details` from the raw SDK response,
+retains structured fields and opaque signatures, derives one display representation,
+and reconstructs correlated native assistant messages with reasoning and tool-call
+extensions. `ChatResponseMetadata` owns versioned provenance, finish reasons, and
+usage; raw endpoint URLs and credentials are never stored in this metadata.
+See [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/)
+and [OpenRouter reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
+for the external field contracts. Codex also exposes terminal finish reasons and
+usage to the shared round engine. Gateway integration still requires a live,
+user-authorized check; build and static validation do not establish interoperability.
 
 ### OAuth and credential security
 

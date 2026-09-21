@@ -1,6 +1,10 @@
 using System.Text;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Tokens;
+using Lorekeeper.Models;
+using Lorekeeper.Llm;
+using Microsoft.Extensions.AI;
+using System.Text.Json;
 
 namespace Lorekeeper.Components.Chat;
 
@@ -10,7 +14,8 @@ public sealed record ChatTranscriptTokenMessage(
     string ToolCallsJson = "[]",
     string? ToolCallId = null,
     string? ToolName = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    string? ProtocolReasoning = null);
 
 public readonly record struct ChatTranscriptTokenCount(int TokenCount, bool IsExact, bool IsSettled)
 {
@@ -48,14 +53,20 @@ public static class ChatTranscriptTokenCounter
     public static IEnumerable<ChatTranscriptTokenMessage> ModelReplayMessages<TMessage>(
         IEnumerable<TMessage> messages,
         Func<TMessage, string> role,
-        Func<TMessage, string> content)
+        Func<TMessage, string> content,
+        Func<TMessage, string?>? metadata = null,
+        LlmProvider? provider = null)
     {
         foreach (var message in messages)
         {
             var projectedRole = role(message);
             var projectedContent = content(message);
-            if (ChatModelHistory.IsReplayedText(projectedRole, projectedContent))
-                yield return new ChatTranscriptTokenMessage(projectedRole, projectedContent);
+            var replay = ChatModelHistory.Project(projectedRole, projectedContent, metadata?.Invoke(message), provider);
+            if (replay is not null)
+                yield return new ChatTranscriptTokenMessage(replay.Role.ToString(),
+                    string.Concat(replay.Contents.OfType<TextContent>().Select(text => text.Text)),
+                    ProtocolReasoning: replay.Contents.OfType<ChatProtocolContent>().FirstOrDefault() is { } protocol
+                        ? JsonSerializer.Serialize(protocol.Snapshot().ReasoningFields) : null);
         }
     }
 
@@ -94,6 +105,8 @@ public static class ChatTranscriptTokenCounter
         sb.Append(message.Role).AppendLine(":");
         if (!string.IsNullOrEmpty(message.Content))
             sb.AppendLine(message.Content);
+        if (!string.IsNullOrEmpty(message.ProtocolReasoning))
+            sb.AppendLine(message.ProtocolReasoning);
         if (!string.IsNullOrWhiteSpace(message.ToolCallsJson) && message.ToolCallsJson != "[]")
         {
             sb.AppendLine("Tool calls:");

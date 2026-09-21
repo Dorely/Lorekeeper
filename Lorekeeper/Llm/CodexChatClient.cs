@@ -308,7 +308,34 @@ public sealed class CodexChatClient : IChatClient
                     }
                     break;
 
-                case "response.completed" or "response.done":
+                case "response.completed" or "response.done" or "response.incomplete":
+                    var terminal = new ChatResponseUpdate { Role = ChatRole.Assistant };
+                    var terminalResponse = evt.TryGetProperty("response", out var nestedResponse) ? nestedResponse : evt;
+                    var incomplete = terminalResponse.TryGetProperty("status", out var terminalStatus)
+                        && terminalStatus.GetString() == "incomplete";
+                    var incompleteReason = terminalResponse.TryGetProperty("incomplete_details", out var incompleteDetails)
+                        && incompleteDetails.ValueKind == JsonValueKind.Object
+                        && incompleteDetails.TryGetProperty("reason", out var reason) ? reason.GetString() : null;
+                    terminal.FinishReason = incompleteReason == "max_output_tokens"
+                        ? ChatFinishReason.Length
+                        : incomplete ? new ChatFinishReason(incompleteReason ?? "incomplete")
+                        : functionCallCount > 0 ? ChatFinishReason.ToolCalls : ChatFinishReason.Stop;
+                    if (terminalResponse.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+                    {
+                        var details = new UsageDetails
+                        {
+                            InputTokenCount = usage.TryGetProperty("input_tokens", out var input) ? input.GetInt64() : null,
+                            OutputTokenCount = usage.TryGetProperty("output_tokens", out var output) ? output.GetInt64() : null,
+                            TotalTokenCount = usage.TryGetProperty("total_tokens", out var total) ? total.GetInt64() : null,
+                        };
+                        if (usage.TryGetProperty("output_tokens_details", out var outputDetails)
+                            && outputDetails.ValueKind == JsonValueKind.Object
+                            && outputDetails.TryGetProperty("reasoning_tokens", out var reasoningTokens)
+                            && reasoningTokens.ValueKind == JsonValueKind.Number)
+                            details.ReasoningTokenCount = reasoningTokens.GetInt64();
+                        terminal.Contents.Add(new UsageContent(details));
+                    }
+                    yield return terminal;
                     _logger.LogDebug(
                         "Codex streaming response completed after {EventCount} SSE events. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
                         eventCount,

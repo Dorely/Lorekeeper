@@ -457,7 +457,9 @@
             ChatTranscriptTokenCounter.ModelReplayMessages(
                 _messages,
                 message => message.Role.ToString(),
-                message => message.Content),
+                message => message.Content,
+                message => message.ResponseMetadataJson,
+                _chatSelection?.Provider),
             message => message,
             _live,
             _pendingUserText,

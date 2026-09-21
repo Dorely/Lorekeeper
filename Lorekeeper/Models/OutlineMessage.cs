@@ -22,10 +22,13 @@ public class OutlineMessage
     /// <summary>Plain-text content. For an assistant row this is the streamed text; for a user row, the user's input; for a tool row, the JSON-serialized tool result (or the error string).</summary>
     public string Content { get; set; } = string.Empty;
 
+    /// <summary>Versioned provider protocol, provenance, finish reason, and usage. Not display text.</summary>
+    public string? ResponseMetadataJson { get; set; }
+
     /// <summary>JSON array of <c>{ callId, name, argumentsJson }</c> for assistant rows that emitted tool calls. Empty array otherwise.</summary>
     public string ToolCallsJson { get; set; } = "[]";
 
-    /// <summary>Model reasoning streamed alongside this assistant row. Echoed back within the turn; dropped from cross-turn replay.</summary>
+    /// <summary>Displayed reasoning. Provider protocol is stored separately in ResponseMetadataJson.</summary>
     public string Reasoning { get; set; } = string.Empty;
 
     /// <summary>Set on <see cref="OutlineMessageRole.Tool"/> rows; matches the assistant's emitted call id.</summary>

@@ -1038,35 +1038,48 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         CancellationToken cancellationToken)
     {
         var responseText = new StringBuilder();
+        var responseCapture = new ChatResponseCapture();
         var pendingProgress = new StringBuilder();
         var lastProgressFlush = Stopwatch.StartNew();
 
-        await foreach (var update in chat.GetStreamingResponseAsync(
-            messages,
-            new ChatOptions
-            {
-                ToolMode = ChatToolMode.None,
-            },
-            cancellationToken))
+        try
         {
-            foreach (var content in update.Contents)
-            {
-                if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+            await foreach (var update in chat.GetStreamingResponseAsync(
+                messages,
+                new ChatOptions
                 {
-                    responseText.Append(textContent.Text);
-                    pendingProgress.Append(textContent.Text);
-                    if (pendingProgress.Length >= 128 || lastProgressFlush.ElapsedMilliseconds >= 150)
+                    ToolMode = ChatToolMode.None,
+                },
+                cancellationToken))
+            {
+                responseCapture.Observe(update);
+                foreach (var content in update.Contents)
+                {
+                    if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
                     {
-                        progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
-                        pendingProgress.Clear();
-                        lastProgressFlush.Restart();
+                        responseText.Append(textContent.Text);
+                        pendingProgress.Append(textContent.Text);
+                        if (pendingProgress.Length >= 128 || lastProgressFlush.ElapsedMilliseconds >= 150)
+                        {
+                            progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
+                            pendingProgress.Clear();
+                            lastProgressFlush.Restart();
+                        }
                     }
                 }
             }
+
+        }
+        finally
+        {
+            candidate.ResponseMetadataJson = responseCapture.Metadata.Serialize();
+            candidate.RawResponse = responseText.ToString();
+            if (pendingProgress.Length > 0)
+                progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
         }
 
-        if (pendingProgress.Length > 0)
-            progressWriter.TryWrite(new ContestCandidateRawProgress(candidate.Id, pendingProgress.ToString()));
+        if (responseCapture.Metadata.FailureMessage is { } failure)
+            throw new ContestCandidateInvalidException(failure, responseText.ToString());
 
         var response = responseText.ToString().Trim();
         if (response.Length > MaximumContestCandidateResponseLength)

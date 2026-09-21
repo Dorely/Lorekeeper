@@ -374,7 +374,7 @@ they commit to a direction, act on it without a second confirmation.
                 messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
                 continue;
             }
-            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content, persistedMessage.ResponseMetadataJson, persistedProvider);
             if (replay is not null) messages.Add(replay);
         }
 
@@ -393,6 +393,19 @@ they commit to a direction, act on it without a second confirmation.
                 Status = OutlineMessageStatus.Pending,
             };
             await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, activeAssistant, cancellationToken);
+
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
+            {
+                yield return new ContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
+                {
+                    activeAssistant.Status = OutlineMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new TurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
+            }
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -416,6 +429,7 @@ they commit to a direction, act on it without a second confirmation.
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
@@ -441,6 +455,7 @@ they commit to a direction, act on it without a second confirmation.
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
             activeAssistant.Reasoning = completedRound.Reasoning;
+            activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
             // No tool calls -> final turn.
             if (pendingCalls.Count == 0)
@@ -463,7 +478,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Append to in-memory message list as a single assistant message with tool calls,
             // matching what the model emitted (text + FunctionCallContent[]).
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -537,18 +552,6 @@ they commit to a direction, act on it without a second confirmation.
                 }
             }
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
-            {
-                yield return new ContextTrimmed(compaction);
-                if (compaction.LimitExceeded)
-                {
-                    activeAssistant.Status = OutlineMessageStatus.Failed;
-                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                    await SafePersistAsync(activeAssistant);
-                    yield return new TurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                    yield break;
-                }
-            }
 
             if (iteration == maxIterations - 1)
             {

@@ -40,6 +40,8 @@ public class ContestCandidate
     public string DraftPlainText =>
         ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(EffectiveDraftManuscriptJson));
 
+    public string? ResponseMetadataJson { get; set; }
+
     public string RawResponse { get; set; } = string.Empty;
 
     public string ReviewStateJson { get; set; } = "{}";

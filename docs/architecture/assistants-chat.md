@@ -49,22 +49,27 @@ message, stream assistant text, reasoning, and function-call argument deltas,
 invoke the registered application tools, return correlated results, persist the
 completed visible transcript, and emit typed updates. Tool rounds retain the
 provider's `FunctionCallContent` only until its correlated tool result has been
-submitted. OpenAI-compatible clients must also preserve unknown immediate-round
-tool-call metadata such as Gemini thought signatures. Cross-turn replay is
-intentionally text-only: non-empty system, user, and assistant prose is retained;
-tool calls, tool results, reasoning, and model-only visual attachments are not
-replayed.
+submitted and in subsequent tool rounds. OpenAI-compatible clients preserve tool-call
+extensions such as Gemini thought signatures alongside complete supported reasoning
+protocol. Cross-turn replay retains conversational prose and same-connection/model
+assistant reasoning metadata; historical tool calls, tool results, and model-only
+visual attachments are never replayed. Legacy or foreign-model assistant prose is
+labeled quoted history, without inventing missing reasoning.
 
 Reasoning deltas (`TextReasoningContent`) stream into a collapsed-by-default,
 expandable transcript section per assistant message and are persisted on the
-message row. Within a turn, completed-round reasoning is echoed back to the
-provider in the next round's assistant message; transports without a reasoning
-field drop it harmlessly. A round that ends with no visible text and no tool
+message row. Display text is separate from versioned protocol metadata: flat
+reasoning fields and structured details, signatures, and opaque values survive
+assistant reconstruction and are restored only to their originating connection,
+endpoint fingerprint, and model. A round that ends with no visible text and no tool
 calls fails visibly ("empty response" or "reasoning without an answer") instead
 of persisting a silently empty completed message; failed rounds keep any
-reasoning they received.
+reasoning they received. Finish reasons and usage are preserved. Output-budget
+exhaustion explicitly fails the round, retains partial output, and prevents pending
+tools from running. Contest candidates likewise remain incomplete on truncation.
+No truncation retry or reasoning-disable fallback is introduced.
 
-Because protocol metadata disappears on later turns, assistant prose is the
+Because historical tool records are omitted on later turns, assistant prose is the
 durable work log. A tool-using assistant narrates meaningful phases and closes
 with a self-contained account of completed work, decisions,
 verification, diagnostics, and remaining actions. That prose supports historical
@@ -104,7 +109,7 @@ library metadata and, when the selected provider is vision-ready, the full
 image bytes. That same snapshot is available to the Images tool context:
 `list_project_images` excludes its IDs and `read_project_image` short-circuits
 them without another repository read or another visual delivery. Because
-cross-turn replay remains text-only and providers do not retain Lorekeeper's
+cross-turn replay omits images and providers do not retain Lorekeeper's
 binary context, a later turn must resolve and resubmit its persistent attachment
 bytes once; this is distinct from redundant tool-driven rereads within a turn.
 
@@ -143,9 +148,12 @@ the exact structural tombstone marker and payload. The original
 `FunctionCallContent`, call ID, name, arguments, result row, and audit rendering
 remain intact; only the active in-memory result payload is replaced. Each
 replacement is recounted, so newer results are preserved when an older result is
-sufficient. Reasoning and marked tool-derived visual messages are removed only
-after every result in that tool round is tombstoned. Reasoning is included in
-server token accounting, and repeated compaction is idempotent.
+sufficient. Marked tool-derived visual messages and display-only reasoning may be
+removed after every result in that tool round is tombstoned. Required protocol
+reasoning stays with retained assistant/tool messages, even when all results are
+tombstoned. Protocol reasoning (including opaque values) is counted without counting
+its display text twice; repeated compaction is idempotent. The budget is checked
+before each request, including the first request with replayed history.
 
 Each turn emits the shared trim state (original/final token counts, token limit,
 newly tombstoned call IDs, completed-round call IDs whose transient context was
@@ -157,8 +165,10 @@ current assistant row is persisted as failed, an actionable reset or
 larger-context-model error is emitted, and no further provider request is made.
 There is no summarization call, full-prune fallback, runtime warning, or new
 synthetic `Chat Compacted` row/chip. Historical compaction rows remain inert and
-renderable. Background ingest, contests, revision workers, image jobs, and
-publication workers do not use interactive chat compaction.
+renderable. Revision workers and both ingest loops use the same compaction policy;
+contests, image jobs, and publication workers do not use interactive chat compaction.
+Transcript token previews include compatible persisted protocol; live previews
+estimate display text until complete protocol is available.
 
 ### Prompts, context, and tool boundaries
 
@@ -567,11 +577,13 @@ model selection and fails closed if it is unavailable or its captured model has
 changed; it never falls back to the global default. Job setup disposes its write
 operation before launching parallel scoped workers, and finalization reloads
 the job in a separate tracked write operation so no worker shares an ambient
-database context or duplicates its tracked job graph. A worker that returns no
-tool call receives one corrective retry with its prior response and an explicit
-terminal-apply instruction; it may still perform needed read/search grounding.
-If its second response also omits tools, the session is Invalid with distinct
-empty-output or text-only detail. A partially successful job remains Completed
+database context or duplicates its tracked job graph. A worker that returns
+completed prose without a tool call receives its existing single corrective retry,
+with the original reasoning protocol and an explicit terminal-apply instruction;
+it may still perform needed read/search grounding. If its second response also
+omits tools, the session is Invalid. Empty, reasoning-only, transport-failed,
+cancelled, and output-truncated rounds fail through the shared engine before
+tools or corrective retries, retaining the partial response. A partially successful job remains Completed
 when valid edits succeeded, but returns an error summary for every incomplete
 session alongside the full session details. Completed worker mutations are
 reviewed as part of the Git HEAD-to-live comparison rather than adopted through
@@ -632,7 +644,7 @@ assistant evidence link never silently creates a manuscript citation.
 
 | File or family | Architectural role |
 |---|---|
-| [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, text-only replay, compaction, message-store boundary, and image attachments. |
+| [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, provenance-bound replay, compaction, message-store boundary, and image attachments. |
 | [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, tool chips, and composer behavior. |
 | [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
@@ -676,7 +688,7 @@ assistant evidence link never silently creates a manuscript citation.
   unavailable explicit selection fails closed without erasing the transcript.
 - Exercise token accounting and result tombstoning at complete tool-batch
   boundaries; confirm reasoning is counted, oldest results trim first, pairing
-  and audit rows remain intact, replay stays text-only, and exhausted eligible
+  and audit rows remain intact, replay omits historical tools, and exhausted eligible
   results fail closed before another provider request.
 - For tool changes, inspect schemas, prompt guidance, result shapes, mutation
   notices, owning-service revision checks, persistence, UI refresh consumers, and the

@@ -351,7 +351,7 @@ public sealed class ResearchService(
                 messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
                 continue;
             }
-            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content, persistedMessage.ResponseMetadataJson, chatProvider);
             if (replay is not null) messages.Add(replay);
         }
 
@@ -367,6 +367,19 @@ public sealed class ResearchService(
                 Status = ResearchMessageStatus.Pending,
             };
             await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, activeAssistant, cancellationToken);
+
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
+            {
+                yield return new ResearchContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
+                {
+                    activeAssistant.Status = ResearchMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
+            }
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -390,6 +403,7 @@ public sealed class ResearchService(
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
@@ -415,6 +429,7 @@ public sealed class ResearchService(
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
             activeAssistant.Reasoning = completedRound.Reasoning;
+            activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
             if (pendingCalls.Count == 0)
             {
@@ -432,7 +447,7 @@ public sealed class ResearchService(
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
             activeAssistant.Status = ResearchMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -520,18 +535,6 @@ public sealed class ResearchService(
                 }
             }
 
-            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
-            {
-                yield return new ResearchContextTrimmed(compaction);
-                if (compaction.LimitExceeded)
-                {
-                    activeAssistant.Status = ResearchMessageStatus.Failed;
-                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                    await SafePersistAsync(activeAssistant);
-                    yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                    yield break;
-                }
-            }
 
             if (iteration == maxIterations - 1)
             {

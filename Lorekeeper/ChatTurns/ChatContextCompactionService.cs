@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Lorekeeper.Tokens;
+using Lorekeeper.Llm;
 
 namespace Lorekeeper.ChatTurns;
 
@@ -185,15 +186,17 @@ internal sealed class ChatContextCompactionService(
 
     private static bool DropCompletedRoundContext(IList<ChatMessage> messages, ToolRound round)
     {
-        var removedReasoning = round.AssistantMessage.Contents.Any(content => content is TextReasoningContent);
+        var retainReasoning = round.AssistantMessage.Contents.OfType<ChatProtocolContent>()
+            .Any(protocol => protocol.Snapshot().ReasoningFields.Count > 0);
+        var removedReasoning = !retainReasoning && round.AssistantMessage.Contents.Any(content => content is TextReasoningContent);
         round.AssistantMessage.Contents = round.AssistantMessage.Contents
-            .Where(content => content is not TextReasoningContent)
+            .Where(content => retainReasoning || content is not TextReasoningContent)
             .ToList();
 
-        var removedVisual = false;
         foreach (var visual in round.FollowingToolContextMessages)
-            removedVisual |= messages.Remove(visual);
+            messages.Remove(visual);
 
-        return removedReasoning || removedVisual;
+        // The UI uses these IDs specifically to stop counting displayed reasoning.
+        return removedReasoning;
     }
 }

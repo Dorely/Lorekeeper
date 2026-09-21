@@ -386,7 +386,7 @@ public sealed class ImagesChatService(
 
             var modelMessage = ChatModelHistory.Project(
                 persistedMessage.Role.ToString(),
-                persistedMessage.Content);
+                persistedMessage.Content, persistedMessage.ResponseMetadataJson, chatProvider);
             if (modelMessage is not null)
                 messages.Add(modelMessage);
         }
@@ -403,6 +403,19 @@ public sealed class ImagesChatService(
                 Status = ProjectImageMessageStatus.Pending,
             };
             await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, activeAssistant, cancellationToken);
+
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
+            {
+                yield return new ImagesChatContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
+                {
+                    activeAssistant.Status = ProjectImageMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new ImagesChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
+            }
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -426,6 +439,7 @@ public sealed class ImagesChatService(
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
@@ -451,6 +465,7 @@ public sealed class ImagesChatService(
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
             activeAssistant.Reasoning = completedRound.Reasoning;
+            activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
             if (pendingCalls.Count == 0)
             {
@@ -471,7 +486,7 @@ public sealed class ImagesChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<ProjectImageView>();
@@ -537,18 +552,6 @@ public sealed class ImagesChatService(
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
                     await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound, modelOnlyImagePayloadsForNextRound)));
 
-            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
-            {
-                yield return new ImagesChatContextTrimmed(compaction);
-                if (compaction.LimitExceeded)
-                {
-                    activeAssistant.Status = ProjectImageMessageStatus.Failed;
-                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                    await SafePersistAsync(activeAssistant);
-                    yield return new ImagesChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                    yield break;
-                }
-            }
 
             if (iteration == maxIterations - 1)
             {

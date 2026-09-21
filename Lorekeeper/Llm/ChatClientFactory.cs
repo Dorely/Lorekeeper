@@ -119,8 +119,8 @@ public class ChatClientFactory(
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(access.ApiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
-        IChatClient chatClient = new OpenAIChatToolMetadataClient(
-            client.GetChatClient(provider.ModelId).AsIChatClient());
+        IChatClient chatClient = new OpenAIChatProtocolClient(
+            client.GetChatClient(provider.ModelId).AsIChatClient(), provider);
 
         var pipeline = chatClient.AsBuilder();
         if (provider.MaxOutputTokens is > 0 and var budget)
@@ -139,7 +139,11 @@ public class ChatClientFactory(
         {
             // Exercise the configured client, including explicit user overrides.
             // Unset generation settings remain provider-owned defaults.
-            await chatClient.GetResponseAsync("Reply with exactly: ok", cancellationToken: cancellationToken);
+            var response = await chatClient.GetResponseAsync("Reply with exactly: ok", cancellationToken: cancellationToken);
+            if (response.FinishReason == Microsoft.Extensions.AI.ChatFinishReason.Length)
+                throw new InvalidOperationException(ChatResponseMetadata.OutputLimitMessage);
+            if (string.IsNullOrWhiteSpace(response.Text))
+                throw new InvalidOperationException("The model returned no visible answer to the readiness probe.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

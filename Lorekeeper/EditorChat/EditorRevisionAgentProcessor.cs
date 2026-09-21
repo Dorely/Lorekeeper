@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
@@ -19,7 +20,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorRevisionAgentProcessor(
-    IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IContextBuilder contextBuilder, IEntityVisualContextService entityVisualContext, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectSearchService projectSearch, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes, IEntityRelationContextService entityRelations, IEntityVisualExampleService entityVisualExamples, IOptions<EditorChatOptions> options, IEditorRevisionJobNotifier notifier, IEditorContestMutationGuard contestGuard, ILogger<EditorRevisionAgentProcessor> logger)
+    ChatTurnEngine turnEngine, IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IContextBuilder contextBuilder, IEntityVisualContextService entityVisualContext, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectSearchService projectSearch, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes, IEntityRelationContextService entityRelations, IEntityVisualExampleService entityVisualExamples, IOptions<EditorChatOptions> options, IEditorRevisionJobNotifier notifier, IEditorContestMutationGuard contestGuard, ILogger<EditorRevisionAgentProcessor> logger)
 {
     private static EditorContentTarget JobTarget(EditorRevisionJob job) => EditorContentTarget.From(
         Enum.TryParse<EditorContentTargetKind>(job.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
@@ -154,34 +155,25 @@ public sealed class EditorRevisionAgentProcessor(
                 };
                 await AddMessageAsync(assistant, cancellationToken);
 
-                var textBuilder = new StringBuilder();
-                var pendingCalls = new List<PendingToolCall>();
-                var toolTracker = new StreamingToolCallTracker();
-                await foreach (var update in chat.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+                ChatRoundCompleted? completed = null;
+                await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
                 {
-                    foreach (var content in update.Contents)
+                    if (update is ChatRoundCompleted round) completed = round;
+                    if (update is ChatRoundFailed failed)
                     {
-                        if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                        {
-                            textBuilder.Append(textContent.Text);
-                            continue;
-                        }
-
-                        foreach (var toolUpdate in toolTracker.Process(content, textBuilder.Length))
-                        {
-                            if (toolUpdate is StreamingToolCallReadyUpdate ready)
-                            {
-                                pendingCalls.Add(new PendingToolCall(
-                                    ready.Content,
-                                    ready.CallId,
-                                    ready.ToolName,
-                                    ready.ArgumentsJson,
-                                    ready.TextOffset));
-                            }
-                        }
+                        assistant.Content = failed.Text;
+                        assistant.ResponseMetadataJson = failed.Metadata?.Serialize();
+                        assistant.Status = failed.Cancelled ? EditorRevisionMessageStatus.Cancelled : EditorRevisionMessageStatus.Failed;
+                        assistant.ErrorMessage = failed.Message;
+                        await SaveMessageAsync(assistant, CancellationToken.None);
+                        if (failed.Cancelled) throw new OperationCanceledException(cancellationToken);
+                        throw new InvalidOperationException(failed.Message);
                     }
                 }
-
+                if (completed is null) throw new InvalidOperationException("Revision worker ended without a completed round.");
+                var textBuilder = new StringBuilder(completed.Text);
+                var pendingCalls = completed.ToolCalls;
+                assistant.ResponseMetadataJson = completed.Metadata.Serialize();
                 assistant.Content = textBuilder.ToString();
                 assistant.ToolCallsJson = JsonSerializer.Serialize(
                     pendingCalls.Select(call => new PersistedToolCall(call.CallId, call.Name, call.ArgumentsJson, call.TextOffset)),
@@ -197,7 +189,7 @@ public sealed class EditorRevisionAgentProcessor(
                     {
                         correctiveRetryUsed = true;
                         correctiveRetryPending = true;
-                        var correctivePrompt = BuildNoToolCallCorrection(response);
+                        var correctivePrompt = NoToolCallCorrection;
                         await AddMessageAsync(new EditorRevisionMessage
                         {
                             SessionId = session.Id,
@@ -207,22 +199,20 @@ public sealed class EditorRevisionAgentProcessor(
                             Status = EditorRevisionMessageStatus.Completed,
                         }, cancellationToken);
                         if (!string.IsNullOrWhiteSpace(response))
-                            messages.Add(new ChatMessage(ChatRole.Assistant, response));
+                            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(response, pendingCalls, completed.Reasoning, completed.Metadata)));
                         messages.Add(new ChatMessage(ChatRole.User, correctivePrompt));
                         NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
                         continue;
                     }
 
-                    var failure = string.IsNullOrWhiteSpace(response)
-                        ? "Worker returned no output and did not edit the assigned chapter after one corrective retry."
-                        : "Worker returned text but did not call the required manuscript tool after one corrective retry.";
+                    const string failure = "Worker returned text but did not call the required manuscript tool after one corrective retry.";
                     MarkInvalid(session, failure, response, stopwatch);
                     await SaveSessionAsync(session, cancellationToken);
                     NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                     return;
                 }
 
-                messages.Add(new ChatMessage(ChatRole.Assistant, BuildAssistantToolCallContents(pendingCalls)));
+                messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(completed.Text, pendingCalls, completed.Reasoning, completed.Metadata)));
                 var resultContents = new List<AIContent>();
                 foreach (var pendingCall in pendingCalls)
                 {
@@ -274,6 +264,8 @@ public sealed class EditorRevisionAgentProcessor(
                 }
 
                 messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+                if (turnEngine.TryCompactContext(messages, provider.ModelId, provider.EffectiveMaxInputTokens) is { LimitExceeded: true })
+                    throw new InvalidOperationException(ChatContextCompaction.LimitExceededMessage);
             }
 
             MarkInvalid(session, $"Worker exceeded {maxIterations} tool iterations without editing the assigned chapter.", string.Empty, stopwatch);
@@ -481,10 +473,8 @@ public sealed class EditorRevisionAgentProcessor(
         return sb.ToString().TrimEnd();
     }
 
-    private static string BuildNoToolCallCorrection(string response) =>
-        string.IsNullOrWhiteSpace(response)
-            ? "Your previous response was empty, so no edit was made. Continue the assigned revision now. You may use read/search tools if grounding is still needed; then call apply_assigned_manuscript_operations exactly once as the terminal tool call. Do not provide another text-only response."
-            : "Your previous response contained text but no tool call, so no edit was made. Continue the assigned revision now. You may use read/search tools if grounding is still needed; then call apply_assigned_manuscript_operations exactly once as the terminal tool call. Do not provide another text-only response.";
+    private const string NoToolCallCorrection =
+        "Your previous response contained text but no tool call, so no edit was made. Continue the assigned revision now. You may use read/search tools if grounding is still needed; then call apply_assigned_manuscript_operations exactly once as the terminal tool call. Do not provide another text-only response.";
 
     private async Task<string> ReadParentEditorHistoryAsync(Guid conversationId, int? pageNumber)
     {
@@ -1193,16 +1183,6 @@ public sealed class EditorRevisionAgentProcessor(
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
-
-    private static List<AIContent> BuildAssistantToolCallContents(IReadOnlyList<PendingToolCall> calls) =>
-        calls.Select(call => (AIContent)call.Content).ToList();
-
-    private sealed record PendingToolCall(
-        FunctionCallContent Content,
-        string CallId,
-        string Name,
-        string ArgumentsJson,
-        int TextOffset);
 
     private sealed record PersistedToolCall(string CallId, string Name, string ArgumentsJson, int? TextOffset = null);
 

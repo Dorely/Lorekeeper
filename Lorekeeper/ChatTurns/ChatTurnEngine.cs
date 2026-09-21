@@ -30,13 +30,15 @@ public sealed record ChatRoundReasoningDelta(string Text) : ChatRoundUpdate;
 public sealed record ChatRoundCompleted(
     string Text,
     string Reasoning,
-    IReadOnlyList<ChatPendingToolCall> ToolCalls) : ChatRoundUpdate;
+    IReadOnlyList<ChatPendingToolCall> ToolCalls,
+    ChatResponseMetadata Metadata) : ChatRoundUpdate;
 
 public sealed record ChatRoundFailed(
     string Message,
     bool Cancelled,
     string Text,
-    string? Reasoning = null) : ChatRoundUpdate;
+    string? Reasoning = null,
+    ChatResponseMetadata? Metadata = null) : ChatRoundUpdate;
 
 public sealed record ChatPendingToolCall(
     FunctionCallContent Content,
@@ -175,6 +177,7 @@ public sealed class ChatTurnEngine(
         var reasoningBuilder = new StringBuilder();
         var pendingCalls = new List<ChatPendingToolCall>();
         var tracker = new StreamingToolCallTracker();
+        var response = new ChatResponseCapture();
         string? failure = null;
         var cancelled = false;
         var enumerator = chat.GetStreamingResponseAsync(messages, options, cancellationToken)
@@ -204,6 +207,7 @@ public sealed class ChatTurnEngine(
                 if (!hasNext)
                     break;
 
+                if (enumerator.Current is { } current) response.Observe(current);
                 var contents = enumerator.Current?.Contents;
                 if (contents is null)
                     continue;
@@ -285,13 +289,16 @@ public sealed class ChatTurnEngine(
             }
         }
 
+        var metadata = response.Metadata;
+        failure ??= metadata.FailureMessage;
+        metadata.Incomplete = cancelled || failure is not null || (textBuilder.Length == 0 && pendingCalls.Count == 0);
         if (cancelled)
         {
             yield return new ChatRoundFailed(
                 "Cancelled.",
                 Cancelled: true,
                 textBuilder.ToString(),
-                ReasoningOrNull(reasoningBuilder));
+                ReasoningOrNull(reasoningBuilder), metadata);
             yield break;
         }
         if (failure is not null)
@@ -300,7 +307,7 @@ public sealed class ChatTurnEngine(
                 failure,
                 Cancelled: false,
                 textBuilder.ToString(),
-                ReasoningOrNull(reasoningBuilder));
+                ReasoningOrNull(reasoningBuilder), metadata);
             yield break;
         }
         if (textBuilder.Length == 0 && pendingCalls.Count == 0)
@@ -314,11 +321,11 @@ public sealed class ChatTurnEngine(
                     : "The model returned an empty response.",
                 Cancelled: false,
                 string.Empty,
-                ReasoningOrNull(reasoningBuilder));
+                ReasoningOrNull(reasoningBuilder), metadata);
             yield break;
         }
 
-        yield return new ChatRoundCompleted(textBuilder.ToString(), reasoningBuilder.ToString(), pendingCalls);
+        yield return new ChatRoundCompleted(textBuilder.ToString(), reasoningBuilder.ToString(), pendingCalls, metadata);
     }
 
     private static string? ReasoningOrNull(StringBuilder reasoningBuilder) =>
@@ -385,18 +392,12 @@ public sealed class ChatTurnEngine(
     public static List<AIContent> BuildAssistantContents(
         string text,
         IReadOnlyList<ChatPendingToolCall> calls,
-        string? reasoning)
+        string? reasoning,
+        ChatResponseMetadata? metadata = null)
     {
-        // Reasoning is echoed back to the provider within the same turn so
-        // reasoning-capable models can condition on it; cross-turn replay stays
-        // text-only. Providers without a reasoning field drop it harmlessly.
-        if (calls.Count == 0 && !string.IsNullOrEmpty(reasoning))
-            return [new TextReasoningContent(reasoning), new TextContent(text)];
-
-        if (calls.Count == 0)
-            return string.IsNullOrEmpty(text) ? [new TextContent(string.Empty)] : [new TextContent(text)];
-
         var contents = new List<AIContent>();
+        if (metadata is not null)
+            contents.Add(new ChatProtocolContent(metadata));
         if (!string.IsNullOrEmpty(reasoning))
             contents.Add(new TextReasoningContent(reasoning));
         var cursor = 0;

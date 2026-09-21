@@ -373,7 +373,7 @@ public sealed class EditorChatService(
                 messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
                 continue;
             }
-            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content, persistedMessage.ResponseMetadataJson, persistedProvider);
             if (replay is not null) messages.Add(replay);
         }
 
@@ -389,6 +389,19 @@ public sealed class EditorChatService(
                 Status = EditorMessageStatus.Pending,
             };
             await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, activeAssistant, cancellationToken);
+
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
+            {
+                yield return new EditorChatContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
+                {
+                    activeAssistant.Status = EditorMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
+            }
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -412,6 +425,7 @@ public sealed class EditorChatService(
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
@@ -437,6 +451,7 @@ public sealed class EditorChatService(
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls.ToList();
             activeAssistant.Reasoning = completedRound.Reasoning;
+            activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
             if (pendingCalls.Count == 0)
             {
@@ -476,7 +491,7 @@ public sealed class EditorChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();
@@ -740,18 +755,6 @@ public sealed class EditorChatService(
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
                     await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
-            {
-                yield return new EditorChatContextTrimmed(compaction);
-                if (compaction.LimitExceeded)
-                {
-                    activeAssistant.Status = EditorMessageStatus.Failed;
-                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                    await SafePersistAsync(activeAssistant);
-                    yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                    yield break;
-                }
-            }
 
             if (iteration == maxIterations - 1)
             {

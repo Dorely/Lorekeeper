@@ -252,7 +252,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 messages.Add(await imageAttachments.BuildUserMessageAsync(projectId, persistedMessage.Content, imageIds, cancellationToken: cancellationToken));
                 continue;
             }
-            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content);
+            var replay = ChatModelHistory.Project(persistedMessage.Role.ToString(), persistedMessage.Content, persistedMessage.ResponseMetadataJson, persistedProvider);
             if (replay is not null) messages.Add(replay);
         }
 
@@ -268,6 +268,19 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 Status = WritingCoachMessageStatus.Pending,
             };
             await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, activeAssistant, cancellationToken);
+
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
+            {
+                yield return new WritingCoachContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
+                {
+                    activeAssistant.Status = WritingCoachMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
+            }
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -291,6 +304,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        activeAssistant.ResponseMetadataJson = failed.Metadata?.Serialize();
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
@@ -315,6 +329,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
             activeAssistant.Reasoning = completedRound.Reasoning;
+            activeAssistant.ResponseMetadataJson = completedRound.Metadata.Serialize();
 
             if (pendingCalls.Count == 0)
             {
@@ -333,7 +348,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             activeAssistant.Status = WritingCoachMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
@@ -398,18 +413,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
             }
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
-            {
-                yield return new WritingCoachContextTrimmed(compaction);
-                if (compaction.LimitExceeded)
-                {
-                    activeAssistant.Status = WritingCoachMessageStatus.Failed;
-                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
-                    await SafePersistAsync(activeAssistant);
-                    yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
-                    yield break;
-                }
-            }
 
             if (iteration == maxIterations - 1)
             {
