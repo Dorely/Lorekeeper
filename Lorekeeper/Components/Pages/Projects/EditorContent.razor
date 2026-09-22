@@ -291,7 +291,7 @@ else
                         }
                         @if (OpenDesignedPagePlacement is { } selectedPlacement)
                         {
-                            <DesignedPageWorkspace @key="selectedPlacement.BlockId"
+                            <DesignedPageWorkspace @key="(Project.Id, _contentTarget, selectedPlacement.PageId)"
                                                    @ref="_designedPageWorkspace"
                                                    ProjectId="Project.Id"
                                                    ContentTarget="_contentTarget"

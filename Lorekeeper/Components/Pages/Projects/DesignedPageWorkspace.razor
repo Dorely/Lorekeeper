@@ -20,7 +20,14 @@
 @inject IJSRuntime JS
 @inject IPrintPreparationService Printing
 
-<section class="composition-workspace @((InteractionLocked || _authoringFrozen) ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@(InteractionLocked || _authoringFrozen)" inert="@((InteractionLocked || _authoringFrozen) ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
+@if (_authoringWriterError is not null)
+{
+    <div class="alert alert-warning" role="status">
+        <span>@_authoringWriterError The page is read-only until editing can be resumed.</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" disabled="@(_openingAuthoringWriter || InteractionLocked)" @onclick="RetryAuthoringWriterAsync">Retry editing</button>
+    </div>
+}
+<section class="composition-workspace @(CanvasInteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@CanvasInteractionLocked" inert="@(CanvasInteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error))
     {
@@ -374,10 +381,18 @@
     private Guid _loadedPageId;
     private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedRefreshSignal = -1;
+    private string? _loadedPlacementBlockId;
     private Guid? _loadedRequestedVariantId;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
     private IAsyncDisposable? _authoringWriterLease;
+    private readonly SemaphoreSlim _authoringWriterGate = new(1, 1);
+    private AuthoringTargetReferenceV1? _registeredAuthoringTarget;
+    private bool _openingAuthoringWriter;
+    private string? _authoringWriterError;
+    private bool _disposing;
+    private bool _disposed;
+    private bool CanvasInteractionLocked => InteractionLocked || _authoringFrozen || _authoringWriterLease is null || _authoringWriterError is not null || _disposing || _disposed;
     private Guid _authoringSessionId;
     private readonly Guid _authoringWriterId = Guid.NewGuid();
     private long _authoringGeneration;
@@ -522,8 +537,10 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (_disposing || _disposed) return;
         if (_loadedProjectId == ProjectId
             && _loadedPageId == PageId
+            && _loadedPlacementBlockId == PlacementBlockId
             && _loadedContentTarget == ContentTarget
             && _loadedRefreshSignal == RefreshSignal
             && _loadedRequestedVariantId == RequestedVariantId)
@@ -559,6 +576,7 @@
             }
             _loadedProjectId = ProjectId;
             _loadedPageId = PageId;
+            _loadedPlacementBlockId = PlacementBlockId;
             _loadedContentTarget = ContentTarget;
             _loadedRefreshSignal = RefreshSignal;
             _loadedRequestedVariantId = RequestedVariantId;
@@ -1288,7 +1306,7 @@
 
     private async Task MoveHistoryAsync(bool redo)
     {
-        if (InteractionLocked || _authoringFrozen)
+        if (CanvasInteractionLocked)
             return;
         if (!await FlushAsync())
             return;
@@ -1378,7 +1396,11 @@
         {
             if (!_dirty || _scene is null || _variant is null)
                 return;
+            if (_authoringWriterLease is null)
+                throw new InvalidOperationException(_authoringWriterError ?? "The page has no writable authoring session.");
             await EnsureWritableReleaseContentAsync();
+            if (_authoringWriterLease is null)
+                throw new InvalidOperationException(_authoringWriterError ?? "The release page could not acquire a writable authoring session.");
             var changeVersion = _changeVersion;
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
             var semanticBlocks = _semanticBlocks.ToList();
@@ -1446,14 +1468,9 @@
         var overrideView = await DesignedPages.EnsureReleaseOverrideAsync(ProjectId, PageId, editionId);
         _page = overrideView.Page;
         _composition = overrideView.Content;
-        if (_authoringWriterLease is not null)
-        {
-            await _authoringWriterLease.DisposeAsync();
-            _authoringWriterLease = null;
-        }
         _variant = await DesignedPages.GetOrCreateVariantAsync(ProjectId, _composition.Id, editionId);
         _variants = await DesignedPages.ListVariantsAsync(ProjectId, _composition.Id);
-        await OpenAuthoringWriterAsync();
+        await OpenAuthoringWriterAsync(allowDuringDisposal: true);
         _history = DeltaHistory.Read(AuthoringTargetId()).State;
     }
 
@@ -1734,14 +1751,25 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_disposing || _disposed) return;
         if (firstRender)
         {
             _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
+            if (_disposing || _disposed)
+            {
+                await _workspaceModule.DisposeAsync();
+                return;
+            }
             _dotNetReference = DotNetObjectReference.Create(this);
             await _workspaceModule.InvokeVoidAsync("observeTextOverflow", _stageElement, _dotNetReference);
             try
             {
                 _journalModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-authoring-journal.js");
+                if (_disposing || _disposed)
+                {
+                    await _journalModule.DisposeAsync();
+                    return;
+                }
                 await RecoverPendingAsync();
             }
             catch (Exception exception)
@@ -1750,6 +1778,8 @@
             }
             _journalInitialized = true;
             await OpenAuthoringWriterAsync();
+            if (_disposing || _disposed) return;
+            await InvokeAsync(StateHasChanged);
         }
         if (_workspaceModule is not null && _focusTextId is Guid focusId)
         {
@@ -1886,15 +1916,35 @@
 
     public async ValueTask DisposeAsync()
     {
+        if (_disposing || _disposed) return;
+        _disposing = true;
+        // Drain an in-flight registration before flushing or releasing its lease.
+        await _authoringWriterGate.WaitAsync();
+        _authoringWriterGate.Release();
         _autosaveCancellation?.Cancel();
-        _autosaveCancellation?.Dispose();
         var flushed = false;
-        try { flushed = await FlushAsync(); }
+        try
+        {
+            flushed = await FlushAsync();
+            await _saveGate.WaitAsync();
+            _saveGate.Release();
+            flushed &= !_dirty && _journalRecoverable;
+        }
         catch { }
-        if (_authoringWriterLease is not null && flushed)
-            await _authoringWriterLease.DisposeAsync();
-        else if (_authoringWriterLease is not null)
-            MarkAuthoringWriterUnreachable();
+        _autosaveCancellation?.Dispose();
+        _autosaveCancellation = null;
+        await _authoringWriterGate.WaitAsync();
+        try
+        {
+            if (_authoringWriterLease is not null && flushed)
+                await _authoringWriterLease.DisposeAsync();
+            else if (_authoringWriterLease is not null)
+                MarkAuthoringWriterUnreachable();
+            _authoringWriterLease = null;
+            _registeredAuthoringTarget = null;
+            _disposed = true;
+        }
+        finally { _authoringWriterGate.Release(); }
         if (_workspaceModule is null)
         {
             _dotNetReference?.Dispose();
@@ -1923,28 +1973,62 @@
         ? $"release:{editionId:D}:designed-page-content:{_composition!.Id:D}"
         : $"designed-page-content:{_composition!.Id:D}";
 
-    private async Task OpenAuthoringWriterAsync()
+    private async Task OpenAuthoringWriterAsync(bool allowDuringDisposal = false)
     {
-        var targetId = AuthoringTargetId();
-        if (_authoringWriterLease is not null)
-            return;
-        if (!_journalInitialized)
-            return;
-        _authoringSessionId = _journalModule is null
-            ? Guid.NewGuid()
-            : await _journalModule.InvokeAsync<Guid>("sessionId", ProjectId.ToString("D"), targetId);
-        _authoringGeneration = (await AuthoringGenerations.ReadAsync(ProjectId, [targetId]))[targetId];
-        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
-            new(ProjectId, targetId),
-            _authoringSessionId,
-            _authoringWriterId,
-            FreezeAndFlushAuthoringAsync,
-            async _ => await InvokeAsync(() =>
+        await _authoringWriterGate.WaitAsync();
+        try
+        {
+            if (_disposed || (_disposing && !allowDuringDisposal) || !_journalInitialized || _composition is null)
+                return;
+            var target = new AuthoringTargetReferenceV1(ProjectId, AuthoringTargetId());
+            if (_authoringWriterLease is not null && _registeredAuthoringTarget == target)
+                return;
+            _openingAuthoringWriter = true;
+            if (_authoringWriterLease is not null)
             {
-                _authoringFrozen = false;
-                StateHasChanged();
-            })));
-        UpdateAuthoringWriterState();
+                await _authoringWriterLease.DisposeAsync();
+                _authoringWriterLease = null;
+                _registeredAuthoringTarget = null;
+            }
+            var sessionId = _journalModule is null
+                ? Guid.NewGuid()
+                : await _journalModule.InvokeAsync<Guid>("sessionId", target.ProjectId.ToString("D"), target.TargetId);
+            var generation = (await AuthoringGenerations.ReadAsync(target.ProjectId, [target.TargetId]))[target.TargetId];
+            if (_disposed || (_disposing && !allowDuringDisposal)
+                || target.ProjectId != ProjectId || target.TargetId != AuthoringTargetId())
+                return;
+            _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+                target, sessionId, _authoringWriterId, FreezeAndFlushAuthoringAsync,
+                async _ => await InvokeAsync(() =>
+                {
+                    _authoringFrozen = false;
+                    if (!_disposing && !_disposed) StateHasChanged();
+                })));
+            _registeredAuthoringTarget = target;
+            _authoringSessionId = sessionId;
+            _authoringGeneration = generation;
+            _authoringWriterError = null;
+            UpdateAuthoringWriterState();
+        }
+        catch (AuthoringMutationFenceException exception)
+        {
+            // Never steal another live writer or let an ownership conflict end the circuit.
+            _authoringWriterError = exception.Message;
+        }
+        finally
+        {
+            _openingAuthoringWriter = false;
+            _authoringWriterGate.Release();
+        }
+    }
+
+    private async Task RetryAuthoringWriterAsync()
+    {
+        if (_disposing || _disposed || InteractionLocked) return;
+        // Refresh a clean canvas before resuming after another writer released it.
+        _loadedRefreshSignal = -1;
+        await OnParametersSetAsync();
+        await OpenAuthoringWriterAsync();
     }
 
     private async Task<AuthoringWriterFlushResult> FreezeAndFlushAuthoringAsync(long capturedSequence, CancellationToken cancellationToken)
@@ -1959,20 +2043,20 @@
 
     private void UpdateAuthoringWriterState()
     {
-        if (_authoringWriterLease is null || _composition is null)
+        if (_authoringWriterLease is null || _registeredAuthoringTarget is null)
             return;
         AuthoringFence.UpdateWriterState(new(
-            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _registeredAuthoringTarget, _authoringSessionId, _authoringWriterId, _authoringGeneration,
             _changeVersion, _changeVersion, _dirty ? 0 : _changeVersion,
             _dirty, IsRecoverable: _journalRecoverable));
     }
 
     private void MarkAuthoringWriterUnreachable()
     {
-        if (_authoringWriterLease is null || _composition is null)
+        if (_authoringWriterLease is null || _registeredAuthoringTarget is null)
             return;
         AuthoringFence.UpdateWriterState(new(
-            new(ProjectId, AuthoringTargetId()), _authoringSessionId, _authoringWriterId, _authoringGeneration,
+            _registeredAuthoringTarget, _authoringSessionId, _authoringWriterId, _authoringGeneration,
             _changeVersion, _changeVersion, 0,
             IsDirty: true, IsRecoverable: false, IsReachable: false));
     }
@@ -2112,7 +2196,7 @@
 
     private void HandleKeyDown(KeyboardEventArgs e)
     {
-        if (InteractionLocked) return;
+        if (CanvasInteractionLocked) return;
         if (Selected is not { Locked: false } selected) return;
         var delta = e.ShiftKey ? 1d : .25;
         if (IsCropRepositioning(selected))

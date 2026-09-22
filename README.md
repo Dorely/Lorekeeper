@@ -228,7 +228,8 @@ its planned features are not claims about current capabilities.
   and removal, release reset, and guarded deletion. Insertion opens the exact new
   chapter occurrence in the Editor's Pages canvas. Library pages must be placed
   in a chapter before opening them for editing; Publish retains its section canvas
-  workflow. The manual Generate panel can select existing library
+  workflow. Canvas ownership conflicts keep the page read-only with a **Retry
+  editing** action. The manual Generate panel can select existing library
   images or upload new images
   as ordered visual references, with an explicit role for each reference carried
   into the saved generation request. It also accepts an optional Minimum DPI and

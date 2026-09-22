@@ -67,6 +67,15 @@ owns transient complete-scene inspection for Pages and covers; previews are
 not project images and do not enter the library.
 
 Open Designed Page and cover canvases are registered mutation-fence writers.
+Designed Page writer acquisition is serialized across parameter loading and
+first-render initialization. Disposal drains pending acquisition before flushing
+and releasing the exact registered target; late initialization cannot leave a
+writer behind. Refreshes that change effective content ownership transfer that
+lease through the same serialized path. A competing writer or active fence keeps
+the canvas read-only with an application-owned retry action instead of ending
+the circuit. The Editor keys its canvas by project, content target, and page
+identity, so switching between occurrences of one shared page retains its writer
+while refreshing placement-specific context.
 Their normal serial save path is the fence flush path: a fence pauses gesture
 input, waits through the captured local sequence, then resumes only after the
 dependent operation releases its project lease. Canvas history is process-wide
