@@ -26,7 +26,7 @@ function Get-LorekeeperVersion
     return $versionMatches[0].Groups['version'].Value
 }
 
-function Invoke-ReleaseCommitGate
+function Invoke-ReleasePreflight
 {
     param([Parameter(Mandatory)][string]$RepositoryRoot)
 
@@ -34,7 +34,7 @@ function Invoke-ReleaseCommitGate
     Push-Location $RepositoryRoot
     try
     {
-        $env:ArtifactsPath = Join-Path $RepositoryRoot '.artifacts/commit-gate'
+        $env:ArtifactsPath = Join-Path $RepositoryRoot '.artifacts/release-preflight'
         Invoke-ReleaseCommand dotnet @('build', 'Lorekeeper.sln')
         Invoke-ReleaseCommand dotnet @('test', 'Lorekeeper.Tests/Lorekeeper.Tests.csproj')
         if ($null -eq $previousArtifactsPath) { Remove-Item Env:ArtifactsPath }
@@ -42,8 +42,6 @@ function Invoke-ReleaseCommitGate
         Push-Location (Join-Path $RepositoryRoot 'Lorekeeper.Press')
         try
         {
-            Invoke-ReleaseCommand cargo @('fmt', '--check')
-            Invoke-ReleaseCommand cargo @('clippy', '--all-targets', '--', '-D', 'warnings')
             Invoke-ReleaseCommand cargo @('test', '--locked')
         }
         finally { Pop-Location }

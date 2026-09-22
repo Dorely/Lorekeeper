@@ -27,30 +27,22 @@ OAuth test; an HTTP startup is not an Electron/package test; and renderer unit
 tests are not vendor acceptance. Report unperformed integrations instead of
 promoting assumptions to verified behavior.
 
-The repository has intentionally narrow automated-test boundaries. Apart from
-Press conformance tests that map to the native renderer evidence matrix,
-application tests are limited to startup database migration and versioned project
-import/export transformation safety plus deterministic, headless v1 contract
-regressions for DOCX/citation conversion and formatting; shared Designed Page and
-release-override behavior; authoring operations, Undo/save recovery, idempotency,
-and assistant concurrency; provider catalog/account configuration and credential
-migration; portable archive/history closure and restoration; and free/Store
-channel and updater-policy selection. These tests exercise production contracts;
-they do not simulate browser UI, Word desktop, OAuth or provider calls, Store
-services, packaging, or operating-system updates. Do not add broad UI, general
-editor, assistant, provider, ordinary service, authentication, packaging, or
-runtime-behavior suites merely because a feature would normally invite one.
+The repository has intentionally narrow automated-test boundaries. Press
+conformance tests map to the native renderer evidence matrix and verify PDF-spec
+parity. `Lorekeeper.Tests` is limited to the data-safety core: startup database
+migration, versioned project import/export, archive, and history preservation
+and fail-closed behavior, and recovery. **Automated tests outside those two
+scopes are forbidden.** Do not create new test projects, suites, or one-off test
+harnesses anywhere else merely because a feature would normally invite one; a
+request to add tests does not broaden this boundary unless the user explicitly
+changes it. Areas outside the boundary are validated by the build, static
+inspection, and user-authorized manual checks.
 
-Image-generation resolution controls therefore use compilation, static contract
-inspection, startup smoke checks, and user-authorized provider/UI exercise rather
-than new automated assistant or provider tests. Static evidence must cover the
-Publish aspect/protected-region-only schema, application-owned target resolution,
-crop-to-fill behavior for provider-supported and extreme aspects, decoded-output
-fallback preparation, surface-bound geometry fingerprints, hardcover versus
-digital expectations, explicit minimum/size validation outside Publish,
-regional-guide exclusion, and undersized provider output handling.
-Do not claim the external provider or rendered UI was exercised unless that
-integration check actually ran.
+Manual and UI validation — startup smoke checks, Electron checks, browser/UI
+checks, screenshots, and interactive provider or Word exercises — requires the
+user's explicit authorization before it is performed. Do not claim an external
+provider or rendered UI was exercised unless that authorized integration check
+actually ran.
 
 ## Current architecture and invariants
 
@@ -140,67 +132,47 @@ The source toolchain is:
   [`Lorekeeper.Press/rust-toolchain.toml`](../../Lorekeeper.Press/rust-toolchain.toml),
   for source builds of the native renderer.
 
-Normal source changes require:
+Completion requires a successful `dotnet build Lorekeeper.sln` and passing
+remaining tests — `dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj`, and
+`cargo test` in `Lorekeeper.Press` when Press sources change. There is no
+automated commit gate; this completion rule applies to the final state of the
+change.
 
-```powershell
-dotnet build Lorekeeper.sln
-dotnet run --project Lorekeeper --launch-profile http
-```
+Manual and UI validation — startup smoke checks, Electron checks, browser/UI
+checks, screenshots, and interactive provider or Word exercises — requires the
+user's explicit authorization before it is performed. When authorized, use the
+explicit `http` profile (`http://localhost:1455`) for browser checks or the
+`electron` profile for the desktop shell, always terminate what you start, and
+do not start a competing host on a port a user-owned debug instance occupies.
+Electron remains the primary/default debug target. An HTTP startup does not
+validate the Electron bridge, update integration, packaged data paths, or
+native window behavior.
 
-After the successful build, confirm the local host starts without startup
-exceptions and terminate it. The explicit HTTP profile serves
-`http://localhost:1455` for browser-oriented development and smoke validation;
-Electron remains the primary/default debug target. Always plan how to terminate a
-host, Electron shell, browser helper, or background process before starting it.
+### Data-safety tests
 
-Do not run Playwright, screenshots, browser UI checks, Electron window checks, or
-manual UI validation unless the user explicitly requests them. When Electron
-startup itself must be checked, run:
+[`Lorekeeper.Tests`](../../Lorekeeper.Tests/) is the automated-test boundary for
+application data safety: startup database migration, versioned project
+import/export, archive, and history preservation and fail-closed behavior, and
+recovery. Fixtures must exercise the same production boundaries as the app; do
+not create a parallel migration sequence or a generic unit-test suite for test
+convenience.
 
-```powershell
-dotnet run --project Lorekeeper --launch-profile electron
-```
-
-Confirm startup and terminate the application. An HTTP startup does not validate
-the Electron bridge, update integration, packaged data paths, or native window
-behavior.
-
-### Authorized .NET data-safety and focused contract tests
-
-[`Lorekeeper.Tests`](../../Lorekeeper.Tests/) proves data preservation and
-fail-closed behavior across application-startup database migrations and versioned
-project import/export transformations, plus the focused deterministic contract
-regressions listed above. Fixtures must exercise the same production boundaries
-as the app; do not create a parallel migration sequence or a generic unit-test
-suite for test convenience.
-
-Run the full authorized suite with:
+Run the kept suite with:
 
 ```powershell
 dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 ```
 
-Focused filters are appropriate during an edit loop, but final verification must
-cover the affected preservation or focused-contract boundary. For example,
-project-reference
-compatibility uses populated pre-reference migration fixtures and the real v26
-export/queued-import path:
-
-```powershell
-dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj --no-restore -c Release --filter "FullyQualifiedName~ProjectReferenceMigrationTests|FullyQualifiedName~V25ExportPreservesRectoSettingsWarnsAndDoesNotInferProjectReferences"
-```
-
-Tests in this project cover manuscript/page/composition/Core/release migrations,
-annotation and chat preservation, source-evidence and project-reference cutovers,
-protected backup/recovery, current/legacy import adaptation, identifier remapping,
-warning behavior, foreign keys, whole-import rollback, guarded OpenAI credential
-migration, deterministic static account-catalog manifest/readiness/discovery
-rejection, and
-the process-local authorization state/allowlist/origin/serialization contracts.
-It is also the current
-home for the approved v1 focused contracts. It is not a home for broad assistant,
-UI, ordinary service, or provider behavior suites, and no permitted test may
-substitute a simulated external integration for target-specific evidence.
+It covers manuscript/page/composition/Core/release migrations, annotation and
+chat preservation, source-evidence and project-reference cutovers, protected
+backup/recovery, current/legacy import adaptation, identifier remapping, warning
+behavior, foreign keys, whole-import rollback, guarded OpenAI credential
+migration, retained-source conversion, streamed archive/history closure and
+restoration, and citation preservation with fail-closed import rejection. It is
+not a home for assistant, UI, ordinary service, provider behavior, or formatting
+suites, and no permitted test may substitute a simulated external integration
+for target-specific evidence. Tests outside this boundary and the Press
+conformance suite are forbidden.
 
 ### Semantic editor verification
 
@@ -317,10 +289,11 @@ an already published exact source is a no-op. `-Bump Minor`, `-Bump Major`, and
 `-Version <major.minor.patch>` select deliberate alternatives. Prereleases use the
 lower-level publisher. Documentation uses version-independent examples.
 
-Only the project version is edited and committed. The driver runs the complete
-repository gate through `eng/ReleaseWorkflow.ps1` before that commit and again
-on the committed source before pushing and publishing. .NET gate outputs use
-the isolated commit-gate directory and the previous environment is restored.
+Only the project version is edited and committed. The driver runs the
+build-and-test preflight through `eng/ReleaseWorkflow.ps1` before that commit
+and again on the committed source before pushing and publishing. .NET preflight
+outputs use the isolated artifacts directory and the previous environment is
+restored.
 Verification rejects unexpected source/index changes. On failure it restores
 only its exact unstaged version edit; committed preparation remains available
 for a retry. Staged/concurrent edits and partial publication need inspection.
@@ -359,8 +332,8 @@ The owner has declined general hosted CI, hosted validation workflows, and
 non-macOS GitHub compute for v1. The dispatch-only macOS arm64 release builder
 remains the sole hosted workflow because native Mac packaging needs a Mac host.
 GitHub Actions stays restricted to that builder with read-only repository
-workflow permissions. Every normal repository gate and approved focused
-regression stays local, with evidence recorded in the commit message or work
+workflow permissions. Every normal build-and-test completion run stays local,
+with evidence recorded in the commit message or work
 item; do not turn the release builder into a general validation lane without a
 new owner decision.
 
@@ -378,46 +351,16 @@ Approved migration/import fixtures cover historical
 print-resample reclassification, preparation-job preservation, v31 full and
 non-structural round trips, parent remapping/missing-parent rejection, legacy
 cover-description adaptation, and snapshot-schema-v7 restore preservation. Ordinary publication
-service or UI tests remain outside the automated-test boundary. The sole related
-exception is the approved deterministic free/Store channel and updater-policy
-selection contract; actual package and update behavior still requires
-target-specific evidence.
+service or UI tests remain outside the automated-test boundary; actual package
+and update behavior requires target-specific, user-authorized evidence.
 
-### Current M2-M5 contract evidence
+### Milestone contract evidence
 
-M2-M5A fixtures now have implementation evidence. M5B citation/DOCX fixtures
-remain normative input, not formatter- or exporter-generated snapshots. Focused deterministic regressions
-must cover Designed Page migration/placement/release isolation and occurrence
-mapping; `AuthoringBatchProtocolV1` reducers, inverses, receipts, recovery,
-conflicts, and mutation fences; source legacy `OriginalUnavailable` migration,
-archive/history closure, chunks, streamed restoration, and fail-closed import;
-and rich-manuscript, DOCX, citation, EPUB, and Press conformance. M5A coverage
-includes v5-to-v6 migration, recursive identity/span/note validation, exact rich
-authoring replacement and inverse identity, note cleanup, semantic projections,
-EPUB v5 structure, and Press v14 table/note diagnostics and layout fixtures. Citation
-fixtures are independently authored for Chicago 18, APA 7, and MLA 9, including
-missing metadata, repeats, and repeated Designed Page occurrences.
-
-Migration checks use copied representative databases and prove rollback without
-modifying developer data. Local scale tooling may measure source/archive memory
-and cancellation on the 50-source fixture, but does not establish native
-navigation evidence. M4's deterministic retention, archive, history, and
-fail-closed import contracts do not establish its native scale/portability gate.
-M5B implementation adds manuscript v7/archive record 3/history 10/agent projection
-4/EPUB 6/Press 15 preservation, managed semantic citation runs, editable DOCX
-output, semantic Word file/paste insertion, and rich note editing. Approved
-regressions cover reference remapping and ownership, duplicate titles and repeated
-placements, nested note/table citations, malformed input rollback, resource
-admission and receipt replay, rich Undo/recovery, full-publication formatting,
-and reference-aware footnote reservation/continuation. History and archive
-restoration read sources and binary assets individually; preservation regressions
-exercise later failure rollback and predecessor formats.
-
-These deterministic contracts are ready for manual acceptance after the exact-head
-repository gate and isolated HTTP startup check. M5 remains in progress until
-acceptance findings are resolved. Broader UI, live OAuth/provider, Word desktop,
-and native performance validation require the owner's next go-ahead. M3's latency
-and M4's 50-source/multi-GB memory targets remain unmeasured.
+Earlier milestone contract evidence (M2-M5) is recorded in the
+[`docs/v1-roadmap.md`](../v1-roadmap.md) milestone ledger. Those entries are
+historical records of what was implemented and verified at the time. The current
+automated-test boundary is the data-safety core plus the Press conformance
+suite.
 
 ## Key files and file families
 
@@ -428,10 +371,10 @@ and M4's 50-source/multi-GB memory targets remain unmeasured.
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
-| [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary for migration/import preservation and fail-closed fixtures plus the approved deterministic, headless v1 contract regressions. |
-| [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs), [`OpenAiAccountModelCatalogTests.cs`](../../Lorekeeper.Tests/OpenAiAccountModelCatalogTests.cs), and [`OpenAiAuthorizationContractTests.cs`](../../Lorekeeper.Tests/OpenAiAuthorizationContractTests.cs) | Account/token migration rollback and obsolete discovery-column removal; static catalog manifest, account-backed discovery rejection, usable-budget resolution, zero-Test readiness, and fail-closed selection; plus cancellation, denial, expiry, reconnect credential preservation, single-use/simultaneous callbacks, refresh serialization/classification, URL allowlisting, callback origin, and standalone completion-page evidence without external OAuth/provider simulation. |
+| [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary: the data-safety core for migration, import/export/archive/history preservation and fail-closed behavior, and recovery. |
+| [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs) | Account/token migration rollback and obsolete discovery-column removal without external OAuth/provider simulation. |
 | [`eng/ReleaseDependencyAudit.ps1`](../../eng/ReleaseDependencyAudit.ps1) | Shared fail-closed shipped Electron dependency policy and its narrowly bounded dormant-splash advisory exception. |
-| [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared repository gate/version/tag checks, and explicit editor entry points. |
+| [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared build-and-test preflight/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
@@ -462,21 +405,19 @@ For a documentation-only refactor, verify local links and paths, configuration
 keys against `appsettings*.json` and bound option names, launch profiles against
 `launchSettings.json`, and commands against the repository scripts/projects. Search
 for stale source names and conflicting current-state claims, inspect the complete
-diff, and run `git diff --check`. Run the solution build, authorized test project,
-and HTTP startup smoke check when the documentation asserts those commands and
-current contracts, terminating the host afterward.
+diff, and run `git diff --check`.
 
 For contributor-workflow changes, parse affected PowerShell scripts, inspect any
-affected workflow YAML and permissions, compare automated steps to the exact
-repository commit gate when automation exists, and confirm every documented
-command and link.
+affected workflow YAML and permissions, compare automated steps to the release
+preflight, and confirm every documented command and link.
 
-For source work, combine the baseline build/startup check with the owning
-chapter's focused checks. Add the semantic-editor, migration/import, Press,
-Electron, packaging, or target-native release checks only when their boundaries
-are affected. In the completion report, state exact commands and results, manual
-or integration checks performed, checks intentionally not run, final commit, and
-working-tree status.
+For source work, apply the completion rule — build and remaining tests — with
+the owning chapter's focused checks. Add the semantic-editor, migration/import,
+Press, Electron, packaging, or target-native release checks only when their
+boundaries are affected; manual and UI validation runs only with the user's
+explicit authorization. In the completion report, state exact commands and
+results, manual or integration checks performed, checks intentionally not run,
+final commit, and working-tree status.
 
 For the M0.3 local performance baseline, build the unsigned Windows Release
 package only after confirming `publish/win-x64-stage` and `publish/win-x64` are

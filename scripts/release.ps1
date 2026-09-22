@@ -225,7 +225,7 @@ try
         $updatedText = $projectText.Replace("<Version>$currentVersion</Version>", "<Version>$Version</Version>")
         [System.IO.File]::WriteAllText($projectPath, $updatedText, [System.Text.UTF8Encoding]::new($false))
         $writtenProjectHash = (Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash
-        Invoke-ReleaseCommitGate $repoRoot
+        Invoke-ReleasePreflight $repoRoot
         Invoke-ReleaseCommand git @('diff', '--check')
         $changedFiles = @(Invoke-ReleaseCommand git @('diff', '--name-only', 'HEAD'))
         if ($changedFiles.Count -ne 1 -or $changedFiles[0] -ne $projectRelativePath -or
@@ -244,7 +244,7 @@ try
 
     Assert-CleanReleaseTree
     $releaseHead = Invoke-ReleaseCommand git @('rev-parse', 'HEAD')
-    Invoke-ReleaseCommitGate $repoRoot
+    Invoke-ReleasePreflight $repoRoot
     Assert-CleanReleaseTree
     if ((Invoke-ReleaseCommand git @('rev-parse', 'HEAD')) -ne $releaseHead) { throw 'HEAD changed during release verification.' }
     Invoke-ReleaseCommand git @('fetch', 'origin', '--prune')

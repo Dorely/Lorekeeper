@@ -582,8 +582,8 @@ unrelated uncommitted work block execution. By default it reuses a higher
 unpublished project version, otherwise increments the patch version. If the
 exact current commit is already published, it exits without another release.
 
-It updates only `Lorekeeper/Lorekeeper.csproj`, runs the full repository gate,
-commits the version, reruns the gate on the committed source, and pushes main
+It updates only `Lorekeeper/Lorekeeper.csproj`, runs the build-and-test
+preflight, commits the version, reruns the preflight on the committed source, and pushes main
 normally before building and publishing. Existing local commits on main are
 included. Failed verification restores only the driver's exact unstaged version
 edit. Committed preparation remains available so a retry reuses that version.

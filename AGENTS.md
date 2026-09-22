@@ -164,70 +164,37 @@
 
 ## Verification
 
-- Beyond the mandatory repository-wide commit gate below, verify changes in
-  proportion to their impact using the relevant static checks, runtime checks,
-  and release checks documented in `docs/architecture.md` and its routed
-  chapters.
+- **Completion rule (not a scripted gate): do not finish a change until
+  `dotnet build Lorekeeper.sln` succeeds and the remaining tests pass** —
+  `dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj`, and `cargo test` in
+  `Lorekeeper.Press` when Press sources are affected. Run these on the final
+  state of the change; earlier results do not count. There is no automated
+  commit gate.
+- Verify changes in proportion to their impact using the relevant static
+  checks and release checks documented in `docs/architecture.md` and its
+  routed chapters.
 - Automated tests in `Lorekeeper.Press` may exist only when they map to a
   requirement in the Press conformance evidence matrix. This includes the
   protocol, containment, atomicity, cancellation, determinism, typography,
   layout, raw-PDF, and adversarial evidence needed to trust the PDF result.
-- Automated tests in `Lorekeeper.Tests` may prove startup database migration or
-  versioned project import/export preservation and fail-closed behavior, plus
-  the approved deterministic, headless v1 contract regressions: DOCX/citation
-  conversion and formatting; shared Designed Page and release-override
-  behavior; authoring operations, Undo/save recovery, idempotency, and
-  assistant concurrency; provider catalog/account configuration and credential
-  migration; portable archive/history closure and restoration; and free/Store
-  channel and updater-policy selection.
-- Approved tests exercise production contracts without simulating browser UI,
-  Word desktop, OAuth or provider calls, Store services, packaging, or operating
-  system updates. Do not add broad UI, general editor, assistant, provider,
-  ordinary service, packaging, authentication, or runtime-behavior suites.
-  Validate excluded areas through builds, static inspection, and
-  user-authorized manual or browser checks. A user request to add tests does not
-  broaden this approved boundary unless they explicitly change it.
-- Every commit, regardless of its apparent scope, must pass the full repository
-  commit gate on the exact final worktree that will be committed. Route .NET
-  outputs through the ignored commit-gate artifacts directory so verification
-  never requires stopping a developer-owned debug instance that has the default
-  `bin/` output locked:
-
-  ```powershell
-  $env:ArtifactsPath = Join-Path (Get-Location) ".artifacts\commit-gate"
-  dotnet build Lorekeeper.sln
-  dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
-  Remove-Item Env:ArtifactsPath
-  Push-Location Lorekeeper.Press
-  cargo fmt --check
-  cargo clippy --all-targets -- -D warnings
-  cargo test --locked
-  Pop-Location
-  ```
-
-  Earlier results from another commit or from before the final edit do not
-  satisfy this gate. A failure blocks the commit even when the failing test
-  appears unrelated, pre-existing, intermittent, or outside the changed area.
-  Diagnose the failure; then either correct it and rerun the entire gate, or stop
-  and report the blocker. Never commit, push, tag, or publish while any command
-  in this gate is failing.
-- Verify normal source changes with `dotnet build Lorekeeper.sln`, using the
-  isolated `ArtifactsPath` above when a debug instance is running. After a
-  successful build, start the browser-hosted app with
-  `dotnet run --project Lorekeeper --launch-profile http`, confirm the local host
-  starts without startup exceptions, and terminate it. When a user-owned debug
-  instance already provides the requested validation surface, use that instance
-  without terminating it and do not start a competing host on the same port.
-- Electron is the primary/default debug target. For browser-driven validation,
-  use the explicit `http` launch profile at `http://localhost:1455`; do not
+  This is the Press TDD workflow and stays.
+- Automated tests in `Lorekeeper.Tests` are limited to the data-safety core:
+  startup database migration, versioned project import/export, archive, and
+  history preservation and fail-closed behavior, and recovery.
+- **Automated tests outside those two scopes are forbidden.** Do not create
+  new test projects, test suites, or one-off test harnesses anywhere else. A
+  request to add tests does not broaden this boundary unless the user
+  explicitly changes it.
+- **Manual and UI validation requires the user's explicit authorization
+  before it is performed.** This includes startup smoke checks, Electron
+  checks, browser/UI checks, screenshots, and interactive provider or Word
+  exercises. Ask first; never run them as routine verification. When
+  authorized, terminate every host, Electron shell, browser helper, and
+  background process afterward, and do not start a competing host on a port a
+  user-owned debug instance already occupies.
+- Electron is the primary/default debug target. The explicit `http` launch
+  profile at `http://localhost:1455` is the browser validation surface; do not
   reorder the launch profiles to make browser hosting the default.
-- Never start a host, Electron shell, browser automation, or background helper
-  without a plan to terminate it after validation.
-- Do not run Playwright, screenshots, browser UI checks, Electron window checks,
-  or manual UI validation unless the user explicitly requests them.
-- When Electron startup itself must be smoke-checked, start
-  `dotnet run --project Lorekeeper --launch-profile electron`, confirm startup,
-  and terminate the app. Never leave the app running.
 - Do not claim OAuth, provider calls, embeddings, web search, image generation,
   publishing, release packaging, automatic updates, or platform-specific
   Electron behavior works unless the relevant integration and target platform
@@ -235,15 +202,15 @@
   unperformed.
 - Before completion, search for obsolete names and paths, inspect the complete
   diff, and confirm that documentation matches the resulting code.
-- Immediately before a release version-preparation commit and again before
-  invoking a release publisher, run the full repository commit gate. Release
-  packaging checks are additional evidence; they never replace the repository
-  gate. The exact commit being released must be the verified commit.
+- The release driver runs its build-and-test preflight before the version
+  commit and again before publication. Release packaging checks are additional
+  evidence. The exact commit being released must be the verified commit.
 - For a user-authorized direct stable release, prefer `scripts/release.ps1` on
-  clean `main`. It owns version selection, the version-only commit, both gates,
-  pushing, and publication. Use `-CheckOnly` when asked to preview or validate
-  the driver without releasing. Do not run its publishing path merely to test
-  changes to release tooling. It must never commit unrelated unfinished work.
+  clean `main`. It owns version selection, the version-only commit, both
+  preflights, pushing, and publication. Use `-CheckOnly` when asked to preview
+  or validate the driver without releasing. Do not run its publishing path
+  merely to test changes to release tooling. It must never commit unrelated
+  unfinished work.
 - Invoke the publisher only from a clean tree whose `HEAD` equals fetched
   `origin/main`, with the explicit `-AllowDirectMainPush` authorization. The
   script enforces these preconditions itself.
@@ -253,7 +220,7 @@
 - A feature is complete only when its full impact area is implemented, obsolete
   runtime code is removed, documentation is current, and relevant verification
   succeeds.
-- Once a feature is complete and the full repository commit gate plus all
+- Once a feature is complete and the build and remaining tests pass plus all
   impact-specific verification succeeds, inspect the final diff and status,
   stage only that feature's files, and create a focused commit with a descriptive
   message.

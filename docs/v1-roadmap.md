@@ -123,8 +123,8 @@ Initial M0 substeps (split further only when current-code findings justify it):
 - [x] **M0.2 - Superseded (2026-09-16; owner declined general hosted CI).** Do not
   add GitHub CI, PR-validation workflows, or non-macOS GitHub compute. The
   dispatch-only macOS release builder remains the sole hosted workflow; local
-  commit-gate evidence and approved focused regressions remain required until an
-  owner decision changes this boundary.
+  build-and-test evidence and the remaining data-safety tests remain required
+  until an owner decision changes this boundary.
 - [ ] **M0.3 - Local performance fixtures and baseline (blocked).** The local-only
   fixture generator, trace, Release-package runner, and reference-environment
   report are implemented. The first isolated Windows Release launch succeeded,
@@ -828,10 +828,11 @@ Concentrate cleanup on measured problems and changed boundaries:
 ## 5. Verification and v1 acceptance
 
 M0.1 updates repository instructions to permit focused regression tests for these
-contracts. Retain the full repository commit gate and Press evidence requirements.
+contracts. The automated commit gate is replaced by the build-and-tests
+completion rule; Press evidence requirements remain.
 Use the current commands from [AGENTS.md](../AGENTS.md) and
 [validation guidance](architecture/validation-documentation.md); do not copy a
-second gate into this plan that can drift.
+second verification list into this plan that can drift.
 
 ### Data preservation
 
@@ -897,8 +898,8 @@ Require:
   and updates. Windows evidence does not establish Mac readiness.
 - Current documentation and a reviewed complete diff.
 
-Run the local commit gate and approved focused contract regressions; use targeted
-human/UI validation for actual desktop and external integrations. General hosted
+Run the build-and-tests completion rule; use targeted human/UI validation, only
+with explicit user authorization, for actual desktop and external integrations. General hosted
 CI is owner-declined; record unperformed checks explicitly.
 
 ## 6. Distribution, public repository, and launch (M6-M8)
