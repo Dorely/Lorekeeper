@@ -49,6 +49,8 @@ its planned features are not claims about current capabilities.
 - Each chapter's Assistant Memory can be reset from its panel header, clearing
   manual additions and exclusions so the current default context is rebuilt,
   including default-on Writing Samples.
+- **Voice** manages writing samples and free-form character dialogue/POV profiles
+  through manual editing and an assistant with revision-checked editing tools.
 - Long-running interactive chat turns protect the active model context at 90% of its
   input limit by tombstoning completed tool results oldest-first while preserving the
   full audit transcript and call metadata. The live token counter reflects the

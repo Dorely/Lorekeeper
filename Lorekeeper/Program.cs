@@ -291,9 +291,10 @@ builder.Services.AddSingleton<IOutlineChatTurnRunner, OutlineChatTurnRunner>();
 
 // Writing samples
 builder.Services.AddScoped<IWritingSampleService, WritingSampleService>();
-builder.Services.AddScoped<WritingCoachTools>();
-builder.Services.AddScoped<IWritingCoachService, WritingCoachService>();
-builder.Services.AddSingleton<IWritingCoachTurnRunner, WritingCoachTurnRunner>();
+builder.Services.AddScoped<VoiceProfileService>();
+builder.Services.AddScoped<VoiceTools>();
+builder.Services.AddScoped<IVoiceService, VoiceService>();
+builder.Services.AddSingleton<IVoiceTurnRunner, VoiceTurnRunner>();
 
 // Ingest
 builder.Services.Configure<IngestSourceStructureOptions>(builder.Configuration.GetSection(IngestSourceStructureOptions.SectionName));

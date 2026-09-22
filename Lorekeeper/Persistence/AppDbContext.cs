@@ -47,8 +47,8 @@ public class AppDbContext(
     public DbSet<EditorMessage> EditorMessages => Set<EditorMessage>();
     public DbSet<EditorMessageVisual> EditorMessageVisuals => Set<EditorMessageVisual>();
     public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
-    public DbSet<WritingCoachConversation> WritingCoachConversations => Set<WritingCoachConversation>();
-    public DbSet<WritingCoachMessage> WritingCoachMessages => Set<WritingCoachMessage>();
+    public DbSet<VoiceConversation> VoiceConversations => Set<VoiceConversation>();
+    public DbSet<VoiceMessage> VoiceMessages => Set<VoiceMessage>();
     public DbSet<ResearchConversation> ResearchConversations => Set<ResearchConversation>();
     public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
     public DbSet<PublishConversation> PublishConversations => Set<PublishConversation>();
@@ -727,18 +727,18 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<WritingCoachConversation>(entity =>
+        modelBuilder.Entity<VoiceConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
             entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
-                .WithMany(p => p.WritingCoachConversations)
+                .WithMany(p => p.VoiceConversations)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<WritingCoachMessage>(entity =>
+        modelBuilder.Entity<VoiceMessage>(entity =>
         {
             entity.HasIndex(e => new { e.ConversationId, e.Order });
             entity.Property(e => e.Role).HasConversion<string>();

@@ -18,7 +18,7 @@ annotation behavior, and [composition-media.md](composition-media.md) or
 ## Scope and ownership
 
 This chapter owns the six interactive assistant surfaces—Outline, Editor,
-Writing Coach, Research, Images, and Publish—and their shared conversation
+Voice, Research, Images, and Publish—and their shared conversation
 protocol. It covers active-turn lifetime, transcript replay, model selection,
 tool invocation and streaming, prompt assembly, token accounting and
 compaction, image attachments, mutation refresh signals, Git-backed Review Edits,
@@ -37,7 +37,7 @@ against Git HEAD.
 ### Six surfaces over one shared protocol
 
 `ChatTurnSurface` has exactly six user-facing values: `Outline`, `Editor`,
-`Research`, `Images`, `WritingCoach`, and `Publish`. Each surface owns one
+`Research`, `Images`, `Voice`, and `Publish`. Each surface owns one
 project-scoped persisted conversation and ordered messages, including a nullable
 selected-provider override. Feature services adapt their repository, prompt
 context, tools, and typed streaming updates to the common `ChatTurnEngine`.
@@ -183,8 +183,7 @@ verification.
 
 `SystemPromptComposer` adds the shared
 `AssistantWorkflowInstructions.ProjectSearchQueryDiscipline` to every
-composed assistant role; Writing Coach's intentionally separate static prompt
-appends the same block. Its tool-scope sentence is role-specific: Editor
+composed assistant role, including Voice. Its tool-scope sentence is role-specific: Editor
 also has `find_impacted_chapters`, revision workers do not, Contest Candidate
 has no project-search tools, and Research's external `web_search` remains a
 separate contract. Project-search facets are concise 2–6-term source-content
@@ -379,10 +378,12 @@ Those tools are project-scoped, revision-bound evidence only; they do not
 approve, reject, or mutate changes and are not exposed to Contest Preparation or
 revision-worker turns.
 
-Writing Coach owns project-level coaching around editable writing samples. Its
-tools are read-only for project facts, the current sample, direct-reference
-narrative evidence, and bounded canonical visuals. It does not mutate canon,
-outline, manuscript, or publishing state.
+Voice owns writing samples and free-form Character voice profiles. Its tools create,
+read, revise, and delete samples with expected revisions, and save or clear the
+canonical voiceProfile entity property with an exact previous-value check. It can
+create a Character when requested work requires one. Dialogue and POV guidance
+travel with relevant entity context; samples remain project-wide style evidence.
+Voice uses shared prompts, mutation fencing, workspace refresh, and checkpoints.
 
 Research combines bounded project/direct-reference reads with configured web
 search, safe cached page reads, image/source promotion, and direct graph
@@ -649,7 +650,7 @@ assistant evidence link never silently creates a manuscript citation.
 | [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
 | [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Git-backed Review page, contests, revision jobs/workers, and active-turn updates. |
-| [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Writing Coach service, read-only tool catalog, runner, and writing-sample application boundary. |
+| [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Voice service, sample/profile tool catalog, runner, and writing-sample application boundary. |
 | [`Lorekeeper/Research/ResearchService.cs`](../../Lorekeeper/Research/ResearchService.cs), [`ResearchTools.cs`](../../Lorekeeper/Research/ResearchTools.cs), [`ResearchChatTurnRunner.cs`](../../Lorekeeper/Research/ResearchChatTurnRunner.cs), and [`ResearchTurnUpdate.cs`](../../Lorekeeper/Research/ResearchTurnUpdate.cs) | Research chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
 | [`Lorekeeper/ImagesChat/`](../../Lorekeeper/ImagesChat/) | Images assistant, turn context, visual-canon tools, job reconnection, and streaming updates. |
 | [`Lorekeeper/Publish/PublishChatService.cs`](../../Lorekeeper/Publish/PublishChatService.cs), [`PublishChatTurnRunner.cs`](../../Lorekeeper/Publish/PublishChatTurnRunner.cs), and [`PublishTurnUpdate.cs`](../../Lorekeeper/Publish/PublishTurnUpdate.cs) | Publish conversation, protected visible-target context, turn lifetime, and refresh updates; the publication chapter owns its domain tool catalog. |

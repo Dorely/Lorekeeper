@@ -6,16 +6,16 @@
 @using Lorekeeper.Writing
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
-@inject IWritingCoachService Coach
-@inject IWritingCoachTurnRunner ChatTurns
+@inject IVoiceService Coach
+@inject IVoiceTurnRunner ChatTurns
 @inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
-<ChatSurface Title="Writing Coach"
+<ChatSurface Title="Voice"
              ProjectId="@ProjectId"
-             Surface="ChatTurnSurface.WritingCoach"
+             Surface="ChatTurnSurface.Voice"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -42,7 +42,7 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
-        <button type="button" class="btn btn-link btn-sm writing-coach-reset" title="Start over"
+        <button type="button" class="btn btn-link btn-sm voice-reset" title="Start over"
                 disabled="@(_loading || _running || _resetting)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
@@ -60,6 +60,7 @@
     private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public EventCallback OnMutated { get; set; }
     [Parameter] public string? CurrentSampleTitle { get; set; }
     [Parameter] public string? CurrentSampleBody { get; set; }
     [Parameter] public Func<Task<(string? Title, string? Body)>>? GetCurrentDraft { get; set; }
@@ -69,8 +70,8 @@
     private int _autoFollowKey;
     private int _resetComposerKey;
 
-    private WritingCoachConversation? _conversation;
-    private List<WritingCoachMessage> _messages = [];
+    private VoiceConversation? _conversation;
+    private List<VoiceMessage> _messages = [];
     private List<ChatRenderableMessage> _renderable = [];
     private ChatLiveTurn? _live;
 
@@ -117,7 +118,7 @@
             _selectedProviderId = _conversation.SelectedProviderId;
             await LoadChatProviderStateAsync();
             _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
-            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.WritingCoach);
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Voice);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -199,7 +200,7 @@
 
         if (!ChatTurns.TryStart(ProjectId, text, draft.Title, draft.Body, submission.Images, model))
         {
-            _error = "Writing Coach already has a running turn.";
+            _error = "Voice already has a running turn.";
             ReleaseRunningUi();
             if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
                 await ListenToActiveTurnAsync(existingTurn);
@@ -261,7 +262,7 @@
     }
 
     private async Task ListenToTurnAsync(
-        IChatTurnSubscription<WritingCoachTurnUpdate> subscription,
+        IChatTurnSubscription<VoiceTurnUpdate> subscription,
         CancellationToken cancellationToken)
     {
         await using (subscription)
@@ -276,45 +277,48 @@
         }
     }
 
-    private async Task ApplyTurnUpdateAsync(WritingCoachTurnUpdate update)
+    private async Task ApplyTurnUpdateAsync(VoiceTurnUpdate update)
     {
         switch (update)
         {
-            case WritingCoachTextDelta delta:
+            case VoiceMutated:
+                await OnMutated.InvokeAsync();
+                break;
+            case VoiceTextDelta delta:
                 _live!.AppendText(delta.Text);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case WritingCoachReasoningDelta reasoning:
+            case VoiceReasoningDelta reasoning:
                 _live!.AppendReasoning(reasoning.Text);
                 RequestScroll();
                 StateHasChanged();
                 break;
 
 
-            case WritingCoachToolCallStarted started:
+            case VoiceToolCallStarted started:
                 _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
 
-            case WritingCoachToolCallArgumentsDelta delta:
+            case VoiceToolCallArgumentsDelta delta:
                 _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
 
-            case WritingCoachToolCallCompleted completed:
+            case VoiceToolCallCompleted completed:
                 _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
 
-            case WritingCoachContextTrimmed trimmed:
+            case VoiceContextTrimmed trimmed:
                 _live!.ApplyContextTrim(
                     trimmed.Result.NewlyTombstonedCallIds,
                     trimmed.Result.CompletedRoundCallIds);
@@ -322,14 +326,14 @@
                 StateHasChanged();
                 break;
 
-            case WritingCoachAssistantMessageCompleted:
+            case VoiceAssistantMessageCompleted:
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
 
-            case WritingCoachTurnError error:
+            case VoiceTurnError error:
                 _error = error.Cancelled ? null : error.Message;
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
@@ -361,7 +365,7 @@
         _selectedProviderId = _conversation.SelectedProviderId;
         await LoadChatProviderStateAsync();
         _messages = (await Coach.LoadMessagesAsync(_conversation.Id)).ToList();
-        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.WritingCoach);
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Voice);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;
@@ -375,14 +379,14 @@
             : _messages;
 
         var byCallId = messages
-            .Where(message => message.Role == WritingCoachMessageRole.Tool && message.ToolCallId is not null)
+            .Where(message => message.Role == VoiceMessageRole.Tool && message.ToolCallId is not null)
             .ToDictionary(message => message.ToolCallId!, message => message);
 
         _renderable = new List<ChatRenderableMessage>(messages.Count);
         foreach (var message in messages)
         {
-            if (message.Role == WritingCoachMessageRole.Tool) continue;
-            if (message.Role == WritingCoachMessageRole.System) continue;
+            if (message.Role == VoiceMessageRole.Tool) continue;
+            if (message.Role == VoiceMessageRole.System) continue;
 
             _renderable.Add(new ChatRenderableMessage(
                 Id: message.Id,
@@ -416,7 +420,7 @@
         if (_loading || _running || _resetting) return;
         if (ChatTurns.GetActiveTurn(ProjectId) is not null)
         {
-            _error = "Writing Coach is still working in another window. Stop or wait for that turn before changing its model.";
+            _error = "Voice is still working in another window. Stop or wait for that turn before changing its model.";
             return;
         }
         try
@@ -436,29 +440,29 @@
     private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
         new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.EffectiveMaxInputTokens, provider.ResolvedMetadata);
 
-    private List<ChatMessagePart> BuildPartsWithImages(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    private List<ChatMessagePart> BuildPartsWithImages(VoiceMessage message, IReadOnlyDictionary<string, VoiceMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId);
-        if (message.Role == WritingCoachMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        if (message.Role == VoiceMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
         {
             var reasoningPart = new ChatReasoningPart();
             reasoningPart.Append(message.Reasoning);
             parts.Insert(0, reasoningPart);
         }
-        if (message.Role == WritingCoachMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+        if (message.Role == VoiceMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;
     }
 
-    private static ChatMessageRole ToChatRole(WritingCoachMessageRole role) => role == WritingCoachMessageRole.User
+    private static ChatMessageRole ToChatRole(VoiceMessageRole role) => role == VoiceMessageRole.User
         ? ChatMessageRole.User
         : ChatMessageRole.Assistant;
 
-    private static ChatMessageStatus ToChatStatus(WritingCoachMessageStatus status) => status switch
+    private static ChatMessageStatus ToChatStatus(VoiceMessageStatus status) => status switch
     {
-        WritingCoachMessageStatus.Failed => ChatMessageStatus.Failed,
-        WritingCoachMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
-        WritingCoachMessageStatus.Pending => ChatMessageStatus.Pending,
+        VoiceMessageStatus.Failed => ChatMessageStatus.Failed,
+        VoiceMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
+        VoiceMessageStatus.Pending => ChatMessageStatus.Pending,
         _ => ChatMessageStatus.Completed,
     };
 
@@ -475,12 +479,12 @@
             message => message,
             _live,
             _pendingUserText,
-            WritingCoachService.CoachSystemPrompt);
+            VoiceService.VoiceWorkflowInstructions);
     }
 
-    private static List<ChatMessagePart> BuildMessageParts(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    private static List<ChatMessagePart> BuildMessageParts(VoiceMessage message, IReadOnlyDictionary<string, VoiceMessage> byCallId)
     {
-        if (message.Role != WritingCoachMessageRole.Assistant)
+        if (message.Role != VoiceMessageRole.Assistant)
             return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
 
         var calls = ChatTranscriptHelpers.ReadPersistedCalls(message.ToolCallsJson);
@@ -517,13 +521,13 @@
         return parts;
     }
 
-    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
+    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, VoiceMessage> byCallId)
     {
         byCallId.TryGetValue(call.CallId, out var resultMessage);
         return new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
         {
-            Result = resultMessage?.Status == WritingCoachMessageStatus.Completed ? resultMessage.Content : null,
-            Error = resultMessage?.Status == WritingCoachMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
+            Result = resultMessage?.Status == VoiceMessageStatus.Completed ? resultMessage.Content : null,
+            Error = resultMessage?.Status == VoiceMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
             Completed = resultMessage is not null,
         };
     }

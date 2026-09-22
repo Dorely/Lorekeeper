@@ -28,7 +28,7 @@ public sealed class ChatConversationModelSelectionMigrationTests
             {
                 new ConversationFixture("EditorConversations", "EditorMessages", "Editor"),
                 new ConversationFixture("OutlineConversations", "OutlineMessages", "Outline"),
-                new ConversationFixture("WritingCoachConversations", "WritingCoachMessages", "Writing Coach"),
+                new ConversationFixture("WritingCoachConversations", "WritingCoachMessages", "Voice"),
                 new ConversationFixture("ResearchConversations", "ResearchMessages", "Research"),
                 new ConversationFixture("ProjectImageConversations", "ProjectImageMessages", "Images"),
                 new ConversationFixture("PublishConversations", "PublishMessages", "Publish"),
@@ -59,14 +59,14 @@ public sealed class ChatConversationModelSelectionMigrationTests
             {
                 Assert.Null((await db.EditorConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.OutlineConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
-                Assert.Null((await db.WritingCoachConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
+                Assert.Null((await db.VoiceConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.ResearchConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.ProjectImageConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.PublishConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
 
                 Assert.Equal("Editor transcript", (await db.EditorMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Outline transcript", (await db.OutlineMessages.AsNoTracking().SingleAsync()).Content);
-                Assert.Equal("Writing Coach transcript", (await db.WritingCoachMessages.AsNoTracking().SingleAsync()).Content);
+                Assert.Equal("Voice transcript", (await db.VoiceMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Research transcript", (await db.ResearchMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Images transcript", (await db.ProjectImageMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Publish transcript", (await db.PublishMessages.AsNoTracking().SingleAsync()).Content);

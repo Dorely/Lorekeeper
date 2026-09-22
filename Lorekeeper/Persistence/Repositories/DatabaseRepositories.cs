@@ -25,6 +25,6 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
     public IResearchConversationRepository ResearchConversations { get; } = new ResearchConversationRepository(operation);
     public ISearchProviderRepository SearchProviders { get; } = new SearchProviderRepository(operation);
     public IWebIngestCandidateRepository WebIngestCandidates { get; } = new WebIngestCandidateRepository(operation);
-    public IWritingCoachConversationRepository WritingCoachConversations { get; } = new WritingCoachConversationRepository(operation);
+    public IVoiceConversationRepository VoiceConversations { get; } = new VoiceConversationRepository(operation);
     public IWritingSampleRepository WritingSamples { get; } = new WritingSampleRepository(operation);
 }

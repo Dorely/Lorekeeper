@@ -70,7 +70,7 @@ public class Project
 
     public ICollection<WritingSample> WritingSamples { get; set; } = [];
 
-    public ICollection<WritingCoachConversation> WritingCoachConversations { get; set; } = [];
+    public ICollection<VoiceConversation> VoiceConversations { get; set; } = [];
 
     public ICollection<ResearchConversation> ResearchConversations { get; set; } = [];
 

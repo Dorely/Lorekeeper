@@ -14,71 +14,57 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Writing;
 
-public sealed class WritingCoachService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
+public sealed class VoiceService(
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, VoiceTools tools, IContextBuilder contextBuilder, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<VoiceService> logger) : IVoiceService
 {
-    public static readonly string CoachSystemPrompt = """
-        You are a Writing Coach for a long-form fiction project. Your job is to help
-        the writer produce writing samples in their own style and words so future AI
-        drafting can better imitate their voice.
-
-        How to work:
-        - You are a partner, not an oracle. Ask questions, propose options, and
-          surface craft trade-offs. Do not take over the prose.
-        - At the beginning of every user turn, call read_current_section before you
-          answer. Treat its result as the latest current draft. Do not ask the user to
-          paste the current section unless the tool result says it is unavailable.
-        - Call list_project_facts when project-level context would change your advice,
-          especially for premise, tone, setting, character, canon, style constraints,
-          or other established truths.
-        - Your tools are read-only. You cannot edit, save, rename, delete, or otherwise
-          change stored samples or project facts from this chat.
-        - Do not claim you changed the draft or stored anything.
-        - Avoid taking over the prose. When the user asks for examples, keep them short
-          and frame them as options the writer can adapt.
-        - Keep replies concise and practical. Prefer one next step over a broad lecture.
-        - Pay attention to sentence rhythm, diction, point of view, imagery, pacing,
-          and emotional texture. Help the writer make those choices intentional.
-        """ + "\n\n" + AssistantWorkflowInstructions.ProjectSearchQueryDiscipline
-            + "\n\nRelevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. Use them only for read-only coaching context; this role has no find_impacted_chapters tool."
-            + "\n\n" + AssistantWorkflowInstructions.ProjectReferenceContinuity
-            + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
+    public static readonly string VoiceWorkflowInstructions = """
+        Develop the author's writing samples and free-form character voice profiles.
+        Direct build/edit requests authorize in-scope saves; brainstorming and comparisons remain conversational until the user chooses a direction.
+        Read current records and their revisions before editing. Use list_writing_samples and read_writing_sample to resolve the visible sample; never guess its identity from its title.
+        Use read_current_section for the visible workspace selection. It is a turn-start snapshot, not a substitute for a fresh record before writing.
+        Preserve the author's style while helping with rhythm, diction, imagery, pacing, dialogue, and POV narration.
+        Profiles may discuss vocabulary, rhythm, emotional variation, distinguishing traits, internal narration, and illustrative lines. No fixed headings are required.
+        Samples remain general style evidence. Profile example lines illustrate a voice, not dialogue to repeat automatically.
+        Create a Character only when the user's request requires it. Mutate only the active project.
+        Surface conflicts with existing canon or briefs. Keep unrelated entity properties unchanged.
+        Read back changes before reporting completion and distinguish saved work from suggestions.
+        """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
-        "Let's shape a writing sample in your own voice. What kind of scene, moment, or mood do you want to practice first?";
+        "Let’s develop your writing voice or a character’s dialogue and inner narration. Choose a sample or character, or tell me what you want to build.";
 
-    public async Task<WritingCoachConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<VoiceConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var projects = databaseOperation.Repositories.Projects;
-        var conversations = databaseOperation.Repositories.WritingCoachConversations;
+        var conversations = databaseOperation.Repositories.VoiceConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
         _ = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-        var conversation = new WritingCoachConversation { ProjectId = projectId };
+        var conversation = new VoiceConversation { ProjectId = projectId };
         await conversations.AddConversationAsync(conversation, cancellationToken);
 
-        var greeting = new WritingCoachMessage
+        var greeting = new VoiceMessage
         {
             ConversationId = conversation.Id,
             Order = 0,
-            Role = WritingCoachMessageRole.Assistant,
+            Role = VoiceMessageRole.Assistant,
             Content = InitialAssistantGreeting,
-            Status = WritingCoachMessageStatus.Completed,
+            Status = VoiceMessageStatus.Completed,
         };
         await conversations.AddMessageAsync(greeting, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<VoiceMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var conversations = databaseOperation.Repositories.WritingCoachConversations;
+        var conversations = databaseOperation.Repositories.VoiceConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
 
@@ -87,7 +73,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var conversation = await databaseOperation.Repositories.WritingCoachConversations
+        var conversation = await databaseOperation.Repositories.VoiceConversations
             .GetByProjectIdAsync(projectId, cancellationToken);
         var selection = await providerService.ResolveChatModelSelectionAsync(
             conversation?.SelectedProviderId,
@@ -102,9 +88,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         int? providerId,
         CancellationToken cancellationToken = default)
     {
-        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.WritingCoach));
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Voice));
         if (maintenance is null)
-            throw new InvalidOperationException("Writing Coach is still working in another window. Stop or wait for that turn before changing its model.");
+            throw new InvalidOperationException("Voice is still working in another window. Stop or wait for that turn before changing its model.");
 
         if (providerId is int)
         {
@@ -117,38 +103,38 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
-        var conversation = await databaseOperation.Repositories.WritingCoachConversations
+        var conversation = await databaseOperation.Repositories.VoiceConversations
             .GetByProjectIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException("Writing Coach is not initialized.");
+            ?? throw new InvalidOperationException("Voice is not initialized.");
         conversation.SelectedProviderId = normalizedProviderId;
         conversation.UpdatedAt = DateTime.UtcNow;
-        databaseOperation.Repositories.WritingCoachConversations.UpdateSelectedProvider(conversation);
+        databaseOperation.Repositories.VoiceConversations.UpdateSelectedProvider(conversation);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.WritingCoach));
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Voice));
         if (maintenance is null)
-            throw new InvalidOperationException("Writing Coach is still working in another window. Stop or wait for that turn before resetting the conversation.");
-        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.WritingCoach, cancellationToken);
+            throw new InvalidOperationException("Voice is still working in another window. Stop or wait for that turn before resetting the conversation.");
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Voice, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
-        var conversations = databaseOperation.Repositories.WritingCoachConversations;
+        var conversations = databaseOperation.Repositories.VoiceConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
-        await conversations.ResetMessagesAsync(existing, new WritingCoachMessage
+        await conversations.ResetMessagesAsync(existing, new VoiceMessage
         {
             ConversationId = existing.Id,
             Order = 0,
-            Role = WritingCoachMessageRole.Assistant,
+            Role = VoiceMessageRole.Assistant,
             Content = InitialAssistantGreeting,
-            Status = WritingCoachMessageStatus.Completed,
+            Status = VoiceMessageStatus.Completed,
         }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async IAsyncEnumerable<WritingCoachTurnUpdate> SendAsync(
+    public async IAsyncEnumerable<VoiceTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
         string? currentSampleTitle,
@@ -166,45 +152,45 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             cancellationToken);
         if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
         {
-            yield return new WritingCoachTurnError(persistedSelection.Message, Cancelled: false);
+            yield return new VoiceTurnError(persistedSelection.Message, Cancelled: false);
             yield break;
         }
 
         if (persistedProvider.Id != providerId)
         {
-            yield return new WritingCoachTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield return new VoiceTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
             yield break;
         }
 
         var visionReady = await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
-            yield return new WritingCoachTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
+            yield return new VoiceTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
         var nextOrder = await turnEngine.ReadAsync(
-            repositories => repositories.WritingCoachConversations,
+            repositories => repositories.VoiceConversations,
             conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
             cancellationToken) + 1;
 
-        var userMessage = new WritingCoachMessage
+        var userMessage = new VoiceMessage
         {
             ConversationId = conversation.Id,
             Order = nextOrder++,
-            Role = WritingCoachMessageRole.User,
+            Role = VoiceMessageRole.User,
             Content = userText.Trim(),
-            Status = WritingCoachMessageStatus.Completed,
+            Status = VoiceMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, userMessage, cancellationToken);
-        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.WritingCoach, userMessage.Id, imageIds, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.VoiceConversations, userMessage, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Voice, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
-        WritingCoachContext? toolContext = null;
-        var systemPrompt = CoachSystemPrompt;
+        VoiceContext? toolContext = null;
+        var systemPrompt = string.Empty;
         string? setupError = null;
         try
         {
@@ -213,24 +199,23 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            var referenceManifest = ProjectReferenceManifestFormatter.Format(
-                await projectReferences.ListReferenceManifestsAsync(project.Id, cancellationToken));
-            if (referenceManifest is not null)
-                systemPrompt += "\n\n## Direct Project Reference Continuity\n" + referenceManifest;
+            systemPrompt = (await contextBuilder.BuildAsync(new ContextBuildRequest(
+                project, UserMessage: userText, Purpose: ContextBuildPurpose.Voice,
+                OperatingRules: VoiceWorkflowInstructions), cancellationToken)).Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
-            toolContext = new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody, visionReady);
+            toolContext = new VoiceContext(project.Id, currentSampleTitle, currentSampleBody, visionReady);
             aiTools = tools.Build(toolContext);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Writing Coach turn setup failed for project {ProjectId}", projectId);
+            logger.LogError(ex, "Voice turn setup failed for project {ProjectId}", projectId);
             await PersistFailedAssistantAsync(conversation.Id, nextOrder, ex.Message);
             setupError = ex.Message;
         }
 
         if (setupError is not null)
         {
-            yield return new WritingCoachTurnError(setupError, Cancelled: false);
+            yield return new VoiceTurnError(setupError, Cancelled: false);
             yield break;
         }
 
@@ -241,7 +226,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         };
 
         var history = await turnEngine.ReadAsync(
-            repositories => repositories.WritingCoachConversations,
+            repositories => repositories.VoiceConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
@@ -259,25 +244,25 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {
-            var activeAssistant = new WritingCoachMessage
+            var activeAssistant = new VoiceMessage
             {
                 ConversationId = conversation.Id,
                 Order = nextOrder++,
-                Role = WritingCoachMessageRole.Assistant,
+                Role = VoiceMessageRole.Assistant,
                 Content = string.Empty,
-                Status = WritingCoachMessageStatus.Pending,
+                Status = VoiceMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.VoiceConversations, activeAssistant, cancellationToken);
 
             if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.EffectiveMaxInputTokens) is { } compaction)
             {
-                yield return new WritingCoachContextTrimmed(compaction);
+                yield return new VoiceContextTrimmed(compaction);
                 if (compaction.LimitExceeded)
                 {
-                    activeAssistant.Status = WritingCoachMessageStatus.Failed;
+                    activeAssistant.Status = VoiceMessageStatus.Failed;
                     activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
                     await SafePersistAsync(activeAssistant);
-                    yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield return new VoiceTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                     yield break;
                 }
             }
@@ -288,16 +273,16 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 switch (update)
                 {
                     case ChatRoundTextDelta text:
-                        yield return new WritingCoachTextDelta(text.Text);
+                        yield return new VoiceTextDelta(text.Text);
                         break;
                     case ChatRoundReasoningDelta reasoning:
-                        yield return new WritingCoachReasoningDelta(reasoning.Text);
+                        yield return new VoiceReasoningDelta(reasoning.Text);
                         break;
                     case ChatRoundToolCallStarted started:
-                        yield return new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                        yield return new VoiceToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
                     case ChatRoundToolCallArgumentsDelta delta:
-                        yield return new WritingCoachToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                        yield return new VoiceToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
                     case ChatRoundCompleted completed:
                         completedRound = completed;
@@ -308,21 +293,21 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
-                            ? WritingCoachMessageStatus.Cancelled
-                            : WritingCoachMessageStatus.Failed;
+                            ? VoiceMessageStatus.Cancelled
+                            : VoiceMessageStatus.Failed;
                         activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                         await SafePersistAsync(activeAssistant);
-                        yield return new WritingCoachTurnError(failed.Message, failed.Cancelled);
+                        yield return new VoiceTurnError(failed.Message, failed.Cancelled);
                         yield break;
                 }
             }
 
             if (completedRound is null)
             {
-                activeAssistant.Status = WritingCoachMessageStatus.Failed;
-                activeAssistant.ErrorMessage = "Writing Coach streaming ended without a completed round.";
+                activeAssistant.Status = VoiceMessageStatus.Failed;
+                activeAssistant.ErrorMessage = "Voice streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                yield return new VoiceTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
 
@@ -334,9 +319,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             if (pendingCalls.Count == 0)
             {
                 activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = WritingCoachMessageStatus.Completed;
+                activeAssistant.Status = VoiceMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                yield return new WritingCoachAssistantMessageCompleted(activeAssistant.Id);
+                yield return new VoiceAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
 
@@ -345,7 +330,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-            activeAssistant.Status = WritingCoachMessageStatus.Completed;
+            activeAssistant.Status = VoiceMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
             messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
@@ -355,7 +340,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
+                    yield return new VoiceTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
@@ -365,33 +350,34 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
                 if (toolOutcome.Cancelled)
                 {
-                    yield return new WritingCoachTurnError("Cancelled.", Cancelled: true);
+                    yield return new VoiceTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
                 var toolResult = toolOutcome.Result;
                 var toolError = toolOutcome.Error;
 
-                var toolMessage = new WritingCoachMessage
+                var toolMessage = new VoiceMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
-                    Role = WritingCoachMessageRole.Tool,
+                    Role = VoiceMessageRole.Tool,
                     Content = toolResult ?? string.Empty,
                     ToolCallId = pendingCall.CallId,
                     ToolName = pendingCall.Name,
-                    Status = toolError is null ? WritingCoachMessageStatus.Completed : WritingCoachMessageStatus.Failed,
+                    Status = toolError is null ? VoiceMessageStatus.Completed : VoiceMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.VoiceConversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                yield return new WritingCoachToolCallCompleted(
+                yield return new VoiceToolCallCompleted(
                     pendingCall.CallId,
                     pendingCall.Name,
                     toolError is null ? toolResult : null,
                     toolError,
                     sw.Elapsed.TotalMilliseconds);
+                if (toolContext!.TakeMutation()) yield return new VoiceMutated();
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
@@ -416,7 +402,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
             if (iteration == maxIterations - 1)
             {
-                yield return new WritingCoachTurnError(
+                yield return new VoiceTurnError(
                     ChatTurnEngine.ToolLoopLimitError(maxIterations),
                     Cancelled: false);
                 yield break;
@@ -428,15 +414,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
     {
         await using var databaseOperation = await database.OpenWriteAsync(default);
         databaseOperation.ShareWithNestedOperations();
-        var conversations = databaseOperation.Repositories.WritingCoachConversations;
+        var conversations = databaseOperation.Repositories.VoiceConversations;
         try
         {
-            var message = new WritingCoachMessage
+            var message = new VoiceMessage
             {
                 ConversationId = conversationId,
                 Order = order,
-                Role = WritingCoachMessageRole.Assistant,
-                Status = WritingCoachMessageStatus.Failed,
+                Role = VoiceMessageRole.Assistant,
+                Status = VoiceMessageStatus.Failed,
                 ErrorMessage = error,
             };
             await conversations.AddMessageAsync(message, CancellationToken.None);
@@ -444,19 +430,19 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to persist Writing Coach setup failure");
+            logger.LogError(ex, "Failed to persist Voice setup failure");
         }
     }
 
-    private async Task SafePersistAsync(WritingCoachMessage message)
+    private async Task SafePersistAsync(VoiceMessage message)
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(repositories => repositories.WritingCoachConversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.VoiceConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to persist Writing Coach message {MessageId}", message.Id);
+            logger.LogError(ex, "Failed to persist Voice message {MessageId}", message.Id);
         }
     }
 

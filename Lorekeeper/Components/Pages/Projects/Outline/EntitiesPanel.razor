@@ -115,6 +115,10 @@
                     <div>
                         <div class="text-muted small entities-modal-type">@_modalEntity.Type</div>
                         <h5 class="modal-title">@_modalEntity.Name</h5>
+                        @if (_modalEntity.Type == "Character")
+                        {
+                            <a href="@($"/projects/{Project.Slug}/voice?character={_modalEntity.Id}")">Edit voice profile</a>
+                        }
                     </div>
                     <button type="button" class="btn-close" @onclick="CloseModal" aria-label="Close"></button>
                 </div>
@@ -221,6 +225,7 @@
 }
 
 @code {
+    [CascadingParameter] public Project Project { get; set; } = null!;
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     /// <summary>Bumped by the parent every time the outline mutates so this panel re-reads.</summary>
     [Parameter] public int RefreshSignal { get; set; }

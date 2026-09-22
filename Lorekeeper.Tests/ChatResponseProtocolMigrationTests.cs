@@ -28,7 +28,7 @@ public sealed class ChatResponseProtocolMigrationTests
             {
                 new ConversationFixture("EditorConversations", "EditorMessages", "Editor"),
                 new ConversationFixture("OutlineConversations", "OutlineMessages", "Outline"),
-                new ConversationFixture("WritingCoachConversations", "WritingCoachMessages", "Writing Coach"),
+                new ConversationFixture("WritingCoachConversations", "WritingCoachMessages", "Voice"),
                 new ConversationFixture("ResearchConversations", "ResearchMessages", "Research"),
                 new ConversationFixture("ProjectImageConversations", "ProjectImageMessages", "Images"),
                 new ConversationFixture("PublishConversations", "PublishMessages", "Publish"),
@@ -60,20 +60,20 @@ public sealed class ChatResponseProtocolMigrationTests
             {
                 Assert.Null((await db.EditorConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.OutlineConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
-                Assert.Null((await db.WritingCoachConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
+                Assert.Null((await db.VoiceConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.ResearchConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.ProjectImageConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Null((await db.PublishConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
 
                 Assert.Equal("Editor transcript", (await db.EditorMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Outline transcript", (await db.OutlineMessages.AsNoTracking().SingleAsync()).Content);
-                Assert.Equal("Writing Coach transcript", (await db.WritingCoachMessages.AsNoTracking().SingleAsync()).Content);
+                Assert.Equal("Voice transcript", (await db.VoiceMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Research transcript", (await db.ResearchMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Images transcript", (await db.ProjectImageMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Equal("Publish transcript", (await db.PublishMessages.AsNoTracking().SingleAsync()).Content);
                 Assert.Null((await db.EditorMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Null((await db.OutlineMessages.SingleAsync()).ResponseMetadataJson);
-                Assert.Null((await db.WritingCoachMessages.SingleAsync()).ResponseMetadataJson);
+                Assert.Null((await db.VoiceMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Null((await db.ResearchMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Null((await db.ProjectImageMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Null((await db.PublishMessages.SingleAsync()).ResponseMetadataJson);
@@ -87,7 +87,7 @@ public sealed class ChatResponseProtocolMigrationTests
                 await db.Database.MigrateAsync();
                 Assert.Equal(ProtocolJson, (await db.EditorMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Equal(ProtocolJson, (await db.OutlineMessages.SingleAsync()).ResponseMetadataJson);
-                Assert.Equal(ProtocolJson, (await db.WritingCoachMessages.SingleAsync()).ResponseMetadataJson);
+                Assert.Equal(ProtocolJson, (await db.VoiceMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Equal(ProtocolJson, (await db.ResearchMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Equal(ProtocolJson, (await db.ProjectImageMessages.SingleAsync()).ResponseMetadataJson);
                 Assert.Equal(ProtocolJson, (await db.PublishMessages.SingleAsync()).ResponseMetadataJson);
@@ -107,7 +107,7 @@ public sealed class ChatResponseProtocolMigrationTests
 #pragma warning disable EF1002 // Fixture table names are fixed constants, while values remain parameters.
     private static Task StoreProtocolAsync(AppDbContext db, ConversationFixture fixture) =>
         db.Database.ExecuteSqlRawAsync(
-            $"UPDATE {fixture.MessageTable} SET ResponseMetadataJson = $metadata",
+            $"UPDATE {fixture.MessageTable.Replace("WritingCoach", "Voice", StringComparison.Ordinal)} SET ResponseMetadataJson = $metadata",
             new SqliteParameter("$metadata", ProtocolJson));
 
     private static Task InsertConversationAsync(

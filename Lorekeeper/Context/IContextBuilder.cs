@@ -13,6 +13,7 @@ public enum ContextBuildPurpose
     Images,
     Research,
     Publish,
+    Voice,
 }
 
 public sealed record ContextBuildRequest(

@@ -83,7 +83,7 @@ public sealed class OpenAiAccountOwnershipMigrationTests
 
                 Assert.Equal(102, (await db.EditorConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.OutlineConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
-                Assert.Equal(102, (await db.WritingCoachConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
+                Assert.Equal(102, (await db.VoiceConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.ResearchConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.ProjectImageConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
                 Assert.Equal(102, (await db.PublishConversations.AsNoTracking().SingleAsync()).SelectedProviderId);

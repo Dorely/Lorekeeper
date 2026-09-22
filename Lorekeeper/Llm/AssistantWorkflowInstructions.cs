@@ -41,6 +41,7 @@ public static class AssistantWorkflowInstructions
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. External web_search and its read tools are separate and are not governed by this project-search discipline.",
             SystemPromptAgentRole.Publish =>
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. Use them for project grounding and keep publication-state decisions within the Publish contract.",
+            SystemPromptAgentRole.Voice => "Relevant tools: list_search_sources, search_project, read_project_source.",
             SystemPromptAgentRole.ContestCandidate =>
                 "No Lorekeeper project-search tools are available in this role. Use only the supplied candidate context and do not invent project-search or external web-search calls.",
             _ => "No Lorekeeper project-search tools are available in this role. Do not invent project-search calls."

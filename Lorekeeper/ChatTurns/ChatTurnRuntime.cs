@@ -8,7 +8,7 @@ public enum ChatTurnSurface
     Editor,
     Research,
     Images,
-    WritingCoach,
+    Voice,
     Publish,
 }
 

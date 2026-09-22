@@ -49,6 +49,11 @@ event payloads. These operational records remain outside canonical version histo
 and portable project creative-state exports. Migration coverage verifies old
 transcripts and exact opaque metadata storage.
 
+The forward AddVoiceWorkspace migration renames the Writing Coach conversation
+and message tables to Voice, preserving IDs, transcripts, protocol metadata, and
+model selections, migrating attachment surfaces, and adding sample Revision.
+Voice profiles remain canonical graph properties carried by archives and history.
+
 ## Scope and ownership
 
 `AppDbContext` owns the EF model and relationships for projects, Book Briefs,

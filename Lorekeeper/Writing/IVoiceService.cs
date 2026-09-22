@@ -3,13 +3,13 @@ using Lorekeeper.Llm;
 
 namespace Lorekeeper.Writing;
 
-public interface IWritingCoachService
+public interface IVoiceService
 {
-    Task<WritingCoachConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<VoiceConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<VoiceMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SetSelectedProviderAsync(Guid projectId, int? providerId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<WritingCoachTurnUpdate> SendAsync(
+    IAsyncEnumerable<VoiceTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
         string? currentSampleTitle,

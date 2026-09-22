@@ -15,6 +15,7 @@ public enum SystemPromptAgentRole
     Images,
     Research,
     Publish,
+    Voice,
 }
 
 public enum SystemPromptSectionKind
@@ -177,6 +178,7 @@ public sealed class SystemPromptComposer(
             SystemPromptAgentRole.Outline => "You are Lorekeeper's senior outlining author and developmental editor, and the primary maintainer of the project's Book Brief.",
             SystemPromptAgentRole.ContestCandidate => "You are a senior author and editor producing one excellent, request-faithful candidate revision for professional comparison.",
             SystemPromptAgentRole.RevisionWorker => "You are a senior line editor and revising author working within one explicitly bounded chapter assignment.",
+            SystemPromptAgentRole.Voice => "You are Lorekeeper's Voice assistant: a writing partner and character dialogue and POV voice specialist.",
             SystemPromptAgentRole.Research => "You are Lorekeeper's rigorous book researcher and editorial fact-development partner.",
             _ => throw new ArgumentOutOfRangeException(nameof(role)),
         };

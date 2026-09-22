@@ -1,0 +1,133 @@
+@using Lorekeeper.Authoring
+@implements IAsyncDisposable
+@inject IAuthoringMutationFence Fence
+
+<NavigationLock OnBeforeInternalNavigation="BeforeNavigationAsync" />
+
+<div class="d-flex flex-column h-100 gap-2">
+    @if (EditTitle)
+    {
+        <input class="form-control" aria-label="Title" value="@_title" @oninput="TitleChangedAsync" disabled="@(_frozen || _lease is null)" />
+    }
+    <textarea class="form-control flex-grow-1" style="min-height: 20rem; resize: vertical"
+              aria-label="@Label" placeholder="@Placeholder" value="@_body"
+              @oninput="BodyChangedAsync" disabled="@(_frozen || _lease is null)"></textarea>
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_error Your local text is retained.
+            <button class="btn btn-sm btn-outline-secondary" @onclick="SaveAsync" disabled="@(_frozen || _lease is null)">Retry save</button>
+        </div>
+    }
+    <span class="small text-muted">@(_dirty ? "Unsaved" : "Saved")</span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public string TargetId { get; set; } = "";
+    [Parameter] public string Label { get; set; } = "Text";
+    [Parameter] public string Placeholder { get; set; } = "";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Body { get; set; } = "";
+    [Parameter] public bool EditTitle { get; set; }
+    [Parameter, EditorRequired] public Func<string, string, Task> Save { get; set; } = null!;
+    [Parameter] public EventCallback OnResumed { get; set; }
+    private readonly Guid _session = Guid.NewGuid();
+    private readonly Guid _writer = Guid.NewGuid();
+    private readonly SemaphoreSlim _saveGate = new(1);
+    private IAsyncDisposable? _lease;
+    private AuthoringTargetReferenceV1 _target = null!;
+    private string _title = "";
+    private string _body = "";
+    private string? _error;
+    private long _sequence;
+    private long _saved;
+    private bool _dirty;
+    private bool _frozen;
+    private bool _initialized;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_initialized)
+        {
+            _initialized = true;
+            _target = new(ProjectId, TargetId);
+            try
+            {
+                _lease = await Fence.RegisterWriterAsync(new(_target, _session, _writer,
+                    async (_, _) =>
+                    {
+                        AuthoringWriterFlushResult result = null!;
+                        await InvokeAsync(async () =>
+                        {
+                            _frozen = true;
+                            await SaveAsync();
+                            result = new(_saved, _dirty, !_dirty, true, ErrorMessage: _error);
+                            StateHasChanged();
+                        });
+                        return result;
+                    },
+                    async _ => await InvokeAsync(async () =>
+                    {
+                        _frozen = false;
+                        await OnResumed.InvokeAsync();
+                        StateHasChanged();
+                    })));
+            }
+            catch (InvalidOperationException exception) { _error = exception.Message; }
+        }
+        if (!_dirty) { _title = Title; _body = Body; }
+    }
+
+    private async Task TitleChangedAsync(ChangeEventArgs args)
+    {
+        _title = args.Value?.ToString() ?? "";
+        await ChangedAsync();
+    }
+    private async Task BodyChangedAsync(ChangeEventArgs args)
+    {
+        _body = args.Value?.ToString() ?? "";
+        await ChangedAsync();
+    }
+    private async Task ChangedAsync()
+    {
+        _sequence++;
+        _dirty = true;
+        Report();
+        await SaveAsync();
+    }
+    private void Report()
+    {
+        if (_lease is not null)
+            Fence.UpdateWriterState(new(_target, _session, _writer, 0, _sequence, _sequence, _saved, _dirty, !_dirty));
+    }
+    private async Task SaveAsync()
+    {
+        await _saveGate.WaitAsync();
+        try
+        {
+            if (!_dirty || _lease is null) return;
+            var sequence = _sequence;
+            await Save(_title, _body);
+            _saved = sequence;
+            _dirty = _sequence != sequence;
+            _error = null;
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { Report(); _saveGate.Release(); }
+    }
+    public async Task EnsureSavedAsync()
+    {
+        await SaveAsync();
+        if (_dirty) throw new InvalidOperationException(_error ?? "Save this draft before leaving it.");
+    }
+    private async Task BeforeNavigationAsync(Microsoft.AspNetCore.Components.Routing.LocationChangingContext context)
+    {
+        await SaveAsync();
+        if (_dirty) context.PreventNavigation();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        await SaveAsync();
+        if (_lease is not null) await _lease.DisposeAsync();
+    }
+}

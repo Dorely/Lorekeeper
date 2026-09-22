@@ -1,9 +1,9 @@
 namespace Lorekeeper.Models;
 
 /// <summary>
-/// Persisted, per-project transcript for the Writing Coach chat.
+/// Persisted, per-project transcript for the Voice chat.
 /// </summary>
-public class WritingCoachConversation
+public class VoiceConversation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -20,5 +20,5 @@ public class WritingCoachConversation
     /// </summary>
     public int? SelectedProviderId { get; set; }
 
-    public ICollection<WritingCoachMessage> Messages { get; set; } = [];
+    public ICollection<VoiceMessage> Messages { get; set; } = [];
 }

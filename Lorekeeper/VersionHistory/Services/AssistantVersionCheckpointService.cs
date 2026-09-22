@@ -61,7 +61,7 @@ public sealed class AssistantVersionCheckpointService(
     {
         ChatTurnSurface.Editor => "editor",
         ChatTurnSurface.Outline => "outline",
-        ChatTurnSurface.WritingCoach => "writing sample",
+        ChatTurnSurface.Voice => "Voice",
         ChatTurnSurface.Research => "research",
         ChatTurnSurface.Images => "images",
         ChatTurnSurface.Publish => "publishing",

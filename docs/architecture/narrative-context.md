@@ -161,6 +161,16 @@ by `AgentManuscriptProjection`: its paged and filtered results preserve absolute
 document indexes and omit empty semantic overlays rather than using a generic
 object paginator.
 
+### Voice workspace
+
+Voice retains project-wide writing samples and owns an optional free-form
+voiceProfile property on Character entities. Profiles cover dialogue and POV
+narration and follow ordinary entity indexing, context, archive, and history
+ownership. Profile writes compare the exact previously read content; sample
+writes compare their persisted Revision. Manual and assistant edits use the same
+services. NarrativeTextEditor registers with the authoring fence and blocks
+dependent work while a failed or unacknowledged save remains dirty.
+
 ### Project creation and profile indexing
 
 Creating a project persists its empty Book Brief and page setup with the project
