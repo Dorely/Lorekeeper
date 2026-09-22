@@ -172,6 +172,11 @@ remain policy-specific; common code must not flatten them into one scope.
 History source capture stores a source index, per-source manifests,
 extraction blocks, and reusable content-addressed chunks. Metadata comparison is
 lazy, restore streams and validates data, and results report new/reused bytes.
+Retained sources with pending or failed initial extraction attempts may have no
+active extraction. History preserves their originals and attempts without
+promoting an unreadable version; a declared active version must still exist and
+be Ready or LegacyImmutable. Original-byte and extraction validation also applies
+when the active version is absent.
 The capture boundary freezes canonical mutation and reads stable bounded
 descriptors, then releases the project lease before compression, Git transport,
 or download. Archive/history/Git/restore interfaces exchange declared files or

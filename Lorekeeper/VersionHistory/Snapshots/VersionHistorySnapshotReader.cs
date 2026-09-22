@@ -982,14 +982,16 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     {
         if (source.Id == Guid.Empty
             || string.IsNullOrWhiteSpace(source.Title)
-            || source.Extractions.Count == 0
-            || source.ActiveExtractionVersionId is not Guid activeId)
+            || source.Extractions.Count == 0)
         {
             throw new InvalidDataException("Snapshot retained source metadata is incomplete.");
         }
 
-        var active = source.Extractions.Single(extraction => extraction.Id == activeId);
-        if (active.Status is not (SourceExtractionStatus.Ready or SourceExtractionStatus.LegacyImmutable))
+        // Original retention precedes extraction. Pending and failed initial
+        // attempts have no active version, but still belong in project history.
+        if (source.ActiveExtractionVersionId is Guid activeId
+            && source.Extractions.Single(extraction => extraction.Id == activeId).Status
+                is not (SourceExtractionStatus.Ready or SourceExtractionStatus.LegacyImmutable))
             throw new InvalidDataException($"Source {source.Id:N} has a non-readable active extraction.");
 
         if (source.Original.State == SourceOriginalState.OriginalUnavailable)
