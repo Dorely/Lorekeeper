@@ -18,7 +18,7 @@ annotation behavior, and [composition-media.md](composition-media.md) or
 ## Scope and ownership
 
 This chapter owns the six interactive assistant surfaces—Outline, Editor,
-Voice, Research, Images, and Publish—and their shared conversation
+Voice, World, Images, and Publish—and their shared conversation
 protocol. It covers active-turn lifetime, transcript replay, model selection,
 tool invocation and streaming, prompt assembly, token accounting and
 compaction, image attachments, mutation refresh signals, Git-backed Review Edits,
@@ -37,7 +37,7 @@ against Git HEAD.
 ### Six surfaces over one shared protocol
 
 `ChatTurnSurface` has exactly six user-facing values: `Outline`, `Editor`,
-`Research`, `Images`, `Voice`, and `Publish`. Each surface owns one
+`World`, `Images`, `Voice`, and `Publish`. Each surface owns one
 project-scoped persisted conversation and ordered messages, including a nullable
 selected-provider override. Feature services adapt their repository, prompt
 context, tools, and typed streaming updates to the common `ChatTurnEngine`.
@@ -185,7 +185,7 @@ verification.
 `AssistantWorkflowInstructions.ProjectSearchQueryDiscipline` to every
 composed assistant role, including Voice. Its tool-scope sentence is role-specific: Editor
 also has `find_impacted_chapters`, revision workers do not, Contest Candidate
-has no project-search tools, and Research's external `web_search` remains a
+has no project-search tools, and World's external `web_search` remains a
 separate contract. Project-search facets are concise 2–6-term source-content
 queries with rare canonical names, aliases, exact events, objects, or other
 distinctive terms first. Conceptual facets use hybrid `search_project`; exact
@@ -385,12 +385,24 @@ create a Character when requested work requires one. Dialogue and POV guidance
 travel with relevant entity context; samples remain project-wide style evidence.
 Voice uses shared prompts, mutation fencing, workspace refresh, and checkpoints.
 
-Research combines bounded project/direct-reference reads with configured web
-search, safe cached page reads, image/source promotion, and direct graph
-mutations through Research services. Search and fetch security remains in
-Research services. Its activity
-view derives from touched entities and accessed cached sources rather than a
-separate assistant-authored log.
+World is one adaptive assistant for world development and research. It combines
+bounded project/direct-reference reads, guarded cached webpage reads, source/image
+promotion, and entity/fact/relationship tools. Only web_search requires a search
+provider; local work and ordinary chat do not. The World Brief view shares its
+conversation with a separate Research Activity view, derived from touched
+entities and cached sources. Search/fetch security stays in research services.
+World primarily maintains the free-form World Brief through read_world_brief and
+update_world_brief, using exact revisions and the shared authoring mutation fence.
+Direct build/edit requests authorize saves; brainstorming stays conversational
+until a direction is chosen. Brief changes trigger editor refresh, profile
+reindexing, Pending changes, and the existing assistant checkpoint policy.
+
+Project Guidance, Book Brief, and World Brief are protected user-owned sections
+in all six assistants, revision workers, and captured contest context. World
+Brief remains that name for every book type. Fiction captures established world
+principles; nonfiction captures scope, supported findings, terminology, uncertainty,
+and background. Detailed canon stays in entities/facts and evidence in Sources.
+Research does not automatically promote sources to canon.
 
 Images is concept art and visual canon. It can read narrative context for
 grounding and can mutate project images, canonical entity associations, and the
@@ -651,7 +663,7 @@ assistant evidence link never silently creates a manuscript citation.
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
 | [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Git-backed Review page, contests, revision jobs/workers, and active-turn updates. |
 | [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Voice service, sample/profile tool catalog, runner, and writing-sample application boundary. |
-| [`Lorekeeper/Research/ResearchService.cs`](../../Lorekeeper/Research/ResearchService.cs), [`ResearchTools.cs`](../../Lorekeeper/Research/ResearchTools.cs), [`ResearchChatTurnRunner.cs`](../../Lorekeeper/Research/ResearchChatTurnRunner.cs), and [`ResearchTurnUpdate.cs`](../../Lorekeeper/Research/ResearchTurnUpdate.cs) | Research chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
+| [`Lorekeeper/Research/WorldService.cs`](../../Lorekeeper/Research/WorldService.cs), [`WorldTools.cs`](../../Lorekeeper/Research/WorldTools.cs), [`WorldChatTurnRunner.cs`](../../Lorekeeper/Research/WorldChatTurnRunner.cs), and [`WorldTurnUpdate.cs`](../../Lorekeeper/Research/WorldTurnUpdate.cs) | World chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
 | [`Lorekeeper/ImagesChat/`](../../Lorekeeper/ImagesChat/) | Images assistant, turn context, visual-canon tools, job reconnection, and streaming updates. |
 | [`Lorekeeper/Publish/PublishChatService.cs`](../../Lorekeeper/Publish/PublishChatService.cs), [`PublishChatTurnRunner.cs`](../../Lorekeeper/Publish/PublishChatTurnRunner.cs), and [`PublishTurnUpdate.cs`](../../Lorekeeper/Publish/PublishTurnUpdate.cs) | Publish conversation, protected visible-target context, turn lifetime, and refresh updates; the publication chapter owns its domain tool catalog. |
 | Conversation/message, `Contest*`, and `EditorRevision*` models and repositories | Durable transcript, model-selection, independent contest drafts, and worker audit boundaries; Git owns approved and pending creative review state. |

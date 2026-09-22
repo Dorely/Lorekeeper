@@ -16,71 +16,58 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Research;
 
-public sealed class ResearchService(
- IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
+public sealed class WorldService(
+ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, IWebIngestCandidateService webCandidates, IEntityService entities, WorldTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WorldService> logger) : IWorldService
 {
-    public const string ResearchWorkflowInstructions = """
-        You are Lorekeeper's Research Mode: a factual research agent for a long-form writing project.
-
-        Context integrity:
-        - Entity/link reads use explicit JSON-path pagination with full identities and GUIDs repeated on every page. Follow nextPageArguments until the needed records are complete; assemble labeled oversized text-field segments in order.
-        - Search and list results are explicitly compact discovery payloads. Honor total/returned counts and isComplete, then use exact detailReadArguments for complete reads. Copy identifiers exactly; never shorten, reconstruct, or fuzzily correct a GUID.
-
-        Your job is to research user-provided topics and report source-backed findings. You are not a writing coach, story advisor, scene planner, or prose-framing assistant.
-
-        How to work:
-        - Use the Project Guidance, Project Facts, and Outline context only to understand project-local references, disambiguate the user's request, and recognize which factual details may be relevant. Do not search the web just to understand already-stored project details.
-        - Do not tailor conclusions into scene, chapter, prose, dialogue, or characterization advice based on the outline. The outline is reference context, not an instruction to explain how the user should use the research in the story.
-        - Do not say things like "you should portray", "use this to frame", "this would work well in the scene", or similar story-use guidance.
-        - Use web_search for external canon, lore, quotes, or facts that need public-source grounding. Do not claim web knowledge from memory when search would answer it.
-        - Read pages before relying on them. read_webpage and read_search_result are cache-first and paginated: repeated reads may reuse stored full-page text without a new web request, and you can use pageNumber or nextPageArguments to inspect later page text.
-        - If a read result has pagination.hasNextPage true and the current page does not contain enough useful evidence, request the next page instead of treating the source as incomplete.
-        - Use follow_page_links or read_webpage to follow links from read pages when the link text or surrounding result suggests stronger source material.
-        - Tool results are not replayed into future turns. Before ending a turn, summarize the important source-backed findings, source titles/URLs, and any unresolved factual questions in your assistant message.
-        - When reporting character personality, motives, speech, or voice, phrase them as factual observations from sources: "Sources portray X as...", "Notable speech patterns include...", or "Representative quotes include...". Do not convert those observations into advice about portrayal.
-        - Do not create or update graph entities until the user confirms what should be stored.
-        - When the user confirms storage, use search_entities/read_entity/list_entity_links first to avoid duplicates, then create_entity, update_entity, or link_entities.
-        - Keep graph properties concise, source-grounded, and factual. Include source URLs or source labels inside properties when they are needed to evaluate provenance.
-        - Graph-memory recommendations must be factual storage candidates only: suggested entities, properties, relationships, source URLs, and unresolved factual questions. Do not recommend how those facts should be used in prose.
-        - When a page cannot be accessed, report that briefly and move on.
-        - End research turns with a concise factual report: what you searched, what you read, what you found, what factual graph-memory updates you recommend storing, and what factual questions you would investigate next.
-        """;
+    public const string WorldWorkflowInstructions = """
+        You are Lorekeeper's World assistant, an adaptive world-development and research partner for any book type.
+        Help invent coherent fictional settings, investigate real subjects, and develop durable context appropriate to the user's book.
+        Maintain the free-form World Brief as the project's concise synthesis of established world or research context. Its name remains World Brief for every book type.
+        For fiction, capture established setting, history, cultures, systems, and constraints. For nonfiction, capture research scope, supported findings, terminology, uncertainties, and background. No fixed headings are required.
+        Direct build/edit requests authorize saves. Brainstorming and comparison remain conversational until a direction is chosen. Distinguish fictional invention, sourced fact, inference, and unresolved questions.
+        Read the current World Brief and revision before updating it. Keep detailed canon in entities, facts, and relationships and source material in Sources. Do not duplicate whole sources in the brief or automatically promote sources to canon.
+        Search existing entities before creating them. Preserve useful provenance and surface conflicts with the Book Brief, World Brief, or established canon.
+        Use configured web_search when external evidence is needed, then read pages before relying on them. Cached reads are paginated; follow continuations as needed.
+        Missing web search configuration does not block creative work or local project research. Explain an unavailable external capability without fabricating evidence.
+        Preserve the guarded fetching, source promotion, and explicit visual-reference approval rules of the web tools.
+        Read back saved changes. Close with a self-contained account of established decisions, saved changes, sources, and unresolved questions.
+        """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
-        "What should I research? Give me a topic, question, canon area, or character and I'll find source-backed details we can turn into graph memory.";
+        "What would you like to develop or research? I can build your world, investigate a subject, and maintain the project’s World Brief.";
 
     private bool _mutatedSinceYield;
 
-    public async Task<ResearchConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<WorldConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var projects = databaseOperation.Repositories.Projects;
-        var conversations = databaseOperation.Repositories.ResearchConversations;
+        var conversations = databaseOperation.Repositories.WorldConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
         _ = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
-        var conversation = new ResearchConversation { ProjectId = projectId };
+        var conversation = new WorldConversation { ProjectId = projectId };
         await conversations.AddConversationAsync(conversation, cancellationToken);
-        await conversations.AddMessageAsync(new ResearchMessage
+        await conversations.AddMessageAsync(new WorldMessage
         {
             ConversationId = conversation.Id,
             Order = 0,
-            Role = ResearchMessageRole.Assistant,
+            Role = WorldMessageRole.Assistant,
             Content = InitialAssistantGreeting,
-            Status = ResearchMessageStatus.Completed,
+            Status = WorldMessageStatus.Completed,
         }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<WorldMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var conversations = databaseOperation.Repositories.ResearchConversations;
+        var conversations = databaseOperation.Repositories.WorldConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
 
@@ -89,7 +76,7 @@ public sealed class ResearchService(
         CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var conversation = await databaseOperation.Repositories.ResearchConversations
+        var conversation = await databaseOperation.Repositories.WorldConversations
             .GetByProjectIdAsync(projectId, cancellationToken);
         var selection = await providerService.ResolveChatModelSelectionAsync(
             conversation?.SelectedProviderId,
@@ -104,9 +91,9 @@ public sealed class ResearchService(
         int? providerId,
         CancellationToken cancellationToken = default)
     {
-        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Research));
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.World));
         if (maintenance is null)
-            throw new InvalidOperationException("Research Chat is still working in another window. Stop or wait for that turn before changing its model.");
+            throw new InvalidOperationException("World is still working in another window. Stop or wait for that turn before changing its model.");
 
         if (providerId is int)
         {
@@ -119,12 +106,12 @@ public sealed class ResearchService(
 
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
-        var conversation = await databaseOperation.Repositories.ResearchConversations
+        var conversation = await databaseOperation.Repositories.WorldConversations
             .GetByProjectIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException("Research Chat is not initialized.");
+            ?? throw new InvalidOperationException("World is not initialized.");
         conversation.SelectedProviderId = normalizedProviderId;
         conversation.UpdatedAt = DateTime.UtcNow;
-        databaseOperation.Repositories.ResearchConversations.UpdateSelectedProvider(conversation);
+        databaseOperation.Repositories.WorldConversations.UpdateSelectedProvider(conversation);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -140,13 +127,13 @@ public sealed class ResearchService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
-        var conversations = databaseOperation.Repositories.ResearchConversations;
+        var conversations = databaseOperation.Repositories.WorldConversations;
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var toolCalls = BuildToolCallLookup(history);
         var entityTouches = new Dictionary<Guid, EntityTouch>();
 
-        foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Tool))
+        foreach (var message in history.Where(message => message.Role == WorldMessageRole.Tool))
             AddToolEntityTouches(entityTouches, message, toolCalls);
 
         var entityItems = new List<ResearchEntityActivityItem>();
@@ -173,7 +160,7 @@ public sealed class ResearchService(
         }
 
         var sourceItems = (await webCandidates.ListResearchAsync(projectId, cancellationToken))
-            .Where(source => source.ResearchConversationId == conversation.Id
+            .Where(source => source.WorldConversationId == conversation.Id
                 && (source.FetchedAt is not null || source.Status == WebIngestCandidateStatus.Failed))
             .OrderByDescending(source => source.UpdatedAt)
             .Select(source => new ResearchSourceActivityItem(
@@ -199,28 +186,28 @@ public sealed class ResearchService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Research));
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.World));
         if (maintenance is null)
-            throw new InvalidOperationException("Research Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
-        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Research, cancellationToken);
+            throw new InvalidOperationException("World is still working in another window. Stop or wait for that turn before resetting the conversation.");
+        await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.World, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
-        var conversations = databaseOperation.Repositories.ResearchConversations;
+        var conversations = databaseOperation.Repositories.WorldConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
-        await conversations.ResetMessagesAsync(existing, new ResearchMessage
+        await conversations.ResetMessagesAsync(existing, new WorldMessage
         {
             ConversationId = existing.Id,
             Order = 0,
-            Role = ResearchMessageRole.Assistant,
+            Role = WorldMessageRole.Assistant,
             Content = InitialAssistantGreeting,
-            Status = ResearchMessageStatus.Completed,
+            Status = WorldMessageStatus.Completed,
         }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async IAsyncEnumerable<ResearchTurnUpdate> SendAsync(
+    public async IAsyncEnumerable<WorldTurnUpdate> SendAsync(
         Guid projectId,
         string userText,
         IReadOnlyList<Guid> imageIds,
@@ -241,8 +228,6 @@ public sealed class ResearchService(
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
-                throw new InvalidOperationException("No active search provider is configured.");
             var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
                 conversation.SelectedProviderId,
                 cancellationToken);
@@ -254,7 +239,7 @@ public sealed class ResearchService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Research turn setup failed for project {ProjectId}", projectId);
+            logger.LogError(ex, "World turn setup failed for project {ProjectId}", projectId);
             preflightError = ex.Message;
             project = null!;
             providerAvailability = null!;
@@ -262,39 +247,39 @@ public sealed class ResearchService(
 
         if (preflightError is not null)
         {
-            yield return new ResearchTurnError(preflightError, Cancelled: false);
+            yield return new WorldTurnError(preflightError, Cancelled: false);
             yield break;
         }
         var chatProvider = providerAvailability.Provider!;
         var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
-            yield return new ResearchTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
+            yield return new WorldTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
         var nextOrder = await turnEngine.ReadAsync(
-            repositories => repositories.ResearchConversations,
+            repositories => repositories.WorldConversations,
             conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
             cancellationToken) + 1;
-        var userMessage = new ResearchMessage
+        var userMessage = new WorldMessage
         {
             ConversationId = conversation.Id,
             Order = nextOrder++,
-            Role = ResearchMessageRole.User,
+            Role = WorldMessageRole.User,
             Content = userText.Trim(),
-            Status = ResearchMessageStatus.Completed,
+            Status = WorldMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, userMessage, cancellationToken);
-        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Research, userMessage.Id, imageIds, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.WorldConversations, userMessage, cancellationToken);
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.World, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         string systemPrompt = string.Empty;
         ContextAssembly? initialAssembly = null;
-        ResearchToolContext? toolContext = null;
+        WorldToolContext? toolContext = null;
         string? setupError = null;
         try
         {
@@ -303,27 +288,27 @@ public sealed class ResearchService(
                 new ContextBuildRequest(
                     project,
                     UserMessage: userText,
-                    Purpose: ContextBuildPurpose.Research,
-                    OperatingRules: ResearchWorkflowInstructions
+                    Purpose: ContextBuildPurpose.World,
+                    OperatingRules: WorldWorkflowInstructions
                         + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                         + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
                 cancellationToken);
             systemPrompt = initialAssembly.Assemble();
-            // Research tools always mutate the live project. Review derives pending work from
+            // World tools always mutate the live project. Review derives pending work from
             // the version-history baseline rather than a per-turn staging overlay.
-            toolContext = new ResearchToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady);
+            toolContext = new WorldToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Research turn setup failed for project {ProjectId}", projectId);
+            logger.LogError(ex, "World turn setup failed for project {ProjectId}", projectId);
             await PersistFailedAssistantAsync(conversation.Id, nextOrder, ex.Message);
             setupError = ex.Message;
         }
 
         if (setupError is not null)
         {
-            yield return new ResearchTurnError(setupError, Cancelled: false);
+            yield return new WorldTurnError(setupError, Cancelled: false);
             yield break;
         }
 
@@ -333,7 +318,7 @@ public sealed class ResearchService(
             ToolMode = ChatToolMode.Auto,
         };
         var history = await turnEngine.ReadAsync(
-            repositories => repositories.ResearchConversations,
+            repositories => repositories.WorldConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
@@ -358,25 +343,25 @@ public sealed class ResearchService(
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {
-            var activeAssistant = new ResearchMessage
+            var activeAssistant = new WorldMessage
             {
                 ConversationId = conversation.Id,
                 Order = nextOrder++,
-                Role = ResearchMessageRole.Assistant,
+                Role = WorldMessageRole.Assistant,
                 Content = string.Empty,
-                Status = ResearchMessageStatus.Pending,
+                Status = WorldMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.WorldConversations, activeAssistant, cancellationToken);
 
             if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.EffectiveMaxInputTokens) is { } compaction)
             {
-                yield return new ResearchContextTrimmed(compaction);
+                yield return new WorldContextTrimmed(compaction);
                 if (compaction.LimitExceeded)
                 {
-                    activeAssistant.Status = ResearchMessageStatus.Failed;
+                    activeAssistant.Status = WorldMessageStatus.Failed;
                     activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
                     await SafePersistAsync(activeAssistant);
-                    yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield return new WorldTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                     yield break;
                 }
             }
@@ -387,16 +372,16 @@ public sealed class ResearchService(
                 switch (update)
                 {
                     case ChatRoundTextDelta text:
-                        yield return new ResearchTextDelta(text.Text);
+                        yield return new WorldTextDelta(text.Text);
                         break;
                     case ChatRoundReasoningDelta reasoning:
-                        yield return new ResearchReasoningDelta(reasoning.Text);
+                        yield return new WorldReasoningDelta(reasoning.Text);
                         break;
                     case ChatRoundToolCallStarted started:
-                        yield return new ResearchToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
+                        yield return new WorldToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
                     case ChatRoundToolCallArgumentsDelta delta:
-                        yield return new ResearchToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
+                        yield return new WorldToolCallArgumentsDelta(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                         break;
                     case ChatRoundCompleted completed:
                         completedRound = completed;
@@ -407,11 +392,11 @@ public sealed class ResearchService(
                         if (!string.IsNullOrEmpty(failed.Reasoning))
                             activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
-                            ? ResearchMessageStatus.Cancelled
-                            : ResearchMessageStatus.Failed;
+                            ? WorldMessageStatus.Cancelled
+                            : WorldMessageStatus.Failed;
                         activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                         await SafePersistAsync(activeAssistant);
-                        yield return new ResearchTurnError(failed.Message, failed.Cancelled);
+                        yield return new WorldTurnError(failed.Message, failed.Cancelled);
                         yield break;
                 }
             }
@@ -419,10 +404,10 @@ public sealed class ResearchService(
             DrainMutated();
             if (completedRound is null)
             {
-                activeAssistant.Status = ResearchMessageStatus.Failed;
-                activeAssistant.ErrorMessage = "Research streaming ended without a completed round.";
+                activeAssistant.Status = WorldMessageStatus.Failed;
+                activeAssistant.ErrorMessage = "World streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                yield return new WorldTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
 
@@ -434,9 +419,9 @@ public sealed class ResearchService(
             if (pendingCalls.Count == 0)
             {
                 activeAssistant.Content = textBuilder.ToString();
-                activeAssistant.Status = ResearchMessageStatus.Completed;
+                activeAssistant.Status = WorldMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                yield return new ResearchAssistantMessageCompleted(activeAssistant.Id);
+                yield return new WorldAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
 
@@ -445,7 +430,7 @@ public sealed class ResearchService(
                 .ToList();
             activeAssistant.Content = textBuilder.ToString();
             activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-            activeAssistant.Status = ResearchMessageStatus.Completed;
+            activeAssistant.Status = WorldMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
             messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning, completedRound.Metadata)));
 
@@ -454,7 +439,7 @@ public sealed class ResearchService(
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    yield return new ResearchTurnError("Cancelled.", Cancelled: true);
+                    yield return new WorldTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
@@ -464,28 +449,28 @@ public sealed class ResearchService(
 
                 if (toolOutcome.Cancelled)
                 {
-                    yield return new ResearchTurnError("Cancelled.", Cancelled: true);
+                    yield return new WorldTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
 
                 var toolResult = toolOutcome.Result;
                 var toolError = toolOutcome.Error;
 
-                var toolMessage = new ResearchMessage
+                var toolMessage = new WorldMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
-                    Role = ResearchMessageRole.Tool,
+                    Role = WorldMessageRole.Tool,
                     Content = toolResult ?? string.Empty,
                     ToolCallId = pendingCall.CallId,
                     ToolName = pendingCall.Name,
-                    Status = toolError is null ? ResearchMessageStatus.Completed : ResearchMessageStatus.Failed,
+                    Status = toolError is null ? WorldMessageStatus.Completed : WorldMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.WorldConversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                yield return new ResearchToolCallCompleted(
+                yield return new WorldToolCallCompleted(
                     pendingCall.CallId,
                     pendingCall.Name,
                     toolError is null ? toolResult : null,
@@ -493,7 +478,7 @@ public sealed class ResearchService(
                     sw.Elapsed.TotalMilliseconds);
 
                 if (DrainMutated())
-                    yield return new ResearchGraphMutated();
+                    yield return new WorldMutated();
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
@@ -538,7 +523,7 @@ public sealed class ResearchService(
 
             if (iteration == maxIterations - 1)
             {
-                yield return new ResearchTurnError(
+                yield return new WorldTurnError(
                     ChatTurnEngine.ToolLoopLimitError(maxIterations),
                     Cancelled: false);
                 yield break;
@@ -546,10 +531,10 @@ public sealed class ResearchService(
         }
     }
 
-    private static Dictionary<string, ChatToolCallManifest> BuildToolCallLookup(IEnumerable<ResearchMessage> history)
+    private static Dictionary<string, ChatToolCallManifest> BuildToolCallLookup(IEnumerable<WorldMessage> history)
     {
         var result = new Dictionary<string, ChatToolCallManifest>(StringComparer.Ordinal);
-        foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Assistant))
+        foreach (var message in history.Where(message => message.Role == WorldMessageRole.Assistant))
         {
             foreach (var call in ReadPersistedToolCalls(message.ToolCallsJson))
                 result[call.CallId] = call;
@@ -560,7 +545,7 @@ public sealed class ResearchService(
 
     private static void AddToolEntityTouches(
         IDictionary<Guid, EntityTouch> touches,
-        ResearchMessage message,
+        WorldMessage message,
         IReadOnlyDictionary<string, ChatToolCallManifest> toolCalls)
     {
         var toolName = message.ToolName ?? string.Empty;
@@ -862,8 +847,8 @@ public sealed class ResearchService(
         var assembly = await contextBuilder.BuildAsync(
             new ContextBuildRequest(
                 project,
-                Purpose: ContextBuildPurpose.Research,
-                OperatingRules: ResearchWorkflowInstructions
+                Purpose: ContextBuildPurpose.World,
+                OperatingRules: WorldWorkflowInstructions
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                     + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
             cancellationToken);
@@ -883,34 +868,34 @@ public sealed class ResearchService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(default);
         databaseOperation.ShareWithNestedOperations();
-        var conversations = databaseOperation.Repositories.ResearchConversations;
+        var conversations = databaseOperation.Repositories.WorldConversations;
         try
         {
-            await conversations.AddMessageAsync(new ResearchMessage
+            await conversations.AddMessageAsync(new WorldMessage
             {
                 ConversationId = conversationId,
                 Order = order,
-                Role = ResearchMessageRole.Assistant,
-                Status = ResearchMessageStatus.Failed,
+                Role = WorldMessageRole.Assistant,
+                Status = WorldMessageStatus.Failed,
                 ErrorMessage = error,
             }, CancellationToken.None);
             await databaseOperation.SaveChangesAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to persist Research setup failure");
+            logger.LogError(ex, "Failed to persist World setup failure");
         }
     }
 
-    private async Task SafePersistAsync(ResearchMessage message)
+    private async Task SafePersistAsync(WorldMessage message)
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(repositories => repositories.ResearchConversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.WorldConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to persist Research message {MessageId}", message.Id);
+            logger.LogError(ex, "Failed to persist World message {MessageId}", message.Id);
         }
     }
 

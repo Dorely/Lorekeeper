@@ -301,7 +301,7 @@ inspection and revision rules, while mutation scope remains surface-specific.
 
 Entity visual examples are ordered associations, not copied image records.
 They carry association origin and source provenance and are reused by image
-prompting, Editor context, Research/Ingest promotion, and entity indexing.
+prompting, Editor context, World/Ingest promotion, and entity indexing.
 Canonical-reference reads are bounded, deduplicated, and validated against
 the owning entity and project/reference scope. General-library images are not
 continuity evidence. Changing visual ownership or reference semantics must

@@ -5,7 +5,7 @@ namespace Lorekeeper.Research;
 public sealed record WebIngestCandidateView(
     Guid Id,
     Guid ProjectId,
-    Guid? ResearchConversationId,
+    Guid? WorldConversationId,
     Guid? IngestJobId,
     WebIngestCandidateDiscoveryKind DiscoveryKind,
     WebIngestCandidateStatus Status,

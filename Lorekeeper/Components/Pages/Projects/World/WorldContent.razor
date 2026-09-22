@@ -5,7 +5,9 @@
 @using Lorekeeper.Research
 @using Lorekeeper.Search
 @inject ISearchProviderService SearchProviders
-@inject IResearchService Research
+@inject IWorldService World
+@using Lorekeeper.Projects
+@inject IWorldBriefService Briefs
 
 @if (Project is null)
 {
@@ -13,27 +15,34 @@
 }
 else if (_loading)
 {
-    <p class="text-muted"><em>Loading research workspace...</em></p>
-}
-else if (_activeSearchProvider is null)
-{
-    <div class="alert alert-warning">
-        <strong>Research Mode needs an active search provider.</strong>
-        <a class="alert-link ms-2" href="/settings/search-providers">Configure Search Providers</a>
-    </div>
+    <p class="text-muted"><em>Loading World workspace...</em></p>
 }
 else
 {
     <div class="research-pane">
         <section class="research-chat-pane">
-            <ResearchChatPanel ProjectId="Project.Id" OnActivityChanged="ReloadActivityAsync" />
+            <WorldChatPanel ProjectId="Project.Id" OnActivityChanged="ReloadActivityAsync" />
         </section>
 
         <section class="research-pages-pane">
+            <div class="btn-group p-2" role="group" aria-label="World workspace">
+                <button class="btn @(!_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = false">World Brief</button>
+                <button class="btn @(_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = true">Research Activity</button>
+            </div>
+            <div class="p-3 flex-grow-1" style="@(_showActivity ? "display:none" : null)">
+                @if (_brief is not null)
+                {
+                    <NarrativeTextEditor @key="Project.Id" ProjectId="Project.Id" TargetId="@($"world-brief:{Project.Id:N}")"
+                        Label="World Brief" Body="@_brief.Content" Revision="_brief.Revision" Save="SaveBriefAsync" OnResumed="ReloadActivityAsync"
+                        Placeholder="Develop the established world or research context for this book. Organize it however suits your project." />
+                }
+            </div>
+            <div style="@(!_showActivity ? "display:none" : null)">
+
             <div class="research-side-head">
                 <div>
                     <div class="research-section-title">Research Activity</div>
-                    <div class="small text-muted">Search: @(_activeSearchProvider.DisplayName ?? _activeSearchProvider.Name)</div>
+                    <div class="small text-muted">Search: @(_activeSearchProvider?.DisplayName ?? _activeSearchProvider?.Name ?? "Not configured — local work is available")</div>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadActivityAsync">Refresh</button>
             </div>
@@ -128,6 +137,7 @@ else
                     }
                 </section>
             }
+            </div>
         </section>
     </div>
 }
@@ -202,7 +212,7 @@ else
                         <h6>Webpage visual candidates</h6>
                         @if (_selectedSourceDetail.DiscoveredImages.Count > 0)
                         {
-                            <p class="text-muted small">@_selectedSourceDetail.DiscoveredImages.Count discovered from page markup; inspect an image in Research Chat before importing it.</p>
+                            <p class="text-muted small">@_selectedSourceDetail.DiscoveredImages.Count discovered from page markup; inspect an image in World before importing it.</p>
                         }
                         @if (_selectedSourceDetail.Visuals.Count == 0)
                         {
@@ -279,6 +289,8 @@ else
 
     [CascadingParameter] public Project? Project { get; set; }
 
+    private WorldBrief? _brief;
+    private bool _showActivity;
     private SearchProvider? _activeSearchProvider;
     private ResearchActivity? _activity;
     private Guid? _loadedProjectId;
@@ -303,8 +315,16 @@ else
     private async Task ReloadActivityAsync()
     {
         if (Project is null) return;
-        _activity = await Research.GetActivityAsync(Project.Id);
+        _activity = await World.GetActivityAsync(Project.Id);
+        _brief = await Briefs.GetAsync(Project.Id);
         StateHasChanged();
+    }
+
+    private async Task<NarrativeTextSnapshot> SaveBriefAsync(NarrativeTextSnapshot draft)
+    {
+        _brief = await Briefs.UpdateAsync(Project!.Id, draft.Revision, draft.Body);
+        StateHasChanged();
+        return new("", _brief.Content, _brief.Revision, _brief.Content);
     }
 
     private Task OpenEntityAsync(ResearchEntityActivityItem entity)
@@ -327,7 +347,7 @@ else
     {
         if (Project is null) return;
         _actionError = null;
-        var detail = await Research.GetSourceDetailAsync(Project.Id, sourceId);
+        var detail = await World.GetSourceDetailAsync(Project.Id, sourceId);
         if (detail is null)
         {
             _actionError = "Research source not found.";

@@ -263,11 +263,11 @@ indexing rules belong to [Narrative context](narrative-context.md).
 
 ### Web search and guarded fetch
 
-Research web search is selected through a single active `SearchProvider` and a
+World web search is selected through a single active `SearchProvider` and a
 provider factory. The current clients normalize SerpApi Google results and Brave
 Search results into the shared `WebSearchResult` contract. Search-provider CRUD,
 activation, readiness tests, and execution belong to `ISearchProviderService`;
-the Research surface must not construct provider requests directly.
+the World surface must not construct provider requests directly.
 
 Page reads use a separate safe-fetch boundary. URL normalization, navigation and
 static-link filtering, redirect handling, private-network blocking, response byte

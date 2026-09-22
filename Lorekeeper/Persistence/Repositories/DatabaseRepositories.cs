@@ -22,7 +22,7 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
     public IProjectRepository Projects { get; } = new ProjectRepository(operation);
     public IProjectReferenceRepository ProjectReferences { get; } = new ProjectReferenceRepository(operation);
     public IPublishConversationRepository PublishConversations { get; } = new PublishConversationRepository(operation);
-    public IResearchConversationRepository ResearchConversations { get; } = new ResearchConversationRepository(operation);
+    public IWorldConversationRepository WorldConversations { get; } = new WorldConversationRepository(operation);
     public ISearchProviderRepository SearchProviders { get; } = new SearchProviderRepository(operation);
     public IWebIngestCandidateRepository WebIngestCandidates { get; } = new WebIngestCandidateRepository(operation);
     public IVoiceConversationRepository VoiceConversations { get; } = new VoiceConversationRepository(operation);

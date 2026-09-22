@@ -1,15 +1,15 @@
 namespace Lorekeeper.Models;
 
-public class ResearchMessage
+public class WorldMessage
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
     public Guid ConversationId { get; set; }
-    public ResearchConversation Conversation { get; set; } = null!;
+    public WorldConversation Conversation { get; set; } = null!;
 
     public int Order { get; set; }
 
-    public ResearchMessageRole Role { get; set; }
+    public WorldMessageRole Role { get; set; }
 
     public string Content { get; set; } = string.Empty;
 
@@ -26,14 +26,14 @@ public class ResearchMessage
 
     public string? ToolName { get; set; }
 
-    public ResearchMessageStatus Status { get; set; } = ResearchMessageStatus.Completed;
+    public WorldMessageStatus Status { get; set; } = WorldMessageStatus.Completed;
 
     public string? ErrorMessage { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public enum ResearchMessageRole
+public enum WorldMessageRole
 {
     System,
     User,
@@ -41,7 +41,7 @@ public enum ResearchMessageRole
     Tool,
 }
 
-public enum ResearchMessageStatus
+public enum WorldMessageStatus
 {
     Pending,
     Completed,

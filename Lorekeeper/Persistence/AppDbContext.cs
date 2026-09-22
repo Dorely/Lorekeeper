@@ -46,11 +46,12 @@ public class AppDbContext(
     public DbSet<EditorConversation> EditorConversations => Set<EditorConversation>();
     public DbSet<EditorMessage> EditorMessages => Set<EditorMessage>();
     public DbSet<EditorMessageVisual> EditorMessageVisuals => Set<EditorMessageVisual>();
+    public DbSet<WorldBrief> WorldBriefs => Set<WorldBrief>();
     public DbSet<WritingSample> WritingSamples => Set<WritingSample>();
     public DbSet<VoiceConversation> VoiceConversations => Set<VoiceConversation>();
     public DbSet<VoiceMessage> VoiceMessages => Set<VoiceMessage>();
-    public DbSet<ResearchConversation> ResearchConversations => Set<ResearchConversation>();
-    public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
+    public DbSet<WorldConversation> WorldConversations => Set<WorldConversation>();
+    public DbSet<WorldMessage> WorldMessages => Set<WorldMessage>();
     public DbSet<PublishConversation> PublishConversations => Set<PublishConversation>();
     public DbSet<PublishMessage> PublishMessages => Set<PublishMessage>();
     public DbSet<PublishMessageVisual> PublishMessageVisuals => Set<PublishMessageVisual>();
@@ -727,6 +728,14 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<WorldBrief>(entity =>
+        {
+            entity.HasKey(brief => brief.ProjectId);
+            entity.Property(brief => brief.Revision).IsConcurrencyToken();
+            entity.HasOne(brief => brief.Project).WithOne(project => project.WorldBrief)
+                .HasForeignKey<WorldBrief>(brief => brief.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<VoiceConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
@@ -750,18 +759,18 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<ResearchConversation>(entity =>
+        modelBuilder.Entity<WorldConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
             entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
-                .WithMany(p => p.ResearchConversations)
+                .WithMany(p => p.WorldConversations)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<ResearchMessage>(entity =>
+        modelBuilder.Entity<WorldMessage>(entity =>
         {
             entity.HasIndex(e => new { e.ConversationId, e.Order });
             entity.Property(e => e.Role).HasConversion<string>();
@@ -1320,7 +1329,7 @@ public class AppDbContext(
         modelBuilder.Entity<WebIngestCandidate>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
-            entity.HasIndex(e => new { e.ResearchConversationId, e.CreatedAt });
+            entity.HasIndex(e => new { e.WorldConversationId, e.CreatedAt });
             entity.HasIndex(e => e.IngestJobId);
             entity.Property(e => e.DiscoveryKind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();

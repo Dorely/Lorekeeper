@@ -37,7 +37,7 @@ public static class AssistantWorkflowInstructions
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. This worker has no find_impacted_chapters tool; stay within the assigned chapter and use focused reads.",
             SystemPromptAgentRole.Images =>
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. Use them only for visual-canon grounding; do not treat search results as permission to alter manuscript or publication content.",
-            SystemPromptAgentRole.Research =>
+            SystemPromptAgentRole.World =>
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. External web_search and its read tools are separate and are not governed by this project-search discipline.",
             SystemPromptAgentRole.Publish =>
                 "Relevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. Use them for project grounding and keep publication-state decisions within the Publish contract.",

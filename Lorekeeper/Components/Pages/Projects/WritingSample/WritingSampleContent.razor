@@ -28,15 +28,15 @@
                     <NarrativeTextEditor @ref="_editor" @key="character.Id" ProjectId="Project.Id" TargetId="@($"voice:{character.Id:N}")"
                         Label="@($"{character.Name} voice profile")" Body="@VoiceProfileService.Read(character)"
                         Placeholder="Describe dialogue, POV narration, rhythm, vocabulary, emotional variations, and illustrative lines..."
-                        Save="(title, body) => SaveProfileAsync(character, body)" OnResumed="ReloadAsync" />
+                        Save="draft => SaveProfileAsync(character.Id, draft)" OnResumed="ReloadAsync" />
                 }
                 else { <p>Select a character, or ask Voice to create one.</p> }
             }
             else if (_current is { } sample)
             {
                 <NarrativeTextEditor @ref="_editor" @key="sample.Id" ProjectId="Project.Id" TargetId="@($"sample:{sample.Id:N}")"
-                    Label="Writing sample" EditTitle="true" Title="sample.Title" Body="sample.Body"
-                    Placeholder="Write a passage that sounds like you..." Save="(title, body) => SaveSampleAsync(sample, title, body)" OnResumed="ReloadAsync" />
+                    Label="Writing sample" EditTitle="true" Title="@sample.Title" Body="@sample.Body" Revision="sample.Revision"
+                    Placeholder="Write a passage that sounds like you..." Save="draft => SaveSampleAsync(sample.Id, draft)" OnResumed="ReloadAsync" />
             }
             else { <button class="btn btn-primary" @onclick="CreateSampleAsync">Create first sample</button> }
         </section>
@@ -76,21 +76,21 @@
         _current = _samples.FirstOrDefault(value => value.Id == _current?.Id) ?? _samples.FirstOrDefault();
         _characters = await Entities.ListAsync(Project.Id, "Character");
     }
-    private async Task SaveSampleAsync(WritingSample sample, string title, string body)
+    private async Task<NarrativeTextSnapshot> SaveSampleAsync(Guid id, NarrativeTextSnapshot draft)
     {
-        if (Project is null) return;
-        var updated = await Samples.UpdateAsync(Project.Id, sample.Id, sample.Revision, title, body);
-        sample.Revision = updated.Revision;
-        sample.Title = updated.Title;
-        sample.Body = updated.Body;
-        sample.UpdatedAt = updated.UpdatedAt;
+        var updated = await Samples.UpdateAsync(Project!.Id, id, draft.Revision, draft.Title, draft.Body);
+        var index = _samples.FindIndex(sample => sample.Id == id);
+        if (index >= 0) _samples[index] = updated;
+        if (_current?.Id == id) _current = updated;
+        StateHasChanged();
+        return new(updated.Title, updated.Body, updated.Revision, updated.Body);
     }
-    private async Task SaveProfileAsync(StoryEntity character, string body)
+    private async Task<NarrativeTextSnapshot> SaveProfileAsync(Guid id, NarrativeTextSnapshot draft)
     {
-        if (Project is null) return;
-        var updated = await Profiles.SaveAsync(Project.Id, character.Id, VoiceProfileService.Read(character), body);
+        var updated = await Profiles.SaveAsync(Project!.Id, id, draft.ExpectedContent, draft.Body);
         _characters = _characters.Select(value => value.Id == updated.Id ? updated : value).ToList();
-        await InvokeAsync(StateHasChanged);
+        StateHasChanged();
+        return draft with { ExpectedContent = draft.Body };
     }
     private async Task<bool> CanLeaveAsync()
     {

@@ -56,6 +56,7 @@ public sealed record ProjectExportDocument
     public required ProjectExportProject Project { get; init; }
     public ProjectExportPageSetup? PageSetup { get; init; }
     public ProjectExportBookBrief? BookBrief { get; init; }
+    public string WorldBrief { get; init; } = string.Empty;
     public List<ProjectExportIngestSource> IngestSources { get; init; } = [];
     public List<Guid> BookBriefCanonSourceIds { get; init; } = [];
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];

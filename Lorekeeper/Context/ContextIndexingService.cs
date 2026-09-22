@@ -172,9 +172,11 @@ public sealed class ContextIndexingService(
         {
             Project? project;
             BookBrief? brief;
+            string worldBrief;
             await using (var operation = await database.OpenReadAsync(cancellationToken))
             {
                 project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken);
+                worldBrief = await operation.Db.WorldBriefs.Where(item => item.ProjectId == projectId).Select(item => item.Content).SingleOrDefaultAsync(cancellationToken) ?? "";
                 brief = await operation.Db.BookBriefs
                     .AsNoTracking()
                     .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -191,7 +193,7 @@ public sealed class ContextIndexingService(
                 ContextVectorSourceTypes.ProjectProfile,
                 projectId,
                 $"Project profile {project.Name}",
-                ProjectProfileFormatter.Build(project, brief),
+                ProjectProfileFormatter.Build(project, brief, worldBrief),
                 null,
                 cancellationToken);
         }

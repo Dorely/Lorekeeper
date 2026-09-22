@@ -124,6 +124,12 @@ its planned features are not claims about current capabilities.
   legacy text, preserving source identity and existing evidence. It cannot recover
   an unavailable original file. Monitor, stop, or resume either operation in
   **Sources → Manage jobs**.
+- **World** combines world development and research in one conversation, with a
+  free-form **World Brief** editor and a separate Research Activity view. Local
+  world building works without a search provider; web search requires configuration.
+  The brief becomes persistent project context for all six assistants and revision
+  work, and is preserved in full/non-structural archives and version history.
+  Fiction and nonfiction use the same brief name with content suited to the book.
 - Streamed `.lorekeeper` project archives preserve the complete retained-source
   closure for full exports and use a separate non-structural dependency policy
   with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
@@ -133,7 +139,7 @@ its planned features are not claims about current capabilities.
   to 16 GiB by default, retaining separate per-entry and manifest limits.
   Source extraction/evidence rows and image/font bytes are imported one source
   or asset at a time, with complete rollback if a later import step fails.
-- Local version history schema v10 captures deterministic checkpoints of the creative
+- Local version history schema v11 captures deterministic checkpoints of the creative
   project in an app-managed Git repository. History includes canonical project,
   narrative, graph, source, asset, manuscript, composition, and publication
   state, including per-source manifests and reusable content-addressed original

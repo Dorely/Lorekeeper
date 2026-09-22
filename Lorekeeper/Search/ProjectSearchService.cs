@@ -286,7 +286,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             var brief = await databaseOperation.Db.BookBriefs
                 .AsNoTracking()
                 .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
-            var profile = project is null ? null : ProjectProfileFormatter.Build(project, brief);
+            var worldBrief = await databaseOperation.Db.WorldBriefs.Where(item => item.ProjectId == projectId).Select(item => item.Content).SingleOrDefaultAsync(cancellationToken) ?? "";
+            var profile = project is null ? null : ProjectProfileFormatter.Build(project, brief, worldBrief);
             if (project is not null && Matches(project.Name, project.Slug, profile))
             {
                 results.Add(new ProjectSearchSource(
@@ -676,7 +677,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         var brief = await operation.Db.BookBriefs
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
-        var content = ProjectProfileFormatter.Build(project, brief);
+        var worldBrief = await operation.Db.WorldBriefs.Where(item => item.ProjectId == projectId).Select(item => item.Content).SingleOrDefaultAsync(cancellationToken) ?? "";
+        var content = ProjectProfileFormatter.Build(project, brief, worldBrief);
         return (project.Name, null, content);
     }
 

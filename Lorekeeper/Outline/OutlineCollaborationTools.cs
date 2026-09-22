@@ -107,7 +107,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         "reorder_entities", "link_entities", "read_book_format_guidance", "update_book_brief",
     ];
 
-    private static readonly HashSet<string> ResearchSharedToolNames =
+    private static readonly HashSet<string> WorldSharedToolNames =
     [
         "list_entity_types", "list_search_sources", "read_project_source", "search_project",
         "list_reference_visuals", "read_reference_visual",
@@ -164,9 +164,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         OutlineCollaborationContext context)
         => BuildSharedSubsetAsync(context, EditorSharedToolNames);
 
-    public Task<IList<AITool>> BuildResearchSharedAsync(
+    public Task<IList<AITool>> BuildWorldSharedAsync(
         OutlineCollaborationContext context)
-        => BuildSharedSubsetAsync(context, ResearchSharedToolNames);
+        => BuildSharedSubsetAsync(context, WorldSharedToolNames);
 
     private Task<IList<AITool>> BuildSharedSubsetAsync(
         OutlineCollaborationContext context,

@@ -79,7 +79,7 @@ IAppDatabaseOperationFactory database, IWebPageReader pageReader,
             candidate = new WebIngestCandidate
             {
                 ProjectId = projectId,
-                ResearchConversationId = conversationId,
+                WorldConversationId = conversationId,
                 SearchProviderId = searchProviderId,
                 DiscoveryKind = WebIngestCandidateDiscoveryKind.SearchResult,
                 Status = WebIngestCandidateStatus.Discovered,
@@ -146,7 +146,7 @@ IAppDatabaseOperationFactory database, IWebPageReader pageReader,
                 ?? new WebIngestCandidate
                 {
                     ProjectId = projectId,
-                    ResearchConversationId = conversationId,
+                    WorldConversationId = conversationId,
                     DiscoveryKind = discoveryKind,
                     Url = normalizedUrl,
                     SearchQuery = searchQuery?.Trim() ?? string.Empty,
@@ -457,15 +457,15 @@ IAppDatabaseOperationFactory database, IWebPageReader pageReader,
 
     private static void AssignConversation(WebIngestCandidate candidate, Guid? conversationId)
     {
-        if (conversationId is not null && candidate.ResearchConversationId != conversationId)
-            candidate.ResearchConversationId = conversationId;
+        if (conversationId is not null && candidate.WorldConversationId != conversationId)
+            candidate.WorldConversationId = conversationId;
     }
 
     private static WebIngestCandidateView ToView(WebIngestCandidate candidate) =>
         new(
             candidate.Id,
             candidate.ProjectId,
-            candidate.ResearchConversationId,
+            candidate.WorldConversationId,
             candidate.IngestJobId,
             candidate.DiscoveryKind,
             candidate.Status,

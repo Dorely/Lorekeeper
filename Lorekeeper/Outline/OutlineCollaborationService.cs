@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
- IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, IWorldBriefService worldBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -570,7 +570,7 @@ they commit to a direction, act on it without a second confirmation.
             brief,
             SystemPromptAgentRole.Outline,
             CollaborationOperatingRules,
-            WorkingContext: context)).Prompt;
+            WorkingContext: context, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content)).Prompt;
         var referenceManifest = ProjectReferenceManifestFormatter.Format(
             await projectReferences.ListReferenceManifestsAsync(project.Id, cancellationToken));
         return referenceManifest is null

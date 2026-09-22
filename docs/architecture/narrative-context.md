@@ -270,13 +270,21 @@ without a user decision. Provenance fields use the current `sourceEvidence.*`
 terminology. Historical `canonSource.*` payloads are translated only at the
 versioned import boundary.
 
-Research uses a configured web search provider, cache-first webpage candidates,
+World uses a configured provider only when searching the web, cache-first webpage candidates,
 safe page/image reading, and reviewable graph changes. URL normalization,
 robots handling, private-network rejection, redirect and byte limits,
 per-host throttling, cooldowns, and fetch provenance belong to research
 services. A prompt or Razor component must not weaken those controls. A cached
 web candidate can be promoted into manual ingest, preserving its URL, hash,
 extraction, and discovery provenance.
+
+World Brief is a project-owned free-form Markdown document, initially empty,
+maintained primarily in World. IWorldBriefService owns revision-checked updates
+for both tools and manual editing. Its text is protected context across assistants,
+revision workers, and contest captures, and is included in indexed project profiles
+and origin-qualified reference profile reads. Reference reads retain their source
+project identity. Character voice profiles remain canonical entity properties,
+included only with relevant character context and exact reads, not every prompt.
 
 Background ingest and embedding work is app-process-owned. Durable job and
 checkpoint rows are the restart/audit boundary; Blazor circuits only subscribe
@@ -352,7 +360,7 @@ and semantic conversion implementation.
 | [`Lorekeeper/Context/`](../../Lorekeeper/Context/) | Editor context assembly, recommendations, compact projections, pagination, indexing, and direct-reference manifests. |
 | [`Lorekeeper/Ingest/IngestService.cs`](../../Lorekeeper/Ingest/IngestService.cs), [`BookArtifactPreprocessor.cs`](../../Lorekeeper/Ingest/BookArtifactPreprocessor.cs), [`IngestSourceStructureBuilder.cs`](../../Lorekeeper/Ingest/IngestSourceStructureBuilder.cs), graph/evidence/index services, and [`IngestJobProcessor.cs`](../../Lorekeeper/Ingest/IngestJobProcessor.cs) | Ingest lifecycle, artifact preprocessing, source structure, graph/evidence ownership, retrieval projections, and scoped processing; queue/worker execution belongs to providers. |
 | [`Lorekeeper/Sources/`](../../Lorekeeper/Sources/) | Retained-source workspace projection, bounded normalized reading/search/evidence display, streamed original delivery, bounded PDF-page rendering, bibliography detachment, and guarded handoffs to ingest-owned deletion and local-only re-extraction. |
-| [`Lorekeeper/Research/WebIngestCandidateService.cs`](../../Lorekeeper/Research/WebIngestCandidateService.cs), [`WebIngestCandidateModels.cs`](../../Lorekeeper/Research/WebIngestCandidateModels.cs), and [`ResearchActivityModels.cs`](../../Lorekeeper/Research/ResearchActivityModels.cs) | Cached source provenance, promotion into ingest, and read models; provider fetch policy and Research chat adapters remain in their owning chapters. |
+| [`Lorekeeper/Research/WebIngestCandidateService.cs`](../../Lorekeeper/Research/WebIngestCandidateService.cs), [`WebIngestCandidateModels.cs`](../../Lorekeeper/Research/WebIngestCandidateModels.cs), and [`ResearchActivityModels.cs`](../../Lorekeeper/Research/ResearchActivityModels.cs) | Cached source provenance, promotion into ingest, and read models; provider fetch policy and World chat adapters remain in their owning chapters. |
 | [`Lorekeeper/Components/Pages/Projects/Sources/`](../../Lorekeeper/Components/Pages/Projects/Sources/), [`SourcesPage.razor`](../../Lorekeeper/Components/Pages/Projects/SourcesPage.razor), [`Outline/`](../../Lorekeeper/Components/Pages/Projects/Outline/), and graph/context project components | Application-owned source library/upload entry, outline canon-source, graph, reference, and Assistant Memory interaction surfaces. |
 
 ## Related chapters
@@ -391,7 +399,7 @@ and semantic conversion implementation.
   tests only where they prove approved migration/import safety or the
   deterministic portable archive/history closure and restoration contracts. The
   validation chapter owns the full permitted-test boundary; ordinary search,
-  graph, context, Research, and assistant behavior is verified through builds
+  graph, context, World, and assistant behavior is verified through builds
   and static inspection.
 - Run `dotnet build Lorekeeper.sln` and the documented HTTP startup smoke check
   for normal source changes. Exercise provider calls, web access, embeddings,

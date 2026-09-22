@@ -1,6 +1,6 @@
 namespace Lorekeeper.Models;
 
-public class ResearchConversation
+public class WorldConversation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -17,5 +17,5 @@ public class ResearchConversation
     /// </summary>
     public int? SelectedProviderId { get; set; }
 
-    public ICollection<ResearchMessage> Messages { get; set; } = [];
+    public ICollection<WorldMessage> Messages { get; set; } = [];
 }

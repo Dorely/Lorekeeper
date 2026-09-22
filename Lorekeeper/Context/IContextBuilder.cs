@@ -11,7 +11,7 @@ public enum ContextBuildPurpose
     Editor,
     EditorRevision,
     Images,
-    Research,
+    World,
     Publish,
     Voice,
 }
@@ -86,6 +86,7 @@ public enum ContextItemKind
     IngestSourceChunkReference,
     ProjectImage,
     ChapterVisualLayout,
+    WorldBrief,
 }
 
 public sealed record ContextTraceEntry(

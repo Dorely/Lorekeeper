@@ -6,9 +6,9 @@
 
 <PageTitle>Search Providers</PageTitle>
 
-<ConfigurationShell Title="Search provider" Description="Connect the web search service used by Research for discovery and source-grounded investigation.">
+<ConfigurationShell Title="Search provider" Description="Connect the web search service used by World for discovery and source-grounded investigation.">
     @if (!string.IsNullOrWhiteSpace(_statusMessage)){<div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">@_statusMessage<button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button></div>}
-    <div class="search-toolbar"><div><span class="lk-section-kicker">Research integration</span><strong>@(_providers.FirstOrDefault(provider => provider.IsActive)?.DisplayName ?? _providers.FirstOrDefault(provider => provider.IsActive)?.Name ?? "No active provider")</strong><small>@(_providers.Any(provider => provider.IsActive) ? "Research search is enabled" : "Research search is unavailable")</small></div><button class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button></div>
+    <div class="search-toolbar"><div><span class="lk-section-kicker">Web search integration</span><strong>@(_providers.FirstOrDefault(provider => provider.IsActive)?.DisplayName ?? _providers.FirstOrDefault(provider => provider.IsActive)?.Name ?? "No active provider")</strong><small>@(_providers.Any(provider => provider.IsActive) ? "Web search is enabled" : "Web search is unavailable")</small></div><button class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button></div>
 
     @if (_adding)
     {
@@ -21,7 +21,7 @@
     }
     else if (_providers.Count == 0)
     {
-        <div class="lk-empty-state"><h2>Research needs a search provider</h2><p>Add SerpApi or Brave Search to enable the Research workspace.</p><button class="btn btn-primary" @onclick="ToggleAdd">Add search provider</button></div>
+        <div class="lk-empty-state"><h2>Web search needs a provider</h2><p>Add SerpApi or Brave Search to enable web search in World.</p><button class="btn btn-primary" @onclick="ToggleAdd">Add search provider</button></div>
     }
     else
     {
@@ -29,10 +29,10 @@
             @foreach (var provider in _providers)
             {
                 <article class="search-provider-card @(provider.IsActive ? "is-active" : null)">
-                    <header><div class="search-provider-mark">@ProviderInitial(provider)</div><div><span class="lk-section-kicker">@ProviderKindLabel(provider.ProviderKind)</span><h2>@(provider.DisplayName ?? provider.Name)</h2><p>@(provider.IsActive ? "Used by Research now" : "Available connection")</p></div>@if (provider.IsActive){<span class="lk-status-pill is-success">Active</span>}</header>
+                    <header><div class="search-provider-mark">@ProviderInitial(provider)</div><div><span class="lk-section-kicker">@ProviderKindLabel(provider.ProviderKind)</span><h2>@(provider.DisplayName ?? provider.Name)</h2><p>@(provider.IsActive ? "Used by World now" : "Available connection")</p></div>@if (provider.IsActive){<span class="lk-status-pill is-success">Active</span>}</header>
                     <div class="search-provider-fields"><label><span>Name (slug)</span><input class="form-control form-control-sm" @bind="provider.Name" /></label><label><span>Display name</span><input class="form-control form-control-sm" @bind="provider.DisplayName" /></label><label><span>Provider</span><select class="form-select form-select-sm" @bind="provider.ProviderKind">@foreach (var kind in SupportedKinds){<option value="@kind">@ProviderKindLabel(kind)</option>}</select></label><label><span>API key</span><input type="password" class="form-control form-control-sm" @bind="provider.ApiKey" autocomplete="off" /></label></div>
                     <footer><button class="btn btn-sm btn-outline-secondary" @onclick="() => SaveAsync(provider)">Save changes</button><button class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId is not null)" @onclick="() => TestExistingAsync(provider)">@(_testingProviderId == provider.Id ? "Testing…" : "Test connection")</button>@if (!provider.IsActive){<button class="btn btn-sm btn-outline-primary" @onclick="() => SetActiveAsync(provider.Id)">Make active</button>}<button class="btn btn-sm btn-outline-danger ms-auto" @onclick="() => ToggleDelete(provider.Id)">Delete</button></footer>
-                    @if (_confirmDeleteId == provider.Id){<div class="search-delete-confirm"><span><strong>Delete this provider?</strong> Research will be disabled if it is the active connection.</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(provider)">Delete provider</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteId = null">Cancel</button></div>}
+                    @if (_confirmDeleteId == provider.Id){<div class="search-delete-confirm"><span><strong>Delete this provider?</strong> Web search will be unavailable if it is the active connection.</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(provider)">Delete provider</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteId = null">Cancel</button></div>}
                 </article>
             }
         </section>

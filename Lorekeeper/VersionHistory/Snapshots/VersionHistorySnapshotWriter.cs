@@ -66,7 +66,8 @@ public sealed class VersionHistorySnapshotWriter(
             document.Chapters.OrderBy(item => item.Id).ToList(),
             supplemental.WritingSamples,
             supplemental.ContextPreferences,
-            document.ManuscriptAnnotations.OrderBy(item => item.Id).ToList());
+            document.ManuscriptAnnotations.OrderBy(item => item.Id).ToList(),
+            document.WorldBrief);
         AddJson(fullRoot, "narrative/narrative.json", VersionHistorySnapshotNarrativeFile.FromArea(narrative));
         foreach (var chapter in narrative.Chapters)
         {

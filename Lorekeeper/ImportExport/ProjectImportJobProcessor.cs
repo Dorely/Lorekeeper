@@ -283,6 +283,23 @@ public sealed class ProjectImportJobProcessor(
             await databaseOperation.SaveChangesAsync(cancellationToken);
         }
 
+        if (document.WorldBrief is null) throw new InvalidDataException("World Brief content cannot be null.");
+        var worldBrief = await databaseOperation.Db.WorldBriefs.SingleOrDefaultAsync(value => value.ProjectId == project.Id, cancellationToken);
+        if (worldBrief is not null && worldBrief.Content.Length > 0 && document.WorldBrief.Length > 0
+            && worldBrief.Content != document.WorldBrief)
+            throw new InvalidDataException("The destination already has a different World Brief. Import into a new project or reconcile the brief first.");
+        if (document.WorldBrief.Length > 0 && (worldBrief is null || worldBrief.Content.Length == 0))
+        {
+            if (worldBrief is null)
+            {
+                worldBrief = new WorldBrief { ProjectId = project.Id };
+                databaseOperation.Db.WorldBriefs.Add(worldBrief);
+            }
+            worldBrief.Content = document.WorldBrief;
+            worldBrief.Revision++;
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+        }
+
         if (document.BookBrief is not { } imported)
             return;
 
@@ -955,8 +972,9 @@ public sealed class ProjectImportJobProcessor(
 
         if (job.InputKind == ProjectImportInputKind.LegacyJson)
         {
-            return await JsonSerializer.DeserializeAsync<ProjectExportDocument>(input, JsonOptions, cancellationToken)
+            var legacy = await JsonSerializer.DeserializeAsync<ProjectExportDocument>(input, JsonOptions, cancellationToken)
                 ?? throw new InvalidOperationException("Import file did not contain a project export document.");
+            return legacy with { WorldBrief = string.Empty };
         }
 
         var archive = await ProjectArchiveZip.ReadAsync(input, _archiveLimits, cancellationToken);
@@ -971,6 +989,9 @@ public sealed class ProjectImportJobProcessor(
         await using var creativeStream = creative.Open();
         var document = await JsonSerializer.DeserializeAsync<ProjectExportDocument>(creativeStream, JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("Archive creative-state record is invalid.");
+        if (archive.Manifest.SchemaVersions.ArchiveRecord < 4)
+            document = document with { WorldBrief = string.Empty };
+        if (document.WorldBrief is null) throw new InvalidDataException("World Brief content cannot be null.");
         // `sources/` is the v1 archive authority. Do not use the legacy
         // SourceText projection embedded in creative-state.json when restoring
         // an archive: ImportArchiveSourceClosureAsync reads every immutable

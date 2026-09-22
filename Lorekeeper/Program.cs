@@ -225,6 +225,7 @@ builder.Services.AddScoped<IChatImageAttachmentService, ChatImageAttachmentServi
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IProjectReferenceService, ProjectReferenceService>();
 builder.Services.AddScoped<IBookBriefService, BookBriefService>();
+builder.Services.AddScoped<IWorldBriefService, WorldBriefService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
 builder.Services.AddScoped<IModelCatalogService, ModelCatalogService>();
@@ -325,9 +326,9 @@ builder.Services.AddSingleton<IWebRobotsPolicy, WebRobotsPolicy>();
 builder.Services.AddScoped<IWebPageSourceReader, MediaWikiWebPageSourceReader>();
 builder.Services.AddScoped<IWebPageReader, HttpWebPageReader>();
 builder.Services.AddScoped<IWebIngestCandidateService, WebIngestCandidateService>();
-builder.Services.AddScoped<ResearchTools>();
-builder.Services.AddScoped<IResearchService, ResearchService>();
-builder.Services.AddSingleton<IResearchChatTurnRunner, ResearchChatTurnRunner>();
+builder.Services.AddScoped<WorldTools>();
+builder.Services.AddScoped<IWorldService, WorldService>();
+builder.Services.AddSingleton<IWorldChatTurnRunner, WorldChatTurnRunner>();
 
 // Import / export
 builder.Services.AddSingleton<IProjectImportJobQueue, ProjectImportJobQueue>();

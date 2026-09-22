@@ -16,7 +16,7 @@ public sealed class WebIngestCandidateRepository(AppDatabaseReadOperation operat
     public Task<List<WebIngestCandidate>> ListResearchByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         operation.Db.WebIngestCandidates
             .AsNoTracking()
-            .Where(candidate => candidate.ProjectId == projectId && candidate.ResearchConversationId != null)
+            .Where(candidate => candidate.ProjectId == projectId && candidate.WorldConversationId != null)
             .OrderByDescending(candidate => candidate.UpdatedAt)
             .ThenByDescending(candidate => candidate.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -33,7 +33,7 @@ public sealed class WebIngestCandidateRepository(AppDatabaseReadOperation operat
         operation.Db.WebIngestCandidates
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId
-                && candidate.ResearchConversationId == researchConversationId
+                && candidate.WorldConversationId == researchConversationId
                 && candidate.Status == WebIngestCandidateStatus.Staged)
             .OrderByDescending(candidate => candidate.StagedAt)
             .ThenBy(candidate => candidate.Title)

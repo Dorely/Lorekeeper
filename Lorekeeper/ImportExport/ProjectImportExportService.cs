@@ -180,6 +180,7 @@ public sealed class ProjectImportExportService(
                     item.BodyFontSizePoints,
                     item.BodyLineHeight))
                 .SingleOrDefaultAsync(cancellationToken),
+            WorldBrief = await db.WorldBriefs.AsNoTracking().Where(brief => brief.ProjectId == projectId).Select(brief => brief.Content).SingleOrDefaultAsync(cancellationToken) ?? "",
             BookBrief = await db.BookBriefs
                 .AsNoTracking()
                 .Where(brief => brief.ProjectId == projectId)

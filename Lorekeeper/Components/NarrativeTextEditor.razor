@@ -16,10 +16,13 @@
     {
         <div class="alert alert-danger" role="alert">@_error Your local text is retained.
             <button class="btn btn-sm btn-outline-secondary" @onclick="SaveAsync" disabled="@(_frozen || _lease is null)">Retry save</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmReload = true" disabled="@(_frozen || _lease is null)">Reload saved text</button>
         </div>
     }
     <span class="small text-muted">@(_dirty ? "Unsaved" : "Saved")</span>
 </div>
+
+<ConfirmationDialog IsOpen="@_confirmReload" Title="Discard local draft?" Message="Reloading replaces your unsaved text with the saved version. Copy any text you want to keep first." ConfirmLabel="Reload saved text" Destructive="true" OnConfirm="ReloadSavedAsync" OnCancel="() => _confirmReload = false" />
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
@@ -28,20 +31,25 @@
     [Parameter] public string Placeholder { get; set; } = "";
     [Parameter] public string Title { get; set; } = "";
     [Parameter] public string Body { get; set; } = "";
+    [Parameter] public long Revision { get; set; }
     [Parameter] public bool EditTitle { get; set; }
-    [Parameter, EditorRequired] public Func<string, string, Task> Save { get; set; } = null!;
+    [Parameter, EditorRequired] public Func<NarrativeTextSnapshot, Task<NarrativeTextSnapshot>> Save { get; set; } = null!;
     [Parameter] public EventCallback OnResumed { get; set; }
     private readonly Guid _session = Guid.NewGuid();
     private readonly Guid _writer = Guid.NewGuid();
     private readonly SemaphoreSlim _saveGate = new(1);
     private IAsyncDisposable? _lease;
     private AuthoringTargetReferenceV1 _target = null!;
+    private Func<NarrativeTextSnapshot, Task<NarrativeTextSnapshot>> _save = null!;
+    private long _revision;
+    private string _savedBody = "";
     private string _title = "";
     private string _body = "";
     private string? _error;
     private long _sequence;
     private long _saved;
     private bool _dirty;
+    private bool _confirmReload;
     private bool _frozen;
     private bool _initialized;
 
@@ -75,7 +83,7 @@
             }
             catch (InvalidOperationException exception) { _error = exception.Message; }
         }
-        if (!_dirty) { _title = Title; _body = Body; }
+        if (!_dirty) { _title = Title; _body = Body; _savedBody = Body; _revision = Revision; _save = Save; }
     }
 
     private async Task TitleChangedAsync(ChangeEventArgs args)
@@ -107,13 +115,30 @@
         {
             if (!_dirty || _lease is null) return;
             var sequence = _sequence;
-            await Save(_title, _body);
+            var result = await _save(new(_title, _body, _revision, _savedBody));
+            _revision = result.Revision;
+            _savedBody = result.Body;
             _saved = sequence;
             _dirty = _sequence != sequence;
             _error = null;
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { Report(); _saveGate.Release(); }
+    }
+    private async Task ReloadSavedAsync()
+    {
+        await _saveGate.WaitAsync();
+        try
+        {
+            await OnResumed.InvokeAsync();
+            _dirty = false;
+            _saved = _sequence;
+            _error = null;
+            _confirmReload = false;
+            _title = Title; _body = Body; _savedBody = Body; _revision = Revision; _save = Save;
+            Report();
+        }
+        finally { _saveGate.Release(); }
     }
     public async Task EnsureSavedAsync()
     {

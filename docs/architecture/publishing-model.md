@@ -417,7 +417,7 @@ Press. Plain text uses explicit cell separators and numbered note bodies;
 Markdown keeps table and note syntax; HTML uses table, `doc-noteref`, footnote,
 and endnote semantics. Numbering restarts for every top-level chapter or
 publication section, and empty note sections are omitted. Archive record schema
-3 and history snapshot schema 10 preserve the recursive manuscript and citation
+4 and history snapshot schema 11 preserve the recursive manuscript and citation
 metadata; explicit predecessor readers validate and adapt older payloads.
 
 `ICitationFormatter` is managed C# with identity `lorekeeper-citations-v1` and

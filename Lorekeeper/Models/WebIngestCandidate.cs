@@ -7,7 +7,7 @@ public class WebIngestCandidate
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;
 
-    public Guid? ResearchConversationId { get; set; }
+    public Guid? WorldConversationId { get; set; }
 
     public int? SearchProviderId { get; set; }
     public Guid? IngestJobId { get; set; }

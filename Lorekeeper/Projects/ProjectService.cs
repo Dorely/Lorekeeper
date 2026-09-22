@@ -57,6 +57,7 @@ public class ProjectService(
             Slug = slug,
             ProjectGuidance = string.Empty,
             BookBrief = new BookBrief(),
+            WorldBrief = new WorldBrief(),
             PageSetup = new ProjectPageSetup(),
         };
         await repo.AddAsync(project, cancellationToken);

@@ -5,7 +5,7 @@ namespace Lorekeeper.Context;
 
 internal static class ProjectProfileFormatter
 {
-    public static string Build(Project project, BookBrief? brief)
+    public static string Build(Project project, BookBrief? brief, string worldBrief = "")
     {
         var builder = new System.Text.StringBuilder();
         builder.Append("# ").AppendLine(project.Name);
@@ -15,6 +15,9 @@ internal static class ProjectProfileFormatter
         builder.AppendLine();
         builder.AppendLine("Book Brief:");
         builder.AppendLine(brief is null ? "(not configured)" : FormatBookBrief(brief));
+        builder.AppendLine();
+        builder.AppendLine("World Brief:");
+        builder.AppendLine(string.IsNullOrWhiteSpace(worldBrief) ? "(not configured)" : worldBrief);
         return builder.ToString().TrimEnd();
     }
 

@@ -20,6 +20,8 @@ public class Project
     /// </summary>
     public string ProjectGuidance { get; set; } = string.Empty;
 
+    public WorldBrief? WorldBrief { get; set; }
+
     public BookBrief? BookBrief { get; set; }
 
     public ProjectPageSetup? PageSetup { get; set; }
@@ -72,7 +74,7 @@ public class Project
 
     public ICollection<VoiceConversation> VoiceConversations { get; set; } = [];
 
-    public ICollection<ResearchConversation> ResearchConversations { get; set; } = [];
+    public ICollection<WorldConversation> WorldConversations { get; set; } = [];
 
     public ICollection<PublishConversation> PublishConversations { get; set; } = [];
 

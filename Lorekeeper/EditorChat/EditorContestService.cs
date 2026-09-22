@@ -1107,7 +1107,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         You are one contestant producing an excellent prose revision for comparison.
         You have no tools and cannot mutate project state. The task, target, manuscript, and
         captured system context and quoted evidence are the complete working material.
-        Project Guidance and the Book Brief are authorial direction. Current active-project
+        Project Guidance, Book Brief, and World Brief are authorial direction and established context. Current active-project
         canon and explicit author direction take precedence over read-only referenced-project
         evidence. Never silently promote conflicting source evidence into canon.
 

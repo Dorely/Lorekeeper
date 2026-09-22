@@ -976,7 +976,7 @@ public sealed class ProjectImportJobIntegrationTests
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
 
-        var sourceProject = new Project { Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
+        var sourceProject = new Project { WorldBrief = new WorldBrief { Content = "# World\nEstablished principles.", Revision = 4 }, Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
         var destination = new Project { Name = "Archive destination", Slug = $"archive-destination-{Guid.NewGuid():N}" };
         db.Projects.AddRange(sourceProject, destination);
         var publicationBook = new PublicationBook { Project = sourceProject, CitationStyle = Lorekeeper.Citations.CitationStyle.APA7 };
@@ -1111,6 +1111,8 @@ public sealed class ProjectImportJobIntegrationTests
         secondaryExtraction.Source = secondary;
         secondary.ExtractionVersions.Add(secondaryExtraction);
         db.IngestSources.Add(secondary);
+        var character = new GraphNode { ProjectId = sourceProject.Id, NodeType = "Character", Key = Guid.NewGuid().ToString("N"), Label = "Mira", Properties = new() { ["voiceProfile"] = "Clipped dialogue; expansive POV." } };
+        db.GraphNodes.Add(character);
         var brief = new BookBrief { Project = sourceProject };
         brief.CanonSources.Add(new BookBriefCanonSource { BookBrief = brief, IngestSource = retainedSource });
         db.BookBriefs.Add(brief);
@@ -1135,10 +1137,12 @@ public sealed class ProjectImportJobIntegrationTests
             database,
             exporter);
         var capture = await exporter.CaptureArchiveDocumentAsync(sourceProject.Id, ProjectExportKind.Full);
+        Assert.Equal("# World\nEstablished principles.", capture.Document.WorldBrief);
         Assert.Empty(capture.Document.IngestSources);
         Assert.Equal([retainedSource.Id], capture.Document.BookBriefCanonSourceIds);
         Assert.Contains(capture.Document.Nodes, node => node.Key == secondary.Id.ToString("N"));
         var nonStructural = await exporter.CaptureArchiveDocumentAsync(sourceProject.Id, ProjectExportKind.NonStructural);
+        Assert.Equal(capture.Document.WorldBrief, nonStructural.Document.WorldBrief);
         Assert.DoesNotContain(nonStructural.Document.Nodes, node => node.NodeType == EntityTypeService.SourceNodeType);
         var archives = new ProjectArchiveService(traversal);
         await using var archive = new MemoryStream();
@@ -1167,6 +1171,10 @@ public sealed class ProjectImportJobIntegrationTests
             return;
         }
         Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var restoredCharacter = await db.GraphNodes.SingleAsync(node => node.ProjectId == destination.Id && node.Label == "Mira");
+        Assert.NotEqual(character.Id, restoredCharacter.Id);
+        Assert.Equal("Clipped dialogue; expansive POV.", restoredCharacter.Properties["voiceProfile"]?.ToString());
+        Assert.Equal("# World\nEstablished principles.", (await db.WorldBriefs.SingleAsync(item => item.ProjectId == destination.Id)).Content);
         Assert.Equal(2, await db.IngestSources.CountAsync(item => item.ProjectId == destination.Id));
         var restored = await db.IngestSources.AsNoTracking()
             .Include(item => item.Original).ThenInclude(original => original!.Chunks).ThenInclude(chunk => chunk.Blob)

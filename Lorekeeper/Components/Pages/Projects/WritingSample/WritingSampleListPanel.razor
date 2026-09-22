@@ -25,24 +25,15 @@
                         <span class="writing-sample-row-time">Updated @sample.UpdatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
                         <span class="writing-sample-row-excerpt">@Excerpt(sample.Body)</span>
                     </button>
-                    @if (_confirmDeleteId == sample.Id)
-                    {
-                        <div class="writing-sample-row-confirm">
-                            <span>Delete?</span>
-                            <button type="button" class="btn btn-sm btn-danger" @onclick="() => ConfirmDeleteAsync(sample.Id)">Yes</button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelDelete">No</button>
-                        </div>
-                    }
-                    else
-                    {
-                        <button type="button" class="btn btn-sm btn-outline-danger writing-sample-row-delete"
-                                title="Delete sample" @onclick="() => AskDelete(sample.Id)">Delete</button>
-                    }
+                    <button type="button" class="btn btn-sm btn-outline-danger writing-sample-row-delete"
+                            title="Delete sample" @onclick="() => AskDelete(sample.Id)">Delete</button>
                 </div>
             }
         </div>
     }
 </aside>
+
+<ConfirmationDialog IsOpen="@(_confirmDeleteId is not null)" Title="Delete writing sample?" Message="This removes the sample from project style evidence." ConfirmLabel="Delete sample" Destructive="true" OnConfirm="() => ConfirmDeleteAsync(_confirmDeleteId!.Value)" OnCancel="CancelDelete" />
 
 @code {
     [Parameter] public IReadOnlyList<WritingSample> Samples { get; set; } = [];

@@ -8,7 +8,7 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 10;
+    public const int SchemaVersion = 11;
     public const int ImageUpscaleSchemaVersion = 5;
     public const int CoverDescriptionSchemaVersion = 6;
     public const int DesignedPagesSchemaVersion = 7;
@@ -66,7 +66,8 @@ public sealed record VersionHistorySnapshotNarrativeArea(
     IReadOnlyList<ProjectExportChapter> Chapters,
     IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
     IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
-    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations);
+    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations,
+    string WorldBrief = "");
 
 /// <summary>
 /// The non-chapter portion of <c>narrative/narrative.json</c>. Chapters are
@@ -80,7 +81,8 @@ public sealed record VersionHistorySnapshotNarrativeFile(
     IReadOnlyList<ProjectExportAct> Acts,
     IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
     IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
-    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations)
+    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations,
+    string WorldBrief = "")
 {
     public static VersionHistorySnapshotNarrativeFile FromArea(VersionHistorySnapshotNarrativeArea area) => new(
         area.BookBrief,
@@ -89,7 +91,8 @@ public sealed record VersionHistorySnapshotNarrativeFile(
         area.Acts,
         area.WritingSamples,
         area.ContextPreferences,
-        area.Annotations);
+        area.Annotations,
+        area.WorldBrief);
 
     public VersionHistorySnapshotNarrativeArea ToArea(IReadOnlyList<ProjectExportChapter> chapters) => new(
         BookBrief,
@@ -99,7 +102,22 @@ public sealed record VersionHistorySnapshotNarrativeFile(
         chapters,
         WritingSamples,
         ContextPreferences,
-        Annotations);
+        Annotations,
+        WorldBrief);
+}
+
+// Explicit predecessor boundary: preserve canonical bytes of schema 1-10 narrative files.
+public sealed record VersionHistorySnapshotNarrativeFileV10(
+    ProjectExportBookBrief? BookBrief,
+    IReadOnlyList<Guid> BookBriefCanonSourceIds,
+    IReadOnlyList<ProjectExportEntityType> EntityTypes,
+    IReadOnlyList<ProjectExportAct> Acts,
+    IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
+    IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
+    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations)
+{
+    public VersionHistorySnapshotNarrativeFile ToCurrent() => new(
+        BookBrief, BookBriefCanonSourceIds, EntityTypes, Acts, WritingSamples, ContextPreferences, Annotations, "");
 }
 
 /// <summary>

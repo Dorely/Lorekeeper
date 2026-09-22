@@ -6,7 +6,7 @@ public enum ChatTurnSurface
 {
     Outline,
     Editor,
-    Research,
+    World,
     Images,
     Voice,
     Publish,

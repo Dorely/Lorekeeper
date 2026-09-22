@@ -20,7 +20,7 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, IDesignedPageService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, IDesignedPageService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IWorldBriefService worldBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -51,7 +51,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             brief,
             RoleFor(request.Purpose),
             assistantWorkflow,
-            currentChapter));
+            currentChapter, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content));
         var items = composition.Sections.Select(ToContextItem).ToList();
         var projectReferencesItem = await BuildProjectReferencesItemAsync(project.Id, cancellationToken);
         if (projectReferencesItem is not null)
@@ -70,7 +70,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 IsProtected: true));
         }
 
-        if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research or ContextBuildPurpose.Publish)
+        if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.World or ContextBuildPurpose.Publish)
         {
             items.Add(new ContextItem(
                 Key: EditorContextKeys.ProjectOutline,
@@ -260,7 +260,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
                 + "\n\n" + AssistantWorkflowInstructions.ManuscriptOperationDiscipline,
             ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
-            ContextBuildPurpose.Research =>
+            ContextBuildPurpose.World =>
                 "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
             ContextBuildPurpose.Voice => "Help the author develop writing samples and character voice profiles.",
             ContextBuildPurpose.Publish =>
@@ -274,7 +274,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         ContextBuildPurpose.Editor => SystemPromptAgentRole.Editor,
         ContextBuildPurpose.EditorRevision => SystemPromptAgentRole.RevisionWorker,
         ContextBuildPurpose.Images => SystemPromptAgentRole.Images,
-        ContextBuildPurpose.Research => SystemPromptAgentRole.Research,
+        ContextBuildPurpose.World => SystemPromptAgentRole.World,
         ContextBuildPurpose.Publish => SystemPromptAgentRole.Publish,
         ContextBuildPurpose.Voice => SystemPromptAgentRole.Voice,
         _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
@@ -289,6 +289,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             SystemPromptSectionKind.DynamicGuidance => ContextItemKind.DynamicGuidance,
             SystemPromptSectionKind.ProjectGuidance => ContextItemKind.ProjectGuidance,
             SystemPromptSectionKind.BookBrief => ContextItemKind.BookBrief,
+            SystemPromptSectionKind.WorldBrief => ContextItemKind.WorldBrief,
             _ => throw new ArgumentOutOfRangeException(nameof(section)),
         };
         var key = section.Kind switch
@@ -298,6 +299,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             SystemPromptSectionKind.DynamicGuidance => EditorContextKeys.DynamicGuidance,
             SystemPromptSectionKind.ProjectGuidance => EditorContextKeys.ProjectGuidance,
             SystemPromptSectionKind.BookBrief => EditorContextKeys.BookBrief,
+            SystemPromptSectionKind.WorldBrief => EditorContextKeys.WorldBrief,
             _ => section.Key,
         };
 

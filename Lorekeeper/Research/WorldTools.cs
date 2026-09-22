@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Lorekeeper.Projects;
+using Lorekeeper.Authoring;
 using System.Text.Json.Nodes;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -12,7 +14,7 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Research;
 
-public sealed class ResearchToolContext(
+public sealed class WorldToolContext(
     Guid projectId,
     Guid conversationId,
     Action onMutated,
@@ -33,7 +35,9 @@ public sealed class ResearchToolContext(
     public IReadOnlyList<ReferenceVisualReadResult> DrainReferenceVisuals() { var result = _referenceVisuals.ToList(); _referenceVisuals.Clear(); return result; }
 }
 
-public sealed class ResearchTools(
+public sealed class WorldTools(
+    IWorldBriefService briefs,
+    IAuthoringMutationFence fence,
     ISearchProviderService searchProviders,
     IWebIngestCandidateService candidates,
     OutlineCollaborationTools outlineTools,
@@ -58,10 +62,15 @@ public sealed class ResearchTools(
         WriteIndented = false,
     };
 
-    public async Task<IList<AITool>> BuildAsync(ResearchToolContext context, CancellationToken cancellationToken = default)
+    public async Task<IList<AITool>> BuildAsync(WorldToolContext context, CancellationToken cancellationToken = default)
     {
         var tools = new List<AITool>
         {
+            AIFunctionFactory.Create((int? pageNumber = null) => ReadBriefAsync(context, pageNumber),
+                "read_world_brief", "Read the current World Brief and revision with pagination. Follow every page before updating."),
+            AIFunctionFactory.Create((long expectedRevision, string content) => UpdateBriefAsync(context, expectedRevision, content),
+                "update_world_brief", "Save the complete free-form World Brief at its exact read revision; empty content clears it. Keep it concise and preserve unrelated established context."),
+
             AIFunctionFactory.Create(
                 method: (string query, int count = 5) => WebSearchAsync(context, query, count),
                 name: "web_search",
@@ -119,12 +128,28 @@ public sealed class ResearchTools(
             context.ProjectId, context.OnMutated, visionReady: context.VisionReady,
             onVisualsQueued: context.QueueEntityVisuals,
             onReferenceVisualQueued: context.QueueReferenceVisual);
-        tools.AddRange(await outlineTools.BuildResearchSharedAsync(outlineContext));
+        tools.AddRange(await outlineTools.BuildWorldSharedAsync(outlineContext));
 
         return tools;
     }
 
-    private async Task<string> WebSearchAsync(ResearchToolContext context, string query, int count)
+    private async Task<string> ReadBriefAsync(WorldToolContext context, int? page)
+    {
+        var brief = await briefs.GetAsync(context.ProjectId);
+        return AgentPayloadPaginator.SerializePage(
+            new JsonObject { ["projectId"] = context.ProjectId, ["revision"] = brief.Revision },
+            new JsonObject { ["content"] = brief.Content }, "read_world_brief", new(), page);
+    }
+
+    private Task<string> UpdateBriefAsync(WorldToolContext context, long expectedRevision, string content) =>
+        fence.ExecuteAsync(new AuthoringFenceRequest(context.ProjectId, [], "World Brief edit"), async (_, token) =>
+        {
+            var updated = await briefs.UpdateAsync(context.ProjectId, expectedRevision, content, token);
+            if (updated.Revision != expectedRevision) context.OnMutated();
+            return JsonSerializer.Serialize(new { updated.ProjectId, updated.Revision });
+        });
+
+    private async Task<string> WebSearchAsync(WorldToolContext context, string query, int count)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
         count = Math.Clamp(count, 1, 10);
@@ -159,7 +184,7 @@ public sealed class ResearchTools(
         }, JsonOptions);
     }
 
-    private async Task<string> ReadSearchResultAsync(ResearchToolContext context, Guid pageId, int? pageNumber)
+    private async Task<string> ReadSearchResultAsync(WorldToolContext context, Guid pageId, int? pageNumber)
     {
         var read = await TryReadCandidateForToolAsync(context, pageId);
         if (read is null)
@@ -168,14 +193,14 @@ public sealed class ResearchTools(
         return SerializeReadPayload(read, pageNumber, WebReadToolKind.SearchResult);
     }
 
-    private async Task<string> ReadWebpageAsync(ResearchToolContext context, string url, int? pageNumber)
+    private async Task<string> ReadWebpageAsync(WorldToolContext context, string url, int? pageNumber)
     {
         if (string.IsNullOrWhiteSpace(url)) return "Error: url is required.";
         var read = await candidates.ReadUrlAsync(context.ProjectId, context.ConversationId, url.Trim());
         return SerializeReadPayload(read, pageNumber, WebReadToolKind.DirectUrl);
     }
 
-    private async Task<string> FollowPageLinksAsync(ResearchToolContext context, Guid pageId, int count, bool sameDomainOnly)
+    private async Task<string> FollowPageLinksAsync(WorldToolContext context, Guid pageId, int count, bool sameDomainOnly)
     {
         count = Math.Clamp(count, 1, Math.Max(1, webOptions.Value.MaxFollowLinksPerPage));
         var sourceRead = await TryReadCandidateForToolAsync(context, pageId);
@@ -229,7 +254,7 @@ public sealed class ResearchTools(
         }, JsonOptions);
     }
 
-    private async Task<WebIngestCandidateReadResult?> TryReadCandidateForToolAsync(ResearchToolContext context, Guid pageId)
+    private async Task<WebIngestCandidateReadResult?> TryReadCandidateForToolAsync(WorldToolContext context, Guid pageId)
     {
         var cached = await candidates.GetCachedDetailAsync(context.ProjectId, pageId);
         if (cached is null) return null;
@@ -244,7 +269,7 @@ public sealed class ResearchTools(
         }
     }
 
-    private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
+    private async Task<string> ReadEntityAsync(WorldToolContext context, Guid entityId, int? pageNumber)
     {
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)
@@ -285,7 +310,7 @@ public sealed class ResearchTools(
         value = relationContext,
     };
 
-    private async Task<string> InspectWebImageAsync(ResearchToolContext context, Guid pageId, string? imageUrl)
+    private async Task<string> InspectWebImageAsync(WorldToolContext context, Guid pageId, string? imageUrl)
     {
         var read = await TryReadCandidateForToolAsync(context, pageId);
         if (read is null) return $"Error: webpage {pageId:N} was not found in this project.";
@@ -326,7 +351,7 @@ public sealed class ResearchTools(
     }
 
     private async Task<string> ImportWebImageAsync(
-        ResearchToolContext context,
+        WorldToolContext context,
         Guid candidateId,
         EntityVisualTarget entityTarget,
         ProjectImageCropRegion? crop,
@@ -361,7 +386,7 @@ public sealed class ResearchTools(
         catch (Exception ex) { return $"Error: {ex.Message}"; }
     }
 
-    private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(ResearchToolContext context, Guid entityId)
+    private async Task<IReadOnlyList<EntityVisualExampleView>> QueueEntityVisualsAsync(WorldToolContext context, Guid entityId)
     {
         var examples = await entityVisualExamples.ListForEntityAsync(context.ProjectId, entityId);
         context.QueueEntityVisuals(examples.Select(EntityVisualContextService.ToReference));
@@ -381,7 +406,7 @@ public sealed class ResearchTools(
         return contentType == "image/png" ? "research-image.png" : contentType == "image/webp" ? "research-image.webp" : "research-image.jpg";
     }
 
-    private async Task<string> ListEntityLinksAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
+    private async Task<string> ListEntityLinksAsync(WorldToolContext context, Guid entityId, int? pageNumber)
     {
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)

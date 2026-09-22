@@ -542,7 +542,7 @@ content, including linked image-upscale provenance. Older manuscript inputs are
 accepted only through isolated versioned transformers. Search, context, TXT,
 Markdown, EPUB, Read preview, and
 Press all consume the semantic document or its explicit projection. Archive
-record schema 3, history snapshot schema 10, `agent-manuscript-v4`, EPUB exporter
+record schema 4, history snapshot schema 11, `agent-manuscript-v4`, EPUB exporter
 v6, and Press protocol v15 are the current boundaries. Archive/history readers
 adapt predecessor data only at explicit versioned boundaries. Current renderer
 manifests and writers require protocol 15; historical render requests are handled
@@ -704,3 +704,10 @@ and Word desktop compatibility remain manual acceptance work.
   and the HTTP startup smoke check for source changes. Documentation-only edits
   require link/path validation and the broader verification selected by the
   coordinating task.
+Voice sample/profile editors and the World Brief editor share NarrativeTextEditor.
+Each retains the exact revision or prior profile content that accompanied its
+local draft. External refresh never advances that token while dirty. Save failures
+retain the draft and block dependent mutations/checkpoints through the authoring
+fence; explicit app-owned confirmation can reload saved text. Successful saves
+acknowledge the writer sequence. Tools use the same owning services under a
+project-wide flush/freeze scope.

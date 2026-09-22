@@ -49,6 +49,18 @@ event payloads. These operational records remain outside canonical version histo
 and portable project creative-state exports. Migration coverage verifies old
 transcripts and exact opaque metadata storage.
 
+The forward AddWorldWorkspace migration preserves Research conversation/message
+identities, selected models, attachment surface identities, and cached webpage
+conversation provenance while renaming their runtime ownership to World. It adds
+one empty WorldBrief row per existing project, with Markdown Content and a
+concurrency Revision. New projects create an empty brief.
+
+Archive-record schema 4 carries WorldBrief in both full and non-structural
+documents. Record predecessors and legacy JSON adapt to an empty brief. Import
+fills an empty destination brief, preserves an identical brief, and refuses
+conflicting nonempty content inside the rollback-safe transaction. Graph voice
+properties travel with their entities and remapped entity identities.
+
 The forward AddVoiceWorkspace migration renames the Writing Coach conversation
 and message tables to Voice, preserving IDs, transcripts, protocol metadata, and
 model selections, migrating attachment surfaces, and adding sample Revision.
@@ -339,7 +351,7 @@ Legacy project export v31 is the final JSON format and is import-only. Its
 adapter retains the durable print registry/profile fields, removes finish, and
 accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-at that boundary. New `.lorekeeper` full archives use archive-record schema 3
+at that boundary. New `.lorekeeper` full archives use archive-record schema 4
 and include the current v7
 manuscript model, Core/release annotations, the complete retained-source closure,
 page setup, independent Designed

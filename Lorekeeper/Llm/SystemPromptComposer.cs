@@ -13,7 +13,7 @@ public enum SystemPromptAgentRole
     ContestCandidate,
     RevisionWorker,
     Images,
-    Research,
+    World,
     Publish,
     Voice,
 }
@@ -25,6 +25,7 @@ public enum SystemPromptSectionKind
     DynamicGuidance,
     ProjectGuidance,
     BookBrief,
+    WorldBrief,
     WorkingContext,
 }
 
@@ -47,7 +48,8 @@ public sealed record SystemPromptComposeRequest(
     string OperatingRules,
     Chapter? ActiveChapter = null,
     IReadOnlyList<SystemPromptSourceSection>? WorkingContext = null,
-    IReadOnlyCollection<PublicationEditionFormat>? PublicationFormats = null);
+    IReadOnlyCollection<PublicationEditionFormat>? PublicationFormats = null,
+    string WorldBrief = "");
 
 public sealed record SystemPromptComposition(
     string Prompt,
@@ -110,6 +112,12 @@ public sealed class SystemPromptComposer(
                 SystemPromptSectionKind.BookBrief,
                 "Book Brief",
                 bookBriefs.FormatForPrompt(request.BookBrief),
+                IsUserOwned: true),
+            new(
+                "world-brief",
+                SystemPromptSectionKind.WorldBrief,
+                "World Brief",
+                string.IsNullOrWhiteSpace(request.WorldBrief) ? "No World Brief has been supplied." : request.WorldBrief,
                 IsUserOwned: true),
         };
 
@@ -179,7 +187,7 @@ public sealed class SystemPromptComposer(
             SystemPromptAgentRole.ContestCandidate => "You are a senior author and editor producing one excellent, request-faithful candidate revision for professional comparison.",
             SystemPromptAgentRole.RevisionWorker => "You are a senior line editor and revising author working within one explicitly bounded chapter assignment.",
             SystemPromptAgentRole.Voice => "You are Lorekeeper's Voice assistant: a writing partner and character dialogue and POV voice specialist.",
-            SystemPromptAgentRole.Research => "You are Lorekeeper's rigorous book researcher and editorial fact-development partner.",
+            SystemPromptAgentRole.World => "You are Lorekeeper's world-development and research partner for fiction, nonfiction, and other book types.",
             _ => throw new ArgumentOutOfRangeException(nameof(role)),
         };
         var autonomyRule = role switch
@@ -199,7 +207,7 @@ public sealed class SystemPromptComposer(
             - For developmental work, evaluate premise and structure, causality, stakes, character agency, scene purpose, pacing, transitions, point of view, and continuity at the appropriate scale.
             - For line work, improve clarity, specificity, rhythm, emphasis, dialogue, paragraph movement, and sentence craft without flattening the voice.
             - For copyediting and proofreading, correct grammar, usage, consistency, spelling, punctuation, factual contradictions, and production errors while avoiding unrequested rewrites.
-            - Treat writing samples as style evidence; treat structured facts, entities, links, beats, and directly read source material as canon; treat Project Guidance and the Book Brief as authorial direction. If sources conflict, identify the conflict instead of silently choosing.
+            - Treat writing samples as style evidence; treat established facts, entities, links, and beats as canon; treat source material as evidence unless the author explicitly designates it canonical; treat Project Guidance, Book Brief, and World Brief as authorial direction and established context. If sources conflict, identify the conflict instead of silently choosing.
             - In picture books, make words and images complementary rather than redundant. Respect page turns, read-aloud cadence, child comprehension, visual pacing, and the emotional work of negative space.
             - In composition, maintain a clear hierarchy and reading path, protect trim and gutter areas, keep story text editable and accessible, and treat heuristics as advice unless a real overflow, collision, contrast, or safety failure is measured. For image-led pages, art-direct natural low-detail negative space sized for the actual copy, place the editable text in that planned space, and default the text box to a transparent background rather than covering the illustration with a panel.
             {{autonomyRule}}

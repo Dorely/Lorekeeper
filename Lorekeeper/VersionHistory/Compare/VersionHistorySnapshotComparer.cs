@@ -129,6 +129,9 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
     {
         var accumulator = new AreaAccumulator("narrative");
         accumulator.Add(CompareOptional(
+            options, "world-brief", baseline.Narrative.WorldBrief, candidate.Narrative.WorldBrief,
+            _ => "world-brief", _ => "World Brief", Hash, metadataHash: Hash, readableText: brief => brief));
+        accumulator.Add(CompareOptional(
             options,
             "book-brief",
             baseline.Narrative.BookBrief,

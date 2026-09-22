@@ -7,16 +7,16 @@
 @using Lorekeeper.Tokens
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
-@inject IResearchService Research
-@inject IResearchChatTurnRunner ChatTurns
+@inject IWorldService World
+@inject IWorldChatTurnRunner ChatTurns
 @inject IChatImageAttachmentService ImageAttachments
 @inject ILlmProviderService Providers
 @inject ITokenCounter TokenCounter
 @inject ChatTokenLimitResolver TokenLimits
 
-<ChatSurface Title="Research"
+<ChatSurface Title="World"
              ProjectId="@ProjectId"
-             Surface="ChatTurnSurface.Research"
+             Surface="ChatTurnSurface.World"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -27,7 +27,7 @@
              OnClearError="ClearError"
              Input="@_input"
              InputChanged="SetInput"
-             Placeholder="Ask me to research a topic..."
+             Placeholder="Develop your world or research a subject..."
              Running="@_running"
               ComposerDisabled="@(ChatDisabled || _running || _resetting)"
               SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input))"
@@ -66,8 +66,8 @@
     private int _scrollKey;
     private int _autoFollowKey;
     private int _resetComposerKey;
-    private ResearchConversation? _conversation;
-    private List<ResearchMessage> _messages = [];
+    private WorldConversation? _conversation;
+    private List<WorldMessage> _messages = [];
     private List<ChatRenderableMessage> _renderable = [];
     private ChatLiveTurn? _live;
     private string _input = string.Empty;
@@ -109,12 +109,12 @@
         _loading = true;
         try
         {
-            _conversation = await Research.GetOrCreateAsync(ProjectId);
+            _conversation = await World.GetOrCreateAsync(ProjectId);
             _selectedProviderId = _conversation.SelectedProviderId;
             await LoadChatProviderStateAsync();
-            _messages = (await Research.LoadMessagesAsync(_conversation.Id)).ToList();
-            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Research);
-            _systemPrompt = await Research.GetSystemPromptAsync(ProjectId);
+            _messages = (await World.LoadMessagesAsync(_conversation.Id)).ToList();
+            _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.World);
+            _systemPrompt = await World.GetSystemPromptAsync(ProjectId);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -192,7 +192,7 @@
 
         if (!ChatTurns.TryStart(ProjectId, text, submission.Images, model))
         {
-            _error = "Research Chat already has a running turn.";
+            _error = "World already has a running turn.";
             ReleaseRunningUi();
             if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
                 await ListenToActiveTurnAsync(existingTurn);
@@ -209,7 +209,7 @@
         _resetting = true;
         try
         {
-            await Research.ResetAsync(ProjectId);
+            await World.ResetAsync(ProjectId);
             _loadedProjectId = null;
             await LoadAsync();
         }
@@ -254,7 +254,7 @@
     }
 
     private async Task ListenToTurnAsync(
-        IChatTurnSubscription<ResearchTurnUpdate> subscription,
+        IChatTurnSubscription<WorldTurnUpdate> subscription,
         CancellationToken cancellationToken)
     {
         await using (subscription)
@@ -269,59 +269,59 @@
         }
     }
 
-    private async Task ApplyTurnUpdateAsync(ResearchTurnUpdate update)
+    private async Task ApplyTurnUpdateAsync(WorldTurnUpdate update)
     {
         switch (update)
         {
-            case ResearchTextDelta delta:
+            case WorldTextDelta delta:
                 _live!.AppendText(delta.Text);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case ResearchReasoningDelta reasoning:
+            case WorldReasoningDelta reasoning:
                 _live!.AppendReasoning(reasoning.Text);
                 RequestScroll();
                 StateHasChanged();
                 break;
 
-            case ResearchToolCallStarted started:
+            case WorldToolCallStarted started:
                 _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case ResearchToolCallArgumentsDelta delta:
+            case WorldToolCallArgumentsDelta delta:
                 _live!.AppendToolArguments(delta.CallId, delta.ArgumentsDelta, delta.ArgumentsComplete);
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case ResearchToolCallCompleted completed:
+            case WorldToolCallCompleted completed:
                 _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
                 UpdateConversationTokenCount();
                 await OnActivityChanged.InvokeAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case ResearchContextTrimmed trimmed:
+            case WorldContextTrimmed trimmed:
                 _live!.ApplyContextTrim(
                     trimmed.Result.NewlyTombstonedCallIds,
                     trimmed.Result.CompletedRoundCallIds);
                 UpdateConversationTokenCount();
                 StateHasChanged();
                 break;
-            case ResearchGraphMutated:
+            case WorldMutated:
                 await OnActivityChanged.InvokeAsync();
                 break;
-            case ResearchAssistantMessageCompleted:
+            case WorldAssistantMessageCompleted:
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
                 await OnActivityChanged.InvokeAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
-            case ResearchTurnError error:
+            case WorldTurnError error:
                 _error = error.Cancelled ? null : error.Message;
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
@@ -350,12 +350,12 @@
     private async Task ReloadFromDbAsync()
     {
         if (_conversation is null) return;
-        _conversation = await Research.GetOrCreateAsync(ProjectId);
+        _conversation = await World.GetOrCreateAsync(ProjectId);
         _selectedProviderId = _conversation.SelectedProviderId;
         await LoadChatProviderStateAsync();
-        _messages = (await Research.LoadMessagesAsync(_conversation.Id)).ToList();
-        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Research);
-        _systemPrompt = await Research.GetSystemPromptAsync(ProjectId);
+        _messages = (await World.LoadMessagesAsync(_conversation.Id)).ToList();
+        _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.World);
+        _systemPrompt = await World.GetSystemPromptAsync(ProjectId);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;
@@ -364,7 +364,7 @@
 
     private async Task LoadChatProviderStateAsync()
     {
-        _chatAvailability = await Research.GetChatProviderAvailabilityAsync(ProjectId);
+        _chatAvailability = await World.GetChatProviderAvailabilityAsync(ProjectId);
         _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId);
         _modelOptions = (await Providers.ListChatModelOptionsAsync())
             .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
@@ -386,12 +386,12 @@
         if (_loading || _running || _resetting) return;
         if (ChatTurns.GetActiveTurn(ProjectId) is not null)
         {
-            _error = "Research Chat is still working in another window. Stop or wait for that turn before changing its model.";
+            _error = "World is still working in another window. Stop or wait for that turn before changing its model.";
             return;
         }
         try
         {
-            await Research.SetSelectedProviderAsync(ProjectId, providerId);
+            await World.SetSelectedProviderAsync(ProjectId, providerId);
             _selectedProviderId = await Providers.NormalizeChatModelSelectionAsync(providerId);
             await LoadChatProviderStateAsync();
             UpdateConversationTokenCount();
@@ -413,40 +413,40 @@
             : _messages;
 
         var byCallId = messages
-            .Where(message => message.Role == ResearchMessageRole.Tool && message.ToolCallId is not null)
+            .Where(message => message.Role == WorldMessageRole.Tool && message.ToolCallId is not null)
             .ToDictionary(message => message.ToolCallId!, message => message);
 
         _renderable = new List<ChatRenderableMessage>(messages.Count);
         foreach (var message in messages)
         {
-            if (message.Role is ResearchMessageRole.Tool or ResearchMessageRole.System) continue;
+            if (message.Role is WorldMessageRole.Tool or WorldMessageRole.System) continue;
             _renderable.Add(new ChatRenderableMessage(
                 message.Id,
-                message.Role == ResearchMessageRole.User ? ChatMessageRole.User : ChatMessageRole.Assistant,
+                message.Role == WorldMessageRole.User ? ChatMessageRole.User : ChatMessageRole.Assistant,
                 ToChatStatus(message.Status),
                 BuildPartsWithImages(message, byCallId)));
         }
     }
 
-    private List<ChatMessagePart> BuildPartsWithImages(ResearchMessage message, IReadOnlyDictionary<string, ResearchMessage> byCallId)
+    private List<ChatMessagePart> BuildPartsWithImages(WorldMessage message, IReadOnlyDictionary<string, WorldMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId);
-        if (message.Role == ResearchMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        if (message.Role == WorldMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
         {
             var reasoningPart = new ChatReasoningPart();
             reasoningPart.Append(message.Reasoning);
             parts.Insert(0, reasoningPart);
         }
-        if (message.Role == ResearchMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
+        if (message.Role == WorldMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;
     }
 
-    private static ChatMessageStatus ToChatStatus(ResearchMessageStatus status) => status switch
+    private static ChatMessageStatus ToChatStatus(WorldMessageStatus status) => status switch
     {
-        ResearchMessageStatus.Failed => ChatMessageStatus.Failed,
-        ResearchMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
-        ResearchMessageStatus.Pending => ChatMessageStatus.Pending,
+        WorldMessageStatus.Failed => ChatMessageStatus.Failed,
+        WorldMessageStatus.Cancelled => ChatMessageStatus.Cancelled,
+        WorldMessageStatus.Pending => ChatMessageStatus.Pending,
         _ => ChatMessageStatus.Completed,
     };
 
@@ -466,9 +466,9 @@
             _systemPrompt);
     }
 
-    private static List<ChatMessagePart> BuildMessageParts(ResearchMessage message, IReadOnlyDictionary<string, ResearchMessage> byCallId)
+    private static List<ChatMessagePart> BuildMessageParts(WorldMessage message, IReadOnlyDictionary<string, WorldMessage> byCallId)
     {
-        if (message.Role != ResearchMessageRole.Assistant)
+        if (message.Role != WorldMessageRole.Assistant)
             return string.IsNullOrEmpty(message.Content) ? [] : [new ChatTextPart(message.Content)];
 
         var calls = ChatTranscriptHelpers.ReadPersistedCalls(message.ToolCallsJson);
@@ -501,13 +501,13 @@
         return parts;
     }
 
-    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, ResearchMessage> byCallId)
+    private static ChatToolChip BuildToolChip(ChatPersistedToolCall call, IReadOnlyDictionary<string, WorldMessage> byCallId)
     {
         byCallId.TryGetValue(call.CallId, out var resultMessage);
         return new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
         {
-            Result = resultMessage?.Status == ResearchMessageStatus.Completed ? resultMessage.Content : null,
-            Error = resultMessage?.Status == ResearchMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
+            Result = resultMessage?.Status == WorldMessageStatus.Completed ? resultMessage.Content : null,
+            Error = resultMessage?.Status == WorldMessageStatus.Failed ? (resultMessage.ErrorMessage ?? resultMessage.Content) : null,
             Completed = resultMessage is not null,
         };
     }

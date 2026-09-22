@@ -1088,7 +1088,8 @@ public sealed class ProjectVersionRestoreService(
             chapters,
             current.WritingSamples,
             preferences,
-            annotations);
+            annotations,
+            current.WorldBrief);
     }
 
     private static void ValidateWholePayload(VersionHistorySnapshotPayload payload)
@@ -1097,6 +1098,7 @@ public sealed class ProjectVersionRestoreService(
             throw new VersionHistoryRestoreException("ReviewOnlySnapshot", "A bounded review projection cannot be used for restoration.");
         if (payload.Project.Project.Id != payload.ProjectId)
             throw new VersionHistoryRestoreException("ProjectIdentityMismatch", "The snapshot project payload does not match its manifest.");
+        if (payload.Narrative.WorldBrief is null) throw new VersionHistoryRestoreException("InvalidWorldBrief", "World Brief content cannot be null.");
         VersionHistoryCitationReferences.Validate(payload);
 
         var actIds = payload.Narrative.Acts.Select(item => item.Id).ToHashSet();
@@ -1399,6 +1401,7 @@ public sealed class ProjectVersionRestoreService(
         await db.Chapters.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.Acts.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.BookBriefs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
+        await db.WorldBriefs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.SourceLocations.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.BibliographicRecords.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.IngestSourceBlocks.Where(item => item.Source.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
@@ -1437,6 +1440,7 @@ public sealed class ProjectVersionRestoreService(
             warnings.Add($"Retained source originals restored: {retainedSourceBytes.NewBytes} new bytes; {retainedSourceBytes.ReusedBytes} reused bytes.");
         await AddAssetsAsync(db, projectId, payload, cancellationToken);
         AddBookBrief(db, projectId, payload.Narrative.BookBrief, payload.Narrative.BookBriefCanonSourceIds);
+        db.WorldBriefs.Add(new WorldBrief { ProjectId = projectId, Content = payload.Narrative.WorldBrief, Revision = DateTime.UtcNow.Ticks });
         foreach (var entityType in payload.Narrative.EntityTypes)
             db.GraphEntityTypes.Add(new GraphEntityType
             {
@@ -1467,7 +1471,7 @@ public sealed class ProjectVersionRestoreService(
                 VectorIndexState = VectorIndexState.Stale,
             });
         foreach (var sample in payload.Narrative.WritingSamples)
-            db.WritingSamples.Add(new WritingSample { Id = sample.Id, ProjectId = projectId, Title = sample.Title, Body = sample.Body });
+            db.WritingSamples.Add(new WritingSample { Id = sample.Id, ProjectId = projectId, Title = sample.Title, Body = sample.Body, Revision = DateTime.UtcNow.Ticks });
         foreach (var preference in payload.Narrative.ContextPreferences)
             db.EditorContextPreferences.Add(new EditorContextPreference
             {
