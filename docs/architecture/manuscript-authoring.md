@@ -277,6 +277,18 @@ selection content, credentials, or provider data. The path is absent unless the
 host has enabled an output below `.artifacts/performance/`; it is neither a UI
 test hook nor an authoring behavior branch.
 
+The Editor's **Insert Page** action opens an application-owned visual library
+modal for the selected chapter and protected Core/release target. It replaces
+the project-wide Pages route and the semantic editor's text dropdown picker.
+Opening flushes pending edits and captures the insertion index and revision:
+Edit uses its saved top-level selection, Pages inserts after its selected
+occurrence, and Read/Review append. A revision conflict requires a new captured
+position rather than silently relocating the insertion. The committed placement
+block ID selects the exact new occurrence in the Pages canvas, including repeated
+placements of the same shared page. Cancelling does not change the manuscript.
+Library management reconciles the current chapter and refreshes preview/context
+consumers through the existing services and project mutation fence.
+
 Editor has Edit, Read, Pages, and Review modes. A chapter containing only
 Designed Pages initially opens Pages; after the user chooses, per-project
 browser-local preferences restore its mode. Read flushes edits and asks the

@@ -1870,68 +1870,6 @@ async function editFigurePresentation(view, root) {
     view.focus();
 }
 
-async function insertDesignedPage(view, dotNetRef, getRevision, flush, replaceDocument, root, designedPages) {
-    const existingPageOptions = designedPages
-        .map(page => [String(page.id), `${page.name} — ${page.surfaceLabel || "layout unavailable"}${page.status ? ` · ${page.status}` : ""}`]);
-    const values = await showEditorForm(root, {
-        title: "Insert Designed Page",
-        description: "Create a page or place an existing page from this project's library. Existing pages remain shared; release edits customize that page's release content rather than this placement.",
-        submitLabel: "Insert page",
-        fields: [
-            {
-                name: "choice",
-                label: "Page",
-                type: "select",
-                value: "create",
-                options: [["create", "Create a new Designed Page"], ["existing", "Place an existing Designed Page"]]
-            },
-            {name: "name", label: "Page name", type: "text", value: "Designed page", required: true},
-            {
-                name: "pageId",
-                label: "Existing page",
-                type: "select",
-                value: existingPageOptions[0]?.[0] ?? "",
-                options: existingPageOptions.length > 0 ? existingPageOptions : [["", "No pages in this library"]]
-            },
-            {
-                name: "layoutMode",
-                label: "Layout",
-                type: "select",
-                value: "SinglePage",
-                options: [["SinglePage", "Single page"], ["FacingSpread", "Facing spread"]]
-            }
-        ],
-        validate: value => value.choice === "create"
-            ? (!value.name.trim() ? "Enter a page name." : null)
-            : (!value.pageId ? "Choose an existing Designed Page." : null)
-    });
-    if (!values) return;
-    if (!await flush()) {
-        showEditorNotice(root, "The current chapter could not be saved, so the Designed Page was not created.");
-        return;
-    }
-    const resolved = view.state.selection.$from;
-    const blockIndex = resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0);
-    try {
-        const page = values.choice === "existing"
-            ? await dotNetRef.invokeMethodAsync("OnPlaceDesignedPage", values.pageId, blockIndex, getRevision())
-            : await dotNetRef.invokeMethodAsync(
-                "OnCreateDesignedPage",
-                values.name.trim(),
-                values.layoutMode,
-                blockIndex,
-                getRevision());
-        if (!page?.id || !page?.manuscriptJson)
-            throw new Error("The application returned no Designed Page.");
-        replaceDocument(page.manuscriptJson, page.summary);
-        await dotNetRef.invokeMethodAsync("OnOpenDesignedPage", page.id);
-    } catch (error) {
-        showEditorNotice(
-            root,
-            error?.message || "The Designed Page could not be created. Reload the chapter and try again.");
-        view.focus();
-    }
-}
 
 function textBlockMatches(doc, search) {
     if (!search) return [];
@@ -3699,9 +3637,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         timer = setTimeout(() => { void saveNow(); }, debounceMs);
     };
 
-    const replaceDocument = (json, designedPageSummary = null) => {
-        if (designedPageSummary?.id)
-            designedPageById.set(String(designedPageSummary.id).toLowerCase(), designedPageSummary);
+    const replaceDocument = json => {
         const incoming = hydrateDesignedPageSummaries(
             hydrateFigureImageUrls(JSON.parse(json), imageById),
             designedPageById);
@@ -4190,7 +4126,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
 
     const designedPageControls = allowDesignedPages
         ? [iconButton("▣", "Insert a designed page at the current manuscript position", () =>
-            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root, designedPages))]
+            void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))]
         : [];
 
     const createAnnotation = async kind => {
@@ -4792,6 +4728,10 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
 
     return {
         flush: saveNow,
+        capturePageInsertion() {
+            const resolved = view.state.selection.$from;
+            return { index: resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0), revision };
+        },
         waitForSaves() { return saveChain.catch(() => false); },
         async freezeAndFlush(sequence) {
             fenceFrozen = true;

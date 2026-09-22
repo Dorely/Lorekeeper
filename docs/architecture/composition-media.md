@@ -107,6 +107,25 @@ are never rewritten to satisfy deletion. Repeated placements expand with
 occurrence-specific anchors, while unplaced pages remain searchable without
 staling publication artifacts.
 
+### Editor page library
+
+`DesignedPageLibraryModal` is the Editor-owned insertion and management surface;
+there is no standalone project Pages tab or route. It inherits the active target,
+shows named effective chapter and publication-section occurrences, and exposes
+creation, duplication, guarded deletion, release reset, and placement move/removal.
+Only chapter occurrence links open editing from the library; unplaced pages must
+be inserted first. Publish's section canvases retain their existing entry points.
+Mutations use the existing services under the project authoring fence and Contest
+guard. Live references in other targets still block deletion.
+
+`DesignedPageLibraryPreviewService` resolves the effective active saved scene and
+publication-bound semantic text into clean 720-pixel previews through the existing
+composition rasterizer. It never creates a variant, override, asset, or render job.
+The modal loads previews progressively with one raster request at a time, cancels
+on refresh/disposal, and displays individual preview failures with retry. Artwork
+retains its actual page/spread aspect ratio. Library filters and insertion state
+are transient UI state; persistence and interchange contracts are unchanged.
+
 ## Current architecture and invariants
 
 Project images are reusable assets with bytes, media metadata, crop lineage,
@@ -551,9 +570,11 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
 | `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
-| `Lorekeeper/Composition/CompositionService.cs` | `IDesignedPageService`, revision-aware Designed Page aggregates, placement lifecycle, release overrides, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
+| `Lorekeeper/Composition/DesignedPageService.cs` | `IDesignedPageService`, revision-aware Designed Page aggregates, placement lifecycle, release overrides, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
+| `Lorekeeper/Composition/DesignedPageLibraryPreviewService.cs` | Read-only effective page-library artwork with publication-bound text and bounded thumbnail resolution. |
+| `Lorekeeper/Components/Pages/Projects/DesignedPageLibraryModal.razor` and its CSS/JavaScript | Visual page selection, management, progressive previews, modal keyboard/focus ownership, and chapter-placement editing links. |
 | `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `PublicationTextBindings.cs` / `LegacyCoverTextBindingMigration.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, shared publication text-binding catalog and cover token resolution, and boundary-only retired-token adaptation. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |

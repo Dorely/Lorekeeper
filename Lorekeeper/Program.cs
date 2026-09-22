@@ -262,6 +262,7 @@ builder.Services.AddScoped<Lorekeeper.Composition.IDesignedPageService, Lorekeep
 builder.Services.AddScoped<Lorekeeper.Composition.IProjectPageSetupService, Lorekeeper.Composition.ProjectPageSetupService>();
 builder.Services.AddScoped<Lorekeeper.Composition.IChapterPreviewService, Lorekeeper.Composition.ChapterPreviewService>();
 builder.Services.AddScoped<Lorekeeper.Composition.ICompositionCanvasPreviewService, Lorekeeper.Composition.CompositionCanvasPreviewService>();
+builder.Services.AddScoped<Lorekeeper.Composition.DesignedPageLibraryPreviewService>();
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();

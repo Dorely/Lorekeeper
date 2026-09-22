@@ -222,11 +222,13 @@ its planned features are not claims about current capabilities.
   Book page aspect instead of an implicit square. Regional-guided edits preserve
   the source framing and treat the painted area as approximate model guidance,
   not a hard pixel boundary; the complete result still requires inspection. The
-  project Pages workspace lists reusable and unplaced pages, switches between Core
-  and release content, shows placement counts, and supports repeated placement,
-  movement, duplication, release override reset, and guarded deletion. Chapter and
-  publication-section Pages entrances filter that same project-owned library rather
-  than owning private copies. The manual Generate panel can select existing library
+  Editor's **Insert Page** modal browses reusable and unplaced pages with clean
+  artwork previews, search, placement filters, and page details. It follows the
+  active Core/release target and supports creation, duplication, placement moves
+  and removal, release reset, and guarded deletion. Insertion opens the exact new
+  chapter occurrence in the Editor's Pages canvas. Library pages must be placed
+  in a chapter before opening them for editing; Publish retains its section canvas
+  workflow. The manual Generate panel can select existing library
   images or upload new images
   as ordered visual references, with an explicit role for each reference carried
   into the saved generation request. It also accepts an optional Minimum DPI and

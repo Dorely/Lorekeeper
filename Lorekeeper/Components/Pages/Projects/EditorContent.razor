@@ -22,6 +22,8 @@
 @inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject IDesignedPageService DesignedPages
+@inject IAuthoringMutationFence PageLibraryFence
+@inject IEditorContestMutationGuard PageLibraryContestGuard
 @inject IEditionContentService EditionContent
 @inject IEditorContextService EditorContext
 @inject IActService Acts
@@ -220,6 +222,7 @@ else
                         aria-pressed="@(_mode == EditorMode.Review)"
                         title="@ReviewModeTitle"
                         @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_current is null || _pageLibraryOpening)" @onclick="OpenPageLibraryAsync">Insert Page</button>
             </div>
 
             <div class="@ChapterEditorClass()">
@@ -235,6 +238,7 @@ else
                                        IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
                                        OpenDesignedPage="OpenDesignedPage"
+                                       OpenPageLibrary="OpenPageLibraryAsync"
                                        OpenProjectImagePicker="OpenManuscriptImageModal"
                                        OpenBookTextStyles="OpenBookTextStylesModal"
                                        StyleCatalogChanged="OnEditorStyleCatalogChanged"
@@ -295,7 +299,7 @@ else
                                                    PlacementBlockId="selectedPlacement.BlockId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
                                                    RequestedSelectionId="_pageWorkspaceSelectionId"
-                                                   InteractionLocked="@EditorMutationLocked" />
+                                                   InteractionLocked="@(EditorMutationLocked || _pageInsertion is not null)" />
                         }
                     </div>
                 }
@@ -1081,6 +1085,16 @@ else
 
 }
 
+@if (_pageInsertion is { } insertion && Project?.Id == insertion.ProjectId && _activeChapterId == insertion.ChapterId && _contentTarget == insertion.Target)
+{
+    <DesignedPageLibraryModal @key="insertion" ProjectId="insertion.ProjectId" ChapterId="insertion.ChapterId"
+                             ChapterTitle="@(_current?.Title ?? string.Empty)" Target="insertion.Target"
+                             TargetLabel="@(insertion.Target.EditionId is { } edition ? _enabledEditions.FirstOrDefault(item => item.EditionId == edition)?.Name ?? "Release" : "Core Book")"
+                             IsReadOnly="EditorMutationLocked" InsertionLabel="insertion.Label"
+                             Insert="InsertLibraryPageAsync" OpenPlacement="OpenLibraryPlacementAsync"
+                             Changed="RefreshPageLibraryConsumersAsync" Closed="ClosePageLibraryAsync" />
+}
+
 @code {
     [CascadingParameter] public Project? Project { get; set; }
     [Parameter] public Guid? ChapterId { get; set; }
@@ -1220,7 +1234,7 @@ else
         CurrentManuscriptLocationIdentity() is { } current && current == identity;
 
     private bool EditorMutationLocked => _chapterLocked || _projectContestLock.IsLocked;
-    private bool EditorReadOnly => EditorMutationLocked || _mode != EditorMode.Edit;
+    private bool EditorReadOnly => EditorMutationLocked || _mode != EditorMode.Edit || _pageInsertion is not null;
     private bool LayoutControlsLocked => EditorMutationLocked;
     private bool ReadOnlyNavigationLocked => _chapterLocked && !_projectContestLock.IsLocked;
     private bool AssistantContextControlsLocked => ReadOnlyNavigationLocked;
@@ -1418,6 +1432,7 @@ else
             || _loadedContentTarget != requestedTarget;
         if (isRealTransition)
         {
+            _pageInsertion = null;
             _manuscriptLocation = null;
             _manuscriptLocationIdentity = null;
             _pendingLocation = null;

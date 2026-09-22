@@ -60,7 +60,7 @@
     [Parameter] public EventCallback AnnotationsChanged { get; set; }
     [Parameter] public EventCallback<Guid> AnnotationSelected { get; set; }
     [Parameter] public EventCallback<AuthoringBatchResultV1> AuthoringSaved { get; set; }
-    [Parameter] public Func<string, string, int, long, Task<object>>? CreateDesignedPageOverrideAsync { get; set; }
+    [Parameter] public EventCallback OpenPageLibrary { get; set; }
     [Parameter] public Func<long, Task<ManuscriptDocument>>? ReadDocumentOverrideAsync { get; set; }
     [Parameter] public string? AuthoringTargetIdOverride { get; set; }
 
@@ -248,50 +248,15 @@
     }
 
     [JSInvokable]
-    public async Task<object> OnCreateDesignedPage(
-        string name,
-        string layoutMode,
-        int blockIndex,
-        long expectedRevision)
-    {
-        if (!Enum.TryParse<DesignedPageLayoutMode>(layoutMode, ignoreCase: true, out var parsedLayoutMode))
-            throw new ArgumentException("Choose a supported Designed Page layout.", nameof(layoutMode));
-        if (CreateDesignedPageOverrideAsync is not null)
-            return await CreateDesignedPageOverrideAsync(name, layoutMode, blockIndex, expectedRevision);
-        var result = await DesignedPages.CreateDesignedPageAsync(
-            ContentTarget,
-            ProjectId,
-            ChapterId,
-            blockIndex,
-            name,
-            expectedRevision,
-            new DesignedPageInitialContent { LayoutMode = parsedLayoutMode });
-        return new
-        {
-            id = result.Page.Id,
-            result.Page.Name,
-            manuscriptJson = ManuscriptCodec.Serialize(result.Manuscript.Document),
-            summary = BuildDesignedPageSummary(new DesignedPageView(result.Page, result.Content, IsInherited: false)),
-        };
-    }
+    public Task OnOpenPageLibrary() => OpenPageLibrary.InvokeAsync();
 
-    [JSInvokable]
-    public async Task<object> OnPlaceDesignedPage(Guid pageId, int blockIndex, long expectedRevision)
+    public sealed record PageInsertionPosition(int Index, long Revision);
+
+    public async Task<PageInsertionPosition> CapturePageInsertionAsync()
     {
-        var result = await DesignedPages.PlaceAsync(
-            ContentTarget,
-            ProjectId,
-            pageId,
-            DesignedPageContainer.Chapter(ChapterId),
-            blockIndex,
-            expectedRevision);
-        return new
-        {
-            id = result.Page.Page.Id,
-            result.Page.Page.Name,
-            manuscriptJson = ManuscriptCodec.Serialize(result.Containers.Single().Document),
-            summary = BuildDesignedPageSummary(result.Page),
-        };
+        if (_handle is null)
+            throw new InvalidOperationException("The manuscript editor is not ready.");
+        return await _handle.InvokeAsync<PageInsertionPosition>("capturePageInsertion");
     }
 
     [JSInvokable]
