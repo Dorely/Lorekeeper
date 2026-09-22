@@ -20,7 +20,6 @@ param(
     [string]$Bump = 'Patch',
     [switch]$WindowsOnly,
     [switch]$CheckOnly,
-    [switch]$ConfirmOpenPullRequests,
     [string]$Notes,
     [string]$NotesFile
 )
@@ -137,14 +136,6 @@ try
         $enabled = Invoke-ReleaseCommand gh @('api', "repos/$($repositories[0])/actions/permissions", '--jq', '.enabled')
         $workflow = Invoke-ReleaseCommand gh @('api', "repos/$($repositories[0])/actions/workflows/build-macos-release.yml", '--jq', '.state')
         if ($enabled -ne 'true' -or $workflow -ne 'active') { throw 'Enable the macOS release workflow before releasing.' }
-    }
-    $openPullRequests = @(Invoke-ReleaseCommand gh @('pr', 'list', '--repo', $repositories[0],
-        '--state', 'open', '--base', 'main', '--limit', '1000', '--json', 'number,title,url') |
-        Out-String | ConvertFrom-Json | ForEach-Object { $_ })
-    if ($openPullRequests.Count -gt 0)
-    {
-        $openPullRequests | Format-Table number, title, url | Out-Host
-        if (-not $ConfirmOpenPullRequests) { throw 'Review the open PRs, then use -ConfirmOpenPullRequests only if they may be excluded.' }
     }
 
     $sdk = [Version](Invoke-ReleaseCommand dotnet @('--version'))
@@ -263,7 +254,6 @@ try
     if ((Invoke-ReleaseCommand git @('rev-parse', 'origin/main')) -ne $releaseHead) { throw 'origin/main moved after the push. Rerun verification on its new state.' }
     $publishArguments = @{ Version = $Version; AllowDirectMainPush = $true }
     if ($WindowsOnly) { $publishArguments.WindowsOnly = $true }
-    if ($ConfirmOpenPullRequests) { $publishArguments.ConfirmOpenPullRequests = $true }
     if ($Notes) { $publishArguments.Notes = $Notes }
     if ($NotesFile) { $publishArguments.NotesFile = $NotesFile }
     & (Join-Path $PSScriptRoot 'publish-release.ps1') @publishArguments

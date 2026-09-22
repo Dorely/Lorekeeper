@@ -113,37 +113,17 @@ checks, command help/dry inspection where safe, and diff review.
 
 ### Repository readiness and completion
 
-Before new work, inspect the branch, working tree, index, remotes, and upstream.
-Maintainer-directed commits and pushes to `main` are permitted. Normal work reuses exactly one
-generic `work/` branch across accumulation cycles; it does not create feature or
-topic branches. Create that branch from freshly fetched `origin/main` only when
-no work branch exists and the tree and index are clean. When an upstream exists,
-fetch it with pruning and ensure there are no unintegrated commits from the
-branch's own remote tracking branch. The work branch must contain the current
-`origin/main`: fast-forward when it has no unique work or merge `origin/main`
-without rewriting published history when it does. After synchronization its
-history must be equal to or strictly ahead of `origin/main`, not locally
-diverged. Multiple work branches or unclear ownership require user direction.
-Without a remote/upstream, require a clean local `HEAD` and report that
-synchronization could not be checked.
+Work on whatever branch is already checked out. Before beginning new work, if
+the current branch is not `main`, merge the latest `main` into it first.
 
 Existing changes belong to the user unless proved otherwise. Inspect every diff;
 never discard, hide, overwrite, or mix unrelated unfinished work into a feature.
-Completed work includes current documentation, removal of obsolete runtime paths,
-the relevant verification, full-diff inspection, a focused commit, and a clean
-post-commit working tree. Coherent verified commits accumulate on the work branch
-until the user decides it is ready to merge; completion of an individual change
-does not trigger a pull request. At that point, refresh the remote state, verify
-the complete proposed head, push the reusable branch, and open or update one pull
-request targeting `main`. The change becomes repository-integrated only after its
-required status check and independent approval pass, every conversation is
-resolved, and GitHub reports the pull request merged with a merge commit. Squash
-and rebase merges are incompatible with reuse without divergence. After merge,
-verify that fetched `origin/main` descends from the submitted head and
-fast-forward the reusable local and existing remote work refs to it before new
-work. Applied EF migrations remain immutable history. Publishing uses the current
-clean named branch, including `main`, at fetched `origin/main`; no temporary
-release branch is needed.
+If existing changes form coherent prior work, finish their verification and
+documentation, then commit them before beginning a new feature. Completed work
+includes current documentation, removal of obsolete runtime paths, the relevant
+verification, full-diff inspection, one focused commit per completed feature,
+and a clean post-commit working tree. Applied EF migrations remain immutable
+history.
 
 Before completion, search again for obsolete names and paths, inspect all callers
 of changed contracts, run `git diff --check`, and compare documentation claims to
@@ -354,25 +334,19 @@ and reports a behind checkout instead of fast-forwarding it. `-WindowsOnly`
 omits the macOS build. Preview is the release-driver validation surface; do not
 publish a new version merely to exercise tooling changes.
 
-For a reviewed release, prepare the version as the reusable work branch's final
-verified commit and include it in its PR. The lower-level publisher runs from a
-clean named branch at fetched `origin/main`, with one explicit authorization mode:
+The lower-level publisher runs from a clean tree at fetched `origin/main`:
 
 ```powershell
 .\scripts\release.ps1
 .\scripts\release.ps1 -CheckOnly
 .\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
-.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
 The publisher rejects detached or dirty source, a version different from the
-project, and any commit other than fetched `origin/main`. The reviewed parameter
-set requires a merged PR targeting `main` whose merge commit matches that source;
-the direct parameter set requires `-AllowDirectMainPush` and does not query a PR.
-It rechecks worktree and local/remote source identity after packaging. It lists and
-stops for open pull requests targeting `main`; `-ConfirmOpenPullRequests` is an
-explicit human-approved override for unrelated open work, never for unmerged
-release preparation. The cross-platform path dispatches one correlated macOS
+project, and any commit other than fetched `origin/main`. It requires the
+explicit `-AllowDirectMainPush` authorization and does not query pull requests.
+It rechecks worktree and local/remote source identity after packaging.
+The cross-platform path dispatches one correlated macOS
 arm64 workflow, builds Windows locally, verifies one requested artifact set,
 creates matching draft releases in the private source and public release
 repositories, verifies both asset sets, and only then publishes both. On a failed
@@ -381,12 +355,14 @@ GitHub permits, and reports any resource requiring manual inspection. Temporary
 Actions artifacts are deleted only after successful publication. The public
 release repository is the automatic and manual update authority.
 
-The owner has declined general hosted CI, PR-validation workflows, and non-macOS
-GitHub compute for v1. The dispatch-only macOS arm64 release builder remains the
-sole hosted workflow because native Mac packaging needs a Mac host. Every normal
-repository gate and approved focused regression stays local, with evidence
-recorded in the work item or pull request; do not turn the release builder into
-a general validation lane without a new owner decision.
+The owner has declined general hosted CI, hosted validation workflows, and
+non-macOS GitHub compute for v1. The dispatch-only macOS arm64 release builder
+remains the sole hosted workflow because native Mac packaging needs a Mac host.
+GitHub Actions stays restricted to that builder with read-only repository
+workflow permissions. Every normal repository gate and approved focused
+regression stays local, with evidence recorded in the commit message or work
+item; do not turn the release builder into a general validation lane without a
+new owner decision.
 
 Packaging and updater claims require execution on the relevant operating system.
 Never claim OAuth, provider calls, embeddings, web search, image generation,
@@ -447,8 +423,7 @@ and M4's 50-source/multi-GB memory targets remain unmeasured.
 
 | File or family | Architectural role |
 |---|---|
-| [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, branches, pull requests, documentation, and commits. |
-| [`CONTRIBUTING.md`](../../CONTRIBUTING.md), [pull-request template](../../.github/pull_request_template.md), and [GitHub settings checklist](../github-repository-settings.md) | Human contribution workflow, local commit-gate evidence, and maintainer-owned server protection settings. General hosted validation is owner-declined; the dispatch-only macOS release builder is not a PR-validation workflow. |
+| [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
@@ -494,9 +469,7 @@ current contracts, terminating the host afterward.
 For contributor-workflow changes, parse affected PowerShell scripts, inspect any
 affected workflow YAML and permissions, compare automated steps to the exact
 repository commit gate when automation exists, and confirm every documented
-command and link. After branch-policy changes reach `main`, validate the
-protected-branch settings and exercise them with a disposable pull request as
-described in the GitHub settings checklist.
+command and link.
 
 For source work, combine the baseline build/startup check with the owning
 chapter's focused checks. Add the semantic-editor, migration/import, Press,

@@ -19,67 +19,14 @@
 
 ## Repository Readiness
 
-- Before beginning new work, inspect the current branch, working tree, index,
-  configured remotes, and upstream status.
-- Normal repository work uses exactly one reusable local branch whose name
-  starts with `work/`. Do not create per-feature, per-task, or per-topic
-  branches, and do not create a second `work/` branch while one already exists.
-  Direct commits and pushes to `main` are permitted as a working practice to
-  keep merges clean when pull requests cause friction.
-- At the start of a session, fetch `origin` with pruning and locate the existing
-  `work/` branch before changing files. If exactly one exists, continue on it.
-  If multiple `work/` branches exist, or uncommitted work belongs to another
-  branch, stop and ask for direction rather than choosing, moving, or hiding
-  work. Create a generic reusable `work/` branch from `origin/main` only when no
-  work branch exists and the checkout is clean and synchronized.
-- Before new work, require the reusable work branch to contain the current
-  `origin/main`. Fast-forward it when it has no unique commits; otherwise merge
-  `origin/main` into it without rebasing or rewriting history. After
-  synchronization, `origin/main` must be an ancestor of the work branch so its
-  history is equal to or strictly ahead of `main`, never locally diverged.
+- Work on whatever branch is already checked out. Before beginning new work,
+  if the current branch is not `main`, merge the latest `main` into it first.
 - If existing changes form coherent prior work, finish their verification and
   documentation, then commit them before beginning a new feature. Never mix
   unrelated unfinished work into a new change.
 - Inspect every existing diff before committing it. If changes are unfamiliar,
   incomplete, unsafe to commit, or owned by another active effort, stop and ask
   for direction instead of discarding, hiding, or overwriting them.
-- When an upstream exists, fetch it with pruning before work, before final
-  verification, and immediately before pushing. Ensure the work branch includes
-  the current `origin/main` and has no unintegrated commits from its own remote
-  tracking branch. Integrate remote changes without rewriting published history;
-  stop for direction if histories have diverged or ownership is unclear.
-- When no remote or upstream exists, require a clean local `HEAD` and report that
-  remote synchronization could not be checked.
-
-## Branch and Pull Request Workflow
-
-- Repository changes normally enter `main` through a pull request from a
-  non-`main` branch. Direct pushes to `main` are permitted when pull requests
-  cause friction, so merges stay clean.
-- Accumulate coherent, verified commits on the same reusable work branch until
-  the user decides that the accumulated changes are ready to merge. Do not open
-  or update a pull request without explicit request from the user. When the user
-  asks to push directly to `main` instead, commit on the current branch as
-  requested and push `main` after verification.
-- When the user decides to merge the accumulated work, fetch `origin`, merge the
-  latest `origin/main` into the work branch if needed, inspect the complete
-  branch diff, rerun all required verification on the exact proposed head, push
-  only the reusable work branch, and open or update one pull request targeting
-  `main`.
-- Merge the pull request with a merge commit. Do not squash-merge or rebase-merge
-  it: those methods replace the submitted commit ancestry and make a reused work
-  branch diverge from `main`. Do not approve or merge your own pull request;
-  wait for the required status checks, an independent approval, and resolution
-  of every review conversation.
-- After GitHub reports the pull request merged, fetch `origin` and verify that
-  `origin/main` descends from the exact submitted work-branch head. Fast-forward
-  the local reusable work branch to `origin/main`, then fast-forward its remote
-  branch when one exists. Do not delete or replace the local work branch; reuse
-  it for the next accumulation cycle. If the merged `origin/main` does not
-  descend from the submitted head, stop for direction instead of resetting,
-  rebasing, or beginning new work on divergent history.
-- Publishing uses the current clean named branch, including `main`, at the
-  fetched `origin/main` commit. Do not create a temporary release branch.
 
 ## Research and Impact Analysis
 
@@ -297,22 +244,9 @@
   pushing, and publication. Use `-CheckOnly` when asked to preview or validate
   the driver without releasing. Do not run its publishing path merely to test
   changes to release tooling. It must never commit unrelated unfinished work.
-- When the user decides the accumulated work is ready for release, add the
-  release/version changes as the final commit on the reusable work branch and
-  include them in that branch's reviewed pull request. Do not create a separate
-  release-preparation branch or pull request. When the user asks to push
-  directly to `main` instead, commit on the current branch as requested and
-  push `main` after verification. Before publishing, verify that the
-  resulting release-preparation pull request is `MERGED`, targets `main`, and
-  produced the current `origin/main` commit. When the user explicitly directs a
-  direct release instead, use the driver or the publisher's
-  `-AllowDirectMainPush` mode without a PR number. The reviewed path cannot
-  publish an unmerged release-preparation PR.
-- Invoke the publisher only from a clean named branch, including `main`, whose
-  `HEAD` equals fetched `origin/main`. If any pull request targeting
-  `main` remains open, stop and obtain explicit user confirmation before using
-  the publisher's `-ConfirmOpenPullRequests` override. That override never makes
-  an unmerged release-preparation pull request releasable.
+- Invoke the publisher only from a clean tree whose `HEAD` equals fetched
+  `origin/main`, with the explicit `-AllowDirectMainPush` authorization. The
+  script enforces these preconditions itself.
 
 ## Completion and Commits
 
@@ -324,16 +258,8 @@
   stage only that feature's files, and create a focused commit with a descriptive
   message.
 - Commit every completed feature before beginning another one. Do not combine
-  unrelated work in a single commit. Keep subsequent coherent commits on the
-  same work branch until the user decides the accumulated branch is ready to
-  merge; do not create a pull request after every commit or feature.
-- After committing, verify that the working tree is clean. Push the branch when
-  requested or needed for collaboration or backup, but open or update its pull
-  request only when the user decides to merge the accumulated work. When the
-  user explicitly asks for a direct push to `main`, push `main` instead. Do not
-  amend, squash, force-push, or otherwise rewrite history unless explicitly
-  requested. Repository integration through a pull request is complete only
-  after the pull request is reviewed, all required checks pass, and GitHub
-  reports it merged.
+  unrelated work in a single commit.
+- After committing, verify that the working tree is clean. Do not amend, squash,
+  force-push, or otherwise rewrite history unless explicitly requested.
 - If a required commit cannot be created, report the blocker and do not describe
   the feature as completed.

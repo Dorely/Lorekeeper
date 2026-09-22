@@ -1,11 +1,7 @@
-[CmdletBinding(DefaultParameterSetName = 'Reviewed')]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$Version,
-
-    [Parameter(Mandatory, ParameterSetName = 'Reviewed')]
-    [ValidateRange(1, [int]::MaxValue)]
-    [int]$MergedPullRequest,
 
     [string]$Notes,
 
@@ -15,9 +11,6 @@ param(
 
     [switch]$WindowsOnly,
 
-    [switch]$ConfirmOpenPullRequests,
-
-    [Parameter(Mandatory, ParameterSetName = 'Direct')]
     [switch]$AllowDirectMainPush
 )
 
@@ -275,48 +268,8 @@ try
         throw "Local HEAD ($sourceCommit) must exactly match origin/main ($remoteCommit)."
     }
 
-    if ($PSCmdlet.ParameterSetName -eq 'Direct')
-    {
-        if (-not $AllowDirectMainPush) { throw 'Direct publication requires -AllowDirectMainPush.' }
-        Write-Host "Publishing explicitly authorized source $sourceCommit from origin/main."
-    }
-    else
-    {
-        $pullRequestJson = & gh pr view $MergedPullRequest --repo $sourceRepository `
-            --json state,baseRefName,mergeCommit
-        if ($LASTEXITCODE -ne 0)
-        {
-            throw "Could not inspect release-preparation pull request #$MergedPullRequest."
-        }
-        $pullRequest = ($pullRequestJson -join [Environment]::NewLine) | ConvertFrom-Json
-        if ($pullRequest.state -ne 'MERGED' -or $pullRequest.baseRefName -ne 'main' -or
-            [string]$pullRequest.mergeCommit.oid -ne $sourceCommit)
-        {
-            throw "Release-preparation pull request #$MergedPullRequest must be merged into main and produce current origin/main. Use -AllowDirectMainPush instead for an explicitly authorized direct release."
-        }
-    }
-
-    $openPullRequestsJson = & gh pr list --repo $sourceRepository --state open `
-        --base main --limit 1000 --json number,title,headRefName,url
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw 'Could not inspect open pull requests targeting main.'
-    }
-    $openPullRequests = @((
-        ($openPullRequestsJson -join [Environment]::NewLine) | ConvertFrom-Json
-    ) | ForEach-Object { $_ })
-    if ($openPullRequests.Count -gt 0)
-    {
-        $openPullRequestSummary = @(
-            $openPullRequests |
-                ForEach-Object { "#$($_.number) $($_.title) [$($_.headRefName)] $($_.url)" }
-        ) -join [Environment]::NewLine
-        if (-not $ConfirmOpenPullRequests)
-        {
-            throw "Open pull requests target main. Stop and obtain explicit confirmation before releasing, then rerun with -ConfirmOpenPullRequests if publication should proceed:$([Environment]::NewLine)$openPullRequestSummary"
-        }
-        Write-Warning "Proceeding after explicit confirmation with open pull requests targeting main:$([Environment]::NewLine)$openPullRequestSummary"
-    }
+    if (-not $AllowDirectMainPush) { throw 'Direct publication requires -AllowDirectMainPush.' }
+    Write-Host "Publishing explicitly authorized source $sourceCommit from origin/main."
 
     $tag = "v$Version"
     foreach ($repository in $releaseRepositories)

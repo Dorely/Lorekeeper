@@ -33,7 +33,7 @@ Start here when resuming work, then read the relevant specification below.
 | Known external dependencies | Owner source-license decision, unresolved dependency/asset provenance, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
 | Scope boundary for the next session | Manual acceptance and resolution of reported feature defects. Do not begin broader UI automation, Word desktop, native performance, live OAuth/provider, installed-package/Store, signing, publication, or launch work without the owner's go-ahead |
 | Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded license and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. The project-creation responsiveness correction passes the same-change repository gate and browser-host startup smoke, but has no browser/Electron interaction timing because UI automation was not authorized. M2 (2026-09-17) adds guarded/idempotent migration and recovery coverage, release clone/isolation, scoped placement-index restoration, compound cross-container history, JSON v31/manuscript v5/history v7/Press v13 compatibility, semantic-editor build evidence, the full repository gate, and HTTP startup smoke. M3 (2026-09-17) adds deterministic batch hashing/reduction, transactional receipt replay and rollback, multi-target Undo/Redo, recovery-journal, exact-conflict, writer/fence, migration, semantic-editor JavaScript, full-gate, and HTTP-startup evidence. M4 (2026-09-17) adds retained-source migration and re-extraction coverage, archive closure and adversarial validation, streamed staging, commit/index recovery, history-v8 preservation and restore, DOCX source-extraction safety, full-gate, and HTTP-startup evidence; it does not establish native 50-source navigation or multi-GB portability performance. M5A (this 2026-09-17 change) adds v5-to-v6 and direct legacy migration coverage, recursive table/note validation, exact rich authoring/inverse behavior, output semantics, EPUB v5, and Press v14 conformance. Reference-page footnote reservation was open at that checkpoint; no browser interaction or native latency/platform evidence is claimed. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists. The feature-completion implementation adds approved citation/DOCX conversion, rich recovery, remapping/closure, predecessor-format, rollback/replay, and Press footnote/occurrence regressions, semantic-editor build checks, repository gates, and isolated HTTP startup checks. These are implementation evidence only; manual acceptance, Word desktop, live integration, and native performance remain separate |
-| Workspace/branch | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
+| Workspace | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
 The user explicitly approved expanding focused regression coverage for
 DOCX/citations, Undo/concurrency, provider configuration, and release-channel
@@ -48,8 +48,7 @@ the plan; follow the user's current task and the applicable execution rules.
 ### Session handoff procedure
 
 1. Follow [AGENTS.md](../AGENTS.md), read VISION and the architecture map, and
-   perform repository readiness checks. Preserve unrelated work and reuse the
-   existing work branch according to repository policy.
+   perform repository readiness checks. Preserve unrelated work.
 2. Read this handoff, the milestone ledger, and relevant specification. Inspect
    current code, then read all routed architecture chapters for that impact area.
 3. State the selected milestone/substep, concrete deliverable, dependencies, and
@@ -257,7 +256,7 @@ Follow M0-M8 in the ledger, with packaging feasibility running early alongside
 independent feature work. Open the public beta after M5 and repository-readiness
 checks; recruit testers earlier. Windows and Mac have independent final gates.
 
-Each milestone produces coherent, verified commits on the reusable work branch.
+Each milestone produces coherent, verified commits.
 Structural formats advance separately when needed; do not assign the same schema
 version to two independently shipped changes. Preserve all consumers at each
 boundary rather than letting editor, renderer, and stored forms drift.
@@ -963,7 +962,7 @@ Before publication:
   official commercial distribution, security reporting, issue templates,
   support policy, and build instructions.
 - Keep repository-gate and focused-regression evidence local; do not add general
-  GitHub CI or PR validation unless the owner explicitly revisits the decision.
+  GitHub CI or hosted validation unless the owner explicitly revisits the decision.
 - Configure GitHub's funding button and README donation link using the owner's
   verified Buy Me a Coffee URL.
 - Keep donations optional and unrelated to feature access.

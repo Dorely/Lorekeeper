@@ -1,7 +1,7 @@
 # Lorekeeper
 
-Lorekeeper is a local Blazor Server proof-of-concept for AI-assisted long-form
-story planning, drafting, research, ingest, and publishing.
+Lorekeeper is a local, desktop-first AI-assisted bookmaking workbench for
+long-form story planning, drafting, research, ingest, and publishing.
 
 See [VISION.md](VISION.md) for the product direction and
 [docs/architecture.md](docs/architecture.md) for the compact technical map and
@@ -529,12 +529,9 @@ callback agree.
 
 ## Contributing
 
-Changes normally use reviewed pull requests; maintainer-directed direct pushes
-to `main` are also supported. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for branch synchronization, the mandatory
-repository gate, review requirements, and the maintainer release workflow.
-Repository owners can apply and verify the matching GitHub controls with
-[`docs/github-repository-settings.md`](docs/github-repository-settings.md).
+Verification and the maintainer release workflow are documented in
+[`docs/architecture/validation-documentation.md`](docs/architecture/validation-documentation.md)
+and [`AGENTS.md`](AGENTS.md).
 
 ## Desktop Packaging
 
@@ -566,7 +563,7 @@ without administrator rights, and recipients do not need .NET or Node.js. Share
 `publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
 
 For a complete stable release, install and authenticate
-[GitHub CLI](https://cli.github.com/), commit your feature work on `main`, and run
+[GitHub CLI](https://cli.github.com/), commit your completed feature work, and run
 this from Windows:
 
 ```powershell
@@ -579,7 +576,7 @@ Silicon macOS builds, and publication to both repositories. The project's
 `<Version>` is the single version source; documentation needs no per-release edits.
 
 The driver checks tools, GitHub write access, origin identity, clean source/index,
-remote ancestry, open PRs, matching latest stable releases/assets, and unused tags.
+remote ancestry, matching latest stable releases/assets, and unused tags.
 It fast-forwards a behind-only main and reloads the driver; divergence and
 unrelated uncommitted work block execution. By default it reuses a higher
 unpublished project version, otherwise increments the patch version. If the
@@ -612,18 +609,13 @@ not both. The driver handles stable releases; prereleases remain an explicit
 lower-level publishing operation.
 
 For already prepared and verified source at fetched origin/main, the lower-level
-publisher accepts either direct publication or a merged release-preparation PR
-that produced that exact commit:
+publisher accepts direct publication:
 
 ```powershell
 .\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
-.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
-The authorization modes are mutually exclusive; direct publication does not
-query a PR. The requested version must match the project. Open PRs targeting main
-block the driver and publisher unless the maintainer explicitly supplies
-`-ConfirmOpenPullRequests` after reviewing the excluded work.
+The requested version must match the project.
 
 The Windows-only path omits macOS and publishes the installer, portable
 executable, Electron-generated release metadata, blockmap, and checksum file as
