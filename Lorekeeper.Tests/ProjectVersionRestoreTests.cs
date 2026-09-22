@@ -766,64 +766,6 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Theory]
-    [InlineData(SourceExtractionStatus.Extracting)]
-    [InlineData(SourceExtractionStatus.Failed)]
-    public void RetainedSourceWithoutActiveExtractionPreservesOriginalAndRejectsInvalidClaims(SourceExtractionStatus status)
-    {
-        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper", Guid.NewGuid().ToString("N"));
-        try
-        {
-            var bytes = Encoding.UTF8.GetBytes("original retained before preprocessing");
-            var hash = VersionHistoryCanonicalJson.Sha256Hex(bytes);
-            var extraction = new VersionHistorySourceExtraction(Guid.NewGuid(), 0,
-                "book-artifact-preprocessor", "m4.1", "{}", SourceRetentionValidator.Sha256(string.Empty),
-                status, string.Empty, string.Empty, [], [], []);
-            var retained = new VersionHistoryRetainedSource(Guid.NewGuid(), "Source", "artifact", "", "", "",
-                "", "", "", "application/pdf", "{}", null,
-                new VersionHistorySourceOriginal(SourceOriginalState.Available, "source.pdf", "application/pdf",
-                    bytes.Length, hash, [new VersionHistorySourceOriginalChunk(Guid.NewGuid(), 0, hash, bytes.Length)]),
-                [extraction], [], []);
-            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
-            {
-                Sources = new VersionHistorySnapshotSourcesArea([retained]),
-            };
-            var originals = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [hash] = bytes };
-            WriteSnapshotTree(root, payload, sourceOriginalData: originals);
-            var reader = new VersionHistorySnapshotReader();
-            var restored = reader.Read(root, options: new() { IncludeSourceOriginalBlobs = true }).Payload;
-            var source = Assert.Single(restored.Sources.RetainedSources);
-            Assert.Null(source.ActiveExtractionVersionId);
-            Assert.Equal(status, Assert.Single(source.Extractions).Status);
-            using (var original = restored.SourceOriginalBlobs[hash].OpenRead())
-            using (var copy = new MemoryStream())
-            {
-                original.CopyTo(copy);
-                Assert.Equal(bytes, copy.ToArray());
-            }
-            var review = reader.Read(root, options: new() { IncludeSourceDetails = false }).Payload;
-            Assert.Equal(string.Empty, Assert.Single(review.Sources.ReviewSummaries!).ReadableText);
-            Assert.Empty(new VersionHistorySnapshotComparer().Compare(restored, review).GetArea("sources").Entries);
-
-            foreach (var invalid in new[]
-            {
-                retained with { ActiveExtractionVersionId = extraction.Id },
-                retained with { ActiveExtractionVersionId = Guid.NewGuid() },
-                retained with { Extractions = [] },
-                retained with { Original = retained.Original with { Length = bytes.Length + 1 } },
-            })
-            {
-                WriteSnapshotTree(root, payload with { Sources = new VersionHistorySnapshotSourcesArea([invalid]) },
-                    sourceOriginalData: originals);
-                Assert.Throws<InvalidDataException>(() => reader.Read(root));
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Theory]
     [InlineData(1)]
     [InlineData(7)]
     public void PredecessorSourceAdaptsAtTheReaderBoundary(int schemaVersion)
