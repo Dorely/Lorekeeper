@@ -66,10 +66,12 @@ from token shape. Manual/API-key connection groups continue using
 `CredentialSourceId` and provider-owned keys.
 
 `OpenAiAccountModelCatalog` is the versioned metadata authority for bundled
-account models. Schema version 1 was validated on 2026-09-16 against the
+account models. Schema version 2 was validated on 2026-09-22 against the
 [official Codex model catalog](https://learn.chatgpt.com/docs/models) and contains
-only `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Sol is
-preferred. Defaults are Astra/Medium, Sol/Low, Terra/Medium, and Luna/Medium;
+`gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`,
+and `gpt-5.6-luna`. GPT-6 Sol is preferred. Defaults are Astra/Medium,
+GPT-6 Sol/Medium, GPT-6 Luna/Medium, GPT-5.6 Sol/Low, Terra/Medium,
+and GPT-5.6 Luna/Medium;
 each permits Low, Medium, High, Extra high, and Maximum and declares text plus
 image input. Catalog rows retain nullable explicit effort and input-budget
 overrides; runtime resolution supplies catalog defaults only when an override is
@@ -77,7 +79,7 @@ absent. Unsupported saved effort values fail closed.
 
 OpenAI account model discovery is intentionally absent: Lorekeeper never calls
 `/v1/models` for an account-backed chat or embedding connection. The bundled
-stable-four manifest is the complete account model list, while Advanced accepts
+six-model manifest is the complete account model list, while Advanced accepts
 an exact manual model ID followed by the existing explicit Test workflow.
 User-configured OpenAI-compatible connections may still discover models through
 `GET /models`, and Ollama connections through `GET /api/tags`; those generic
@@ -90,13 +92,13 @@ gated on chat success only. A failed vision probe persists or presents a warning
 without converting a working chat connection into a failure. Shared error helpers
 extract concise provider detail rather than exposing raw response bodies.
 Direct OpenAI presets and OpenAI-account chat, vision, and image-mainline
-fallbacks use `gpt-5.6-sol` as the code-owned default; existing persisted model
+fallbacks use `gpt-6-sol` as the code-owned default; existing persisted model
 selections remain authoritative until the user changes them.
 
 Bundled account rows need valid account credentials and catalog-valid settings,
 but they do not require a manual chat or vision Test. Manual account rows retain
 the explicit Test workflow under Advanced configuration. A new, empty account
-receives the stable four and makes Sol the global default only when no default
+receives the bundled six and makes GPT-6 Sol the global default only when no default
 already exists. An explicit global or conversation selection whose credentials
 or eventual provider request fail remains selected and returns an actionable
 error; it is never replaced with another model.
