@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lorekeeper</title>
+  <style>
+    :root { color-scheme: dark; font: 15px/1.5 system-ui, sans-serif; --paper:#1c2225; --panel:#232c30; --line:#39464d; --ink:#eef0e9; --muted:#a8b7b8; --accent:#aad6bc; }
+    * { box-sizing: border-box; } body { margin:0; background:var(--paper); color:var(--ink); }
+    button,input,textarea,select { font:inherit; } button { cursor:pointer; border:1px solid var(--line); border-radius:8px; padding:8px 12px; color:var(--ink); background:var(--panel); }
+    button:hover:not(:disabled) { border-color:var(--accent); } button:disabled { opacity:.45; cursor:default; } button.primary { background:var(--accent); border-color:var(--accent); color:#17281e; font-weight:650; }
+    input,textarea,select { width:100%; color:var(--ink); background:#161d20; border:1px solid var(--line); border-radius:7px; padding:10px; }
+    textarea { resize:vertical; min-height:130px; } input:focus,textarea:focus,select:focus,button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    header { padding:20px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; } .brand { font:700 27px Georgia,serif; letter-spacing:-.5px; } .badge { color:var(--accent); border:1px solid var(--line); border-radius:20px; padding:3px 9px; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+    .layout { display:grid; grid-template-columns:190px minmax(0,1fr); min-height:700px; } aside { padding:20px 14px; border-right:1px solid var(--line); } main { padding:26px; max-width:1000px; min-width:0; }
+    nav { display:grid; gap:6px; margin:20px 0; } nav button { text-align:left; border-color:transparent; background:transparent; } nav button.active { color:var(--accent); border-color:var(--line); background:var(--panel); }
+    h1 { font:400 29px/1.2 Georgia,serif; margin:0 0 8px; } h2 { font-size:18px; margin:0 0 12px; } h3 { font-size:15px; margin:0 0 8px; } p { margin:8px 0 16px; } .muted,small { color:var(--muted); } small { display:block; } .eyebrow { color:var(--accent); font-size:11px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:8px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .between { justify-content:space-between; } .stack { display:grid; gap:18px; } .card { padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--panel); margin-bottom:16px; } label { display:block; color:var(--muted); font-size:13px; margin:12px 0 5px; }
+    #status { margin:0; padding:12px 24px; border-bottom:1px solid var(--line); color:var(--muted); } #status[data-error="true"] { color:#ffd5bd; background:#392923; } #save-state { margin:12px 0; font-size:12px; } #folder { font-size:11px; overflow-wrap:anywhere; margin-top:10px; }
+    .chapter-list { display:flex; gap:6px; flex-wrap:wrap; margin:16px 0; } .chapter-list button.active { border-color:var(--accent); color:var(--accent); } .manuscript { font:18px/1.85 Georgia,serif; min-height:380px; padding:22px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font:14px/1.7 Georgia,serif; margin:10px 0; } .diff { display:grid; grid-template-columns:1fr 1fr; gap:14px; } .diff>div { border:1px solid var(--line); border-radius:7px; padding:12px; min-width:0; } .diff .after { border-color:#658e73; } .source { border-left:2px solid var(--accent); padding-left:14px; margin:18px 0; }
+    .check { display:flex; gap:7px; align-items:center; } .check input { width:auto; } .empty { padding:50px 16px; text-align:center; } dialog { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:12px; max-width:440px; padding:24px; } dialog::backdrop { background:#0009; }
+    details { margin:16px 0; } summary { cursor:pointer; color:var(--muted); } #recovery textarea { min-height:180px; font:12px/1.5 ui-monospace,monospace; } [hidden] { display:none!important; }
+    @media(max-width:660px) { .layout { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); padding:14px 20px; } nav { display:flex; flex-wrap:wrap; margin:12px 0 0; } #folder { display:none; } main { padding:20px; } .diff { grid-template-columns:1fr; } .manuscript { padding:15px; } }
+  </style>
+</head>
+<body>
+  <header><div class="brand">Lorekeeper</div><span class="badge">Local prototype</span></header>
+  <p id="status" role="status" aria-live="polite">Connecting to your workspace…</p>
+  <div class="layout">
+    <aside>
+      <label for="project-list">Your projects</label><select id="project-list" disabled><option value="">Choose a project</option></select>
+      <div class="row" style="margin-top:10px"><button id="new" disabled>New project</button><button id="refresh" disabled>Reopen</button></div>
+      <nav aria-label="Workspace"><button data-view="brief">Book Brief</button><button data-view="outline">Outline</button><button data-view="chapters">Chapters</button><button data-view="canon">Canon</button><button data-view="context">Context</button><button data-view="review">Review edits</button></nav>
+      <div id="save-state">No project open</div><button class="primary" id="save" disabled>Save changes</button>
+      <small style="margin-top:16px">Save before closing. Your projects stay on your computer.</small><div class="muted" id="folder"></div>
+    </aside>
+    <main><section id="content" class="empty"><h1>A place for your story</h1><p class="muted">Open a project or begin with a blank page.</p></section><details id="recovery" hidden><summary>Preserved draft — copy before reloading</summary><textarea id="recovery-copy" readonly aria-label="Preserved project draft"></textarea></details></main>
+  </div>
+  <dialog id="discard-dialog"><h2>Discard unsaved changes?</h2><p>The saved project will reopen. Copy your draft first if you want to keep both versions.</p><div class="row"><button id="keep-draft">Keep editing</button><button id="discard-draft">Discard and reopen</button></div></dialog>
+  <script type="module">/*APP_SCRIPT*/</script>
+</body>
+</html>

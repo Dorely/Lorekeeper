@@ -9,9 +9,10 @@ publication production through the owned Lorekeeper Press renderer. Normal use
 is through an Electron.NET shell backed by a local ASP.NET Core host; an explicit
 browser profile exists for development and validation.
 
-An independent local plugin storage probe lives under `Lorekeeper.Plugin/`.
-It investigates host-owned file storage with synthetic content and is not a
-replacement for the desktop workbench.
+An independent local plugin prototype lives under `Lorekeeper.Plugin/`. It
+provides narrative editing, retrieval, and review using user-owned project
+files, alongside a synthetic ChatGPT storage diagnostic. Its format and runtime
+are separate from the desktop workbench.
 
 This file is the required architecture entry point. It records only the global
 contracts needed to route work safely. Detailed current architecture and key
@@ -29,8 +30,8 @@ the current runtime. Source inspection remains the proof of what is implemented.
 ## Global invariants
 
 The following runtime invariants describe the desktop workbench. The independent
-plugin probe's memory-only content and host-storage boundaries are owned by
-[Plugin storage investigation](architecture/plugin-storage.md).
+plugin's local-file persistence and host-storage boundaries are owned by
+[Local plugin workspace and storage](architecture/plugin-storage.md).
 
 - Razor components own interaction and presentation state. Domain behavior,
   persistence, provider access, indexing, assistant mutations, media workflows,
@@ -93,7 +94,7 @@ hints; concepts and downstream consumers determine the final impact area.
 | EF model, repositories, write coordination, migrations, recovery, import/export, local data and credential storage, `Persistence/`, `ImportExport/` | [`persistence-migrations-import.md`](architecture/persistence-migrations-import.md) | Every domain whose stored contract changes |
 | Deterministic snapshots, local Git history, checkpoints, compare/restore, remote sync, clone import, GitHub version-control connections, `VersionHistory/`, History and Version control surfaces | [`version-history-sync.md`](architecture/version-history-sync.md) | Persistence for SQLite/identity; narrative, manuscript, composition, publishing, assistants, providers, and runtime for captured or excluded state |
 | Build, tests, startup smoke checks, native validation, documentation hierarchy, release scripts, research, decisions | [`validation-documentation.md`](architecture/validation-documentation.md) | Every changed implementation chapter |
-| Local plugins, marketplace, MCP Apps, host file bridge, ChatGPT storage investigation, `Lorekeeper.Plugin/`, `.agents/plugins/` | [`plugin-storage.md`](architecture/plugin-storage.md) | Validation for evidence and checks; runtime/persistence only when desktop contracts change |
+| Local plugin authoring/retrieval/review, marketplace, MCP Apps, local project files, host file bridge, ChatGPT storage investigation, `Lorekeeper.Plugin/`, `.agents/plugins/` | [`plugin-storage.md`](architecture/plugin-storage.md) | Validation for evidence and checks; runtime/persistence only when desktop contracts change |
 
 Representative cross-layer routes are intentional: a manuscript persistence
 change requires manuscript plus persistence; an assistant manuscript tool

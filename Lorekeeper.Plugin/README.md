@@ -1,22 +1,67 @@
-# Lorekeeper Storage Probe
+# Lorekeeper Local
 
-A local plugin that checks whether an actual ChatGPT/Codex host can persist a
-small synthetic Lorekeeper project. This is a storage investigation, not the
-Lorekeeper narrative workspace. It does not open the desktop app's database or
-call model providers.
+A local writing prototype for Codex: plan a book, write chapters, record canon,
+preview focused context, and review ChatGPT's proposed changes. The MCP server
+and editor share project operations. It runs from this repo as a subproject,
+independently of the desktop workbench's database and provider credentials.
 
-Working snapshots stay in editor/process memory. The MCP server reads only its
-bundled HTML; it validates incoming synthetic JSON without writing or retaining
-project content. The committed fixture is artificial reference data. There is
-no content database, authoritative local project copy, credential store, or
-content logging.
+Projects are portable `.lorekeeper.json` files on the user's computer. There is
+no hosted service, content database, API key, or content logging. ChatGPT receives
+the content requested through tools or explicitly shared from the editor.
+
+The original synthetic storage probe remains available as a diagnostic. Only
+that probe keeps all working content in memory and never writes local projects.
 
 The [evidence record](../docs/research/chatgpt-storage-probe.md) separates native
 Pages operations from checks performed through this plugin. Native Page editing
 and agent-mediated JSON uploads/readback have passed. Version 0.1.1's editor
 connected, revised, and validated the sample in Codex desktop, but that host
-exposed no library file APIs or resource bridge. Custom editor storage remains
-unproven; do not choose a production storage backend from those results.
+exposed no library file APIs or resource bridge. The workspace therefore uses
+local files. This does not establish that every future host will lack the
+documented optional bridge.
+
+## Use the workspace
+
+1. Open **Lorekeeper Local**, choose **New project**, and create a blank project
+   or the artificial **The Lantern Archive** sample.
+2. Edit the **Book Brief**, chapter intent/order in **Outline**, prose in
+   **Chapters**, and chapter-linked characters/places/facts in **Canon**.
+3. Choose **Save changes**. Saves are explicit; closing loses unsaved drafts.
+   **Reopen** rereads the saved file. Switching projects or reopening an edited
+   project asks before discarding its draft.
+4. Use **Context** to preview relevant saved content and share it with the
+   conversation. Retrieval prioritizes the brief and chapter-linked canon,
+   followed by lexical matches, within a visible character budget. It includes
+   source identities, relevance reasons, and excerpt completeness.
+5. Ask ChatGPT to revise a saved chapter, brief, outline synopsis, or canon
+   entry. Its tools read exact text and submit a proposal with a source hash and
+   revision. Inspect the before/after text in **Review edits**, then accept or
+   reject. **Try the review workflow** supplies an example without a model call.
+
+The default folder is `Documents/Lorekeeper Projects` under the user's home
+directory. Set the absolute `LOREKEEPER_PROJECTS_DIR` environment variable before
+starting Codex to use another user-owned folder. The server accepts simple
+filenames in that folder, never arbitrary paths. Copy a valid project file into
+the folder to open it; this prototype has no desktop archive importer.
+
+Every changed save increments the revision, preserves the prior exact bytes in
+the folder's `.history/`, and replaces the project through a sibling temporary
+file. Loaded hashes reject stale saves; proposal acceptance also checks the
+original target text. Failure preserves the editor draft, with a copyable JSON
+snapshot. Participating writers use per-file locks. Avoid simultaneously editing
+these files outside the plugin: a filesystem rename is not an atomic comparison
+against an uncooperative external writer. An interrupted process can leave a
+lock requiring manual inspection/removal after all writers are closed. Initial
+creation is exclusive and never overwrites a file; crash/power-loss durability
+and automatic recovery are not established.
+
+Prototype bounds: 4 MiB UTF-8 project files, 100 chapters, 300 canon entries,
+1,000 retained proposals, and a 100-file project inventory. Chapter prose is
+plain text. Context defaults to 12,000 characters with up to 12 sources; this
+is a retrieval budget, not control over ChatGPT's full prompt or token budget.
+
+See the [prototype evidence](../docs/research/local-plugin-prototype.md) for
+actual validation and remaining integration limits.
 
 ## Install locally
 
@@ -33,11 +78,12 @@ codex plugin add lorekeeper-storage-probe@lorekeeper-local
 codex plugin list --marketplace lorekeeper-local --json
 ```
 
-The repo marketplace appears as **Lorekeeper Local**. Open **Lorekeeper Storage
-Probe** from Plugins or mention it in a chat. After installation or refresh,
+The repo marketplace and installed UI appear as **Lorekeeper Local**. The package
+identity remains `lorekeeper-storage-probe` so existing installs upgrade. Open
+Lorekeeper Local from Plugins or ask to open its workspace. After refresh,
 restart the desktop client and test in a new chat as described in the
 [official packaging guide](https://developers.openai.com/plugins/build/plugins).
-If the skill appears but `open_storage_probe` is missing, the editor has not
+If the skill appears but `open_lorekeeper_workspace` is missing, the editor has not
 opened: inspect server registration/startup before claiming host capabilities.
 
 Codex loads an installed copy under its plugin cache. After changing this
@@ -50,7 +96,7 @@ installed plugin. A plain `"."` is rejected by the portable config parser. This
 package has one portable manifest and MCP configuration; there is no duplicate
 legacy registration.
 
-## Perform the storage checks
+## Perform the separate ChatGPT storage checks
 
 Use synthetic samples only. The editor accepts the fixed project/chapter IDs
 in `fixtures/storage-probe-r1.lkproject`, schema version 1, and at most 64 KiB
@@ -115,9 +161,13 @@ these synthetic checks.
 
 ## Capability boundaries
 
-This probe implements no narrative context retrieval, custom model selection,
-other chat providers, rich manuscript editor, background agents, images,
-publication renderer, or project import from the desktop application. It cannot
+The prototype implements brief/outline/canon/prose editing, bounded lexical
+retrieval, and reviewed text replacements. It does not yet implement the rich
+semantic manuscript editor, graph/vector indexes, image workflows, publication
+renderer, desktop import/export, Git history UI, or background revision agents.
+These are omitted from this prototype, not proven impossible in a local plugin.
+
+It does not call other chat providers or offer custom model selection. It cannot
 control ChatGPT's full prompt, token budget, compaction, or durable chat history.
 Built-in Pages tools callable by an agent are not automatically callable by this
 MCP server or iframe.

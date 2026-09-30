@@ -1,13 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lorekeeper-storage-probe",
-  "version": "0.1.1",
-  "description": "Check ChatGPT project-file persistence with synthetic Lorekeeper content.",
+  "version": "0.2.1",
+  "description": "Write with local chapters and canon, retrieve focused context, and review ChatGPT's proposed edits. Includes a ChatGPT storage diagnostic.",
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Lorekeeper Storage Probe",
-        "shortDescription": "Check ChatGPT file storage"
+        "displayName": "Lorekeeper Local",
+        "shortDescription": "Write with your local canon"
       }
     }
   }

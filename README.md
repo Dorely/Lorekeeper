@@ -13,15 +13,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md). The approved
 stepwise milestones, verification gates, and the current development handoff;
 its planned features are not claims about current capabilities.
 
-The independent [Lorekeeper Storage Probe](Lorekeeper.Plugin/README.md) can be
-installed from this repo's local plugin marketplace. It investigates ChatGPT
-file storage with synthetic content and has no content database. Native Page
-editing and agent-mediated JSON save/readback have been exercised; storage
-through its custom editor is blocked on the tested Codex desktop host, which
-exposes neither the library file APIs nor the file resource bridge. The editor
-itself connects and validates synthetic revisions. See the
-[probe evidence](docs/research/chatgpt-storage-probe.md) for results and remaining
-checks. This is not yet the Lorekeeper workspace in plugin form.
+The independent [Lorekeeper Local plugin prototype](Lorekeeper.Plugin/README.md)
+can be installed from this repo's local plugin marketplace. Its custom workspace
+edits a Book Brief, outline, chapters, and linked canon; retrieves focused context;
+and holds ChatGPT's proposed text changes for human review. Content stays in
+portable files on the user's computer, with guarded saves and local revision
+backups. It requires no hosted Lorekeeper service or API key. It uses a separate
+project format and does not open desktop projects. See the
+[prototype evidence](docs/research/local-plugin-prototype.md) for validation and
+limits. The original [ChatGPT storage probe](docs/research/chatgpt-storage-probe.md)
+remains as a diagnostic: native storage works, but the tested Codex editor host
+exposes neither the library file APIs nor the file resource bridge.
 
 ## Current Capabilities
 
