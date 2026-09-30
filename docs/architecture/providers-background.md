@@ -66,10 +66,11 @@ from token shape. Manual/API-key connection groups continue using
 `CredentialSourceId` and provider-owned keys.
 
 `OpenAiAccountModelCatalog` is the versioned metadata authority for bundled
-account models. Schema version 2 was validated on 2026-09-22 against the
+account models. Schema version 3 was validated on 2026-09-29 against the
 [official Codex model catalog](https://learn.chatgpt.com/docs/models) and contains
-`gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`,
-and `gpt-5.6-luna`. GPT-6 Sol is preferred. Defaults are Astra/Medium,
+`gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`,
+`gpt-5.6-terra`, and `gpt-5.6-luna`. GPT-6.1 Sol is preferred. Defaults are
+GPT-6.1 Sol/Medium, Astra/Medium,
 GPT-6 Sol/Medium, GPT-6 Luna/Medium, GPT-5.6 Sol/Low, Terra/Medium,
 and GPT-5.6 Luna/Medium;
 each permits Low, Medium, High, Extra high, and Maximum and declares text plus
@@ -79,7 +80,7 @@ absent. Unsupported saved effort values fail closed.
 
 OpenAI account model discovery is intentionally absent: Lorekeeper never calls
 `/v1/models` for an account-backed chat or embedding connection. The bundled
-six-model manifest is the complete account model list, while Advanced accepts
+seven-model manifest is the complete account model list, while Advanced accepts
 an exact manual model ID followed by the existing explicit Test workflow.
 User-configured OpenAI-compatible connections may still discover models through
 `GET /models`, and Ollama connections through `GET /api/tags`; those generic
@@ -98,8 +99,8 @@ selections remain authoritative until the user changes them.
 Bundled account rows need valid account credentials and catalog-valid settings,
 but they do not require a manual chat or vision Test. Manual account rows retain
 the explicit Test workflow under Advanced configuration. A new, empty account
-receives the bundled six and makes GPT-6 Sol the global default only when no default
-already exists. An explicit global or conversation selection whose credentials
+receives the bundled seven and makes GPT-6.1 Sol the global default only when no
+default already exists. An explicit global or conversation selection whose credentials
 or eventual provider request fail remains selected and returns an actionable
 error; it is never replaced with another model.
 

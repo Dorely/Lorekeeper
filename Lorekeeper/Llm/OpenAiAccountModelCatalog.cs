@@ -13,10 +13,10 @@ public sealed record OpenAiAccountModelCatalogEntry(
 
 public static class OpenAiAccountModelCatalog
 {
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
     public const string Source = "https://learn.chatgpt.com/docs/models";
     public const int UsableInputBudgetTokens = 272_000;
-    public static readonly DateOnly ValidationDate = new(2026, 9, 22);
+    public static readonly DateOnly ValidationDate = new(2026, 9, 29);
 
     private static readonly IReadOnlyList<LlmReasoningEffort> SupportedEfforts =
     [
@@ -29,8 +29,9 @@ public static class OpenAiAccountModelCatalog
 
     public static readonly IReadOnlyList<OpenAiAccountModelCatalogEntry> Entries =
     [
+        Entry("gpt-6.1-sol", "6.1 Sol", true, LlmReasoningEffort.Medium),
         Entry("gpt-6-astra", "Astra", false, LlmReasoningEffort.Medium),
-        Entry("gpt-6-sol", "6 Sol", true, LlmReasoningEffort.Medium),
+        Entry("gpt-6-sol", "6 Sol", false, LlmReasoningEffort.Medium),
         Entry("gpt-6-luna", "6 Luna", false, LlmReasoningEffort.Medium),
         Entry("gpt-5.6-sol", "5.6 Sol", false, LlmReasoningEffort.Low),
         Entry("gpt-5.6-terra", "Terra", false, LlmReasoningEffort.Medium),
