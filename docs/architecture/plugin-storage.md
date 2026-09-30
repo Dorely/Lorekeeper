@@ -31,7 +31,12 @@ installed plugin has no HTTP service. `mcp.json` resolves its working directory 
 inside the installed plugin. Root `plugin.json` is the only manifest. The stable
 package identity remains `lorekeeper-storage-probe`; its display name is
 **Lorekeeper Local**. Source changes are rebuilt and refreshed through supported
-plugin installation, never by editing the installed cache.
+plugin installation, never by editing the installed cache. Each changed
+distributable receives a new plugin/package version so installation does not
+replace a live Windows cache directory. MCP identity, app-server client identity,
+and the editor's visible version use the root manifest version, bundled into
+their distributables. The visible editor version and installed file digests help
+distinguish a successful install from an old view or retained host connection.
 
 ### Local narrative workspace
 
@@ -114,7 +119,9 @@ tool instructions.
 and four dynamic project tools. `CodexAppServer` lazily launches an owned stdio
 `codex app-server` child, negotiates the experimental API, correlates JSONL RPCs,
 streams notifications, and answers only project tool requests. It drains stderr
-without logging it, sanitizes protocol failures, and closes only its child.
+without logging it, sanitizes protocol failures, identifies invalid-request,
+invalid-parameter and missing-method errors as protocol compatibility failures,
+and closes only its child.
 `LOREKEEPER_CODEX_PATH` can select an absolute executable; existing `CODEX_HOME`
 and authentication remain Codex-owned. No credentials are read/copied by the
 plugin, stored with projects, or exposed to the iframe. Connect performs account
@@ -132,7 +139,8 @@ the complete protected Book Brief, current bounded lexical retrieval and its
 identities/completeness, and all prior visible user/assistant prose. Historical
 prose is injected as explicitly quoted work-log evidence; prior tool payloads
 and reasoning are audit-only and are not replayed. Project context is supplied
-as untrusted additional context. Exact file hashes reject a changed project
+as a keyed map of untrusted additional context values, as required by CLI
+0.159.2's `turn/start` protocol. Exact file hashes reject a changed project
 before inference; tools reacquire current state before proposals. The UI refuses
 to send with an unsaved manuscript draft. Users can preview context, choose the
 chapter/budget, switch conversations, select model/effort, stream replies, and Stop.

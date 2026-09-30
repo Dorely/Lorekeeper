@@ -8,6 +8,7 @@ import { z } from "zod";
 import { createProject, editableSchema, hashText, ProjectError, projectSummary, proposeEdit, readTarget, resolveProposal, retrieveContext, targetSchema } from "./project.mjs";
 import { LocalProjectStore } from "./store.mjs";
 import { LorekeeperChat } from "./chat.mjs";
+import manifest from "../plugin.json" with { type: "json" };
 
 const resourceUri = "ui://lorekeeper/storage-probe.html";
 const projectId = "85d88cf9-79a9-4cb6-8fba-a541c707833b";
@@ -28,7 +29,7 @@ const projectSchema = z.object({
   }).strict()).length(1)
 }).strict();
 
-const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.3.0" });
+const server = new McpServer({ name: "lorekeeper-storage-probe", version: manifest.version });
 new OpenAIExtensions(server);
 const store = new LocalProjectStore();
 const workspaceUri = "ui://lorekeeper/workspace.html";
@@ -74,7 +75,7 @@ workspaceTool("open_lorekeeper_workspace", {
   title: "Open Lorekeeper", description: "Open the local authoring workspace when the user asks to display it. This opens a UI tab; do not call it during ordinary reading, retrieval, proposing, or to refresh an existing editor. Existing editors check saved changes automatically. Content stays in user-owned local files.",
   inputSchema: { fileName: fileNameSchema.optional() },
   _meta: { ui: { resourceUri: workspaceUri }, "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] } }
-}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: "0.3.0" } }));
+}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: manifest.version } }));
 
 workspaceTool("list_lorekeeper_projects", {
   title: "List local projects", description: "List up to 100 project summaries from Lorekeeper's configured local folder. Does not read arbitrary paths.", inputSchema: {}

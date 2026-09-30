@@ -1,6 +1,7 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 import { OpenAIExtensions } from "@openai/mcp-extensions/app";
 import { ChatPane } from "./chat-pane";
+import manifest from "../plugin.json";
 
 interface Chapter { id: string; title: string; synopsis: string; text: string }
 interface Canon { id: string; name: string; kind: string; text: string; chapterIds: string[] }
@@ -11,7 +12,8 @@ interface State { fileName: string; project: Project; etag: string }
 interface Inventory { folder: string; projects: { fileName: string; title: string }[]; unreadable: string[]; truncated: boolean; state: State | null }
 interface Context { revision: number; usedCharacters: number; maximumCharacters: number; omittedSources: number; sources: { kind: string; id: string; title: string; text: string; reason: string; complete: boolean }[] }
 
-const app = new App({ name: "Lorekeeper", version: "0.3.0" }, {}, { autoResize: true });
+const app = new App({ name: "Lorekeeper", version: manifest.version }, {}, { autoResize: true });
+document.querySelector("#plugin-version")!.textContent = `Local prototype · ${manifest.version}`;
 new OpenAIExtensions(app);
 const content = document.querySelector<HTMLElement>("#content")!;
 const status = document.querySelector<HTMLElement>("#status")!;

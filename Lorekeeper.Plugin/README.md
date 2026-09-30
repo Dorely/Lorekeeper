@@ -155,8 +155,19 @@ opened: inspect server registration/startup before claiming host capabilities.
 
 Codex loads an installed copy under its plugin cache. After changing this
 subproject, rebuild and refresh the installation with `codex plugin add` before
-retesting. Close any manually started server using that cache first; Windows
-may prevent replacement while a process has it as its working directory.
+retesting. Give each changed distributable a new plugin/package version: Windows
+can prevent replacing a version whose cache is a running process's working
+directory. Version 0.3.1 installs alongside the stale 0.3.0 copy without restarting
+Codex. Close the old workspace view and open Lorekeeper Local again; the header
+must show **Local prototype · 0.3.1**. A CLI listing alone does not prove an existing
+view or MCP connection refreshed. If the host keeps its old connection, that
+connection still needs the host's refresh flow. Never edit installed cache files.
+
+The earlier cached 0.3.0 chat sent `additionalContext` as an array, while CLI
+0.159.2 requires a keyed map. This caused `turn/start` error -32600 before
+inference. The 0.3.1 distributable contains the corrected request and labels
+protocol errors separately from sign-in advice. Failed messages remain in their
+saved transcript and are never resent automatically.
 
 `mcp.json` uses the portable working directory `"./"`, which resolves inside the
 installed plugin. A plain `"."` is rejected by the portable config parser. This

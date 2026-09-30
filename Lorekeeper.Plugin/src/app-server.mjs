@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { ProjectError } from "./project.mjs";
+import manifest from "../plugin.json" with { type: "json" };
 
 // Codex owns authentication. This client never opens/copies its credential files.
 export class CodexAppServer {
@@ -49,12 +50,15 @@ export class CodexAppServer {
         const entry = this.pending.get(message.id);
         if (!entry) return;
         clearTimeout(entry.timer); this.pending.delete(message.id);
-        if (message.error) entry.reject(new ProjectError("CODEX_REQUEST_FAILED", `Codex rejected ${entry.method} (code ${message.error.code}). Check sign-in, account access, and CLI compatibility. An uncertain turn is not resent.`));
+        if (message.error) {
+          const invalidRequest = [-32600, -32601, -32602].includes(message.error.code);
+          entry.reject(new ProjectError("CODEX_REQUEST_FAILED", `Codex rejected ${entry.method} (code ${message.error.code}). ${invalidRequest ? "The plugin request is incompatible with this Codex protocol. Refresh Lorekeeper and check CLI compatibility." : "Check sign-in, account access, and CLI compatibility."} An uncertain turn is not resent.`));
+        }
         else entry.resolve(message.result);
       } else if (message.method) this.onnotification(message.method, message.params ?? {});
     });
     const initialized = await this.request("initialize", {
-      clientInfo: { name: "lorekeeper_local", title: "Lorekeeper Local", version: "0.3.0" },
+      clientInfo: { name: "lorekeeper_local", title: "Lorekeeper Local", version: manifest.version },
       capabilities: { experimentalApi: true }
     });
     this.write({ method: "initialized", params: {} });

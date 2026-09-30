@@ -195,7 +195,54 @@ backing up its cache entry with Windows access denied. The CLI listing reported
 that version label is not proof of a successful refresh. No installed-cache files
 or user-owned Codex processes were manually changed to bypass the lock. The final
 code was exercised through the reloadable development host; installed-host upgrade
-and validation remain pending.
+and validation remained pending at that point.
+
+## Installed chat correction, September 30, 2026
+
+The owner's failed embedded messages reported `turn/start` code -32600. Inspection
+confirmed that the installed 0.3.0 server still sent `additionalContext` as an
+array, while the committed source already used the correct keyed map. Its editor
+also lacked the final Disconnect control. This was a stale distributable;
+successful source/development checks had not delivered the correction to that
+installed copy.
+
+Version 0.3.1 packages the correction under a distinct cache directory.
+`codex.exe plugin add lorekeeper-storage-probe@lorekeeper-local --json` succeeded
+without restarting Codex or editing the cache. The editor visibly shows the
+manifest version, also used for MCP and app-server client identity. Sanitized
+invalid-request errors now explain protocol incompatibility without implying
+that these codes establish an authentication failure.
+
+| Bundle | Repository and installed 0.3.1 SHA-256 |
+|---|---|
+| Server | `618534c5d13c68c018ecd42559e68791ab0c8a19b87115a89da586647f739605` |
+| Workspace | `d71488123abf27c2d025a7b7901fc9167dc3dcef1ab8a7fab248a8c95b1ec5f3` |
+
+A manual official-SDK client launched that exact installed server with the
+separate synthetic development-project folder. Its handshake reported 0.3.1;
+account/model discovery succeeded. A real GPT-6.1 Sol/Low turn completed,
+`read_lorekeeper_project` completed, and the reply described how the two saved
+chapters could develop the Book Brief's forgiveness direction. No edits were
+proposed; the project hash remained unchanged. The saved turn is
+`775cec77-94ba-4dd5-8d70-1355da9718cc` in the existing synthetic project's chat
+sidecar. The client explicitly disconnected and closed its owned processes.
+
+This establishes live chat through the installed package, including project
+context, a dynamic tool, and saved output. It does not establish that an already
+open Codex view or retained MCP connection refreshed: the actual MCP Apps
+automation inventory exposed no tabs from the owner's view. Old failed turns
+remain saved, and no message is automatically replayed.
+
+A later same-version reinstall to refresh documentation was refused by Windows
+while backing up the cache. The installed runtime hashes still matched the
+verified repository bundles. This reinforces using a new version for changed
+distributables; it does not undo the earlier successful 0.3.1 installation or
+its completed live turn. No host-owned process was terminated to bypass the lock.
+
+Clean npm installation, type/syntax checks, generated-module build and audit
+passed with zero dependency vulnerabilities. The solution build succeeded with
+zero warnings/errors and all 167 existing data-safety tests passed. No plugin
+automated tests or harness were added.
 
 ## Limits and next scope
 

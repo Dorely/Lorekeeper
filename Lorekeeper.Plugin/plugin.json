@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lorekeeper-storage-probe",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Write with local chapters and canon, an embedded Codex conversation, fresh project context, and reviewed edits. Includes a ChatGPT storage diagnostic.",
   "extensions": {
     "com.openai": {
