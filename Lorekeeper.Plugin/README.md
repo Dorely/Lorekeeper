@@ -88,9 +88,12 @@ codex plugin list --marketplace lorekeeper-local --json
 
 The repo marketplace and installed UI appear as **Lorekeeper Local**. The package
 identity remains `lorekeeper-storage-probe` so existing installs upgrade. Open
-Lorekeeper Local from Plugins or ask to open its workspace. After refresh,
-restart the desktop client and test in a new chat as described in the
-[official packaging guide](https://developers.openai.com/plugins/build/plugins).
+Lorekeeper Local from Plugins or ask to open its workspace. An active desktop
+connection can retain the previous version after CLI installation. Use the host's
+refresh flow for final installed-plugin validation; the independent development
+preview below avoids repeating that step during source development. The
+[official packaging guide](https://developers.openai.com/plugins/build/plugins)
+describes installation and host discovery.
 If the skill appears but `open_lorekeeper_workspace` is missing, the editor has not
 opened: inspect server registration/startup before claiming host capabilities.
 
@@ -149,6 +152,47 @@ npm run check
 npm run build
 npm audit
 ```
+
+### Reloadable development preview
+
+After the build, run `npm run dev` and open the loopback URL printed in the
+terminal. This is an independent MCP Apps host using the official `AppBridge`
+and a real SDK connection to this plugin's bundled stdio server. It opens the
+same workspace editor; it does not start another Codex instance.
+
+Leave that development host running while editing. Run `npm run check` and
+`npm run build`, then choose **Reload runtime** and **Reload now** in the preview.
+An agent can operate these controls through browser automation. Reload closes
+only the development host's MCP process, discovers the rebuilt tools, rereads
+the UI resource, and mounts a fresh editor in the same tab. Its toolbar shows
+server version, process ID, generation, and server/editor bundle hashes. Save
+or copy drafts first: reload deliberately discards the editor's in-memory draft.
+It refuses to restart during an active tool operation and never replays a write.
+
+Each generation runs from a disposable copy below
+`.artifacts/plugin-development/runtimes`, so the running Node process cannot
+lock the repository's next Windows build. Closed generations are removed. The
+default project folder is `.artifacts/plugin-development/projects`, separate
+from normal projects. Set an absolute `LOREKEEPER_DEV_PROJECTS_DIR` before
+starting the development host to deliberately select another folder. Stopping
+the host removes runtime copies, not project files or their revision history.
+Use Ctrl+C to stop the host and its owned MCP process after manual validation.
+
+**Development tools and results** exposes manual JSON calls to model-visible
+data tools for exercising changes made outside the editor. Calls and responses
+stay in browser memory; there is no automated test runner or saved content log.
+The HTTP listener binds only to `127.0.0.1` on an available port. API calls require
+the exact host/origin and a per-process session token. The sandboxed editor uses
+the MCP bridge and cannot access that token or make direct network requests.
+
+This preview proves local editor/server behavior. It has no model conversation
+or ChatGPT storage APIs and does not prove Codex's installed-plugin cache, tab
+lifecycle, or Side Chat integration. Those still need the actual target host.
+The documented [`config/mcpServer/reload` API](https://learn.chatgpt.com/docs/app-server#api-overview)
+queues refreshes in app-server, but the tested desktop stdio session exposed no
+connectable control socket. The development workflow therefore does not claim
+to reload that existing Codex connection. Changes to the preview host itself
+require restarting `npm run dev`; changes to the plugin use **Reload runtime**.
 
 The build bundles the official MCP/MCP Apps/OpenAI extensions SDKs into the
 server and inline HTML, checks the exact inline module's JavaScript syntax before

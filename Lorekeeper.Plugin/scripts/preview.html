@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lorekeeper development preview</title>
+  <style>
+    :root { color-scheme: dark; font: 15px system-ui, sans-serif; background: #111719; color: #e6eeee; }
+    body { margin: 0; }
+    header, details, #reload-confirmation { padding: 12px 20px; border-bottom: 1px solid #435256; }
+    header { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    button, select, textarea { font: inherit; color: inherit; background: #263237; border: 1px solid #627879; border-radius: 6px; padding: 8px; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    #status, #identity { margin: 6px 0; }
+    #status { color: #b5ded4; }
+    small { display: block; color: #b8c6c9; }
+    label { display: block; margin-top: 10px; }
+    textarea { display: block; width: min(96%, 960px); min-height: 95px; margin-bottom: 10px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+    iframe { display: block; width: 100%; height: calc(100vh - 170px); border: 0; background: #171d1f; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Lorekeeper development preview</strong>
+    <button id="reload">Reload runtime</button>
+    <div>
+      <div id="identity">Connecting…</div>
+      <small>Independent MCP Apps host. Codex stays open. Chat, ChatGPT storage, and Codex integration are outside this preview.</small>
+    </div>
+  </header>
+  <div id="reload-confirmation" hidden>
+    <p>Reload closes this editor and discards its unsaved draft. Save or copy your work before continuing.</p>
+    <button id="reload-now">Reload now</button>
+    <button id="reload-cancel">Cancel</button>
+  </div>
+  <details>
+    <summary>Development tools and results</summary>
+    <p id="status" role="status">Starting the real local MCP connection…</p>
+    <small id="projects"></small>
+    <label for="tool">Host tool</label><select id="tool"></select>
+    <label for="arguments">Tool arguments (JSON)</label><textarea id="arguments">{}</textarea>
+    <button id="call">Call tool</button>
+    <pre id="result" aria-label="Tool result"></pre>
+    <small>Calls use the real server and project files. Data tools leave the existing editor open.</small>
+  </details>
+  <main id="editor"></main>
+  <script type="module">/*PREVIEW_SCRIPT*/</script>
+</body>
+</html>

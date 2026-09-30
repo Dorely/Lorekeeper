@@ -90,6 +90,49 @@ solution build had zero warnings/errors and all 167 existing tests passed.
 No claim is made from a simulated bridge or ordinary browser. The manually owned
 SDK client/server and interactive REPL were closed after validation.
 
+## Independent reloadable development host, September 30, 2026
+
+The owner requested an autonomous development loop without repeated Codex
+restarts. The installed CLI exposes app-server proxy/daemon tooling, and the
+[official API](https://learn.chatgpt.com/docs/app-server#api-overview) includes
+`config/mcpServer/reload`. The current desktop launched its server over stdio;
+the CLI proxy's default control socket was not connectable. No undocumented IPC,
+installed-cache edits, broad process kills, or second Codex instance were used.
+
+The independent preview uses the official MCP Apps `AppBridge` and a real SDK
+stdio connection to the same plugin bundles. It has no model/chat or ChatGPT
+file APIs. This is evidence of plugin UI/runtime behavior in our development
+host, not proof of the existing Codex connection being refreshed.
+
+Manual browser interactions and the preview's manual tool console observed:
+
+| Check | Observed result |
+|---|---|
+| Create, edit, save | Synthetic local project created; title/Unicode brief saved at revision 2. |
+| Separate proposal | A host tool call created revision 3; the already-open Review view automatically displayed it and the pending count without Reopen. |
+| Dirty draft | An external revision 4 left the unsaved Unicode draft and loaded revision 3 intact, with a newer-state notice. |
+| Stale editor save | Failed without replacing current content; draft and copy surface remained available. |
+| New-project form | Typed fields stayed present across polling after another external proposal. |
+| Rebuilt UI | A temporary visible marker appeared after Reload runtime; the editor hash changed from `af438c056aee` to `ee08ec27873e`. Marker was then removed and the original hash restored. |
+| Rebuilt MCP server | A temporary server-version marker was loaded, then rebuilt while that server stayed running. Reload replaced PID 40316 with 38448 and changed the displayed version/hash to the final `0.2.2` / `4e04f0085224`. |
+| Saved persistence after reload | Reopened the same synthetic project ID, revision and Unicode; proposals remained pending and authored text unchanged. |
+| Loopback API guard | A request without the preview's origin/session authorization returned HTTP 403. |
+| Shutdown | The owned MCP PID and development host exited; the runtime-copy directory was empty and project/history files remained. |
+
+The first direct-from-repo development process exposed a Windows bundle-write
+failure during a rebuild. Each generation now runs from an owned disposable copy
+instead. A subsequent rebuild succeeded while that copied server was running.
+Temporary source markers were removed; the installed plugin's bundles are
+unchanged by the development tooling feature.
+
+The retained synthetic file is
+`.artifacts/plugin-development/projects/development-reload.lorekeeper.json`,
+project ID `95857d06-f777-4db0-bea9-497fe8d9d489`. Its local revision files remain
+with it. The owner's Test Project was not modified. There is no automated plugin
+test suite, replay harness, mock storage bridge, or live inference in this check.
+Final static checks/build/test and owned-process cleanup are recorded with the
+development tooling commit.
+
 ## Limits and next scope
 
 The prototype provides plain-text authoring, linked canon, lexical retrieval,

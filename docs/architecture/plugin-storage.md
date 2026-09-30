@@ -24,8 +24,8 @@ public-directory release have different connectivity/review requirements.
 
 The repo marketplace selects a portable Agent Plugins package containing two
 skills, a Node stdio MCP server, and two self-contained MCP App editors. Runtime
-requires Node 22.12 or newer; bundled SDKs eliminate a runtime npm install. There
-is no HTTP service. `mcp.json` resolves the server's working directory `"./"`
+requires Node 22.12 or newer; bundled SDKs eliminate a runtime npm install. The
+installed plugin has no HTTP service. `mcp.json` resolves its working directory `"./"`
 inside the installed plugin. Root `plugin.json` is the only manifest. The stable
 package identity remains `lorekeeper-storage-probe`; its display name is
 **Lorekeeper Local**. Source changes are rebuilt and refreshed through supported
@@ -111,6 +111,42 @@ background revision agents are outside this prototype. The content storage
 constraint also applies to a possible future hosted core; local stdio success
 does not establish public-directory or ChatGPT web compatibility.
 
+### Independent development host
+
+`npm run dev` starts an optional development-only HTTP host on an available
+`127.0.0.1` port. It uses official `AppBridge`/`PostMessageTransport` in an opaque
+sandboxed iframe and an official SDK stdio client, rather than a simulated MCP
+bridge. Host/origin checks, a per-process API token, no-store responses, bounded
+request bodies, and a restrictive CSP contain the loopback API. Server-side
+audience checks preserve app-only tools. It does not supply model inference,
+Side Chat, file-library APIs, or the OpenAI resource bridge.
+
+Each MCP generation is copied from the three repository bundles into an owned
+temporary directory under `.artifacts/plugin-development/runtimes`. Its exact
+copied server/editor hashes, version, PID, and generation are displayed. This
+avoids Windows locking the next repository build. Explicit **Reload runtime**
+asks before discarding the in-memory editor, refuses to interrupt active tool
+operations, closes only its own stdio client/process, cleans that generation,
+starts a fresh one, rediscovers tools/resources, and mounts the editor again.
+No failed write is automatically retried. Shutdown drains active operations and
+removes only validated immediate temporary children of that runtime directory.
+
+Development projects default to the separate ignored
+`.artifacts/plugin-development/projects` folder; an absolute
+`LOREKEEPER_DEV_PROJECTS_DIR` deliberately changes it. The same `LocalProjectStore`
+and guarded writes own these files. Runtime cleanup never deletes projects.
+The manual tool console exposes model-visible data operations; content remains
+in the browser's memory and user-owned project files, without a content log,
+automation/assertions, or a second content store. The helper is contributor
+tooling and is not part of the installed MCP server's runtime closure.
+
+This host permits autonomous rebuild/UI checks without restarting Codex, but
+its results do not establish the actual Codex tab/cache/chat lifecycle. The
+documented app-server `config/mcpServer/reload` method queues thread refreshes;
+the tested desktop stdio session did not expose a connectable control socket.
+Installed-plugin refresh remains a separate actual-host check. The preview
+helper itself is loaded at startup; editing it requires restarting the helper.
+
 ### Separate ChatGPT storage diagnostic
 
 The server exposes `open_storage_probe` to the model/app and
@@ -168,6 +204,7 @@ file, protocol, and workspace observations.
 | `Lorekeeper.Plugin/src/app.ts`, `src/app.html` | Memory-only editor, capability detection, library reads/uploads, conditional writes, stale-save check, and content-free reports. |
 | `Lorekeeper.Plugin/skills/storage-probe/SKILL.md` | Actual-host probe workflow and evidence boundaries. |
 | `Lorekeeper.Plugin/scripts/build.mjs`, `package*.json`, `tsconfig.json` | Exact-pinned dependency closure, static checking, bundles, and notices generation. |
+| `Lorekeeper.Plugin/scripts/dev.mjs`, `scripts/preview.ts`, `scripts/preview.html` | Loopback development host, owned stdio generations, official MCP Apps bridge, explicit reload, and manual tool console. |
 | `Lorekeeper.Plugin/dist/`, `THIRD-PARTY-NOTICES.md`, `licenses/` | Committed distributable server/HTML and bundled dependency license texts. |
 | `Lorekeeper.Plugin/fixtures/`, `.gitattributes`, `.editorconfig` | Synthetic reference bytes and stable LF package formatting. |
 

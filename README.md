@@ -25,6 +25,10 @@ limits. The original [ChatGPT storage probe](docs/research/chatgpt-storage-probe
 remains as a diagnostic: native storage works, but the tested Codex editor host
 exposes neither the library file APIs nor the file resource bridge.
 
+The plugin also has a [reloadable local development preview](Lorekeeper.Plugin/README.md#reloadable-development-preview).
+It lets an agent rebuild and refresh the MCP server and editor without restarting
+Codex, using a separate synthetic project folder by default.
+
 ## Current Capabilities
 
 - Print Designed Pages, selected cover surfaces, images, and individual or ranged
