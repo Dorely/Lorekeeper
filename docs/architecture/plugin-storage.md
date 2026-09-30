@@ -72,6 +72,22 @@ saved snapshot to the editor; write responses give the model bounded summaries.
 Workspace-state loading, manual saves, and accept/reject tools are app-only.
 All tools share project validation and storage operations.
 
+Only the explicit workspace opener links to the UI resource. Data and app-only
+tools declare visibility without a resource URI, so routine model reads,
+retrieval, proposals, and editor calls do not create tabs. The skill forbids using
+the opener as a refresh. The host Side Chat owns the conversation surface.
+
+The app-only `sync_lorekeeper_project` compares the observed exact file hash and
+returns the private saved snapshot only when it changes. A visible editor checks
+every 2.5 seconds and on focus/visibility changes. At most one synchronization
+request runs at a time; reads pause during foreground actions, a new-project
+form, or a discard dialog. Responses are discarded after a project switch or a
+foreground snapshot change. The editor captures inputs again after awaiting a
+response, so typing during a read is preserved. Clean drafts adopt current saved
+state without changing the view; dirty drafts keep their loaded hash and text,
+remember the observed hash to avoid repeat payloads, and show a newer-state
+notice. Polling uses read-only local tools and neither saves nor invokes a model.
+
 Proposals persist before/after text, target identity, source revision, reason,
 status, and timestamps. Creating one never changes the writing. Exact source
 revision/hash guard creation; the proposal UUID provides idempotent retries only

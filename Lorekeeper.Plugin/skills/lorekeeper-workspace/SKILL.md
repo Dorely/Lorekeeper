@@ -5,8 +5,10 @@ description: Use Lorekeeper's local workspace to plan and write a book with proj
 
 # Lorekeeper local workspace
 
-Use `open_lorekeeper_workspace` to open the authoring UI. Use
-`list_lorekeeper_projects` to find an existing file; never guess its filename or
+Use `open_lorekeeper_workspace` only when the user asks to display the authoring
+UI. It opens a tab; never call it just to read, retrieve, propose, or refresh.
+Ordinary writing requests use the data tools below without opening a new editor.
+Use `list_lorekeeper_projects` to find an existing file; never guess its filename or
 read unrelated paths. New files are created only when requested. Content lives
 in the configured user-owned local folder, not a hosted Lorekeeper database.
 
@@ -30,9 +32,10 @@ in the configured user-owned local folder, not a hosted Lorekeeper database.
 
 After a conflict, reacquire saved state instead of silently substituting an
 updated revision. Retrying an uncertain proposal uses exactly the same proposal
-identity and arguments; never create another copy blindly. Reload the workspace
-to see saved proposals if the host does not refresh it automatically. Unsaved
-editor drafts must be saved or preserved before loading newer project state.
+identity and arguments; never create another copy blindly. An existing workspace
+checks saved changes automatically, including proposals. If it has an unsaved
+draft, it keeps that draft and shows a notice; the author must save or copy it
+before reopening newer saved state. Do not open extra tabs to force a refresh.
 
 This prototype does not call other chat providers, manage ChatGPT's full prompt
 or compaction, generate embeddings, render publications, import desktop

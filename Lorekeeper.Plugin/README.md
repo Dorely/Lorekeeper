@@ -38,6 +38,14 @@ documented optional bridge.
    revision. Inspect the before/after text in **Review edits**, then accept or
    reject. **Try the review workflow** supplies an example without a model call.
 
+Use the host's **Side Chat** to talk to the assistant. The plugin supplies the
+writing workspace and project tools, without its own embedded conversation pane.
+Ordinary read/retrieval/proposal tools do not launch editor tabs; only an explicit
+Open action does. An open, visible workspace checks saved changes every 2.5
+seconds, preserves the selected view, and updates the review count. Clean drafts
+refresh automatically. Dirty drafts and new-project forms remain untouched;
+copy/save a draft before explicitly reopening newer saved state.
+
 The default folder is `Documents/Lorekeeper Projects` under the user's home
 directory. Set the absolute `LOREKEEPER_PROJECTS_DIR` environment variable before
 starting Codex to use another user-owned folder. The server accepts simple

@@ -53,10 +53,42 @@ host editor behavior.
 ## Actual host integration
 
 The current chat initially retained the old probe tools after installation.
-An app reload/open was requested to expose the new workspace. New editor
-rendering, manual save/reopen, context sharing, discussion dispatch, and review
-buttons remain pending actual-host validation. No claim is made from a simulated
-bridge or ordinary browser.
+After reload, the owner exercised 0.2.1 in Codex: created **Test Project**, saved
+its brief at revision 2, used Side Chat to request an opening, and saw a pending
+proposal in Review edits at revision 3 after manually reopening. Screenshots
+show the real editor, saved status, and before/after review. The assistant also
+read the saved project through the actual plugin tools. This establishes the
+authoring/Side Chat/proposal path; accept/reject buttons, context sharing, and
+discussion dispatch were not independently exercised in that host.
+
+That run exposed two integration bugs: every data tool was associated with the
+workspace UI and opened another tab, while the original editor missed changes
+made through another call. Version 0.2.2 removes UI resource associations from
+data/app-only tools, reserves opening for explicit display requests, and adds
+read-only hash-based synchronization to existing editors with dirty-draft and
+new-project-form protection.
+
+Manual real-SDK checks of the installed 0.2.2 package observed:
+
+- Only `open_lorekeeper_workspace` and the separate `open_storage_probe` have
+  UI resource/template metadata; ordinary data tools do not.
+- `sync_lorekeeper_project` is app-only and read-only. An unchanged hash returns
+  no snapshot. A saved proposal returns revision 2 and one pending edit in a
+  private snapshot; manuscript prose remains unchanged. Repeating with the
+  observed hash returns no snapshot again.
+- Retrieval still returned seven context sources.
+
+The separate synthetic sample is retained as
+`Documents/Lorekeeper Projects/refresh-validation-00bf14b1.lorekeeper.json`
+under the local user's home. Its ID is `f207b42f-70c1-41a4-b4ed-277eca845ce6`.
+No changes were made to the owner's Test Project during these checks.
+The 0.2.2 editor's no-extra-tab and automatic-refresh behavior await a refreshed
+actual-host session. A final explicit opener still reported version 0.2.1 in
+the current chat, confirming that its running connection had not refreshed.
+Version 0.2.2 clean npm install/check/build/audit passed with zero vulnerabilities;
+solution build had zero warnings/errors and all 167 existing tests passed.
+No claim is made from a simulated bridge or ordinary browser. The manually owned
+SDK client/server and interactive REPL were closed after validation.
 
 ## Limits and next scope
 

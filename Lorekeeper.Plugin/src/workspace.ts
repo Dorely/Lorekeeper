@@ -10,7 +10,7 @@ interface State { fileName: string; project: Project; etag: string }
 interface Inventory { folder: string; projects: { fileName: string; title: string }[]; unreadable: string[]; truncated: boolean; state: State | null }
 interface Context { revision: number; usedCharacters: number; maximumCharacters: number; omittedSources: number; sources: { kind: string; id: string; title: string; text: string; reason: string; complete: boolean }[] }
 
-const app = new App({ name: "Lorekeeper", version: "0.2.1" }, {}, { autoResize: true });
+const app = new App({ name: "Lorekeeper", version: "0.2.2" }, {}, { autoResize: true });
 new OpenAIExtensions(app);
 const content = document.querySelector<HTMLElement>("#content")!;
 const status = document.querySelector<HTMLElement>("#status")!;
@@ -25,6 +25,9 @@ let selectedChapter: string | undefined;
 let connected = false;
 let busy = false;
 let dirty = false;
+let synchronizing = false;
+let observedEtag: string | undefined;
+let syncErrorShown = false;
 let context: Context | undefined;
 let query = "";
 let pendingInput: string | undefined;
@@ -43,6 +46,8 @@ function updateControls(): void {
   button("save").disabled = !connected || busy || !state || !dirty;
   for (const element of content.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("button,input,textarea,select")) element.disabled = busy || !connected;
   saveState.textContent = state ? `${dirty ? "Unsaved changes" : "Saved"} · revision ${state.project.revision}` : "No project open";
+  const pending = state?.project.proposals.filter(p => p.status === "pending").length ?? 0;
+  document.querySelector<HTMLButtonElement>('nav button[data-view="review"]')!.textContent = `Review edits${pending ? ` (${pending})` : ""}`;
   for (const nav of document.querySelectorAll<HTMLButtonElement>("nav button")) nav.classList.toggle("active", nav.dataset.view === view);
 }
 
@@ -62,6 +67,7 @@ function capture(): void {
       c.chapterIds = [...document.querySelectorAll<HTMLInputElement>(`input[data-canon="${c.id}"]:checked`)].map(e => e.value);
     }
   }
+  if (view === "context" && document.querySelector("#context-query")) { query = inputValue("context-query"); selectedChapter = inputValue("context-chapter") || undefined; }
   dirty = JSON.stringify(authored(draft)) !== JSON.stringify(authored(state.project));
   updateControls();
   const counter = document.querySelector("#word-count");
@@ -84,9 +90,41 @@ async function run(action: () => Promise<void>): Promise<void> {
 }
 function adopt(next: State): void {
   state = next; draft = structuredClone(next.project); dirty = false; context = undefined;
+  observedEtag = next.etag; syncErrorShown = false;
+  if (view === "new") view = "brief";
   if (!draft.chapters.some(c => c.id === selectedChapter)) selectedChapter = draft.chapters[0]?.id;
   document.querySelector<HTMLElement>("#recovery")!.hidden = true;
   render();
+}
+async function synchronize(): Promise<void> {
+  if (!connected || busy || synchronizing || !state || view === "new" || dialog.open || document.visibilityState === "hidden") return;
+  capture();
+  const loaded = state;
+  synchronizing = true;
+  try {
+    const result = await call("sync_lorekeeper_project", { fileName: loaded.fileName, knownEtag: dirty ? observedEtag ?? loaded.etag : loaded.etag });
+    // A foreground operation or project switch may finish while this read is pending.
+    if (busy || state?.fileName !== loaded.fileName || state.etag !== loaded.etag || view === "new" || dialog.open) return;
+    capture();
+    syncErrorShown = false;
+    if (typeof result.data.etag === "string") observedEtag = result.data.etag;
+    if (!result.state) return;
+    if (dirty) {
+      show("Saved project changes are available. Your unsaved draft is preserved; save or copy it before reopening.", true);
+      return;
+    }
+    adopt(result.state);
+    const pending = state.project.proposals.filter(p => p.status === "pending").length;
+    show(`Saved changes received. Revision ${state.project.revision}.${pending ? ` ${pending} edit${pending === 1 ? "" : "s"} waiting for review.` : ""}`);
+  } catch {
+    if (state?.fileName === loaded.fileName && state.etag === loaded.etag && !busy && !syncErrorShown) {
+      syncErrorShown = true;
+      show("Automatic refresh is unavailable. Your draft is preserved; reopen saved state when ready.", true);
+    }
+  } finally { synchronizing = false; }
+}
+function scheduleSync(): void {
+  window.setTimeout(() => { void synchronize().finally(scheduleSync); }, 2500);
 }
 async function load(fileName?: string): Promise<void> {
   const result = await call("get_lorekeeper_workspace", fileName ? { fileName } : {});
@@ -127,7 +165,7 @@ function render(): void {
   if (view === "context") content.innerHTML = heading("Choose what the conversation sees", "Preview the saved brief, linked canon, and relevant writing for a specific task.") + `<label for="context-chapter">Chapter</label><select id="context-chapter"><option value="">Whole project</option>${draft.chapters.map(c => `<option value="${c.id}" ${c.id === selectedChapter ? "selected" : ""}>${html(c.title)}</option>`).join("")}</select><label for="context-query">What are you working on?</label><input id="context-query" value="${html(query)}" maxlength="500" placeholder="Mara, lantern memories, harbor…"><div class="row" style="margin-top:12px"><button id="preview-context">Preview context</button><button id="share-context">Share with ChatGPT</button></div>${context ? `<p class="muted">Saved revision ${context.revision} · ${context.usedCharacters.toLocaleString()} / ${context.maximumCharacters.toLocaleString()} characters${context.omittedSources ? ` · ${context.omittedSources} sources omitted` : ""}</p>${context.sources.map(s => `<div class="source"><h3>${html(s.title)}</h3><small>${html(s.reason)} · ${s.complete ? "Complete text" : "Excerpt"}</small><pre>${html(s.text)}</pre></div>`).join("") || `<p>No matching sources. Try distinctive names or terms from the project.</p>`}` : ""}`;
   if (view === "review") {
     const pending = draft.proposals.filter(p => p.status === "pending");
-    content.innerHTML = heading("Your words, your decision", "Proposed edits stay separate from the writing until you accept them.") + (pending.length ? pending.map(p => `<article class="card"><h2>${html(targetTitle(p.target))}</h2><p>${html(p.reason)}</p><small>Based on revision ${p.baseRevision}</small><div class="diff"><div><h3>Current at proposal</h3><pre>${html(p.before) || "(empty)"}</pre></div><div class="after"><h3>Proposed</h3><pre>${html(p.after) || "(empty)"}</pre></div></div><div class="row" style="margin-top:16px"><button class="primary" data-accept="${p.id}">Accept edit</button><button data-reject="${p.id}">Reject edit</button></div></article>`).join("") : `<div class="card"><p>No edits waiting for review.</p><small>Ask ChatGPT to propose a change, then reopen the saved project if the view has not refreshed.</small></div>`) + `<details><summary>Reviewed edits (${draft.proposals.length - pending.length})</summary>${draft.proposals.filter(p => p.status !== "pending").map(p => `<p>${html(targetTitle(p.target))} · ${html(p.status)}<small>${html(p.reason)}</small></p>`).join("")}</details><details><summary>Try the review workflow</summary><p class="muted">Create a proposed sentence for the selected chapter. It will wait for your approval.</p><button id="example-proposal">Create example proposal</button></details>`;
+    content.innerHTML = heading("Your words, your decision", "Proposed edits stay separate from the writing until you accept them.") + (pending.length ? pending.map(p => `<article class="card"><h2>${html(targetTitle(p.target))}</h2><p>${html(p.reason)}</p><small>Based on revision ${p.baseRevision}</small><div class="diff"><div><h3>Current at proposal</h3><pre>${html(p.before) || "(empty)"}</pre></div><div class="after"><h3>Proposed</h3><pre>${html(p.after) || "(empty)"}</pre></div></div><div class="row" style="margin-top:16px"><button class="primary" data-accept="${p.id}">Accept edit</button><button data-reject="${p.id}">Reject edit</button></div></article>`).join("") : `<div class="card"><p>No edits waiting for review.</p><small>Ask in Side Chat. Saved proposals appear here automatically when you have no unsaved changes.</small></div>`) + `<details><summary>Reviewed edits (${draft.proposals.length - pending.length})</summary>${draft.proposals.filter(p => p.status !== "pending").map(p => `<p>${html(targetTitle(p.target))} · ${html(p.status)}<small>${html(p.reason)}</small></p>`).join("")}</details><details><summary>Try the review workflow</summary><p class="muted">Create a proposed sentence for the selected chapter. It will wait for your approval.</p><button id="example-proposal">Create example proposal</button></details>`;
   }
   updateControls();
 }
@@ -148,6 +186,7 @@ async function previewContext(): Promise<void> {
   context = result.data as unknown as Context; render(); show("Context preview uses saved project content.");
 }
 function newProjectForm(): void {
+  view = "new";
   content.className = "";
   content.innerHTML = `<div class="eyebrow">A new beginning</div><h1>Start a project</h1><p class="muted">A portable file on your computer. No account or API key needed.</p><label for="new-title">Project title</label><input id="new-title" value="Untitled story" maxlength="200"><label for="new-file">Filename</label><input id="new-file" value="story-${crypto.randomUUID().slice(0, 8)}.lorekeeper.json"><div class="row" style="margin-top:18px"><button class="primary" id="create-project">Create project</button><button id="create-sample">Create sample project</button></div><small style="margin-top:15px">The sample contains artificial characters and Unicode text for exploring the workspace.</small>`;
   updateControls();
@@ -216,19 +255,20 @@ app.ontoolresult = result => {
   const next = result._meta?.["lorekeeper/workspace"] as State | undefined;
   if (!next) return;
   if (!connected) { pendingInput = next.fileName; return; }
-  if (busy) return;
-  capture();
-  if (dirty) { show("Saved project changes are available. Your unsaved draft is preserved; save or copy it before reopening.", true); return; }
-  if (!state || state.fileName === next.fileName) adopt(next);
+  if (!state && !busy) { void run(() => load(next.fileName)); return; }
+  if (state?.fileName === next.fileName) void synchronize();
 };
 app.addEventListener("toolinput", ({ arguments: args }) => {
   if (typeof args?.fileName !== "string") return;
   if (!connected) { pendingInput = args.fileName; return; }
   if (!state && !busy) void run(() => load(args.fileName as string));
 });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void synchronize(); });
+window.addEventListener("focus", () => { void synchronize(); });
 
 try {
   await app.connect(); connected = true;
   await run(async () => { await load(pendingInput); show("Connected. Open a local project or create one."); });
+  scheduleSync();
 } catch { show("The workspace needs an MCP App connection. Reopen Lorekeeper from the installed plugin.", true); }
 updateControls();

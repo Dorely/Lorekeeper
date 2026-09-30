@@ -27,7 +27,7 @@ const projectSchema = z.object({
   }).strict()).length(1)
 }).strict();
 
-const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.2.1" });
+const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.2.2" });
 new OpenAIExtensions(server);
 const store = new LocalProjectStore();
 const workspaceUri = "ui://lorekeeper/workspace.html";
@@ -51,7 +51,7 @@ function workspaceTool(name, config, handler, appOnly = false) {
   server.registerTool(name, {
     ...config,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, ...config.annotations },
-    _meta: { ui: { resourceUri: workspaceUri, visibility: appOnly ? ["app"] : ["model", "app"] }, ...config._meta }
+    _meta: { ...config._meta, ui: { visibility: appOnly ? ["app"] : ["model", "app"], ...config._meta?.ui } }
   }, async args => {
     try { return await handler(args); }
     catch (error) {
@@ -63,10 +63,10 @@ function workspaceTool(name, config, handler, appOnly = false) {
 }
 
 workspaceTool("open_lorekeeper_workspace", {
-  title: "Open Lorekeeper", description: "Open the local authoring workspace for brief, outline, canon, chapters, context retrieval and reviewed edits. Content stays in user-owned local files.",
+  title: "Open Lorekeeper", description: "Open the local authoring workspace when the user asks to display it. This opens a UI tab; do not call it during ordinary reading, retrieval, proposing, or to refresh an existing editor. Existing editors check saved changes automatically. Content stays in user-owned local files.",
   inputSchema: { fileName: fileNameSchema.optional() },
-  _meta: { "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] } }
-}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: "0.2.1" } }));
+  _meta: { ui: { resourceUri: workspaceUri }, "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] } }
+}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: "0.2.2" } }));
 
 workspaceTool("list_lorekeeper_projects", {
   title: "List local projects", description: "List up to 100 project summaries from Lorekeeper's configured local folder. Does not read arbitrary paths.", inputSchema: {}
@@ -82,6 +82,16 @@ workspaceTool("get_lorekeeper_workspace", {
   const inventory = await store.list();
   const data = { ...inventory, state: fileName ? snapshot(await store.read(fileName)) : null };
   return { content: [], structuredContent: data };
+}, true);
+
+workspaceTool("sync_lorekeeper_project", {
+  title: "Check saved project changes", description: "Read-only editor synchronization. Returns a saved snapshot only when the observed file hash changes; never saves or opens a UI tab.",
+  inputSchema: { fileName: fileNameSchema, knownEtag: etagSchema },
+  outputSchema: { fileName: z.string(), etag: z.string(), revision: z.number(), pendingCount: z.number(), changed: z.boolean() }
+}, async ({ fileName, knownEtag }) => {
+  const current = await store.read(fileName);
+  const data = { fileName, etag: current.etag, revision: current.project.revision, pendingCount: current.project.proposals.filter(p => p.status === "pending").length, changed: current.etag !== knownEtag };
+  return { content: [], structuredContent: data, ...(data.changed ? { _meta: { "lorekeeper/workspace": snapshot(current) } } : {}) };
 }, true);
 
 workspaceTool("create_lorekeeper_project", {
