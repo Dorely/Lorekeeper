@@ -100,7 +100,7 @@ the CLI proxy's default control socket was not connectable. No undocumented IPC,
 installed-cache edits, broad process kills, or second Codex instance were used.
 
 The independent preview uses the official MCP Apps `AppBridge` and a real SDK
-stdio connection to the same plugin bundles. It has no model/chat or ChatGPT
+stdio connection to the same plugin bundles. At that stage it had no model/chat or ChatGPT
 file APIs. This is evidence of plugin UI/runtime behavior in our development
 host, not proof of the existing Codex connection being refreshed.
 
@@ -133,6 +133,70 @@ test suite, replay harness, mock storage bridge, or live inference in this check
 Final static checks/build/test and owned-process cleanup are recorded with the
 development tooling commit.
 
+## Embedded Codex conversation, September 30, 2026
+
+Version 0.3.0 adds an actual writing conversation inside the custom UI, backed by
+an owned local Codex app-server over stdio. It uses Codex-owned account sign-in,
+not copied desktop OAuth tokens or a hosted Lorekeeper service. The official
+[app-server API and authentication guidance](https://learn.chatgpt.com/docs/app-server)
+and the installed CLI's generated experimental schemas informed the implementation.
+CLI 0.159.2 was exercised. Local/open-source authentication is distinct from
+commercial/hosted deployment, which requires Sign in with ChatGPT.
+
+Manual UI checks used the official MCP Apps development host, real bundled MCP
+server, and real app-server/OpenAI inference. This is not a simulated bridge or
+proof that the existing installed Codex connection refreshed. The retained sample
+is `.artifacts/plugin-development/projects/embedded-chat-validation.lorekeeper.json`,
+project ID `305a1ab1-087b-4666-9b91-f952e6e5af08`. Its chapter/canon identities,
+chat sidecar and local revision backups remain available. The owner's Test Project
+was not touched. The [captured editor/chat view](../../.artifacts/plugin-development/embedded-chat.png)
+shows the pending reviewed replacement beside the embedded pane.
+
+| Check | Observed result |
+|---|---|
+| Account/model discovery | Signed-in ChatGPT account; seven models initially, eight on a later reconnect, with their advertised efforts and default. GPT-6.1 Sol was selected without a maintained catalogue. |
+| Context preview | Complete Book Brief plus seven sourced excerpts, linked canon and Unicode, within the requested retrieval budget. |
+| Live drafting turn | Streamed a canon-grounded reply, read exact canon/chapter targets, and saved a 50-word proposal. The writing remained unchanged. |
+| Automatic workspace refresh | Existing Review edits count/view displayed the pending proposal without Reopen or another tab. |
+| Later turn | A new ephemeral thread recalled the earlier proposed paragraph from replayed prose and used the newly saved forgiveness direction. No new proposal. |
+| Native usage | Input/output counts were displayed; the exercised model reported a 258,400-token context window. This does not alter the desktop catalogue. |
+| Stop during startup | Turn saved as interrupted without an answer or a proposal. |
+| Stop during streaming | A running reply was interrupted and 960 characters of partial assistant prose persisted. Completed proposals stayed pending. |
+| Close/restart/reopen | Earlier completed/interrupted messages, tool outcomes, selections, context snapshots and pending project proposal survived fully closing and restarting the development runtime. No message was replayed. |
+| Identical completed-message retry | Real MCP call returned the existing turn while offline; sidecar revision remained 14 and no inference ran. |
+| Unsaved manuscript guard | Send refused an unsaved Book Brief; both draft and composer text remained intact. No turn was created. |
+| Final overview tool | `read_lorekeeper_project` completed inside the chat; reply correctly reported two chapters and the forgiveness direction. |
+| Visibility/packaging | All eight chat control/read tools were app-only with no UI resource association. Bundled SDK server initialized as 0.3.0. |
+| Long-transcript layout | Found and fixed composer displacement; 1,440-pixel layout constrains chat scrolling, 640-pixel layout stacks the pane below the workspace with accessible composer/controls. |
+
+An early additional-context request used the wrong protocol shape and failed
+before inference. The current CLI requires a keyed map of typed context values;
+the failed turn is retained for inspection. A later model supplied invalid
+overview arguments, then succeeded with retrieval; schema errors now identify
+invalid field paths/codes without echoing argument values. The final overview
+call with the declared schema passed.
+
+Full desktop token-reserve/tombstoning behavior is not ported. The client rebuilds
+fresh project context, replays bounded conversation prose, excludes historical
+tool/reasoning payloads, and never silently trims history. Dynamic tools/history
+injection remain experimental app-server APIs. Fresh OAuth, process-crash recovery,
+power-loss durability, other platforms/CLI versions, and public hosted deployment
+remain unverified. No new plugin automated tests or harness were added.
+
+Final source/type/syntax, generated-module build, clean npm install and audit
+passed with zero dependency vulnerabilities. The solution build had zero warnings
+or errors and all 167 existing data-safety tests passed. Owned development MCP and
+app-server processes and the temporary browser tab were closed; runtime copies
+were removed while synthetic project/chat/history files were preserved.
+
+Refreshing the installed package through `codex.exe plugin add` failed while
+backing up its cache entry with Windows access denied. The CLI listing reported
+0.3.0, but cached server/editor digests differed from the final repository bundles;
+that version label is not proof of a successful refresh. No installed-cache files
+or user-owned Codex processes were manually changed to bypass the lock. The final
+code was exercised through the reloadable development host; installed-host upgrade
+and validation remain pending.
+
 ## Limits and next scope
 
 The prototype provides plain-text authoring, linked canon, lexical retrieval,
@@ -141,10 +205,11 @@ vector/graph indexes, images, publication production, desktop archive import,
 Git history UI, or background agents. These omissions are implementation scope,
 not evidence that local plugins cannot support them.
 
-ChatGPT controls its model, complete prompt, compaction and conversation
-lifetime. The prototype cannot take over those host internals; retrieved context
-can inform a turn without becoming an authoritative complete prompt. Other chat
-providers are deliberately omitted. Third-party MCP tools do not inherit native
+The embedded client controls its own model/effort, context assembly and local
+conversation lifetime, while app-server owns native inference internals. It does
+not take over the host ChatGPT conversation or reproduce the desktop's exact
+automatic compaction policy. Other chat providers are deliberately omitted.
+Third-party MCP tools do not inherit native
 Pages privileges. Public-directory/ChatGPT web compatibility and a stateless
 hosted core require separate connectivity, storage-access, and review work.
 

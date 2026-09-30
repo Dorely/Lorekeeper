@@ -37,8 +37,15 @@ checks saved changes automatically, including proposals. If it has an unsaved
 draft, it keeps that draft and shows a notice; the author must save or copy it
 before reopening newer saved state. Do not open extra tabs to force a refresh.
 
-This prototype does not call other chat providers, manage ChatGPT's full prompt
-or compaction, generate embeddings, render publications, import desktop
-Lorekeeper archives, or provide background revision agents. ChatGPT chooses its
-model and conversation lifetime. The storage-probe skill is a separate synthetic
-diagnostic; its ChatGPT storage results are not a local workspace limitation.
+The UI's Writing conversation owns a separate local Codex chat, discovered model
+and reasoning selections, saved transcripts, and fresh project context per turn.
+Its send/connect/stop tools are app-only; do not invoke them from the host chat or
+forward requests into that separate conversation. Discussing a chapter in the UI
+focuses its embedded composer. Host chat can continue using the data tools above.
+
+This prototype does not call other chat providers, take over the host ChatGPT
+prompt/compaction, generate embeddings, render publications, import desktop
+Lorekeeper archives, or provide background revision agents. The embedded chat
+does not yet implement the desktop's exact automatic compaction policy. The
+storage-probe skill is a separate synthetic diagnostic; its ChatGPT storage
+results are not a local workspace limitation.

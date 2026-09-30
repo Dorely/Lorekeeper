@@ -26,13 +26,14 @@
   <header>
     <strong>Lorekeeper development preview</strong>
     <button id="reload">Reload runtime</button>
+    <a id="sign-in-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open Codex sign-in</a>
     <div>
       <div id="identity">Connecting…</div>
-      <small>Independent MCP Apps host. Codex stays open. Chat, ChatGPT storage, and Codex integration are outside this preview.</small>
+      <small>Independent MCP Apps host. Embedded chat uses its own local Codex connection. ChatGPT storage and installed-plugin integration need their actual host.</small>
     </div>
   </header>
   <div id="reload-confirmation" hidden>
-    <p>Reload closes this editor and discards its unsaved draft. Save or copy your work before continuing.</p>
+    <p>Reload closes this editor, stops its embedded chat, and discards unsaved drafts. Save or copy your work before continuing.</p>
     <button id="reload-now">Reload now</button>
     <button id="reload-cancel">Cancel</button>
   </div>

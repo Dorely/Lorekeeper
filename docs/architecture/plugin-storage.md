@@ -12,7 +12,8 @@ This chapter owns the independent local writing prototype and its separate
 storage diagnostic. They do not change the ASP.NET/Blazor/Electron runtime or
 reuse its SQLite database, provider tokens, services, project exports, or
 persistence contracts. The prototype covers brief, outline, chapter prose,
-canon, focused retrieval, and reviewed text replacements.
+canon, focused retrieval, reviewed text replacements, and an embedded local
+Codex conversation with independently assembled context and saved transcripts.
 
 The plugin's hard storage constraint is that durable user content stays
 in ChatGPT storage or user-owned local files. A future hosted core may process
@@ -24,7 +25,8 @@ public-directory release have different connectivity/review requirements.
 
 The repo marketplace selects a portable Agent Plugins package containing two
 skills, a Node stdio MCP server, and two self-contained MCP App editors. Runtime
-requires Node 22.12 or newer; bundled SDKs eliminate a runtime npm install. The
+requires Node 22.12 or newer; embedded chat additionally needs the Codex executable
+and local account sign-in. Bundled SDKs eliminate a runtime npm install. The
 installed plugin has no HTTP service. `mcp.json` resolves its working directory `"./"`
 inside the installed plugin. Root `plugin.json` is the only manifest. The stable
 package identity remains `lorekeeper-storage-probe`; its display name is
@@ -75,7 +77,8 @@ All tools share project validation and storage operations.
 Only the explicit workspace opener links to the UI resource. Data and app-only
 tools declare visibility without a resource URI, so routine model reads,
 retrieval, proposals, and editor calls do not create tabs. The skill forbids using
-the opener as a refresh. The host Side Chat owns the conversation surface.
+the opener as a refresh. Host Side Chat remains an alternative caller of the
+data tools; the custom UI owns a separate embedded writing conversation.
 
 The app-only `sync_lorekeeper_project` compares the observed exact file hash and
 returns the private saved snapshot only when it changes. A visible editor checks
@@ -101,11 +104,77 @@ canon, selected chapter/outline, then query matches. It returns stable source
 identities, reasons, revision, completeness, and a bounded excerpt budget. Default
 is 12,000 UTF-16 characters, up to 12 sources, with surrogate-safe excerpt
 boundaries. No embeddings/provider calls occur. The editor can preview/share
-selected context and request a chapter discussion through the host. This neither
-controls ChatGPT's full prompt/token budget/compaction nor guarantees complete
-retrieval. Author content is data, not executable tool instructions.
+selected context with the host. Chapter discussion focuses the embedded composer.
+Retrieval does not guarantee completeness. Author content is data, not executable
+tool instructions.
 
-Other chat providers/model selection, rich semantic editing, graph/vector
+### Embedded conversation and context ownership
+
+`LorekeeperChat` owns project-bound conversations, context assembly, turn lifecycle,
+and four dynamic project tools. `CodexAppServer` lazily launches an owned stdio
+`codex app-server` child, negotiates the experimental API, correlates JSONL RPCs,
+streams notifications, and answers only project tool requests. It drains stderr
+without logging it, sanitizes protocol failures, and closes only its child.
+`LOREKEEPER_CODEX_PATH` can select an absolute executable; existing `CODEX_HOME`
+and authentication remain Codex-owned. No credentials are read/copied by the
+plugin, stored with projects, or exposed to the iframe. Connect performs account
+and model discovery without inference; Send performs inference using that account.
+The pane can intentionally open only the official OpenAI sign-in URL. Disconnect
+does not log out of Codex. Fresh OAuth remains unverified.
+
+`model/list` supplies available choices and supported/default efforts. Conversation
+selections persist; unavailable selections fail without automatic fallback. Each
+turn records its actual requested model/effort. No desktop provider catalogue,
+OAuth persistence, or transport adapter is reused or changed.
+
+Each turn uses a new ephemeral thread with code-owned base/developer instructions,
+the complete protected Book Brief, current bounded lexical retrieval and its
+identities/completeness, and all prior visible user/assistant prose. Historical
+prose is injected as explicitly quoted work-log evidence; prior tool payloads
+and reasoning are audit-only and are not replayed. Project context is supplied
+as untrusted additional context. Exact file hashes reject a changed project
+before inference; tools reacquire current state before proposals. The UI refuses
+to send with an unsaved manuscript draft. Users can preview context, choose the
+chapter/budget, switch conversations, select model/effort, stream replies, and Stop.
+Codex's native token usage and context-window reports appear with each turn.
+
+The dynamic tool schemas omit filenames and bind all operations to the turn's
+project: overview, exact target, focused retrieval, and proposal. Manual-save and
+accept/reject tools remain app-only and are not exposed to this model. The child
+uses a contained `.codex-workspace` working directory, read-only sandbox, no
+approval escalation, and per-thread overrides disabling inherited MCP servers,
+plugins/apps/hooks, shell/web/browser/image/computer tools, memory, and delegation.
+Overrides do not rewrite user settings. Host chat data tools retain their existing
+contracts, and no routine chat operation is associated with a UI resource.
+
+`LocalDocumentStore` owns shared containment, exact hashes, locks, guarded
+replacement, and revision backups; project/chat codecs retain separate schemas
+and limits. A schema-v1 `PROJECT.lorekeeper.json.chat.json` file holds project UUID,
+active conversation, selections, messages, reasoning summaries, tool outcomes,
+context snapshots, status, and usage. Files are limited to 8 MiB, 30 conversations,
+100 turns per conversation, and 120,000 replayed prose characters. Reaching a
+bound fails without silent history trimming. Turn IDs are stable caller UUIDs;
+identical retries return the existing turn, different input with that ID fails.
+The outgoing message persists before inference under a lease held for the whole
+turn. Project writes/proposals use a separate lock. Partial output stays in memory
+while streaming and is saved on completion, interruption, or graceful close.
+Accepted local tool operations drain before the final audit is persisted; Stop
+does not roll back a proposal already executing its guarded local write.
+Uncertain requests are never resent automatically. A process crash can leave a
+running record/lock requiring inspection; power-loss durability is not established.
+If final persistence fails, buffered output remains in memory and further sends
+are blocked; preserve it before closing. Revision history is local user content.
+
+Fresh threads plus a high native auto-compaction threshold let Lorekeeper rebuild
+context between turns. This is not the desktop chat's exact token-reserve and
+tombstoning implementation. App-server owns native inference/within-turn context
+handling and can reject oversized requests. History injection and dynamic tools
+are experimental, exercised with CLI 0.159.2; no unstable `thread/resume.history`
+path or encrypted reasoning reconstruction is used. The host ChatGPT conversation
+remains separate. Official app-server guidance permits existing authentication for
+local/open-source apps; commercial/hosted apps must use Sign in with ChatGPT.
+
+Other chat providers, rich semantic editing, graph/vector
 indexes, images, publishing/Press, desktop archive imports, Git history UI, and
 background revision agents are outside this prototype. The content storage
 constraint also applies to a possible future hosted core; local stdio success
@@ -118,15 +187,18 @@ does not establish public-directory or ChatGPT web compatibility.
 sandboxed iframe and an official SDK stdio client, rather than a simulated MCP
 bridge. Host/origin checks, a per-process API token, no-store responses, bounded
 request bodies, and a restrictive CSP contain the loopback API. Server-side
-audience checks preserve app-only tools. It does not supply model inference,
-Side Chat, file-library APIs, or the OpenAI resource bridge.
+audience checks preserve app-only tools. The embedded pane exercises the same
+owned Codex app-server connection and live inference as the installed package;
+the preview does not supply host Side Chat, library APIs, or the resource bridge.
+The official sign-in URL appears as an explicit clickable link in the parent.
 
 Each MCP generation is copied from the three repository bundles into an owned
 temporary directory under `.artifacts/plugin-development/runtimes`. Its exact
 copied server/editor hashes, version, PID, and generation are displayed. This
 avoids Windows locking the next repository build. Explicit **Reload runtime**
 asks before discarding the in-memory editor, refuses to interrupt active tool
-operations, closes only its own stdio client/process, cleans that generation,
+operations, stops owned chat turns and persists partial transcripts, closes only
+its own app-server and stdio client/process, cleans that generation,
 starts a fresh one, rediscovers tools/resources, and mounts the editor again.
 No failed write is automatically retried. Shutdown drains active operations and
 removes only validated immediate temporary children of that runtime directory.
@@ -200,6 +272,8 @@ file, protocol, and workspace observations.
 | `Lorekeeper.Plugin/src/server.mjs` | Workspace/diagnostic MCP tools and resources, visibility, bounded responses, safe errors. |
 | `Lorekeeper.Plugin/src/project.mjs`, `src/store.mjs` | Project schema, identities, lexical retrieval, proposal lifecycle, contained local files, guarded writes and revision backups. |
 | `Lorekeeper.Plugin/src/workspace.ts`, `src/workspace.html` | Authoring, context preview/share, draft/save state, review, application dialogs. |
+| `Lorekeeper.Plugin/src/chat.mjs`, `src/app-server.mjs` | Project-bound conversations/context, guarded local transcripts, scoped dynamic tools, and owned Codex stdio lifecycle. |
+| `Lorekeeper.Plugin/src/chat-pane.ts` | Embedded composer/transcript, conversation/model/effort selection, context preview, streaming polling, and interruption. |
 | `Lorekeeper.Plugin/skills/lorekeeper-workspace/SKILL.md` | Grounded reads/retrieval, proposal-only model edits, human review, retry/conflict boundaries. |
 | `Lorekeeper.Plugin/src/app.ts`, `src/app.html` | Memory-only editor, capability detection, library reads/uploads, conditional writes, stale-save check, and content-free reports. |
 | `Lorekeeper.Plugin/skills/storage-probe/SKILL.md` | Actual-host probe workflow and evidence boundaries. |

@@ -1,5 +1,6 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 import { OpenAIExtensions } from "@openai/mcp-extensions/app";
+import { ChatPane } from "./chat-pane";
 
 interface Chapter { id: string; title: string; synopsis: string; text: string }
 interface Canon { id: string; name: string; kind: string; text: string; chapterIds: string[] }
@@ -10,7 +11,7 @@ interface State { fileName: string; project: Project; etag: string }
 interface Inventory { folder: string; projects: { fileName: string; title: string }[]; unreadable: string[]; truncated: boolean; state: State | null }
 interface Context { revision: number; usedCharacters: number; maximumCharacters: number; omittedSources: number; sources: { kind: string; id: string; title: string; text: string; reason: string; complete: boolean }[] }
 
-const app = new App({ name: "Lorekeeper", version: "0.2.2" }, {}, { autoResize: true });
+const app = new App({ name: "Lorekeeper", version: "0.3.0" }, {}, { autoResize: true });
 new OpenAIExtensions(app);
 const content = document.querySelector<HTMLElement>("#content")!;
 const status = document.querySelector<HTMLElement>("#status")!;
@@ -37,6 +38,7 @@ const html = (value: string | number) => String(value).replace(/[&<>"']/g, c => 
 const inputValue = (id: string) => document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`#${id}`)?.value ?? "";
 const authored = (project: Project) => ({ title: project.title, bookBrief: project.bookBrief, chapters: project.chapters, canon: project.canon });
 const button = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`)!;
+const chatPane = new ChatPane({ call, saved: requireSaved, selectedChapter: () => selectedChapter, openLink: url => app.openLink({ url }) });
 
 function show(message: string, error = false): void { status.textContent = message; status.dataset.error = String(error); }
 function updateControls(): void {
@@ -95,6 +97,7 @@ function adopt(next: State): void {
   if (!draft.chapters.some(c => c.id === selectedChapter)) selectedChapter = draft.chapters[0]?.id;
   document.querySelector<HTMLElement>("#recovery")!.hidden = true;
   render();
+  chatPane.setProject(next);
 }
 async function synchronize(): Promise<void> {
   if (!connected || busy || synchronizing || !state || view === "new" || dialog.open || document.visibilityState === "hidden") return;
@@ -165,7 +168,7 @@ function render(): void {
   if (view === "context") content.innerHTML = heading("Choose what the conversation sees", "Preview the saved brief, linked canon, and relevant writing for a specific task.") + `<label for="context-chapter">Chapter</label><select id="context-chapter"><option value="">Whole project</option>${draft.chapters.map(c => `<option value="${c.id}" ${c.id === selectedChapter ? "selected" : ""}>${html(c.title)}</option>`).join("")}</select><label for="context-query">What are you working on?</label><input id="context-query" value="${html(query)}" maxlength="500" placeholder="Mara, lantern memories, harbor…"><div class="row" style="margin-top:12px"><button id="preview-context">Preview context</button><button id="share-context">Share with ChatGPT</button></div>${context ? `<p class="muted">Saved revision ${context.revision} · ${context.usedCharacters.toLocaleString()} / ${context.maximumCharacters.toLocaleString()} characters${context.omittedSources ? ` · ${context.omittedSources} sources omitted` : ""}</p>${context.sources.map(s => `<div class="source"><h3>${html(s.title)}</h3><small>${html(s.reason)} · ${s.complete ? "Complete text" : "Excerpt"}</small><pre>${html(s.text)}</pre></div>`).join("") || `<p>No matching sources. Try distinctive names or terms from the project.</p>`}` : ""}`;
   if (view === "review") {
     const pending = draft.proposals.filter(p => p.status === "pending");
-    content.innerHTML = heading("Your words, your decision", "Proposed edits stay separate from the writing until you accept them.") + (pending.length ? pending.map(p => `<article class="card"><h2>${html(targetTitle(p.target))}</h2><p>${html(p.reason)}</p><small>Based on revision ${p.baseRevision}</small><div class="diff"><div><h3>Current at proposal</h3><pre>${html(p.before) || "(empty)"}</pre></div><div class="after"><h3>Proposed</h3><pre>${html(p.after) || "(empty)"}</pre></div></div><div class="row" style="margin-top:16px"><button class="primary" data-accept="${p.id}">Accept edit</button><button data-reject="${p.id}">Reject edit</button></div></article>`).join("") : `<div class="card"><p>No edits waiting for review.</p><small>Ask in Side Chat. Saved proposals appear here automatically when you have no unsaved changes.</small></div>`) + `<details><summary>Reviewed edits (${draft.proposals.length - pending.length})</summary>${draft.proposals.filter(p => p.status !== "pending").map(p => `<p>${html(targetTitle(p.target))} · ${html(p.status)}<small>${html(p.reason)}</small></p>`).join("")}</details><details><summary>Try the review workflow</summary><p class="muted">Create a proposed sentence for the selected chapter. It will wait for your approval.</p><button id="example-proposal">Create example proposal</button></details>`;
+    content.innerHTML = heading("Your words, your decision", "Proposed edits stay separate from the writing until you accept them.") + (pending.length ? pending.map(p => `<article class="card"><h2>${html(targetTitle(p.target))}</h2><p>${html(p.reason)}</p><small>Based on revision ${p.baseRevision}</small><div class="diff"><div><h3>Current at proposal</h3><pre>${html(p.before) || "(empty)"}</pre></div><div class="after"><h3>Proposed</h3><pre>${html(p.after) || "(empty)"}</pre></div></div><div class="row" style="margin-top:16px"><button class="primary" data-accept="${p.id}">Accept edit</button><button data-reject="${p.id}">Reject edit</button></div></article>`).join("") : `<div class="card"><p>No edits waiting for review.</p><small>Ask in the writing conversation. Saved proposals appear here automatically when you have no unsaved changes.</small></div>`) + `<details><summary>Reviewed edits (${draft.proposals.length - pending.length})</summary>${draft.proposals.filter(p => p.status !== "pending").map(p => `<p>${html(targetTitle(p.target))} · ${html(p.status)}<small>${html(p.reason)}</small></p>`).join("")}</details><details><summary>Try the review workflow</summary><p class="muted">Create a proposed sentence for the selected chapter. It will wait for your approval.</p><button id="example-proposal">Create example proposal</button></details>`;
   }
   updateControls();
 }
@@ -220,9 +223,8 @@ content.addEventListener("click", event => {
     }
     if (element.id === "discuss") {
       const loaded = requireSaved();
-      const response = await app.sendMessage({ role: "user", content: [{ type: "text", text: `Help me work on chapter ${selectedChapter} in Lorekeeper project ${loaded.fileName}. Read its current overview, retrieve relevant context, and read the exact chapter before discussing changes. Propose any requested text changes through propose_lorekeeper_edit for my review; do not directly rewrite the local file.` }] });
-      if (response.isError) throw new Error("The host declined this message. Ask about the saved chapter directly in chat.");
-      show("Chapter discussion requested in this conversation.");
+      document.querySelector<HTMLTextAreaElement>("#chat-message")!.focus();
+      show(`Use the writing conversation beside this editor to discuss ${loaded.project.chapters.find(c => c.id === selectedChapter)?.title ?? "your chapter"}.`);
     }
     if (element.id === "example-proposal") {
       const loaded = requireSaved(); const chapter = loaded.project.chapters.find(c => c.id === selectedChapter) ?? loaded.project.chapters[0];

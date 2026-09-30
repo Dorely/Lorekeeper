@@ -26,7 +26,10 @@ async function startRuntime() {
   const client = new Client({ name: "lorekeeper-development", version: "1.0.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
     command: process.execPath, args: ["./server.mjs"], cwd: directory, stderr: "ignore",
-    env: { ...getDefaultEnvironment(), LOREKEEPER_PROJECTS_DIR: projects }
+    env: { ...getDefaultEnvironment(), LOREKEEPER_PROJECTS_DIR: projects,
+      ...(process.env.LOREKEEPER_CODEX_PATH ? { LOREKEEPER_CODEX_PATH: process.env.LOREKEEPER_CODEX_PATH } : {}),
+      ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {})
+    }
   });
   try {
     const hashes = {};
@@ -46,6 +49,10 @@ async function startRuntime() {
 }
 async function closeRuntime(current) {
   if (!current) return;
+  if (current.tools?.some(tool => tool.name === "disconnect_lorekeeper_chat")) {
+    const result = await current.client.callTool({ name: "disconnect_lorekeeper_chat", arguments: {} });
+    if (result.isError) throw new Error("Embedded chat could not finish closing. Preserve its output before retrying reload.");
+  }
   await current.client.close();
   // Only an owned mkdtemp directory immediately below runtimeRoot may be removed.
   if (dirname(current.directory) !== runtimeRoot || !current.directory.startsWith(resolve(runtimeRoot, "runtime-"))) throw new Error("Unexpected development runtime directory.");

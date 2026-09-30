@@ -16,9 +16,12 @@ its planned features are not claims about current capabilities.
 The independent [Lorekeeper Local plugin prototype](Lorekeeper.Plugin/README.md)
 can be installed from this repo's local plugin marketplace. Its custom workspace
 edits a Book Brief, outline, chapters, and linked canon; retrieves focused context;
-and holds ChatGPT's proposed text changes for human review. Content stays in
+and embeds a Codex-backed writing chat whose proposed changes await human review.
+The chat discovers account models, previews fresh project context, and saves
+separate local conversations with streaming output and Stop. Content stays in
 portable files on the user's computer, with guarded saves and local revision
-backups. It requires no hosted Lorekeeper service or API key. It uses a separate
+backups. Embedded chat requires the local Codex executable and sign-in; it needs
+no hosted Lorekeeper service or API key. It uses a separate
 project format and does not open desktop projects. See the
 [prototype evidence](docs/research/local-plugin-prototype.md) for validation and
 limits. The original [ChatGPT storage probe](docs/research/chatgpt-storage-probe.md)

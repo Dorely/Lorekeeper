@@ -7,6 +7,7 @@ import { OpenAIExtensions } from "@openai/mcp-extensions/server";
 import { z } from "zod";
 import { createProject, editableSchema, hashText, ProjectError, projectSummary, proposeEdit, readTarget, resolveProposal, retrieveContext, targetSchema } from "./project.mjs";
 import { LocalProjectStore } from "./store.mjs";
+import { LorekeeperChat } from "./chat.mjs";
 
 const resourceUri = "ui://lorekeeper/storage-probe.html";
 const projectId = "85d88cf9-79a9-4cb6-8fba-a541c707833b";
@@ -27,12 +28,14 @@ const projectSchema = z.object({
   }).strict()).length(1)
 }).strict();
 
-const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.2.2" });
+const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.3.0" });
 new OpenAIExtensions(server);
 const store = new LocalProjectStore();
 const workspaceUri = "ui://lorekeeper/workspace.html";
 const fileNameSchema = z.string().min(1).max(120);
 const etagSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const narrativeTools = new Map();
+const chat = new LorekeeperChat(store, narrativeTools);
 
 registerAppResource(server, "lorekeeper-workspace", workspaceUri, {}, async () => ({
   contents: [{
@@ -48,6 +51,11 @@ function savedResult(state, extra = {}) {
   return { content: [{ type: "text", text: JSON.stringify(summary) }], structuredContent: summary, _meta: { "lorekeeper/workspace": snapshot(state) } };
 }
 function workspaceTool(name, config, handler, appOnly = false) {
+  if (["read_lorekeeper_project", "read_lorekeeper_target", "retrieve_lorekeeper_context", "propose_lorekeeper_edit"].includes(name)) {
+    const { fileName: _fileName, ...fields } = config.inputSchema;
+    const validate = z.object(fields).strict();
+    narrativeTools.set(name, { name, description: config.description, validate, schema: z.toJSONSchema(validate), handler });
+  }
   server.registerTool(name, {
     ...config,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, ...config.annotations },
@@ -66,7 +74,7 @@ workspaceTool("open_lorekeeper_workspace", {
   title: "Open Lorekeeper", description: "Open the local authoring workspace when the user asks to display it. This opens a UI tab; do not call it during ordinary reading, retrieval, proposing, or to refresh an existing editor. Existing editors check saved changes automatically. Content stays in user-owned local files.",
   inputSchema: { fileName: fileNameSchema.optional() },
   _meta: { ui: { resourceUri: workspaceUri }, "openai/ui": { entrypoints: [{ type: "global" }, { type: "thread" }] } }
-}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: "0.2.2" } }));
+}, async ({ fileName }) => fileName ? savedResult(await store.read(fileName)) : ({ content: [{ type: "text", text: "Lorekeeper opened. Choose or create a local project in the workspace." }], structuredContent: { version: "0.3.0" } }));
 
 workspaceTool("list_lorekeeper_projects", {
   title: "List local projects", description: "List up to 100 project summaries from Lorekeeper's configured local folder. Does not read arbitrary paths.", inputSchema: {}
@@ -147,6 +155,37 @@ workspaceTool("resolve_lorekeeper_proposal", {
   inputSchema: { fileName: fileNameSchema, expectedEtag: etagSchema, proposalId: z.string().uuid(), decision: z.enum(["accept", "reject"]) }, annotations: { readOnlyHint: false, destructiveHint: true }
 }, async ({ fileName, expectedEtag, proposalId, decision }) => savedResult(await store.update(fileName, expectedEtag, project => resolveProposal(project, proposalId, decision))), true);
 
+const chatResult = data => ({ content: [], structuredContent: data });
+workspaceTool("connect_lorekeeper_chat", {
+  title: "Connect local Codex chat", description: "Start this plugin's owned local Codex app-server and discover the signed-in account's models. No inference or user configuration changes.", inputSchema: {}, annotations: { readOnlyHint: false }
+}, async () => chatResult(await chat.connect()), true);
+workspaceTool("disconnect_lorekeeper_chat", {
+  title: "Close local Codex chat connection", description: "Stop owned turns, save their partial transcripts, and close only this plugin's app-server. Does not sign out of Codex or delete conversations.", inputSchema: {}, annotations: { readOnlyHint: false }
+}, async () => { await chat.close(); return chatResult({ disconnected: true }); }, true);
+workspaceTool("sign_in_lorekeeper_chat", {
+  title: "Sign in to local Codex", description: "Start the official Codex ChatGPT sign-in flow. Authentication is shared with local Codex and remains owned by Codex.", inputSchema: {}, annotations: { readOnlyHint: false, openWorldHint: true }
+}, async () => chatResult(await chat.login()), true);
+workspaceTool("get_lorekeeper_chat", {
+  title: "Read embedded conversation", description: "Read this project's local conversation and buffered streaming output. Does not call a model or open tabs.", inputSchema: { fileName: fileNameSchema, knownVersion: z.string().max(100).optional() }
+}, async ({ fileName, knownVersion }) => {
+  const current = await chat.view(fileName);
+  return chatResult(current.version === knownVersion ? { version: current.version, unchanged: true } : current);
+}, true);
+workspaceTool("choose_lorekeeper_conversation", {
+  title: "Choose embedded conversation", description: "Select a saved conversation or create another without deleting earlier transcripts.", inputSchema: { fileName: fileNameSchema, conversationId: z.string().uuid().optional() }, annotations: { readOnlyHint: false }
+}, async ({ fileName, conversationId }) => chatResult(await chat.conversation(fileName, conversationId)), true);
+const contextInputs = { fileName: fileNameSchema, chapterId: z.string().uuid().optional(), text: z.string().min(1).max(10000), maximumCharacters: z.number().int().min(1000).max(24000).optional() };
+workspaceTool("preview_lorekeeper_chat_context", {
+  title: "Preview embedded chat context", description: "Build the exact current project context for a proposed message, including the complete protected Book Brief and bounded retrieval.", inputSchema: contextInputs
+}, async args => chatResult(await chat.preview(args)), true);
+workspaceTool("send_lorekeeper_chat_message", {
+  title: "Send embedded chat message", description: "Persist the outgoing message and start a separate local Codex turn. Streams through read-only chat polling. Uses only current-project read/retrieval/proposal tools; uncertain messages are never resent automatically.",
+  inputSchema: { ...contextInputs, requestId: z.string().uuid(), expectedEtag: etagSchema, model: z.string().min(1).max(200), effort: z.string().min(1).max(50) }, annotations: { readOnlyHint: false, openWorldHint: true }
+}, async args => chatResult(await chat.send(args)), true);
+workspaceTool("stop_lorekeeper_chat", {
+  title: "Stop embedded chat", description: "Interrupt this runtime's active Codex turn. Keeps partial output and completed proposals for inspection.", inputSchema: { fileName: fileNameSchema }, annotations: { readOnlyHint: false }
+}, async ({ fileName }) => chatResult(await chat.stop(fileName)), true);
+
 registerAppResource(server, "storage-probe", resourceUri, {}, async () => ({
   contents: [{
     uri: resourceUri,
@@ -207,3 +246,13 @@ server.registerTool("validate_probe_project", {
 });
 
 await server.connect(new StdioServerTransport());
+let closing = false;
+async function close() {
+  if (closing) return;
+  closing = true;
+  await chat.close();
+  await server.close();
+}
+process.stdin.once("end", () => { void close(); });
+process.once("SIGINT", () => { void close(); });
+process.once("SIGTERM", () => { void close(); });

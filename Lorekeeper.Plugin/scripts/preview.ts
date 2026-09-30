@@ -58,11 +58,18 @@ async function mount(tool: Tool, args: Record<string, unknown>, toolResult: Call
   current.setAttribute("sandbox", "allow-scripts");
   document.querySelector("#editor")!.append(current);
   frame = current;
-  const next = new AppBridge(null, { name: "Lorekeeper development preview", version: "1.0.0" }, { serverTools: {} }, {
+  const next = new AppBridge(null, { name: "Lorekeeper development preview", version: "1.0.0" }, { serverTools: {}, openLinks: {} }, {
     hostContext: { theme: "dark", displayMode: "fullscreen", availableDisplayModes: ["fullscreen"], platform: "web" }
   });
   next.oncalltool = async params => await api<CallToolResult>("tool", { ...params, audience: "app" });
   next.onrequestdisplaymode = async () => ({ mode: "fullscreen" });
+  next.onopenlink = async ({ url }) => {
+    if (new URL(url).origin !== "https://auth.openai.com") return { isError: true };
+    const link = document.querySelector<HTMLAnchorElement>("#sign-in-link")!;
+    link.href = url; link.hidden = false;
+    status.textContent = "Use Open Codex sign-in above to complete authentication, then reconnect in the editor.";
+    return {};
+  };
   next.oninitialized = () => {
     status.textContent = `Editor ${next.getAppVersion()?.version ?? "unknown"} connected through the real MCP Apps bridge. Generation ${runtime.generation}.`;
     void next.sendToolInput({ arguments: args }).then(() => next.sendToolResult(toolResult)).catch(() => {
