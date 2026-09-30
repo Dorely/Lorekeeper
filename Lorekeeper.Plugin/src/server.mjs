@@ -25,7 +25,7 @@ const projectSchema = z.object({
   }).strict()).length(1)
 }).strict();
 
-const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.1.0" });
+const server = new McpServer({ name: "lorekeeper-storage-probe", version: "0.1.1" });
 new OpenAIExtensions(server);
 
 registerAppResource(server, "storage-probe", resourceUri, {}, async () => ({
@@ -57,7 +57,7 @@ registerAppTool(server, "open_storage_probe", {
   }
 }, async () => ({
   content: [{ type: "text", text: "Storage probe opened. Saving and reopening require the host file capabilities reported by the editor." }],
-  structuredContent: { probeVersion: "0.1.0", maximumBytes }
+  structuredContent: { probeVersion: "0.1.1", maximumBytes }
 }));
 
 server.registerTool("validate_probe_project", {

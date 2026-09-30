@@ -17,7 +17,9 @@ The independent [Lorekeeper Storage Probe](Lorekeeper.Plugin/README.md) can be
 installed from this repo's local plugin marketplace. It investigates ChatGPT
 file storage with synthetic content and has no content database. Native Page
 editing and agent-mediated JSON save/readback have been exercised; storage
-through its custom editor remains unverified. See the
+through its custom editor is blocked on the tested Codex desktop host, which
+exposes neither the library file APIs nor the file resource bridge. The editor
+itself connects and validates synthetic revisions. See the
 [probe evidence](docs/research/chatgpt-storage-probe.md) for results and remaining
 checks. This is not yet the Lorekeeper workspace in plugin form.
 

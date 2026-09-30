@@ -26,14 +26,14 @@ class ProbeError extends Error {}
 const maximumBytes = 65536;
 const originalParagraph = "The café’s keeper wrote: “こんにちは — hello, 🌿.”";
 const revisedParagraph = "The café’s keeper revised the note: “こんにちは — hello again, 🌿.”";
-const app = new App({ name: "Lorekeeper Storage Probe", version: "0.1.0" }, {}, { autoResize: true });
+const app = new App({ name: "Lorekeeper Storage Probe", version: "0.1.1" }, {}, { autoResize: true });
 const extensions = new OpenAIExtensions(app);
 const editor = document.querySelector<HTMLTextAreaElement>("#project")!;
 const status = document.querySelector<HTMLElement>("#status")!;
 const capabilities = document.querySelector<HTMLElement>("#capabilities")!;
 const diagnostics = document.querySelector<HTMLElement>("#diagnostics")!;
 const buttons = Object.fromEntries([...document.querySelectorAll<HTMLButtonElement>("button")].map(b => [b.id, b]));
-const report: Record<string, unknown> = { probeVersion: "0.1.0", connected: false, observations: [] };
+const report: Record<string, unknown> = { probeVersion: "0.1.1", connected: false, observations: [] };
 const observations = report.observations as Record<string, unknown>[];
 let connected = false;
 let busy = false;

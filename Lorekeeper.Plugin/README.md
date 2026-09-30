@@ -13,8 +13,10 @@ content logging.
 
 The [evidence record](../docs/research/chatgpt-storage-probe.md) separates native
 Pages operations from checks performed through this plugin. Native Page editing
-and agent-mediated JSON uploads/readback have passed. Custom editor storage is
-not yet proven; do not choose a production storage backend from those results.
+and agent-mediated JSON uploads/readback have passed. Version 0.1.1's editor
+connected, revised, and validated the sample in Codex desktop, but that host
+exposed no library file APIs or resource bridge. Custom editor storage remains
+unproven; do not choose a production storage backend from those results.
 
 ## Install locally
 
@@ -95,9 +97,11 @@ npm audit
 ```
 
 The build bundles the official MCP/MCP Apps/OpenAI extensions SDKs into the
-server and inline HTML, and regenerates `THIRD-PARTY-NOTICES.md`. Version-pinned
-dependencies come from `package-lock.json`. LF checkout rules keep fixture bytes
-and generated artifacts stable across operating systems. Bundled SDK template
+server and inline HTML, checks the exact inline module's JavaScript syntax before
+writing the editor bundle, and regenerates `THIRD-PARTY-NOTICES.md`. A replacement
+callback preserves JavaScript replacement tokens inside the SDK bundle.
+Version-pinned dependencies come from `package-lock.json`. LF checkout rules keep
+fixture bytes and generated artifacts stable across operating systems. Bundled SDK template
 strings preserve upstream whitespace; the package's Git/editor rules exclude
 that generated whitespace from trimming and diff warnings. The vendored MIT text
 under `licenses/` supplies the upstream license omitted from the

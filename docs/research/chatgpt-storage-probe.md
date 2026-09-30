@@ -1,6 +1,6 @@
 # ChatGPT-backed storage probe
 
-Observed September 29, 2026 (America/Los_Angeles; cloud receipts dated September
+Observed September 29–30, 2026 (America/Los_Angeles; cloud receipts dated September
 30 UTC), using Codex desktop 26.928.20755 on Windows, bundled Codex CLI 0.159.0,
 Node 22.18.0, and the authenticated personal ChatGPT account. Only synthetic
 content was used. This record describes evidence, not a production storage
@@ -12,18 +12,26 @@ Native Page editing is a viable agent-mediated storage option. The built-in
 Pages tools can also upload and read back separate JSON project snapshots in
 ChatGPT's file library. Neither proves custom-editor autosave or conditional
 replacement through our plugin. Keep the preferred plugin storage backend
-undecided until the real file bridge passes the editor checks below.
+undecided: the tested Codex desktop editor connects but exposes neither the
+library file APIs nor the file resource bridge. Saving/reopening through that
+editor is blocked. This observation does not establish availability in ChatGPT
+web or another host/version.
 
 The local plugin is implemented, installed, and enabled. Its MCP server and
 bundled resource work through a real SDK client. The initial desktop **Try it**
 attempt loaded the skill but reported that `open_storage_probe` was missing;
 no editor opened. Inspection of the official portable config parser found that
 the initial `cwd: "."` was invalid. It was corrected to `"./"` and the installed
-copy was refreshed. Actual desktop editor capability/save checks remain pending
-after that correction; the original failure does not establish that local MCP
-Apps are unsupported.
+copy was refreshed. After an app restart the editor rendered but stayed at
+Connecting. Its inline JavaScript failed to parse: the build's string replacement
+interpreted replacement tokens inside the SDK bundle and inserted HTML into
+JavaScript expressions. Version 0.1.1 uses a callback to preserve the compiled
+bytes and syntax-checks the exact generated inline module. After refreshing the
+installation and restarting again, the opener and live editor both reported
+0.1.1 and the editor connected. These two corrected failures were packaging
+bugs, not evidence that local MCP Apps are unsupported.
 
-A fresh bundled Codex app-server was then initialized for a read-only
+A separate fresh bundled Codex app-server was also initialized for a read-only
 `mcpServerStatus/list` request restricted to `lorekeeper_storage`. It recognized
 `lorekeeper-storage-probe@lorekeeper-local`, returned server version 0.1.0, and
 discovered `open_storage_probe` and `validate_probe_project`. No registration
@@ -86,7 +94,8 @@ Pages tool also does not predict the iframe API, which supplies
 
 The implementation is in [Lorekeeper.Plugin](../../Lorekeeper.Plugin/README.md).
 The repo marketplace installs `lorekeeper-storage-probe@lorekeeper-local`,
-version 0.1.0. CLI install/list confirmed the plugin is installed and enabled.
+version 0.1.1. CLI install confirmed the updated plugin; this chat's actual
+`open_storage_probe` returned 0.1.1 after restart.
 The installed `mcp.json` uses `"./"` and matches the corrected repo config.
 
 Authorized manual SDK checks established a stdio handshake, discovery of both
@@ -97,20 +106,37 @@ these checks. It required no `node_modules` in that runtime directory. This
 establishes the packaged server/resource boundary, not iframe rendering or host
 file capabilities. Manually owned MCP processes are closed after the checks.
 
+The actual Codex desktop side-panel editor then created revision 1, revised its
+Unicode paragraph to revision 2, and validated the result through the app-only
+MCP tool. Both exact digests and byte counts matched the native file evidence
+above (446/463 bytes), and project/chapter IDs stayed fixed. **Show report in
+chat** completed through MCP App model context. The connected report observed
+`uploadFile: false`, `selectFiles: false`, `getFileDownloadUrl: false`, and
+`resourceBridge: false`. Library open/save and file read/write/stale-save actions
+remained disabled. The installed SDK only exposes `extensions.resources` after
+the host advertises its resource capability during connection; it was absent
+here. No file resource URI, writable metadata, or ETag was received.
+
+Consequently no plugin upload was attempted, and editor save/close/reopen,
+same-file replacement, and file conflicts could not be exercised. The private
+sample Page's Results now records this actual-host blocker. No simulated bridge
+or built-in Page tool was substituted for an editor save.
+
 | Real host check | Current evidence |
 |---|---|
-| Editor renders/connects | Initial Try it failed before the editor opened; corrected registration awaiting host exercise. |
-| Library upload/picker/download APIs | Not observed in our editor. |
-| Host file entrypoint/resource read | Not exercised in our editor. |
+| Editor renders/connects | Passed with 0.1.1 after fixing registration and bundle insertion; synthetic revision/validation and context report passed. |
+| Library upload/picker/download APIs | All three unavailable in the connected Codex desktop editor. |
+| Host file entrypoint/resource read | Resource bridge unavailable; entrypoint/read not exercised. |
 | Writable metadata and ETag | Not observed. |
-| Editor save, close, reopen with matching bytes | Not exercised. |
-| Editor paragraph update, save, close, reopen | Not exercised. |
+| Editor save, close, reopen with matching bytes | Blocked by unavailable host file APIs. |
+| Editor paragraph update, save, close, reopen | Paragraph revision/validation passed in memory; persistence blocked. |
 | Same-file update vs new artifact | Not established through our editor. |
 | Stale `ifMatch` save preserves newer bytes | Not exercised. Native Page block conflict is separate evidence. |
 
 Final static/repository verification passed: plugin `npm ci --ignore-scripts`,
-TypeScript/server syntax checks, bundle/notices generation, and npm audit with
-zero vulnerabilities; `dotnet build Lorekeeper.sln` with zero warnings/errors;
+TypeScript/server and generated inline-module syntax checks, bundle/notices
+generation, and npm audit with zero vulnerabilities; `dotnet build Lorekeeper.sln`
+with zero warnings/errors;
 and `dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj` with 167 passed,
 zero failed/skipped. The staged diff and working diff passed whitespace checks.
 Generated SDK template-string whitespace is preserved under the package's

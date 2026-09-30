@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +10,11 @@ await mkdir(output, { recursive: true });
 const options = { absWorkingDir: root, bundle: true, minify: true, legalComments: "none", metafile: true, write: false };
 const app = await build({ ...options, entryPoints: ["src/app.ts"], platform: "browser", target: "es2022", format: "esm" });
 const html = (await readFile(resolve(root, "src/app.html"), "utf8"))
-  .replace("/*APP_SCRIPT*/", app.outputFiles[0].text.replace(/<\/script/gi, "<\\/script"));
+  // A callback preserves replacement tokens such as $& and $' inside SDK code.
+  .replace("/*APP_SCRIPT*/", () => app.outputFiles[0].text.replace(/<\/script/gi, "<\\/script"));
+const inlineScript = html.match(/<script type="module">([\s\S]*)<\/script>/)?.[1];
+if (inlineScript == null) throw new Error("The editor template must contain its module script.");
+execFileSync(process.execPath, ["--check", "--input-type=module"], { input: inlineScript });
 await writeFile(resolve(output, "storage-probe.html"), html);
 const server = await build({
   ...options, entryPoints: ["src/server.mjs"], platform: "node", target: "node22", format: "esm",

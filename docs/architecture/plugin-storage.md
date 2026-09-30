@@ -95,6 +95,11 @@ the final state. Inspect both source and regenerated distributables/notices.
 Preserve exact fixture bytes and document digests separately from semantic IDs.
 No plugin test suite or one-off automated harness is permitted by repo policy.
 
+The build inserts JavaScript with a replacement callback so SDK replacement
+tokens remain literal, then syntax-checks the exact inline module extracted from
+the generated HTML before writing it. Compiling the TypeScript source alone
+does not verify the HTML embedding step.
+
 With explicit authorization, verify installed and bundle-only MCP handshakes,
 tools/resources, and synthetic validation through a real SDK client. This proves
 packaging/protocol behavior only. Editor capabilities, upload/reopen, same-file
