@@ -13,6 +13,14 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md). The approved
 stepwise milestones, verification gates, and the current development handoff;
 its planned features are not claims about current capabilities.
 
+The independent [Lorekeeper Storage Probe](Lorekeeper.Plugin/README.md) can be
+installed from this repo's local plugin marketplace. It investigates ChatGPT
+file storage with synthetic content and has no content database. Native Page
+editing and agent-mediated JSON save/readback have been exercised; storage
+through its custom editor remains unverified. See the
+[probe evidence](docs/research/chatgpt-storage-probe.md) for results and remaining
+checks. This is not yet the Lorekeeper workspace in plugin form.
+
 ## Current Capabilities
 
 - Print Designed Pages, selected cover surfaces, images, and individual or ranged

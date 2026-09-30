@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "lorekeeper-storage-probe",
+  "version": "0.1.0",
+  "description": "Check ChatGPT project-file persistence with synthetic Lorekeeper content.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Lorekeeper Storage Probe",
+        "shortDescription": "Check user-owned ChatGPT project storage"
+      }
+    }
+  }
+}

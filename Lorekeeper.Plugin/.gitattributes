@@ -1,0 +1,3 @@
+* text eol=lf
+# Bundled Zod contains intentional whitespace in generated-code template strings.
+dist/* whitespace=-blank-at-eol

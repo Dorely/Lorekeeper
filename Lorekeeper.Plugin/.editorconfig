@@ -1,0 +1,8 @@
+[*]
+end_of_line = lf
+
+[*.{ts,mjs}]
+indent_size = 2
+
+[dist/**]
+trim_trailing_whitespace = false
