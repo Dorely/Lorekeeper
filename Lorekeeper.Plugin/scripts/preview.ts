@@ -46,7 +46,7 @@ async function mount(tool: Tool, args: Record<string, unknown>, toolResult: Call
   if (bridge) {
     try { await bridge.teardownResource({}, { timeout: 3000 }); }
     catch (error) {
-      // These editors do not implement the optional teardown method. Discard was explicitly confirmed.
+      // The retained storage diagnostic does not implement optional teardown.
       if (!(error instanceof McpError) || error.code !== ErrorCode.MethodNotFound) throw new Error("The editor could not finish closing. Preserve its draft before retrying reload.");
     }
     await bridge.close();
@@ -90,6 +90,7 @@ async function openWorkspace(): Promise<void> {
 button("reload").onclick = () => { confirmation.hidden = false; };
 button("reload-cancel").onclick = () => { confirmation.hidden = true; };
 button("reload-now").onclick = () => { void run(async () => {
+  if (bridge) await bridge.teardownResource({}, { timeout: 15000 });
   runtime = await api<Runtime>("restart");
   identify();
   await openWorkspace();

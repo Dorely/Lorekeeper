@@ -13,14 +13,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md). The approved
 stepwise milestones, verification gates, and the current development handoff;
 its planned features are not claims about current capabilities.
 
-The independent [Lorekeeper Local plugin prototype](Lorekeeper.Plugin/README.md)
+The independent [Lorekeeper Local plugin](Lorekeeper.Plugin/README.md)
 can be installed from this repo's local plugin marketplace. Its custom workspace
-edits a Book Brief, outline, chapters, and linked canon; retrieves focused context;
-and embeds a Codex-backed writing chat whose proposed changes await human review.
+provides a complete act/chapter/beat Outline and plain-text Editor, structured
+Book Brief and linked entities, with chat left, workspace middle and context/details
+right. Codex-backed chat applies guarded changes directly with comparison and
+targeted rollback. Manual fields autosave and failed drafts remain recoverable.
 The chat discovers account models, previews fresh project context, and saves
-separate local conversations with streaming output and Stop. Content stays in
-portable files on the user's computer, with guarded saves and local revision
-backups. Embedded chat requires the local Codex executable and sign-in; it needs
+separate Outline/Editor conversations with streaming output and Stop. Rolling
+context visibly excludes older turns while retaining the complete transcript.
+Content stays in portable local files with compact history and guarded migration.
+Embedded chat requires the local Codex executable and sign-in; it needs
 no hosted Lorekeeper service or API key. It uses a separate
 project format and does not open desktop projects. See the
 [prototype evidence](docs/research/local-plugin-prototype.md) for validation and

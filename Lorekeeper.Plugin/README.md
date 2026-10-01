@@ -1,126 +1,112 @@
 # Lorekeeper Local
 
-A local writing prototype for Codex: plan a book, write chapters, record canon,
-preview focused context, and chat with an embedded Codex-backed assistant whose
-proposed changes await review. The MCP server and editor share project operations.
-It runs from this repo as a subproject,
-independently of the desktop workbench's database and provider credentials.
+Version 0.4.0 is a local Outline and plain-text Editor workspace for Codex.
+Chat is on the left, writing in the middle, and context/details on the right.
+It uses the desktop app's theme tokens and light/dark themes. Narrow layouts
+switch between Chat, Workspace and Details; they do not make the local MCP
+server reachable from ChatGPT web or a phone.
 
-Projects are portable `.lorekeeper.json` files on the user's computer. There is
-no hosted Lorekeeper service, content database, copied credential, or content
-logging. OpenAI receives messages, conversation prose, selected project context,
-and requested tool results when a message is sent. Saved conversations and their
-audit records stay in local files; they are separate from the host chat.
-
-The original synthetic storage probe remains available as a diagnostic. Only
-that probe keeps all working content in memory and never writes local projects.
-
-The [evidence record](../docs/research/chatgpt-storage-probe.md) separates native
-Pages operations from checks performed through this plugin. Native Page editing
-and agent-mediated JSON uploads/readback have passed. Version 0.1.1's editor
-connected, revised, and validated the sample in Codex desktop, but that host
-exposed no library file APIs or resource bridge. The workspace therefore uses
-local files. This does not establish that every future host will lack the
-documented optional bridge.
+Projects, conversations, composer drafts, recovery journals and change history
+stay in user-owned local files. There is no hosted Lorekeeper content store or
+copied credential. Codex owns sign-in and model transport. Sending a message
+shares its prose, selected project context and tool results with OpenAI.
 
 ## Use the workspace
 
-1. Open **Lorekeeper Local**, choose **New project**, and create a blank project
-   or the artificial **The Lantern Archive** sample.
-2. Edit the **Book Brief**, chapter intent/order in **Outline**, prose in
-   **Chapters**, and chapter-linked characters/places/facts in **Canon**.
-3. Choose **Save changes**. Saves are explicit; closing loses unsaved drafts.
-   **Reopen** rereads the saved file. Switching projects or reopening an edited
-   project asks before discarding its draft.
-4. Use **Context** to preview relevant saved content and share it with the
-   conversation. Retrieval prioritizes the brief and chapter-linked canon,
-   followed by lexical matches, within a visible character budget. It includes
-   source identities, relevance reasons, and excerpt completeness.
-5. In **Writing conversation**, choose **Connect Codex**, then select an available
-   model and reasoning effort. Type a message and choose **Send** (Ctrl/Cmd+Enter).
-   **Context for the next message** previews the complete Book Brief plus bounded
-   retrieval; choose a chapter or the whole project. **Stop** preserves partial
-output and completed proposals. **New chat** preserves earlier conversations.
-6. Ask Lorekeeper to revise a saved chapter, brief, outline synopsis, or canon
-   entry. Its tools read exact text and submit a proposal with a source hash and
-   revision. Inspect the before/after text in **Review edits**, then accept or
-   reject. **Try the review workflow** supplies an example without a model call.
+1. Create a blank or synthetic sample project from **New**.
+2. In **Outline**, organize acts, chapters and beats. Edit titles/synopses inline,
+   use arrows or drag handles to reorder, and **Move to act…** for a chapter's
+   parent. Deleting an act moves its chapters to Unassigned. Chapter deletion
+   confirms removal of prose, beats and links; entities remain.
+3. Use the right pane for the structured **Book Brief**, protected **Project
+   Guidance**, facts and grouped entities. Entities support custom types,
+   aliases, text properties, relationships and chapter/beat associations.
+   Properties currently use a validated JSON object of text values.
+4. In **Editor**, select a chapter and write plain text. Edit/Read/Changes,
+   selection, word count and bounded Undo/Redo are available. Formatting controls
+   are deliberately labelled as future work.
+   Undo/Redo groups recent typing. External saved changes reset that chapter's
+   local stack; persistent restoration is available through Changes / History.
+5. Manual fields autosave after 500 ms of inactivity. Saving/Saved/Failed or
+   Conflict status is visible. Navigation, Send and development reload flush
+   edits first. Invalid JSON stays in its field; a failed submitted batch stays
+   in a local recovery journal. Inspect both variants in the conflict dialog.
+6. The embedded conversation connects to the owned local Codex app-server on
+   first project opening. **Settings** provides Connect, Disconnect and official
+   Sign in. Models and reasoning efforts come from model/list. New conversations
+   prefer 6.1 Sol/Medium when offered; existing unavailable choices show an error.
+   Enter sends, Shift+Enter adds a line, and IME composition does not send.
+7. Outline and Editor have separate project-scoped conversations. Selecting
+   another chapter keeps the Editor conversation. Earlier messages remain saved
+   and can be loaded through **Earlier messages**.
+8. Requested AI changes apply directly. **Changes / History** groups them by
+   turn and groups manual typing. Compare before/after, then **Restore affected
+   items** to create a guarded rollback. Later overlapping edits block rollback;
+   unrelated fields remain intact. Earlier proposals are read-only historical
+   comparisons or unapplied drafts, never auto-applied by migration.
 
-The embedded pane owns its conversation and context assembly through a separate
-local Codex app-server. **Discuss this chapter** focuses that pane. Host Side Chat
-can still use the project data tools, but has a separate transcript and context.
-Ordinary read/retrieval/proposal tools do not launch editor tabs; only an explicit
-Open action does. An open, visible workspace checks saved changes every 2.5
-seconds, preserves the selected view, and updates the review count. Clean drafts
-refresh automatically. Dirty drafts and new-project forms remain untouched;
-copy/save a draft before explicitly reopening newer saved state.
+Only an explicit workspace opener owns a UI resource. Reads, autosave, chat
+and mutation tools refresh the existing workspace without opening more tabs.
+The iframe cannot close or manage Codex's surrounding tabs.
 
-The default folder is `Documents/Lorekeeper Projects` under the user's home
-directory. Set the absolute `LOREKEEPER_PROJECTS_DIR` environment variable before
-starting Codex to use another user-owned folder. The server accepts simple
-filenames in that folder, never arbitrary paths. Copy a valid project file into
-the folder to open it; this prototype has no desktop archive importer.
+## Context and saved data
 
-Every changed save increments the revision, preserves the prior exact bytes in
-the folder's `.history/`, and replaces the project through a sibling temporary
-file. Loaded hashes reject stale saves; proposal acceptance also checks the
-original target text. Failure preserves the editor draft, with a copyable JSON
-snapshot. Participating writers use per-file locks. Avoid simultaneously editing
-these files outside the plugin: a filesystem rename is not an atomic comparison
-against an uncooperative external writer. An interrupted process can leave a
-lock requiring manual inspection/removal after all writers are closed. Initial
-creation is exclusive and never overwrites a file; crash/power-loss durability
-and automatic recovery are not established.
+Book Brief and Project Guidance are protected. Outline receives the complete
+organized hierarchy and associations through lossless tables. Editor receives
+its complete active chapter once, its outline, linked entities, preceding-chapter
+continuity and relevant lexical matches. Chapter preferences persist inclusion,
+   exclusion and explicit pins. Search can open source fields or pin complete content.
+**Reset** changes preferences only. **Prompt** shows authoring instructions, tool
+schemas, the current message, project sources and quoted saved prose; source identity, revision, reason, completeness
+and estimated token cost appear in Details.
 
-Prototype bounds: 4 MiB UTF-8 project files, 100 chapters, 300 canon entries,
-1,000 retained proposals, and a 100-file project inventory. Chapter prose is
-plain text. Context defaults to 12,000 characters with up to 12 sources; this
-budget limits retrieved excerpts, in addition to the complete protected brief.
+The complete request budget includes instructions, tool schemas, source metadata,
+selected prose and replayed messages. Before a native window report, estimated
+input is capped at 32,000 tokens. After a report, 20% of that window is reserved
+for generation/tools; the author's context budget can be smaller. Oldest turns
+leave rolling context visibly, while the complete transcript stays saved.
+Required direction, current chapter or pins are never silently shortened.
+Overflow needs an explicit adjustment. Tokens are conservative UTF-8 estimates,
+not a tokenizer guarantee. Codex still owns processing inside a running turn.
 
-### Embedded chat and local context
+The default folder is Documents/Lorekeeper Projects in the user's home.
+Set absolute LOREKEEPER_PROJECTS_DIR before starting the client to change it.
+Only contained simple filenames are accepted. Projects are independent schema-v2
+.lorekeeper.json files; desktop databases/manuscript archives are not opened.
 
-Codex owns sign-in and provider transport. The plugin starts `codex app-server`
-only on **Connect Codex** or **Sign in**; sending uses the signed-in local account.
-It discovers models and efforts through `model/list`, preserves conversation
-selections, and rejects unavailable choices instead of switching silently.
-**Disconnect** stops owned turns and closes that connection without signing out.
-If needed, **Sign in** opens the official OpenAI authorization URL; alternatively
-run `codex login`, then reconnect. Fresh browser sign-in has not been exercised.
+Supported schema-v1 files upgrade on opening. Original bytes are retained in
+.history; IDs, order, prose, canon, links, proposal records and conversations
+survive. The old brief becomes Premise verbatim and chapters begin Unassigned.
+Old conversations become Editor conversations.
 
-Each message starts a fresh ephemeral Codex thread with Lorekeeper's instructions,
-the complete current Book Brief, bounded saved-project retrieval, and the earlier
-user/assistant prose. Historical prose is explicitly quoted as a work log;
-historical tool results and reasoning summaries remain audit-only. The assistant
-can read the current project, retrieve context, read exact targets, and propose
-edits. These four tools are bound to the selected file; it cannot accept edits.
-Per-thread configuration disables inherited MCP servers, plugins, shell, web
-search, hooks, memory, and delegation, with read-only sandbox and no approvals.
-The iframe makes no direct model/network calls and never receives credentials.
+Exact affected-field/list/dependency hashes guard one shared command service.
+Stable request IDs make identical retries idempotent; different input with the
+same ID fails. Compact durable before/after records precede project replacement.
+Long text changes retain only the changed range, not another full book.
+Participating writers serialize. Unrelated fields reconcile; an overlapping
+dirty draft is preserved for the application-owned conflict dialog.
 
-The pane shows streaming plain text, tool outcomes, reasoning summaries when
-provided, and Codex's reported input/output tokens and context-window size.
-Conversations persist in `PROJECT.lorekeeper.json.chat.json` beside the project,
-with guarded saves and exact revision backups in `.history/`. Outgoing messages
-are saved before inference. A chat file stays locked for the turn; competing
-writers fail closed. Stable message UUIDs prevent identical retries from creating
-another turn. Uncertain turns are never automatically resent. On a graceful
-disconnect/reload, partial transcripts are saved; a crash may leave a running
-record and lock requiring manual inspection. There is no automatic recovery.
-Already-started local tool operations finish before their final audit is saved;
-stopping does not undo a proposal that has reached the guarded local write.
+Unambiguous prepared transactions and demonstrably dead-PID locks can recover.
+Unknown locks, mismatching evidence and uncertain transactions fail closed,
+preserving files for inspection. Previous backups are retained. Filesystem
+rename is not an atomic compare-and-swap against an uncooperative external
+editor; power-loss durability is not established. Preserve the project,
+.history, transaction and lock files before resolving uncertain recovery.
 
-Chat bounds are 8 MiB per file, 30 conversations, 100 turns per conversation,
-10,000 characters per message, and 120,000 characters of replayed conversation
-prose. At a limit, start a new conversation (or a different project at the file
-limit); earlier transcripts are retained. History is never silently trimmed.
-The desktop app's exact token-reserve/tombstoning policy is not ported. Fresh
-threads and a high native auto-compaction threshold keep context assembly local,
-but app-server still owns inference internals and may reject oversized input.
-Dynamic tools and history injection use experimental app-server APIs; CLI
-0.159.2 was exercised. Other CLI versions and platforms remain unverified.
+Project safety bounds are 32 MiB, 1,000 chapters, 10,000 beats, 5,000 entities
+and 100 inventory files. Conversations have a 64 MiB per-project file bound;
+the full transcript is retained rather than truncated at that bound. Partial
+replies are journaled while running and preserved on Stop/graceful reload.
+Uncertain inference is never automatically resent; its send identity is retained.
 
-See the [prototype evidence](../docs/research/local-plugin-prototype.md) for
-actual validation and remaining integration limits.
+World and Voices wait for v2. Sources ingestion, Images, Publish, rich manuscript
+features, desktop archive imports, other providers and ChatGPT-backed editor
+storage are outside this version. The original storage diagnostic remains
+separate and unchanged.
+
+See the [evidence record](../docs/research/local-plugin-prototype.md) for exercised
+behavior and limitations, and the [storage evidence](../docs/research/chatgpt-storage-probe.md)
+for the distinction between native Pages privileges and plugin file APIs.
 
 ## Install locally
 
@@ -157,17 +143,10 @@ Codex loads an installed copy under its plugin cache. After changing this
 subproject, rebuild and refresh the installation with `codex plugin add` before
 retesting. Give each changed distributable a new plugin/package version: Windows
 can prevent replacing a version whose cache is a running process's working
-directory. Version 0.3.1 installs alongside the stale 0.3.0 copy without restarting
-Codex. Close the old workspace view and open Lorekeeper Local again; the header
-must show **Local prototype · 0.3.1**. A CLI listing alone does not prove an existing
-view or MCP connection refreshed. If the host keeps its old connection, that
-connection still needs the host's refresh flow. Never edit installed cache files.
-
-The earlier cached 0.3.0 chat sent `additionalContext` as an array, while CLI
-0.159.2 requires a keyed map. This caused `turn/start` error -32600 before
-inference. The 0.3.1 distributable contains the corrected request and labels
-protocol errors separately from sign-in advice. Failed messages remain in their
-saved transcript and are never resent automatically.
+directory. Version 0.4.0 uses a distinct cache directory. Close the old view and open
+Lorekeeper Local again; its header must show **Local · 0.4.0**. A CLI listing
+alone does not establish that an existing view/connection refreshed. Never edit
+installed cache files. Installed-package verification is separate from the preview.
 
 `mcp.json` uses the portable working directory `"./"`, which resolves inside the
 installed plugin. A plain `"."` is rejected by the portable config parser. This
@@ -234,8 +213,9 @@ An agent can operate these controls through browser automation. Reload closes
 the embedded chat connection (saving interrupted turns), closes only the
 development host's MCP process, discovers the rebuilt tools, rereads
 the UI resource, and mounts a fresh editor in the same tab. Its toolbar shows
-server version, process ID, generation, and server/editor bundle hashes. Save
-or copy drafts first: reload deliberately discards the editor's in-memory draft.
+server version, process ID, generation, and server/editor bundle hashes. Manual
+edits are flushed before closing; failed saves prevent reload. Composer drafts and
+partial replies are preserved.
 It refuses to restart during an active tool operation and never replays a write.
 
 Each generation runs from a disposable copy below
@@ -281,34 +261,18 @@ Run the repository's required solution build and existing data-safety tests on
 the final state as well. Do not add a separate test suite or simulate host
 storage. Manual protocol/UI/integration checks require explicit user
 authorization under `AGENTS.md`; the approved storage-probe request authorizes
-these synthetic checks.
+these synthetic checks. The approved full-workspace plan also authorizes its
+synthetic UI, inference, recovery and installed-package acceptance checks.
 
 ## Capability boundaries
 
-The prototype implements brief/outline/canon/prose editing, bounded lexical
-retrieval, and reviewed text replacements. It does not yet implement the rich
-semantic manuscript editor, graph/vector indexes, image workflows, publication
-renderer, desktop import/export, Git history UI, or background revision agents.
-These are omitted from this prototype, not proven impossible in a local plugin.
-
-It does not call other chat providers. Its embedded conversation controls local
-context assembly, model/effort selection, and durable transcripts. It cannot take
-over the host ChatGPT conversation, its prompt, history, or compaction.
-Built-in Pages tools callable by an agent are not automatically callable by this
-MCP server or iframe.
-
-Local stdio installation is a development/distribution route, not evidence of
-public-directory or ChatGPT web compatibility. Public submission with MCP
-currently calls for a public HTTPS endpoint, subject to the documented local-MCP
-exception process. Any eventual hosted Lorekeeper core must keep durable user
-content in user-controlled ChatGPT storage or local files, not a Lorekeeper
-content database, object store, logs, backups, or queues. Existing app-server
-authentication is documented for local/open-source apps; a commercial or hosted
-release must use Sign in with ChatGPT. The local transport/authentication in this
-prototype is not a public hosted deployment design.
+Local stdio success does not establish a public hosted deployment or ChatGPT web
+compatibility. A future public core needs separate connectivity, authentication,
+distribution and review work. Durable content must remain on users' machines or
+in user-controlled ChatGPT storage; a Lorekeeper-hosted content database is outside
+the agreed direction.
 
 References: [plugin file APIs](https://developers.openai.com/plugins/reference#file-apis),
-[Codex app-server and authentication](https://learn.chatgpt.com/docs/app-server),
+[Codex app-server](https://learn.chatgpt.com/docs/app-server),
 [file editor extensions](https://developers.openai.com/plugins/build/extensions),
-[OpenAI MCP extensions SDK/spec](https://github.com/openai/mcp-extensions),
-[public MCP packaging requirements](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks).
+[MCP extensions](https://github.com/openai/mcp-extensions).

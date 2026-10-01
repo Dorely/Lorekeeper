@@ -244,24 +244,182 @@ passed with zero dependency vulnerabilities. The solution build succeeded with
 zero warnings/errors and all 167 existing data-safety tests passed. No plugin
 automated tests or harness were added.
 
-## Limits and next scope
+## Full local workspace 0.4.0, September 30, 2026
 
-The prototype provides plain-text authoring, linked canon, lexical retrieval,
-and reviewed replacements. It does not reproduce desktop semantic editing,
-vector/graph indexes, images, publication production, desktop archive import,
-Git history UI, or background agents. These omissions are implementation scope,
-not evidence that local plugins cannot support them.
+The owner explicitly authorized the full-workspace implementation and synthetic
+acceptance checks. The historical sections above describe their dated versions;
+proposal-only editing and memory-only drafts are superseded in 0.4.0. Manual
+checks used an interactive official MCP SDK client and the independent official
+MCP Apps development host with the actual bundled server. Browser interaction
+used the computer-use surface. No automated plugin suite, assertion harness,
+mock bridge or hosted content service was introduced.
 
-The embedded client controls its own model/effort, context assembly and local
-conversation lifetime, while app-server owns native inference internals. It does
-not take over the host ChatGPT conversation or reproduce the desktop's exact
-automatic compaction policy. Other chat providers are deliberately omitted.
-Third-party MCP tools do not inherit native
-Pages privileges. Public-directory/ChatGPT web compatibility and a stateless
-hosted core require separate connectivity, storage-access, and review work.
+The main retained sample is
+`.artifacts/plugin-development/projects/story-95e9e582.lorekeeper.json`,
+**0.4 Acceptance — 测试 🌿**, project ID
+`75ed90ab-40a7-426b-9d03-da13f062dea3`, final revision 33. Its chapter, entities,
+conversations, composers, command receipts and history remain alongside it.
+Other fixtures below share that ignored development-project folder. The owner's
+Documents/Lorekeeper Projects/Test Project was not changed.
 
-Project saves are guarded for participating writers and keep local revision
-backups. Crash recovery, power-loss durability, arbitrary external-editor races,
-automatic backup restoration and collaboration across machines are unverified.
-Unsaved drafts are memory-only. Project limits are documented in the
+### Storage, migration and commands
+
+| Check | Observed result |
+|---|---|
+| Schema-v1 migration | `migration-04.lorekeeper.json` upgraded with original IDs, chapter order, Unicode prose, canon and links retained. Brief text became Premise verbatim; chapters became Unassigned. Pending proposals stayed unapplied historical drafts. |
+| Original bytes | Raw project backup SHA-256 was `5600e48023ccff09ee51332a5ad749fe7c31568d9bf6cc48bee7143a4511458a`. The original chat backup was retained separately. |
+| Old conversations | The migrated Editor conversation retained its old messages and Unicode. Outline ownership was separate. |
+| Autosave and reload | Manual fields saved after inactivity. A Unicode manuscript append was flushed through Reload runtime and reopened at the next revision with the same text and identity. |
+| Exact command retry | Request `6fef6270-0da5-4ff6-940b-d1e9500a2266` returned the same receipt/revision/timestamp twice; changed input under that ID failed with `REQUEST_ID_REUSED`. |
+| Two views, overlapping edits | Both act-title variants remained available. An application-owned conflict dialog allowed explicit application of the retained draft as a new guarded transaction. |
+| Two views, unrelated edits | An act synopsis and chapter synopsis reconciled, preserving both. A focused clean title field refreshed an external saved value while retaining focus and caret. |
+| Invalid properties | `{broken JSON` remained visible as an invalid field draft while canonical entity properties stayed unchanged. Corrected text properties and an entity relationship saved successfully. |
+| Prepared transaction recovery | `recovery-prepared-04.lorekeeper.json` recovered only with matching before/after evidence and a verified abandoned lock; revision 2 and its commit marker remained, with temporary/pending files removed. |
+| Uncertain recovery | Deliberately mismatching evidence in `recovery-uncertain-04.lorekeeper.json` preserved canonical revision 1, the pending journal and temporary bytes, and opened the recovery surface. |
+| Comparison and rollback | History separated grouped manual typing and AI turns. Restoring an older prose edit after a later overlapping edit failed without replacement. Restoring an unrelated synopsis preserved the later manuscript text. |
+
+### Outline, Editor and context
+
+| Check | Observed result |
+|---|---|
+| Hierarchy | Created, renamed and moved chapters between acts. Deleting an act moved chapters to Unassigned without losing prose or beats. |
+| Chapter deletion | The confirmation described prose, beats and links. Deletion removed those dependent items while retaining entities; guarded history restoration restored the chapter, its prose, beats and association. |
+| AI structural editing | A real Outline turn moved a chapter and renamed a beat to **The bell answers — 海**; chapter prose remained unchanged. The open Outline refreshed automatically. |
+| Editor | Edit/Read/Changes, selection and word count were exercised. Bounded Undo/Redo changed 42 → 41 → 42 words. Native browser undo had failed the earlier check and was replaced with the explicit chapter history implementation. |
+| Entity fields | Custom type Organization, aliases, Unicode text properties and From/To relationship fields saved. Source selection opened the owning brief/entity fields on the right. |
+| Inclusion versus pins | Explicit inclusion and pinning displayed distinct reasons and controls. Reset removed preferences while retaining manuscript content. |
+| Search-to-context | Lexical search found chapter, synopsis and entity sources; opening and pinning complete sources worked. |
+| Assembled request | Preview included actual instructions, schemas, quoted historical messages and keyed context. The complete active chapter appeared once; source identity, revision, reason, completeness and cost were shown. |
+| Required overflow | A complete outline pin plus the active chapter exceeded the conservative budget at 32,410 / 32,000 estimated tokens. The overflow was visible and required content was not shortened. Reset retained all 2,500 chapter words. |
+| Rolling conversation | `long-chat-04.lorekeeper.json` retained all 35 completed synthetic turns. Earlier messages loaded beyond the recent 20. Turns 1–31 visibly left model replay, with the assembled request estimated at 31,854 / 32,000 tokens. |
+| Substantial book | `large-04.lorekeeper.json` retained three acts, 60 chapters, 300 beats, 400 entities and approximately 150,000 words. Lossless outline tables brought complete Outline context within the initial budget; Editor chapter 60 retained all 2,500 words with continuity and linked entities. |
+| Expanded layout | All 60 chapter cards and 300 beats rendered. Desktop workspace client/scroll widths were both 753 pixels; narrow widths were both 375 pixels inside a 390-pixel viewport. The bottom pane switcher remained reachable. |
+
+The [desktop capture](../../.artifacts/plugin-development/workspace-desktop-0.4.jpg)
+and [narrow capture](../../.artifacts/plugin-development/workspace-narrow-0.4.jpg)
+show the final development host. They do not establish rendering in an already
+open native Codex view. Theme and responsive behavior are implemented; native
+IME composition was source-inspected rather than manually exercised. Unicode
+typing/paste was exercised.
+
+### Embedded conversation and responsiveness
+
+Real 6.1 Sol/Medium Editor inference used an exact target read and a guarded
+command to append **A silver bell rang twice. 海 🌿.** The already-open editor
+updated from 28 to 35 words without Reopen or another tab. A later Outline turn
+used structural tools. Failed invalid tool arguments left content unchanged and
+returned schema errors before a valid read/command succeeded; list-target
+instructions were clarified afterward.
+
+Stop during a real streamed reply retained approximately 600 words as an
+interrupted turn; reload preserved that partial reply and completed changes.
+No inference was resent. Shift+Enter inserted a newline; the composer survived
+reload, and Enter sent a subsequent request. A selected Low effort persisted.
+Separate Outline/Editor conversations and model discovery were exercised.
+
+Measured connection startup was 430–634 ms, with a warm retained connection
+action at 27 ms. Ordinary sampled local actions were 32–36 ms. Captured streamed
+event-to-UI delivery was 47 ms; request preparation, first model output and tool
+execution were displayed separately without content logging. First model output
+in the exercised turns ranged from roughly 2.8 to 27.5 seconds. These samples
+meet the local-action/UI-delivery targets; they are not a latency guarantee for
+all operations or model processing.
+
+Development reload flushed manual/composer drafts before replacing its owned
+MCP generation, retained partial output, and reused the same browser tab. The
+final build, independent host and owned app-server processes were closed after
+validation. Synthetic project/history files and captures were retained. Automatic
+approval review rejected both recursive and explicit-file cleanup of four
+disposable runtime bundle copies. Those ignored directories remain preserved;
+none of their owned server processes or preview listeners remains active.
+
+### Final installed package
+
+`codex.exe plugin add lorekeeper-storage-probe@lorekeeper-local --json` succeeded.
+The CLI reported enabled version 0.4.0 at
+`C:/Users/jonth/.codex/plugins/cache/lorekeeper-local/lorekeeper-storage-probe/0.4.0`.
+
+| Bundle | Initially matching repository and installed 0.4.0 SHA-256 |
+|---|---|
+| Server | `d5db2f263d729e74f2115e2211a897ac57548ab884788966418698fede692474` |
+| Workspace | `4931b296cd3cb512f66c8bc0f6c160de2c309466c7ea4ea92571e7c7b9828eea` |
+| Unchanged storage diagnostic | `4e76ac1baac68f5e1f86802ce7091c93ae39d503fee7232c9841e9ba1a6bd2b4` |
+
+A manual official-SDK connection launched this exact installed server. Handshake
+reported 0.4.0, 30 tools were listed, and only the two explicit workspace/probe
+openers owned UI resources. The original synthetic diagnostic validation passed
+with digest `7c9d985fb00c60b3cd61431c45e39d2179a72de21df874a65dd26615c973acba`.
+Sign-in/model discovery returned eight models. Installed-package turn
+`1f779e80-3325-4ebc-8d30-bb39c69c23a5` used 6.1 Sol/Medium, completed
+`read_lorekeeper_target`, and replied **The Lantern Archive — VERIFIED**.
+Preparation was 10 ms, tool execution 1 ms, first model output 7,202 ms. The
+project stayed at revision 33 with its content hash unchanged. The SDK client
+explicitly disconnected and closed its owned processes.
+
+Final review corrected restoration of an explicitly saved dark theme when the
+host theme is light. The rebuilt final workspace SHA-256 is
+`d7e4e884508c5d1bed40003f5d90f2b855cea2acfd6e7ce8b349da4e7cd187ac`.
+The installed server and diagnostic remain identical to the final source.
+A supported same-version reinstall was refused while backing up the cache with
+Windows **Access is denied**. The installed editor therefore still has the earlier
+hash above and lacks only this final theme-restoration correction. No cache files
+were edited and no user-owned Codex process was stopped to bypass the lock.
+The final repository distributable retains version 0.4.0; refreshing that exact
+editor into the user's active cache remains a delivery limitation.
+
+The final package was then installed through the same supported CLI into the
+isolated profile `.artifacts/plugin-package-verification/codex-home`, preserving
+the marketplace/plugin identity and version. Only that child CLI process used
+the separate profile; no account credentials were copied or user configuration
+changed. All three installed bundle hashes matched the final repository. A real
+SDK connection initialized that exact server as 0.4.0, listed 30 tools, read the
+final workspace resource with digest `d7e4e884508c5d1bed40003f5d90f2b855cea2acfd6e7ce8b349da4e7cd187ac`,
+and passed synthetic diagnostic validation with the unchanged fixture digest.
+The owned SDK/server process was closed afterward. This establishes final-package
+installation and protocol behavior separately from the active user's cache.
+
+The final source/distributable ZIP is retained at
+`.artifacts/plugin-packages/lorekeeper-local-0.4.0-20260930.zip`, SHA-256
+`18c5e32ff338459eeab3b4e61363b54fa5141bf13ae0473b94eba3109dabf13d`.
+Its 35 entries contain manifest version 0.4.0, matching final bundles, source,
+skills, fixtures and license notices, without node_modules or synthetic user data.
+
+An already-open Codex connection can still retain an older package. Installed
+protocol/inference and development-host UI are verified separately; automatic
+refresh of the owner's existing native view is not established. The iframe
+cannot control surrounding host tabs. Routine tools have no UI association,
+and repeated development actions used the existing workspace rather than
+creating extra workspace tabs.
+
+### Final repository verification
+
+Clean `npm ci --ignore-scripts`, TypeScript/MJS checks, the self-contained bundle
+build and exact inline-module syntax checks passed. Final `npm audit` reported
+zero vulnerabilities. `dotnet build Lorekeeper.sln` succeeded with zero warnings
+or errors, and `dotnet test Lorekeeper.Tests/Lorekeeper.Tests.csproj` passed all
+167 existing data-safety tests after the final source correction. `git diff
+--check` passed. Source, bundles, tool registrations and documentation were
+reviewed; obsolete proposal/accept/reject/whole-project-save runtime paths were
+absent. No Press source changed, and no automated plugin tests were added.
+
+## Current limits and next scope
+
+Version 0.4.0 provides complete Outline organization, plain-text Editor authoring,
+structured direction/entities, persistent context preferences, guarded direct
+changes, compact comparison/rollback, autosave journals and rolling conversations.
+World and Voices wait for v2. Sources ingestion, Images, Publish, rich manuscript
+features, desktop archive imports, other providers and ChatGPT-backed editor
+storage remain outside this version. Vector/graph indexes and desktop compaction
+are not reproduced. These are scope boundaries, not evidence of plugin impossibility.
+
+The embedded client controls model/effort, context assembly and local conversation
+lifetime, while Codex owns processing within each turn. Experimental dynamic
+tools/history injection and the exercised CLI version remain integration
+dependencies. Fresh OAuth, native installed-host UI refresh, native IME input,
+other platforms and public deployment were not exercised.
+
+Synthetic interruption and recovery checks establish their exact cases, not
+power-loss durability, arbitrary external-editor races, automatic backup
+restoration or cross-machine collaboration. Unknown recovery evidence stays
+preserved. Project limits and operational instructions are in the
 [plugin README](../../Lorekeeper.Plugin/README.md).
