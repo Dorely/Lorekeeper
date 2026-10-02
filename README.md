@@ -13,28 +13,6 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md). The approved
 stepwise milestones, verification gates, and the current development handoff;
 its planned features are not claims about current capabilities.
 
-The independent [Lorekeeper Local plugin](Lorekeeper.Plugin/README.md)
-can be installed from this repo's local plugin marketplace. Its custom workspace
-provides a complete act/chapter/beat Outline and plain-text Editor, structured
-Book Brief and linked entities, with chat left, workspace middle and context/details
-right. Codex-backed chat applies guarded changes directly with comparison and
-targeted rollback. Manual fields autosave and failed drafts remain recoverable.
-The chat discovers account models, previews fresh project context, and saves
-separate Outline/Editor conversations with streaming output and Stop. Rolling
-context visibly excludes older turns while retaining the complete transcript.
-Content stays in portable local files with compact history and guarded migration.
-Embedded chat requires the local Codex executable and sign-in; it needs
-no hosted Lorekeeper service or API key. It uses a separate
-project format and does not open desktop projects. See the
-[prototype evidence](docs/research/local-plugin-prototype.md) for validation and
-limits. The original [ChatGPT storage probe](docs/research/chatgpt-storage-probe.md)
-remains as a diagnostic: native storage works, but the tested Codex editor host
-exposes neither the library file APIs nor the file resource bridge.
-
-The plugin also has a [reloadable local development preview](Lorekeeper.Plugin/README.md#reloadable-development-preview).
-It lets an agent rebuild and refresh the MCP server and editor without restarting
-Codex, using a separate synthetic project folder by default.
-
 ## Current Capabilities
 
 - Print Designed Pages, selected cover surfaces, images, and individual or ranged
