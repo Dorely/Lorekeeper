@@ -386,6 +386,10 @@ try
     {
         Assert-ReleaseTagUnused -Repository $repository -Tag $tag
     }
+    $appImageSourceArchivePath = if (-not $WindowsOnly)
+    {
+        Assert-AppImagePublicationReady -RepositoryRoot $repoRoot
+    }
     Invoke-ReleasePreflight $repoRoot
     if (@(& git status --porcelain).Count -gt 0 -or (& git rev-parse HEAD).Trim() -ne $sourceCommit)
     {
@@ -474,7 +478,8 @@ try
             "Lorekeeper-$Version-x86_64.AppImage.sha256",
             "Lorekeeper-$Version-amd64.deb",
             "Lorekeeper-$Version-amd64.deb.sha256",
-            'release-provenance.json'
+            'release-provenance.json',
+            [IO.Path]::GetFileName($appImageSourceArchivePath)
         )
         $provenance = Get-Content -LiteralPath (Join-Path $linuxOutputDirectory 'release-provenance.json') -Raw | ConvertFrom-Json
         $sourceTree = (& git rev-parse 'HEAD^{tree}').Trim()
@@ -520,7 +525,11 @@ try
     }
     foreach ($artifactName in $linuxArtifactNames)
     {
-        $sourcePath = Join-Path $linuxOutputDirectory $artifactName
+        $sourcePath = if ($artifactName -ceq [IO.Path]::GetFileName($appImageSourceArchivePath))
+        {
+            $appImageSourceArchivePath
+        }
+        else { Join-Path $linuxOutputDirectory $artifactName }
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf))
         {
             throw "Expected Linux release artifact was not produced: $sourcePath"
@@ -578,6 +587,11 @@ try
             $finalHead -ne $sourceCommit -or $finalRemoteHead -ne $sourceCommit)
         {
             throw 'Release source changed during packaging. Verify the new source before publishing.'
+        }
+        if (-not $WindowsOnly)
+        {
+            $null = Assert-AppImagePublicationReady -RepositoryRoot $repoRoot -ArtifactProvenance $provenance `
+                -SourceArchivePath (Join-Path $releaseDirectory ([IO.Path]::GetFileName($appImageSourceArchivePath)))
         }
         foreach ($repository in $releaseRepositories)
         {

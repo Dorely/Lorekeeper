@@ -234,6 +234,14 @@ with the target Release publish profile and self-contained settings before
 publishing without restore, so every platform selects the reviewed runtime.
 Retained runtime notices cover the current Debug and Release dependency graphs;
 the packaged runtime configuration must match an exact retained identity.
+Ubuntu dependency metadata includes the official .NET self-contained prerequisites
+as well as Electron/Skia dependencies. Native validation rejects unresolved
+libraries except the exact CoreCLR 10.0.12 optional tracing provider's
+`liblttng-ust.so.0` dependency: its managed-root path, runtime version and original
+provider SHA-256 must all match, and every other missing library remains fatal.
+The [pinned runtime source](https://github.com/dotnet/dotnet/blob/95017c711e6afc1085133d440e42b4bd78155701/src/runtime/src/coreclr/pal/src/misc/tracepointprovider.cpp#L55-L114)
+tolerates that module's load failure. Ubuntu's newer LTTng ABI is not aliased;
+provenance records optional LTTng tracing as unavailable rather than working.
 The pinned Linux launcher in `eng/linux/AppRun.sh` must retain its exact source
 hash and executable mode and never add `--no-sandbox`; native desktop/AppArmor
 acceptance and complete AppImage/FUSE license closure remain separate evidence.
@@ -251,6 +259,24 @@ modified LGPL libfuse still needs complete corresponding source, exact dependenc
 provenance and practical recipient relinking evidence. Its reviewable source
 bundle remains ignored/private; notice retention and local packaging do not
 establish public distribution clearance or a permissive admission exception.
+
+`eng/appimage-publication.json` is the explicit, currently blocked public
+AppImage boundary. The shared release helper binds its runtime/source/toolset
+identity and notice-manifest hash to the selected evidence. An approved record
+requires reviewed archive, source-manifest, recipient relink/repack log and output
+hashes. The archive contains unique nonempty regular `sources.json`,
+`recipient-validation/relink.log` and `recipient-validation/repack.log` members;
+the helper reads and verifies them without extracting archive paths. Source
+metadata is limited to one MiB and must bind the selected runtime release,
+source commit and hash, toolset version and archive hash, and modified-libfuse
+version and patch hash. Source review and approval remain manual attestations,
+not proof created by the helper.
+The normal driver checks before a version commit/push; the publisher checks
+before builds/Actions and again against the staged archive and actual runtime
+provenance before draft creation. That source archive is mandatory in both v1
+Linux asset sets and their checksum/download verification. `-CheckOnly` reports
+blocked publication while validating local build readiness; local builders do
+not require public clearance. No bypass is provided.
 
 The dependency audit permits only the two exact known
 `image-size@1.2.1` advisories while Electron.NET's optional splash call is

@@ -679,6 +679,18 @@ normal push, native packaging, checksum verification, and publication. Use
 `-LinuxDistribution <name>` for the configured WSL distribution, and
 `-WindowsOnly` to omit Linux and macOS. Do not use publication to test tooling.
 
+Public AppImage distribution is currently blocked by
+[`eng/appimage-publication.json`](eng/appimage-publication.json). Local Linux
+builds and release preview remain available. Publication requires reviewed
+corresponding-source material, exact dependency provenance and actual recipient
+modified-library relink/repack evidence. The approved archive belongs at
+`.artifacts/appimage-publication/Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz`;
+it must include the reviewed `sources.json` and
+`recipient-validation/relink.log` and `repack.log`. The publisher verifies the
+record, evidence and archive hashes, binds them to the packaged runtime, and
+includes that source archive in both v1 asset sets. Prepared source and notices
+alone do not satisfy this gate.
+
 The lower-level publisher requires clean source whose HEAD equals fetched
 `origin/main`, a matching project version, and explicit
 `-AllowDirectMainPush`. Exact v1.0.0 publishes the same verified artifacts to
@@ -687,8 +699,8 @@ Later releases use the main repository only. Public visibility at the v1 launch
 requires the additional explicit `-MakeSourcePublicAfterV1` flag: publication
 finishes before the visibility change, followed by credential-free verification
 of both metadata and complete asset downloads. The preparation task has not run
-this path. Finalized releases are immutable and survive a failed public check;
-only new drafts are rollback candidates. The historical feed must remain
+this path. Failed publication retains drafts, releases and tags for manual
+inspection against the staged assets. The historical feed must remain
 available until installed-version handoff is exercised.
 
 Every build embeds an immutable distribution channel. Development disables

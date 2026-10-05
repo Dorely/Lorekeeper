@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1,
+  "status": "blocked",
+  "scope": "Public AppImage distribution is blocked until corresponding-source material, exact dependency provenance, and recipient modified-library relink/repack evidence are reviewed and accepted.",
+  "runtimeRelease": "20251108",
+  "runtimeSourceCommit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+  "runtimeSha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+  "toolsetVersion": "appimage@1.0.3",
+  "toolsetArchiveSha256": "84021a78ee214ae6fd33a2d62a92ba25542dd10bc86bf117a9b2d0bba44e7665",
+  "noticeManifestSha256": "9763d08632d9b3bdf0886219c989ae67e08f3217f45e161807d52658d9fc1f62",
+  "sourceArchiveFileName": "Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz",
+  "sourceArchiveSha256": null,
+  "sourceManifestSha256": null,
+  "relinkLogSha256": null,
+  "repackLogSha256": null,
+  "relinkedRuntimeSha256": null,
+  "repackedAppImageSha256": null
+}

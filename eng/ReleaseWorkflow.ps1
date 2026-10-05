@@ -38,6 +38,152 @@ function Get-LorekeeperReleaseRepositories
     return @('Dorely/Lorekeeper')
 }
 
+function Assert-AppImagePublicationReady
+{
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [switch]$CheckOnly,
+        [string]$SourceArchivePath,
+        $ArtifactProvenance
+    )
+
+    $clearance = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'eng/appimage-publication.json') -Raw | ConvertFrom-Json -AsHashtable
+    $noticePath = Join-Path $RepositoryRoot 'licenses/appimage-runtime/sources.json'
+    $notice = Get-Content -LiteralPath $noticePath -Raw | ConvertFrom-Json -AsHashtable
+    if ($clearance.formatVersion -ne 1 -or $clearance.status -cnotin @('blocked', 'approved') -or
+        $clearance.runtimeRelease -cne $notice.runtime.release -or
+        $clearance.runtimeSourceCommit -cne $notice.runtime.commit -or
+        $clearance.runtimeSha256 -cne $notice.runtime.sha256 -or
+        $clearance.toolsetVersion -cne $notice.toolset.version -or
+        $clearance.toolsetArchiveSha256 -cne $notice.toolset.sha256 -or
+        $clearance.noticeManifestSha256 -cne (Get-FileHash -LiteralPath $noticePath -Algorithm SHA256).Hash.ToLowerInvariant())
+    {
+        throw 'AppImage publication clearance is malformed or does not match the selected runtime, toolset, source commit, and notice manifest.'
+    }
+    if ($clearance.status -ceq 'blocked')
+    {
+        $message = 'AppImage publication is blocked: review and accept corresponding-source materials, exact dependency provenance, and recipient modified-library relink/repack evidence in eng/appimage-publication.json. Local Linux builds remain available.'
+        if ($CheckOnly)
+        {
+            Write-Warning $message
+            return
+        }
+        throw $message
+    }
+
+    foreach ($field in @('sourceArchiveSha256', 'sourceManifestSha256', 'relinkLogSha256', 'repackLogSha256', 'relinkedRuntimeSha256', 'repackedAppImageSha256'))
+    {
+        if ([string]$clearance[$field] -cnotmatch '^[a-f0-9]{64}$')
+        {
+            throw "Approved AppImage publication requires the reviewed $field."
+        }
+    }
+    $archiveName = "Lorekeeper-AppImage-Runtime-Sources-$($notice.runtime.release)-x86_64.tar.gz"
+    if ($clearance.sourceArchiveFileName -cne $archiveName)
+    {
+        throw 'The AppImage corresponding-source filename does not match the selected runtime release.'
+    }
+    if ([string]::IsNullOrWhiteSpace($SourceArchivePath))
+    {
+        $SourceArchivePath = Join-Path $RepositoryRoot ".artifacts/appimage-publication/$archiveName"
+    }
+    $SourceArchivePath = [IO.Path]::GetFullPath($SourceArchivePath)
+    if (-not (Test-Path -LiteralPath $SourceArchivePath -PathType Leaf) -or
+        [IO.Path]::GetFileName($SourceArchivePath) -cne $archiveName -or
+        (Get-FileHash -LiteralPath $SourceArchivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $clearance.sourceArchiveSha256)
+    {
+        throw "The reviewed AppImage corresponding-source archive is missing or differs from its approved SHA-256: $SourceArchivePath"
+    }
+
+    # Read only the reviewed members in place; never extract supplier archive paths.
+    $requiredMembers = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $requiredMembers.Add('sources.json', [string]$clearance.sourceManifestSha256)
+    $requiredMembers.Add('recipient-validation/relink.log', [string]$clearance.relinkLogSha256)
+    $requiredMembers.Add('recipient-validation/repack.log', [string]$clearance.repackLogSha256)
+    $seenMembers = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    Add-Type -AssemblyName System.Formats.Tar
+    $fileStream = [IO.File]::OpenRead($SourceArchivePath)
+    try
+    {
+        $gzipStream = [IO.Compression.GZipStream]::new($fileStream, [IO.Compression.CompressionMode]::Decompress, $true)
+        try
+        {
+            $tarReader = [System.Formats.Tar.TarReader]::new($gzipStream, $true)
+            try
+            {
+                while ($null -ne ($entry = $tarReader.GetNextEntry()))
+                {
+                    $memberName = if ($entry.Name.StartsWith('./', [StringComparison]::Ordinal)) { $entry.Name.Substring(2) } else { $entry.Name }
+                    if (-not $requiredMembers.ContainsKey($memberName)) { continue }
+                    if (-not $seenMembers.Add($memberName) -or $entry.Length -le 0 -or
+                        $entry.EntryType -notin @([System.Formats.Tar.TarEntryType]::RegularFile, [System.Formats.Tar.TarEntryType]::V7RegularFile))
+                    {
+                        throw "The source archive has duplicate, empty, or non-file publication evidence: $memberName"
+                    }
+                    $sha256 = [Security.Cryptography.SHA256]::Create()
+                    try
+                    {
+                        if ($memberName -ceq 'sources.json')
+                        {
+                            if ($entry.Length -gt 1048576) { throw 'The AppImage source manifest exceeds the supported one MiB metadata limit.' }
+                            $sourceManifestBytes = [byte[]]::new([int]$entry.Length)
+                            $entry.DataStream.ReadExactly($sourceManifestBytes, 0, $sourceManifestBytes.Length)
+                            $memberHash = [Convert]::ToHexString($sha256.ComputeHash($sourceManifestBytes)).ToLowerInvariant()
+                        }
+                        else { $memberHash = [Convert]::ToHexString($sha256.ComputeHash($entry.DataStream)).ToLowerInvariant() }
+                    }
+                    finally { $sha256.Dispose() }
+                    if ($memberHash -cne $requiredMembers[$memberName])
+                    {
+                        throw "The source archive evidence differs from its reviewed SHA-256: $memberName"
+                    }
+                    if ($memberName -ceq 'sources.json')
+                    {
+                        $sourceManifest = [Text.UTF8Encoding]::new($false, $true).GetString($sourceManifestBytes) | ConvertFrom-Json -AsHashtable
+                        if ($sourceManifest -isnot [Collections.IDictionary] -or $sourceManifest['formatVersion'] -ne 1 -or
+                            $sourceManifest['runtime'] -isnot [Collections.IDictionary] -or
+                            $sourceManifest['toolset'] -isnot [Collections.IDictionary] -or
+                            $sourceManifest['modifiedLibfuse'] -isnot [Collections.IDictionary] -or
+                            $sourceManifest['modifiedLibfuse']['patch'] -isnot [Collections.IDictionary] -or
+                            [string]$sourceManifest['runtime']['release'] -cne [string]$notice.runtime.release -or
+                            [string]$sourceManifest['runtime']['commit'] -cne [string]$notice.runtime.commit -or
+                            [string]$sourceManifest['runtime']['sha256'] -cne [string]$notice.runtime.sha256 -or
+                            [string]$sourceManifest['toolset']['version'] -cne [string]$notice.toolset.version -or
+                            [string]$sourceManifest['toolset']['sha256'] -cne [string]$notice.toolset.sha256 -or
+                            [string]$sourceManifest['modifiedLibfuse']['version'] -cne [string]$notice.modifiedLibfuse.version -or
+                            [string]$sourceManifest['modifiedLibfuse']['patch']['sha256'] -cne [string]$notice.modifiedLibfuse.patch.sha256)
+                        {
+                            throw 'The reviewed AppImage source manifest differs from the selected runtime, toolset, or modified-libfuse version/patch identity.'
+                        }
+                    }
+                }
+            }
+            finally { $tarReader.Dispose() }
+        }
+        finally { $gzipStream.Dispose() }
+    }
+    finally { $fileStream.Dispose() }
+    if ($seenMembers.Count -ne $requiredMembers.Count)
+    {
+        throw 'The AppImage source archive must contain the reviewed sources.json, recipient-validation/relink.log, and recipient-validation/repack.log.'
+    }
+    if ($null -ne $ArtifactProvenance)
+    {
+        $toolset = $ArtifactProvenance.appImageToolset
+        if ([string]$toolset.version -cne ([string]$notice.toolset.version).Replace('appimage@', '') -or
+            [string]$toolset.archiveSha256 -cne $clearance.toolsetArchiveSha256 -or
+            [string]$toolset.runtimeRelease -cne $clearance.runtimeRelease -or
+            [string]$toolset.runtimeSourceCommit -cne $clearance.runtimeSourceCommit -or
+            [string]$toolset.runtimeSha256 -cne $clearance.runtimeSha256 -or
+            [string]$toolset.noticeManifestSha256 -cne $clearance.noticeManifestSha256)
+        {
+            throw 'The packaged AppImage runtime provenance differs from its approved source/relink clearance.'
+        }
+    }
+    Write-Host 'AppImage publication clearance and corresponding-source/evidence hashes passed.'
+    return $SourceArchivePath
+}
+
 function Assert-ReleaseNoticeClosure
 {
     param(

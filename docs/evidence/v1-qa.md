@@ -58,6 +58,13 @@ old release repository are separate launch actions.
   both packages, then stopped before payload verification because its npm-lock
   parser rejected the empty root-package key. No artifacts were copied out.
   The parser correction and native graphical acceptance require a retry.
+  The corrected parser passed on candidate
+  `f05aca9166250a689784ff2bdd286d9ed69d0385`; final validation then rejected the
+  pinned runtime's optional LTTng tracing provider, whose old `so.0` dependency
+  is absent on Ubuntu 24.04. The exact supplier source tolerates that load
+  failure. A hash/version/path-bound optional-dependency report is implemented;
+  mandatory and unknown library failures remain fatal. No Linux package has
+  completed final validation yet.
 - The user subsequently stopped Computer Use with the physical Escape key.
   Desktop interaction stopped immediately; no further UI/provider/trailer
   acceptance is inferred or performed in that turn.
@@ -91,9 +98,18 @@ old release repository are separate launch actions.
   remains unperformed.
 - Linux parses npm's lockfile as a dictionary so its standard empty root key
   survives. The declared, locked and installed Electron identity checks remain.
+- Ubuntu DEB metadata now includes the official .NET runtime prerequisites and
+  uses the Ubuntu 24.04 GTK/AT-SPI package names. Build prerequisites and final
+  DEB metadata are checked against the same declared inventory. The optional
+  LTTng exception requires the exact reviewed provider bytes and runtime;
+  unavailable tracing is recorded explicitly without an ABI alias.
 - Failed publication retains all drafts, releases and tags for inspection. The
   former draft-check/delete sequence could delete a release finalized by another
   actor between those calls; the publisher no longer performs release deletion.
+- Public AppImage publication now has a separate, blocked source/relink clearance
+  record. A later approved corresponding-source archive must be a verified Linux
+  release asset; current private preparation cannot qualify without actual
+  modified-library relink/repack and exact provenance review.
 
 ## Verification and artifact identity
 

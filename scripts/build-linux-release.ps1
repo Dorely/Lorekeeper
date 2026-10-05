@@ -56,6 +56,10 @@ if ($runtimeComponents.Count -ne 1 -or $libfuseComponents.Count -ne 1 -or
 $semanticEditorDirectory = Join-Path $repoRoot 'tools/semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.NOTICES.txt'
+$optionalLttngProviderVersion = '10.0.12'
+$optionalLttngProviderSha256 = '8fc124b76a54a8f3c9ee941035ad1c716b99c845170331900984c069529660bc'
+$optionalLttngSource = 'https://github.com/dotnet/dotnet/blob/95017c711e6afc1085133d440e42b4bd78155701/src/runtime/src/coreclr/pal/src/misc/tracepointprovider.cpp#L109-L114'
+$optionalLttngUnavailable = $false
 . (Join-Path $repoRoot 'eng/ReleaseDependencyAudit.ps1')
 . (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
 
@@ -137,7 +141,11 @@ function Invoke-NpmAuditJson
 
 function Assert-LinuxElf
 {
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$ManagedRoot,
+        [string]$CoreClrVersion
+    )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing native payload: $Path" }
     $stream = [IO.File]::OpenRead($Path)
@@ -152,9 +160,24 @@ function Assert-LinuxElf
         }
     }
     finally { $stream.Dispose() }
-    $dependencies = (& ldd $Path 2>&1) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $dependencies -match '\bnot found\b')
+    $dependencies = (& env LC_ALL=C ldd $Path 2>&1) -join "`n"
+    $dependencyExitCode = $LASTEXITCODE
+    if ($dependencyExitCode -ne 0) { throw "Native dependency inspection failed: $Path`n$dependencies" }
+    if ($dependencies -match '\bnot found\b')
     {
+        $missingLibraries = @([regex]::Matches($dependencies, '(?m)^\s*(?<library>\S+)\s+=>\s+not found\s*$'))
+        # The exact supplier revision tolerates this optional provider's dlopen
+        # failure. Ubuntu's LTTng 2.13 ABI cannot satisfy its 2.12 SONAME.
+        if (-not [string]::IsNullOrWhiteSpace($ManagedRoot) -and
+            [IO.Path]::GetFullPath($Path) -ceq [IO.Path]::GetFullPath((Join-Path $ManagedRoot 'libcoreclrtraceptprovider.so')) -and
+            $CoreClrVersion -ceq $optionalLttngProviderVersion -and
+            (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $optionalLttngProviderSha256 -and
+            $missingLibraries.Count -eq 1 -and $missingLibraries[0].Groups['library'].Value -ceq 'liblttng-ust.so.0')
+        {
+            $script:optionalLttngUnavailable = $true
+            Write-Warning 'The exact CoreCLR 10.0.12 optional LTTng provider cannot load liblttng-ust.so.0 on Ubuntu 24.04. LTTng tracing is unavailable; mandatory and unknown native dependencies remain fatal.'
+            return
+        }
         throw "The native payload has unresolved dependencies: $Path`n$dependencies"
     }
 }
@@ -229,6 +252,8 @@ function Assert-DesktopClosure
 
     $managedRoot = Join-Path $DesktopRoot 'resources/bin'
     Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot -ManagedRoot $managedRoot -DesktopRoot $DesktopRoot
+    $runtimeConfig = Get-Content -LiteralPath (Join-Path $managedRoot 'Lorekeeper.runtimeconfig.json') -Raw | ConvertFrom-Json
+    $coreClrVersion = [string](@($runtimeConfig.runtimeOptions.includedFrameworks | Where-Object name -CEQ 'Microsoft.NETCore.App')[0].version)
     if (-not (Test-Path -LiteralPath (Join-Path $DesktopRoot 'LICENSE.electron.txt') -PathType Leaf) -and
         -not (Test-Path -LiteralPath (Join-Path $DesktopRoot 'LICENSE') -PathType Leaf))
     {
@@ -261,7 +286,7 @@ function Assert-DesktopClosure
     foreach ($library in @(Get-ChildItem -LiteralPath $DesktopRoot -Recurse -File |
         Where-Object Name -Match '\.so(?:\..*)?$'))
     {
-        Assert-LinuxElf -Path $library.FullName
+        Assert-LinuxElf -Path $library.FullName -ManagedRoot $managedRoot -CoreClrVersion $coreClrVersion
     }
     return Assert-PressClosure -ManagedRoot $managedRoot
 }
@@ -326,7 +351,7 @@ if ($osRelease['ID'] -cne 'ubuntu' -or $osRelease['VERSION_ID'] -cne '24.04')
 {
     throw 'The Linux release baseline is Ubuntu 24.04 x64. Use that native host or WSL2 distribution.'
 }
-foreach ($command in @('dotnet', 'pwsh', 'node', 'npm', 'cargo', 'rustc', 'cc', 'dpkg-deb', 'ldd', 'tar', 'stat'))
+foreach ($command in @('dotnet', 'pwsh', 'node', 'npm', 'cargo', 'rustc', 'cc', 'dpkg-deb', 'dpkg-query', 'env', 'ldd', 'tar', 'stat'))
 {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "Missing Linux build command: $command" }
 }
@@ -346,8 +371,12 @@ if ($dotnetVersion -notmatch '^10\.' -or
 {
     throw "Required .NET 10 SDK and Node.js >=22.12; found .NET $dotnetVersion, Node $nodeVersionText."
 }
-foreach ($package in @('build-essential', 'libfontconfig1', 'libicu74', 'libssl3t64', 'libgtk-3-0t64', 'libnss3',
-    'libxss1', 'libxtst6', 'libnotify4', 'libatspi2.0-0t64', 'libsecret-1-0', 'xdg-utils'))
+$runtimePackages = @($electronBuilderConfiguration.deb.depends)
+if ($runtimePackages.Count -eq 0 -or @($runtimePackages | Where-Object { $_ -cnotmatch '^[a-z0-9][a-z0-9+.-]+$' }).Count -ne 0)
+{
+    throw 'The Ubuntu baseline must declare explicit runtime package names in deb.depends.'
+}
+foreach ($package in @('build-essential') + $runtimePackages)
 {
     $status = (& dpkg-query -W '-f=${Status}' $package 2>$null) -join ''
     if ($LASTEXITCODE -ne 0 -or $status -cne 'install ok installed')
@@ -483,6 +512,12 @@ try
     Invoke-CheckedCommand -FilePath dpkg-deb -Arguments @('--extract', $debPath, $debRoot)
     $debArchitecture = (& dpkg-deb --field $debPath Architecture).Trim()
     if ($LASTEXITCODE -ne 0 -or $debArchitecture -cne 'amd64') { throw 'The DEB architecture must be amd64.' }
+    $debDependencies = (& dpkg-deb --field $debPath Depends).Trim()
+    if ($LASTEXITCODE -ne 0 -or
+        @(Compare-Object -ReferenceObject ($runtimePackages | Sort-Object) -DifferenceObject @($debDependencies -split ',\s*' | Sort-Object)).Count -ne 0)
+    {
+        throw 'The DEB dependency metadata does not match the checked Ubuntu runtime inventory.'
+    }
     $debResources = @(Get-ChildItem -LiteralPath $debRoot -Recurse -Directory -Filter resources |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin/Lorekeeper') -PathType Leaf })
     if ($debResources.Count -ne 1) { throw 'The DEB does not contain exactly one Lorekeeper application closure.' }
@@ -532,6 +567,21 @@ $provenance = [ordered]@{
     }
     electron = $installedElectron.version
     semanticEditorSha256 = $bundleHash.ToLowerInvariant()
+    optionalDiagnostics = @(
+        if ($optionalLttngUnavailable)
+        {
+            [ordered]@{
+                component = 'CoreCLR LTTng tracepoint provider'
+                package = "Microsoft.NETCore.App.Runtime.linux-x64/$optionalLttngProviderVersion"
+                path = 'resources/bin/libcoreclrtraceptprovider.so'
+                sha256 = $optionalLttngProviderSha256
+                unavailableDependency = 'liblttng-ust.so.0'
+                available = $false
+                integrationValidated = $false
+                supplierSource = $optionalLttngSource
+            }
+        }
+    )
     press = $pressDescription
     artifacts = $artifacts
 }

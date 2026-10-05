@@ -249,6 +249,7 @@ try
     Write-Host 'The driver will verify, commit only the project version if needed, verify again, push main, build, and publish.'
     if (-not $WindowsOnly)
     {
+        $null = Assert-AppImagePublicationReady -RepositoryRoot $repoRoot -CheckOnly:$CheckOnly
         & (Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1') -Distribution $LinuxDistribution -CheckOnly
     }
     if ($CheckOnly)
