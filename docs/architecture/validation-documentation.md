@@ -227,6 +227,8 @@ invocation, so Windows Git cannot change committed text bytes before the native
 build. The provenance records those archive settings; retained license evidence
 keeps its `-text` attributes. The editor gate still requires an exact byte hash
 match with the committed bundle.
+Linux reads the npm lock as a dictionary, preserving its empty root-package key;
+declared, locked and installed Electron versions must still match.
 Release builds pin .NET/ASP.NET runtime 10.0.12 in the project. Builders restore
 with the target Release publish profile and self-contained settings before
 publishing without restore, so every platform selects the reviewed runtime.
@@ -313,8 +315,10 @@ runtime update authority. At v1 launch, the additional explicit
 `-MakeSourcePublicAfterV1` flag publishes the verified asset sets first, changes
 source visibility second, then performs fresh credential-free metadata and full
 asset-download/hash checks. Private main is allowed during v1 preview/preparation.
-Finalized releases and the old-feed bridge survive a failed public check; only
-new drafts can be rolled back. Preparation never runs this publishing path,
+Failed publication retains all drafts, finalized releases and tags for manual
+inspection against the staged assets. There is no automatic release/tag deletion,
+so a concurrent draft-to-published transition cannot lose the old-feed bridge.
+Preparation never runs this publishing path,
 changes visibility, removes branches, rewrites history, or archives the old feed.
 An installed v0.3.x handoff remains required before that feed becomes immutable.
 

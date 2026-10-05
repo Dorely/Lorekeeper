@@ -35,8 +35,8 @@ old release repository are separate launch actions.
 | Rich manuscripts | DOCX/Word insertion, tables, notes, citations, warnings, Undo, Read preview, EPUB/PDF/DOCX output | Pending |
 | Data safety | Full/non-structural archives, checkpoints and restore, assets/evidence preservation, disposable migration and recovery | Pending |
 | Providers | Ordinary reply, tool read/mutation, follow-up, cancellation, model selection, replay and supported reasoning for each tested connection/model | Pending |
-| Windows | Free installer/portable closure, isolated data/history, MSIX local validation, uninstall preservation, Store update suppression | Pending |
-| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Pending |
+| Windows | Free installer/portable closure, isolated data/history, MSIX local validation, uninstall preservation, Store update suppression | Packaging/local MSIX passed on the recorded candidate; installed acceptance pending |
+| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Build/tests passed; package verification retry and desktop acceptance pending |
 | Mac | Existing native build and package evidence | Unperformed; no local Mac host |
 | Update handoff | Old install discovers v1, both draft sets match, anonymous main downloads and installed v1 main-feed transition | Launch-time check; not performed during preparation |
 
@@ -52,8 +52,12 @@ old release repository are separate launch actions.
   successfully, exported exact source into isolated ext4 storage, and passed
   npm installation/audit. Packaging then failed closed because the rebuilt
   semantic-editor bundle differed from the committed bytes. No Linux package
-  was produced by that attempt. Cross-platform reproducibility and native
-  graphical install/launch acceptance remain open.
+  was produced by that attempt. The canonical archive fix passed the exact
+  bundle gate on candidate `441c96e3ac208b67ec0a0bb85f6be6e3fa73011d`.
+  That candidate passed the Linux build and all permitted tests and produced
+  both packages, then stopped before payload verification because its npm-lock
+  parser rejected the empty root-package key. No artifacts were copied out.
+  The parser correction and native graphical acceptance require a retry.
 - The user subsequently stopped Computer Use with the physical Escape key.
   Desktop interaction stopped immediately; no further UI/provider/trailer
   acceptance is inferred or performed in that turn.
@@ -85,6 +89,11 @@ old release repository are separate launch actions.
   output in private temporary files, uses disposable SQLite/history/Electron
   state, and refuses an occupied port. Static checks passed; native Mac evidence
   remains unperformed.
+- Linux parses npm's lockfile as a dictionary so its standard empty root key
+  survives. The declared, locked and installed Electron identity checks remain.
+- Failed publication retains all drafts, releases and tags for inspection. The
+  former draft-check/delete sequence could delete a release finalized by another
+  actor between those calls; the publisher no longer performs release deletion.
 
 ## Verification and artifact identity
 
@@ -106,7 +115,8 @@ Preparation checks on the current v1 worktree:
   package identities** and their exact notice bytes, including the two active
   framework-asset versions. Windows Store and Free package builders previously
   passed their own managed, semantic-editor, dependency, native Press, and
-  packaged notice checks; their final-runtime rebuild remains required. The final
+  packaged notice checks on the recorded candidate; later source candidates
+  require corresponding rebuilds. The final
   shared preflight also passed **47 Press unit and 104 Press conformance checks**
   with the locked dependency graph.
 - Local MSIX validation passed semantic MakeAppx pack/unpack, embedded CMS
@@ -131,28 +141,39 @@ Capture must wait for functional acceptance, using synthetic content only.
 
 ### Candidate package checks
 
-Package validation source: `6ba993a5103accef77b5a878903027c15023d17f`.
-Source tree: `8aedfac3dc836f8fdba8941a218e64f79d3b91fd`.
+Package validation source: `441c96e3ac208b67ec0a0bb85f6be6e3fa73011d`.
+Source tree: `14acca4439443646b49382b57bc684ec8ad7154c`.
 This identifies package preparation, not functional acceptance.
 
 - Final Windows Store and Free builds passed with zero managed warnings/errors,
   actual 1.0.0/candidate assembly metadata and the correct immutable channel,
   .NET/ASP.NET 10.0.12, native Press and retained notice closure.
 - Free installer SHA-256:
-  `0f822d42be8dd3315849cb8c2d8d7bf488466b5f4045d83c70b76b92e786d8c7`.
+  `5c5cb8e51075d620be32088f5e151b63dfc3134ee7abcfdfcc28c15d7fe67271`.
   Portable SHA-256:
-  `47127db5e398c0fc3bfedef4978bd1b68995f28a45cd71ff2a62eb4100c79636`.
+  `53a94da574bc542203b1fa9cea856b6352976751aef04804393a972886be0d36`.
   Actual Authenticode inspection found those artifacts and app/Press executables
   unsigned. The bundled Microsoft `createdump.exe` retains its valid signature.
 - Local MSIX SHA-256:
-  `712c0ca16b424b06e8925123b86be8a75d545014dcca205d16bb643a8bd6b489`.
+  `885125bc63f4f7984530ee168952c3326767bb90afcdaf6687d9717fc26bcf51`.
   Semantic MakeAppx pack/unpack, CMS integrity/exact signer, certificate absence,
   and unchanged private-key-file inventory passed on Windows 10 build 19045 with
   SDK 10.0.26100. No installation or trust-chain acceptance was performed.
 - Detailed logs, identity/hash evidence, and the pinned DEB installation-template
-  review remain in ignored `.artifacts/v1-sharing/windows-final-6ba993a/`.
+  review remain in ignored `.artifacts/v1-sharing/windows-final-441c96e/`.
   The upstream DEB template provides a scoped AppArmor user-namespace profile;
   AppImage desktop startup on restrictive Ubuntu remains unverified.
+- Linux on that candidate passed zero-warning/error Release compilation,
+  **167 data-safety**, **47 Press unit** and **104 Press conformance** checks.
+  AppImage and DEB construction completed, but the npm root-key parser failure
+  prevented identity, notice, native-dependency and runtime-prefix verification.
+  The wrapper cleaned its isolated source/output; no Linux artifacts are claimed.
+  Attempt log SHA-256:
+  `c6cd3041916acc30e6f5312c34f876e2f1edc9afe39798431146964d40753c69`.
+- Standard `scripts/release.ps1 -Version 1.0.0 -CheckOnly` passed: both repository
+  permissions/tag checks, retained Mac workflow readiness, WSL prerequisites,
+  final build/tests/notices and unchanged clean HEAD. No version commit, push,
+  package build, release creation or visibility change was performed by preview.
 
 This preparation is **not signed off** while any data-loss, credential exposure,
 broken core workflow, installation, or update blocker remains unresolved.

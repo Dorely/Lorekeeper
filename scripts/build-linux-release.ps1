@@ -429,7 +429,7 @@ finally
 }
 
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $stageDirectory 'package.json') | ConvertFrom-Json
-$lock = Get-Content -Raw -LiteralPath (Join-Path $stageDirectory 'package-lock.json') | ConvertFrom-Json
+$lock = Get-Content -Raw -LiteralPath (Join-Path $stageDirectory 'package-lock.json') | ConvertFrom-Json -AsHashtable
 $installedElectron = Get-Content -Raw -LiteralPath (Join-Path $stageDirectory 'node_modules/electron/package.json') | ConvertFrom-Json
 if ($manifest.devDependencies.electron -cne $lock.packages.'node_modules/electron'.version -or
     $manifest.devDependencies.electron -cne $installedElectron.version)

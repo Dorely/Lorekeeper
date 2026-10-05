@@ -72,7 +72,6 @@ $buildScript = Join-Path $PSScriptRoot 'build-windows-release.ps1'
 $linuxBuildScript = Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1'
 $macRunId = $null
 $generatedNotesPath = $null
-$createdReleaseRepositories = [System.Collections.Generic.List[string]]::new()
 $sourceWasPrivate = $false
 
 if ($NotesFile)
@@ -113,32 +112,6 @@ function Invoke-Gh
     if ($LASTEXITCODE -ne 0)
     {
         throw "GitHub CLI failed with exit code $LASTEXITCODE."
-    }
-}
-
-
-function Remove-CreatedReleases
-{
-    param([Parameter(Mandatory)][string]$Tag)
-
-    foreach ($repository in @($createdReleaseRepositories))
-    {
-        $releaseState = & gh release view $Tag --repo $repository --json isDraft 2>$null
-        if ($LASTEXITCODE -ne 0)
-        {
-            continue
-        }
-        if (-not (($releaseState -join [Environment]::NewLine) | ConvertFrom-Json).isDraft)
-        {
-            Write-Warning "Retaining published release $Tag in $repository. Resolve the launch failure before announcing or retrying."
-            continue
-        }
-        Write-Warning "Removing incomplete draft $Tag from $repository."
-        & gh release delete $Tag --repo $repository --yes --cleanup-tag 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0)
-        {
-            Write-Warning "Could not remove incomplete release $Tag from $repository; inspect it manually."
-        }
     }
 }
 
@@ -618,7 +591,6 @@ try
                 '--draft'
             ) + $releaseNotesArguments + $releaseTypeArguments + $artifactPaths
             Invoke-Gh $releaseArguments
-            $createdReleaseRepositories.Add($repository)
         }
 
         foreach ($repository in $releaseRepositories)
@@ -638,8 +610,7 @@ try
     }
     catch
     {
-        Remove-CreatedReleases -Tag $tag
-        throw "Release publication failed. Lorekeeper attempted to remove only drafts created in this run; finalized releases are retained. Inspect $tag in $($releaseRepositories -join ', ') before retrying or announcing. $($_.Exception.Message)"
+        throw "Release publication failed. All drafts, published releases, and tags are retained. Inspect $tag in $($releaseRepositories -join ', ') and compare its assets with $releaseDirectory; resolve partial publication manually before retrying or announcing. $($_.Exception.Message)"
     }
 
     if ($Version -ceq '1.0.0')
