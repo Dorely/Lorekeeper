@@ -714,12 +714,12 @@ assistant evidence link never silently creates a manuscript citation.
   modes, semantic grouping, stale-token rejection, exact target ownership,
   durable candidate drafts, project-wide Editor locking, terminal state,
   resolution/discard behavior, and cancellation cleanup.
-- Do not add broad assistant, UI, editor, or service automated-test suites. The
-  validation chapter permits deterministic, headless authoring-save and
-  assistant-concurrency contract regressions; they must use production contracts
-  and cannot simulate a provider or browser. Use compilation, static inspection,
-  and explicitly authorized manual integration checks for all other assistant
-  behavior.
+- Automated tests are limited to the data-safety core and Press conformance
+  matrix defined by the validation chapter. Do not add assistant, UI, editor,
+  or ordinary service suites outside those scopes. Use compilation, static
+  inspection, and explicitly authorized manual integration checks for other
+  assistant behavior; no test may substitute a simulated provider or browser
+  for integration evidence.
 - Run `dotnet build Lorekeeper.sln` and permitted data-safety tests for normal
   source changes; the HTTP startup smoke check requires explicit authorization.
   Provider calls, model-specific tool behavior, browser UI,

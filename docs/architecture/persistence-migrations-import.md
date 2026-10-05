@@ -527,7 +527,7 @@ hashes, rows, and digital/Core Book history are preserved. Previous combined
 physical render jobs and their artifacts are marked legacy so they remain
 downloadable historical data but cannot satisfy scoped production preflight;
 non-physical preparation links move to the Book slot. Interrupted legacy
-physical jobs are not recovered into the v12 queue.
+physical jobs are not recovered into the current scoped render queue.
 
 ## Key files and file families
 
@@ -602,10 +602,11 @@ EF migrations are unchanged and that every new schema change has a forward
 migration. Do not run destructive restore/delete operations as part of routine
 documentation or source verification.
 
-The repository’s approved .NET tests include startup database migration and
-versioned project import/export safety plus the deterministic, headless v1
-contract regressions enumerated by the validation chapter. Do not add broad UI,
-assistant, provider, packaging, or runtime-behavior suites under this boundary.
+The repository’s approved .NET tests are limited to the data-safety core:
+startup database migration, versioned project import/export, archive and history
+preservation and fail-closed behavior, and recovery. The validation chapter owns
+this boundary. Do not add UI, assistant, ordinary service, provider, packaging,
+or runtime-behavior suites outside it.
 Provider calls, OAuth, embeddings, search, image generation, publication output,
 packaging, and OS-specific behavior require explicit integration exercise before
 claiming they work.

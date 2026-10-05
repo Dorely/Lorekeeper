@@ -132,6 +132,15 @@ old release repository are separate launch actions.
 
 Preparation checks on the current v1 worktree:
 
+- The focused World/Voice corrections were committed as
+  `176bd2430d44ee001417166cf845335d93110268`. The final shared
+  `Invoke-ReleasePreflight` passed with zero build warnings/errors, **167
+  data-safety tests**, and **47 Press unit plus 104 conformance checks**.
+  The ignored log is `.artifacts/v1-worldvoice-fix-final-preflight.log`, SHA-256
+  `ae5adf0c85b163ef3455bc1894dbfcac0fb1eba749e7dd29894eb90ce6e1b5d6`.
+  This verifies the corrected source build and permitted tests. Affected manual
+  retesting remains pending; it does not declare an accepted application build
+  or extend the prior `9eec7b8` package evidence to the corrected source.
 - `dotnet build Lorekeeper.sln --artifacts-path .artifacts/v1-sharing/build`:
   passed, zero warnings/errors. Isolated outputs avoid altering the user's
   original debug output. A first attempt during notice generation failed only
