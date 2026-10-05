@@ -474,7 +474,10 @@ function Get-DistributionMetadataDecision
         }
     }
 
-    $decision = Get-DistributionLicenseDecision -LicenseExpression $LicenseExpression -Policy $Policy
+    # The exact legacy Cargo spelling is documented by the crates themselves.
+    # Do not interpret arbitrary slash-separated or non-SPDX metadata as OR.
+    $normalizedExpression = if ($DependencyCategory -eq 'Cargo' -and $LicenseExpression -eq 'MIT/Apache-2.0') { 'MIT OR Apache-2.0' } else { $LicenseExpression }
+    $decision = Get-DistributionLicenseDecision -LicenseExpression $normalizedExpression -Policy $Policy
     if ($decision.admissionStatus -eq 'admitted' -and [string]::IsNullOrWhiteSpace($LicenseEvidence))
     {
         $decision.admissionStatus = 'unresolved'
@@ -482,4 +485,30 @@ function Get-DistributionMetadataDecision
     }
 
     return $decision
+}
+
+function Get-DistributionRetainedPackageDecision
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PackageIdentity,
+        [Parameter(Mandatory)][object]$Policy,
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$RepositoryRoot
+    )
+    $rule = @($Policy.retainedPackageDecisions | Where-Object { $_.package -ceq $PackageIdentity })
+    $record = @($Manifest.packages | Where-Object { $_.package -ceq $PackageIdentity })
+    if ($rule.Count -ne 1 -or $record.Count -ne 1) { return $null }
+    $evidence = @($record[0].evidence | Where-Object { $_.sha256 -ceq $rule[0].evidenceSha256 })
+    if ($evidence.Count -ne 1) { return $null }
+    $path = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot $evidence[0].path))
+    $allowedRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'licenses/third-party')) + [IO.Path]::DirectorySeparatorChar
+    if (-not $path.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $path -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $rule[0].evidenceSha256) { return $null }
+    return [pscustomobject][ordered]@{
+        admissionStatus = 'admitted'; licenseExpression = [string]$rule[0].licenseExpression
+        selectedLicenseExpression = [string]$rule[0].licenseExpression; selectedOrBranches = @()
+        restrictionClasses = @(); diagnostics = @([string]$rule[0].scope)
+    }
 }

@@ -1,0 +1,20 @@
+# Reviewed exact historical false positives only (2026-10-05).
+# Fifteen are print-product/profile identity keys and conformance data.
+# The last is an unchanged token in the public vis-network 9.1.9 distribution.
+# This does not suppress new matches in these files or any credential rule.
+0427537bbbd1c4f95d86cb9e53684a01121e1197:Lorekeeper/wwwroot/lib/vis-network/vis-network.min.js:generic-api-key:33
+39ae50cc1335087d68ac09ca3f2ab328de72f614:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:13808
+39ae50cc1335087d68ac09ca3f2ab328de72f614:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:3270
+39ae50cc1335087d68ac09ca3f2ab328de72f614:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:5682
+39ae50cc1335087d68ac09ca3f2ab328de72f614:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:7789
+47ef29523b894a8b7a81e6dda554a0594c86dc52:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:130
+47ef29523b894a8b7a81e6dda554a0594c86dc52:Lorekeeper.Press/assets/print-products-v1.json:generic-api-key:82
+47ef29523b894a8b7a81e6dda554a0594c86dc52:Lorekeeper.Press/tests/conformance_v9.rs:generic-api-key:3913
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:126
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:13809
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:20657
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:22335
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:3301
+48a5a96e7610e0f510380195402793651ba8302a:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:7808
+baea1a10d6e4c5b2f71e58cd1c0f82fb446a6eba:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:323
+b0b6015c5d7ad4ecdc8f29175bc0dc10fc9bf678:Lorekeeper.Press/assets/print-artifact-profiles-v1.json:generic-api-key:323

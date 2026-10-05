@@ -1,0 +1,1340 @@
+{
+  "formatVersion": 1,
+  "packages": [
+    {
+      "package": "AngleSharp/1.8.2",
+      "sha512": "iRlkfBIhi+gTgTxBlYNT4PlmaiVEy7+qX3BmprAK4cYE1UjfSNFI4mEDyxC1qgtAKYg5rjGYgL3tJlzGF+Ukdg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/AngleSharp/AngleSharp",
+      "repositoryCommit": "35b26db83557a6a74ce286907833e3b17806d9eb",
+      "copyright": "Copyright 2013-2026, AngleSharp.",
+      "authors": "AngleSharp",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6da3ab781b570d2c-LICENSE",
+          "sha256": "6da3ab781b570d2c45102e74b366c0be0eb758ed0205c3b23093d6ac2231d394",
+          "source": "https://raw.githubusercontent.com/AngleSharp/AngleSharp/35b26db83557a6a74ce286907833e3b17806d9eb/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Docnet.Core/2.6.0",
+      "sha512": "in7fpB16Zbdz7D7Qv+4QrapTKKOU1ub2XOvmVGVDEyEwnEZjlbGIiwmpfO03q/GDDEkDM/gIAumxK0U988qSsQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/GowenGit/docnet",
+      "repositoryCommit": "03191d3a3eb27efa8b542bd637489b388d1ba316",
+      "copyright": "MIT",
+      "authors": "Modestas Petravicius",
+      "evidence": [
+        {
+          "path": "licenses/third-party/5642ee5934608c44-LICENSE",
+          "sha256": "5642ee5934608c44fa535e4337c60f494ac65818ed627b0c420ad337c00ba571",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/linux-arm/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/5642ee5934608c44-LICENSE",
+          "sha256": "5642ee5934608c44fa535e4337c60f494ac65818ed627b0c420ad337c00ba571",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/linux-arm64/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/5642ee5934608c44-LICENSE",
+          "sha256": "5642ee5934608c44fa535e4337c60f494ac65818ed627b0c420ad337c00ba571",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/linux/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/5642ee5934608c44-LICENSE",
+          "sha256": "5642ee5934608c44fa535e4337c60f494ac65818ed627b0c420ad337c00ba571",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/win-x64/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/5642ee5934608c44-LICENSE",
+          "sha256": "5642ee5934608c44fa535e4337c60f494ac65818ed627b0c420ad337c00ba571",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/win-x86/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/d676d852bcbbaea2-LICENSE",
+          "sha256": "d676d852bcbbaea26a36181be92a8e70ad85f531b0ccbcc028bf8f4309627ab8",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/osx-arm64/native/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/d676d852bcbbaea2-LICENSE",
+          "sha256": "d676d852bcbbaea26a36181be92a8e70ad85f531b0ccbcc028bf8f4309627ab8",
+          "source": "nuget:Docnet.Core/2.6.0/runtimes/osx-x64/native/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "DocumentFormat.OpenXml.Framework/3.5.1",
+      "sha512": "U5txtc3ORno73xQx9Lf2gWzfaSZnZwKHfLkTAslhlew9lxe5XbUiCt0dY1fHeAf8yRqszUAe5i/+xLC9R/Xfsw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/Open-XML-SDK",
+      "repositoryCommit": "3139fdfd27414548a41555f7848d5728f6e71a42",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ed03ba352313a4ba-LICENSE",
+          "sha256": "ed03ba352313a4ba7019d5bed4bd3218ac17f3e44442a3bb1aaff54dcca9a2bc",
+          "source": "https://raw.githubusercontent.com/dotnet/Open-XML-SDK/3139fdfd27414548a41555f7848d5728f6e71a42/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "DocumentFormat.OpenXml/3.5.1",
+      "sha512": "zxdOf5VVCe/uNklbRhj8dVBzQGj3DoqkUuqOp9cAZVuN8mNYDjof1lvSQA2OQNr8Ptc9d7pbA7Azq/ReaI3FpA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/Open-XML-SDK",
+      "repositoryCommit": "3139fdfd27414548a41555f7848d5728f6e71a42",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ed03ba352313a4ba-LICENSE",
+          "sha256": "ed03ba352313a4ba7019d5bed4bd3218ac17f3e44442a3bb1aaff54dcca9a2bc",
+          "source": "https://raw.githubusercontent.com/dotnet/Open-XML-SDK/3139fdfd27414548a41555f7848d5728f6e71a42/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "ElectronNET.Core.API/0.5.1",
+      "sha512": "KG02vU4h7LfQYv+CxAWnGrAcd68ZTBfvaXZY48N7GC+9EXkBQ8bh3o5hSw64+Irr2ZXpc1oxu4nMYNciKZmcdw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/ElectronNET/Electron.NET/",
+      "repositoryCommit": "18944fe22276bac30c1e31042d30df1f1dee1d42",
+      "copyright": "",
+      "authors": "Gregor Biswanger, Florian Rappl, softworkz",
+      "evidence": [
+        {
+          "path": "licenses/third-party/08a8c809014e5fcd-LICENSE",
+          "sha256": "08a8c809014e5fcd4776f70313b92268d900953183dce6f2dc05edb4f106f18c",
+          "source": "https://raw.githubusercontent.com/ElectronNET/Electron.NET/18944fe22276bac30c1e31042d30df1f1dee1d42/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "ElectronNET.Core.AspNet/0.5.1",
+      "sha512": "JRIOxNbLMieVT6q729JMBB1Wl0C8jTnB56Wy6PT3jbXaFhMez3vGw3RPEZ+Auss6Xy8TV177BoCOn7R+xqxJjw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/ElectronNET/Electron.NET/",
+      "repositoryCommit": "18944fe22276bac30c1e31042d30df1f1dee1d42",
+      "copyright": "",
+      "authors": "Gregor Biswanger, Florian Rappl, softworkz",
+      "evidence": [
+        {
+          "path": "licenses/third-party/08a8c809014e5fcd-LICENSE",
+          "sha256": "08a8c809014e5fcd4776f70313b92268d900953183dce6f2dc05edb4f106f18c",
+          "source": "https://raw.githubusercontent.com/ElectronNET/Electron.NET/18944fe22276bac30c1e31042d30df1f1dee1d42/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "ElectronNET.Core/0.5.1",
+      "sha512": "+Uj+GOUPZZiyZSkRWMvQyi+o7JB4rbuA5MryadOj9kmVqFxvA4PFOWBCWgEjMqEgq0ofFMFK+nvyr8LMLMVg1w==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/ElectronNET/Electron.NET/",
+      "repositoryCommit": "18944fe22276bac30c1e31042d30df1f1dee1d42",
+      "copyright": "",
+      "authors": "Gregor Biswanger, Florian Rappl, softworkz",
+      "evidence": [
+        {
+          "path": "licenses/third-party/08a8c809014e5fcd-LICENSE",
+          "sha256": "08a8c809014e5fcd4776f70313b92268d900953183dce6f2dc05edb4f106f18c",
+          "source": "https://raw.githubusercontent.com/ElectronNET/Electron.NET/18944fe22276bac30c1e31042d30df1f1dee1d42/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Google.Protobuf/3.30.2",
+      "sha512": "Y2aOVLIt75yeeEWigg9V9YnjsEm53sADtLGq0gLhwaXpk3iu8tYSoauolyhenagA2sWno2TQ2WujI0HQd6s1Vw==",
+      "licenseExpression": "BSD-3-Clause",
+      "repository": "https://github.com/protocolbuffers/protobuf.git",
+      "repositoryCommit": "43e1626812c1b543e56a7bec59dc09eb18248bd2",
+      "copyright": "Copyright 2015, Google Inc.",
+      "authors": "Google Inc.",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6e5e117324afd944-LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+          "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/43e1626812c1b543e56a7bec59dc09eb18248bd2/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Humanizer.Core/2.14.1",
+      "sha512": "lQKvtaTDOXnoVJ20ibTuSIOf2i0uO0MPbDhd1jm238I+U/2ZnRENj0cktKZhtchBMtCUSRQ5v4xBCUbKNmyVMw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/Humanizr/Humanizer",
+      "repositoryCommit": "3ebc38de585fc641a04b0e78ed69468453b0f8a1",
+      "copyright": "Copyright (c) .NET Foundation and Contributors",
+      "authors": "Mehdi Khalili, Claire Novotny",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e24ec7f2eea5c5f4-LICENSE",
+          "sha256": "e24ec7f2eea5c5f4b3e2c08308109ba99b49b4b56ea7ff0e0a178f2bdd4bbce8",
+          "source": "https://raw.githubusercontent.com/Humanizr/Humanizer/3ebc38de585fc641a04b0e78ed69468453b0f8a1/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "LibGit2Sharp.NativeBinaries/2.0.324",
+      "sha512": "5YZVGNuO9nYFQfzRQGPGY9fdpSsABwlF2jSaZ7ydxCfjvt5Krbj/eHbXkvvgAQzp4lkjvgDrlAuuI4KTmqhDlA==",
+      "licenseExpression": "LicenseRef-libgit2-unlimited-linking-exception",
+      "repository": "https://github.com/libgit2/libgit2sharp.nativebinaries",
+      "repositoryCommit": "2b95030f15e55dfe70e9fdbb2b3d304a5c95ad23",
+      "copyright": "",
+      "authors": "LibGit2Sharp contributors",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e0938121c0554985-libgit2.license.txt",
+          "sha256": "e0938121c0554985fe17196ac38fc590d149268e9c46e0c0e7a2eae1354fae71",
+          "source": "nuget:LibGit2Sharp.NativeBinaries/2.0.324/libgit2/libgit2.license.txt"
+        }
+      ]
+    },
+    {
+      "package": "LibGit2Sharp/0.32.0",
+      "sha512": "BL3eMVRnkWWS9zbz6n0H+iDVJ9ZK7hDeiuASnHlsFvwZYTJtDuBFRRVIaH//s4VlF0baOGvCeenXbobE1JLLiQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/libgit2/libgit2sharp",
+      "repositoryCommit": "eaa698d078941fd5e3cc82b59b885cd35d8cc0f8",
+      "copyright": "Copyright © LibGit2Sharp contributors",
+      "authors": "LibGit2Sharp contributors",
+      "evidence": [
+        {
+          "path": "licenses/third-party/d745334f7db93761-LICENSE.md",
+          "sha256": "d745334f7db93761cf9c1ffd4c03d0a843618ff87f594077bd6029a73dd0ccb2",
+          "source": "nuget:LibGit2Sharp/0.32.0/App_Readme/LICENSE.md"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Internal.Assets/10.0.0",
+      "sha512": "0gZrESKwnlmbE8Br8XIy3kk7Pj0++9T2Ly+A8BFYYgo5EgfqWEln26cho+l92KOaHUzclhvz314RiwE910s24g==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/307d014f65d84823-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "307d014f65d8482314f1400ddeae7a0cbabb96c2207bcc77f6233cc10588e5d9",
+          "source": "nuget:Microsoft.AspNetCore.App.Internal.Assets/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/b0f34d51fccc69fd334253924abd8d6853fad7aa/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Internal.Assets/10.0.12",
+      "sha512": "+sIBo9AMBZH46qHWHQdfzcGMt+RuBaPYrUMOAM9VjA7MQ9QtIez3lq1C3E05+Yroa94KKt3DSWaxmCI4H28a9Q==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/307d014f65d84823-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "307d014f65d8482314f1400ddeae7a0cbabb96c2207bcc77f6233cc10588e5d9",
+          "source": "nuget:Microsoft.AspNetCore.App.Internal.Assets/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/95017c711e6afc1085133d440e42b4bd78155701/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Bcl.AsyncInterfaces/9.0.4",
+      "sha512": "9VGI5kxIvrNG2mqLQZnUR6y/3fcnygD8eNpHR+CqfbnIXvea6nehnYknDKQTxZVPMpzpNca+7DxLBmpdB3q0Bw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "f57e6dc747158ab7ade4e62a75a6750d16b771e8",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:Microsoft.Bcl.AsyncInterfaces/9.0.4/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.Bcl.AsyncInterfaces/9.0.4/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Bcl.HashCode/6.0.0",
+      "sha512": "GI4jcoi6eC9ZhNOQylIBaWOQjyGaR8T6N3tC1u8p3EXfndLCVNNWa+Zp+ocjvvS3kNBN09Zma2HXL0ezO0dRfw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/maintenance-packages",
+      "repositoryCommit": "d0c2a5a83211e271826172a6b0510c25a52dbd53",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/cfc21f5e8bd655ae-LICENSE",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "https://raw.githubusercontent.com/dotnet/maintenance-packages/d0c2a5a83211e271826172a6b0510c25a52dbd53/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Bcl.Memory/10.0.7",
+      "sha512": "+0MJLOVIO64hZuP8vwdIBbF8QmOw8ZK/1PXq6h+981OrRaWo6e8PmUajbEO7fuKfmaDxasxj0sQPZJI3Dewpig==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b16286c2284fecf303dbc12a0bb152476d662e44",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6d15e10a101c6bff-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:Microsoft.Bcl.Memory/10.0.7/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/b16286c2284fecf303dbc12a0bb152476d662e44/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Build.Framework/18.0.2",
+      "sha512": "sOSb+0J4G/jCBW/YqmRuL0eOMXgfw1KQLdC9TkbvfA5xs7uNm+PBQXJCOzSJGXtZcZrtXozcwxPmUiRUbmd7FA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/msbuild",
+      "repositoryCommit": "995a3dce41788caebf2b8ca6602a7431f08bfd06",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/74dc1c6ae57076cd-THIRDPARTYNOTICES.txt",
+          "sha256": "74dc1c6ae57076cd6e4caf9b105f9b61508b8dfefdb5888f4e7656f948a5b8dd",
+          "source": "nuget:Microsoft.Build.Framework/18.0.2/notices/THIRDPARTYNOTICES.txt"
+        },
+        {
+          "path": "licenses/third-party/9aebac42398b50e6-LICENSE",
+          "sha256": "9aebac42398b50e652a84a7b92d70e85cd1a9c8746558a743dc6cec11b8d7d3e",
+          "source": "https://raw.githubusercontent.com/dotnet/msbuild/995a3dce41788caebf2b8ca6602a7431f08bfd06/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.Analyzers/3.11.0",
+      "sha512": "v/EW3UE8/lbEYHoC2Qq7AR/DnmvpgdtAMndfQNmpuIMx/Mto8L5JnuCfdBYtgvalQOtfNCnxFejxuRrryvUTsg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn-analyzers",
+      "repositoryCommit": "f2384e61845314d0e8ad74cc0fe67d1bd4e9f102",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/0eabe2880daf9bfb-ThirdPartyNotices.txt",
+          "sha256": "0eabe2880daf9bfb25ac160b1e779c5da95a88406dd06cdb570ec7edb5eabb76",
+          "source": "nuget:Microsoft.CodeAnalysis.Analyzers/3.11.0/ThirdPartyNotices.txt"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn-analyzers/f2384e61845314d0e8ad74cc0fe67d1bd4e9f102/License.txt"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.Common/5.0.0",
+      "sha512": "ZXRAdvH6GiDeHRyd3q/km8Z44RoM6FBWHd+gen/la81mVnAdHTEsEkO5J0TCNXBymAcx5UYKt5TvgKBhaLJEow==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn",
+      "repositoryCommit": "6c4a46a31302167b425d5e0a31ea83c9a9aa1d09",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09/License.txt"
+        },
+        {
+          "path": "licenses/third-party/ef4678850e7e3aaf-ThirdPartyNotices.rtf",
+          "sha256": "ef4678850e7e3aaf9297f07e5c4060d477854e545ccf8e2ef8452d65a7b2efaf",
+          "source": "nuget:Microsoft.CodeAnalysis.Common/5.0.0/ThirdPartyNotices.rtf"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0",
+      "sha512": "Al/Q8B+yO8odSqGVpSvrShMFDvlQdIBU//F3E6Rb0YdiLSALE9wh/pvozPNnfmh5HDnvU+mkmSjpz4hQO++jaA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn",
+      "repositoryCommit": "6c4a46a31302167b425d5e0a31ea83c9a9aa1d09",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09/License.txt"
+        },
+        {
+          "path": "licenses/third-party/ef4678850e7e3aaf-ThirdPartyNotices.rtf",
+          "sha256": "ef4678850e7e3aaf9297f07e5c4060d477854e545ccf8e2ef8452d65a7b2efaf",
+          "source": "nuget:Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0/ThirdPartyNotices.rtf"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.CSharp/5.0.0",
+      "sha512": "5DSyJ9bk+ATuDy7fp2Zt0mJStDVKbBoiz1DyfAwSa+k4H4IwykAUcV3URelw5b8/iVbfSaOwkwmPUZH6opZKCw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn",
+      "repositoryCommit": "6c4a46a31302167b425d5e0a31ea83c9a9aa1d09",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09/License.txt"
+        },
+        {
+          "path": "licenses/third-party/ef4678850e7e3aaf-ThirdPartyNotices.rtf",
+          "sha256": "ef4678850e7e3aaf9297f07e5c4060d477854e545ccf8e2ef8452d65a7b2efaf",
+          "source": "nuget:Microsoft.CodeAnalysis.CSharp/5.0.0/ThirdPartyNotices.rtf"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.Workspaces.Common/5.0.0",
+      "sha512": "ZbUmIvT6lqTNKiv06Jl5wf0MTMi1vQ1oH7ou4CLcs2C/no/L7EhP3T8y3XXvn9VbqMcJaJnEsNA1jwYUMgc5jg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn",
+      "repositoryCommit": "6c4a46a31302167b425d5e0a31ea83c9a9aa1d09",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09/License.txt"
+        },
+        {
+          "path": "licenses/third-party/ef4678850e7e3aaf-ThirdPartyNotices.rtf",
+          "sha256": "ef4678850e7e3aaf9297f07e5c4060d477854e545ccf8e2ef8452d65a7b2efaf",
+          "source": "nuget:Microsoft.CodeAnalysis.Workspaces.Common/5.0.0/ThirdPartyNotices.rtf"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0",
+      "sha512": "/G+LVoAGMz6Ae8nm+PGLxSw+F5RjYx/J7irbTO5uKAPw1bxHyQJLc/YOnpDxt+EpPtYxvC9wvBsg/kETZp1F9Q==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/roslyn",
+      "repositoryCommit": "6c4a46a31302167b425d5e0a31ea83c9a9aa1d09",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-License.txt",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/roslyn/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09/License.txt"
+        },
+        {
+          "path": "licenses/third-party/ef4678850e7e3aaf-ThirdPartyNotices.rtf",
+          "sha256": "ef4678850e7e3aaf9297f07e5c4060d477854e545ccf8e2ef8452d65a7b2efaf",
+          "source": "nuget:Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0/ThirdPartyNotices.rtf"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Data.Sqlite.Core/10.0.5",
+      "sha512": "jFYXnh7s0RShCw6Vkf+ReGCw+mVi7ISg1YaEzYCJcXnUifmbW+aqvCsRJuSRj2ZuQ+oqetpjxlZtbpMmk5FKqQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Abstractions/10.0.5",
+      "sha512": "32c58Rnm47Qvhimawf67KO9PytgPz3QoWye7Abapt0Yocw/JnzMiSNj/pRoIKyn8Jxypkv86zxKD4Q/zNTc0Ag==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Analyzers/10.0.5",
+      "sha512": "ipC4u1VojgEfoIZhtbS2Sx5IluJTP/Jf1hz3yGsxGBgSukYY/CquI6rAjxn5H58CZgVn36qcuPPtNMwZ0AUzMg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Design/10.0.5",
+      "sha512": "gm6f0cC2w/2tcd4GeZJqEMruTercpIJfO5sSAFLtqTqblDBHgAFk70xwshUIUVX4I6sZwdEUSd1YxoKFk1AL0w==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Relational/10.0.5",
+      "sha512": "uxmFjZEAB/KbsgWFSS4lLqkEHCfXxB2x0UcbiO4e5fCRpFFeTMSx/me6009nYJLu5IKlDwO1POh++P6RilFTDw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Sqlite.Core/10.0.5",
+      "sha512": "rVH43bcUyZiMn0SnCpVnvFpl4PFxT4GwmuVVLcT4JL0NtzuHY9ymKV+Llb5cjuJ+6+gEl4eixy2rE8nxOPcBSA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore.Sqlite/10.0.5",
+      "sha512": "lxeRviglTkkmzYJVJ600yb6gJjnf5za9v7uH+0byuSXTGv7U8cT6hz7qRTmiGSOfLcl86QFdy2BBKaUFd6NQug==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.EntityFrameworkCore/10.0.5",
+      "sha512": "9tNBmK3EpYVGRQLiqP+bqK2m+TD0Gv//4vCzR7ZOgl4FWzCFyOpYdIVka13M4kcBdPdSJcs3wbHr3rmzOqbIMA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Extensions.AI.Abstractions/10.4.1",
+      "sha512": "ZxhU/wg9BOc3ohibhLl18toPLWm96ysQoE+3OhCgrZ0TUPZd7bsUmGteeatz08yweyuPIEhtyUzEZTF+3bMWEQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/extensions",
+      "repositoryCommit": "b797b53993672eae537cf2cebe6ad3cf58c507e6",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/47f0ad8ba753eae5-LICENSE",
+          "sha256": "47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275",
+          "source": "https://raw.githubusercontent.com/dotnet/extensions/b797b53993672eae537cf2cebe6ad3cf58c507e6/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Extensions.AI.OpenAI/10.3.0",
+      "sha512": "+TAHAJy2+m5zazGLuwz6PbcMu6EmhxR+LmRhmz8+O3BBnfuGWVJOBGDeKAaSvIQDzKFYCLOrE4ZH0IbdLHVlKw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/extensions",
+      "repositoryCommit": "1055487872e1fa424d49f70355405796f9c3a8e3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/47f0ad8ba753eae5-LICENSE",
+          "sha256": "47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275",
+          "source": "https://raw.githubusercontent.com/dotnet/extensions/1055487872e1fa424d49f70355405796f9c3a8e3/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Extensions.AI/10.4.1",
+      "sha512": "io38o6v3Tpbh++UqIcievOOTRwEyBpbNcudpZDjOo+DnAEQQvc3WqlChPipWLYH65cl9m8jiqH6ahHeasZzmOA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/extensions",
+      "repositoryCommit": "b797b53993672eae537cf2cebe6ad3cf58c507e6",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/47f0ad8ba753eae5-LICENSE",
+          "sha256": "47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275",
+          "source": "https://raw.githubusercontent.com/dotnet/extensions/b797b53993672eae537cf2cebe6ad3cf58c507e6/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Extensions.DependencyModel/10.0.5",
+      "sha512": "xA4kkL+QS6KCAOKz/O0oquHs44Ob8J7zpBCNt3wjkBWDg5aCqfwG8rWWLsg5V86AM0sB849g9JjPjIdksTCIKg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6d15e10a101c6bff-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:Microsoft.Extensions.DependencyModel/10.0.5/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.ML.Tokenizers.Data.Cl100kBase/2.0.0",
+      "sha512": "APL8S3FFDesfAMBACeVhRjFLMEEavCVgExPvmM1JkC4u+iiQOiqmOS47bN0n4iKM8k/yYhxd3bBVB3uKo6CCGg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/machinelearning",
+      "repositoryCommit": "efefa92f4486a43047c5b47618885a71bf7f0967",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.ML.Tokenizers.Data.Cl100kBase/2.0.0/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/ec84cc3eae77024f-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "ec84cc3eae77024fc512828ed05b257af93e61c32eb8c732cefba16dac4de5ea",
+          "source": "nuget:Microsoft.ML.Tokenizers.Data.Cl100kBase/2.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.ML.Tokenizers.Data.O200kBase/2.0.0",
+      "sha512": "19G0KWrRnUZmc8vGdPNuBJqTruhAjzPLRY2nn6a/HiBXbEnE/Lx9L223jGlDzg1oAcCggo/8GlWw3ZLVuS76Ow==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/machinelearning",
+      "repositoryCommit": "efefa92f4486a43047c5b47618885a71bf7f0967",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.ML.Tokenizers.Data.O200kBase/2.0.0/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/ec84cc3eae77024f-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "ec84cc3eae77024fc512828ed05b257af93e61c32eb8c732cefba16dac4de5ea",
+          "source": "nuget:Microsoft.ML.Tokenizers.Data.O200kBase/2.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.ML.Tokenizers/2.0.0",
+      "sha512": "+b8lT4cLLO/sBR2hjvE/qG6qrZG15h7/PBvnIrzTh4xDaAxdHUY6449rC+1pHzQUsBiCHZVbj+VMn+xS0sL7TA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/machinelearning",
+      "repositoryCommit": "efefa92f4486a43047c5b47618885a71bf7f0967",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.ML.Tokenizers/2.0.0/LICENSE"
+        },
+        {
+          "path": "licenses/third-party/ec84cc3eae77024f-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "ec84cc3eae77024fc512828ed05b257af93e61c32eb8c732cefba16dac4de5ea",
+          "source": "nuget:Microsoft.ML.Tokenizers/2.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.VisualStudio.SolutionPersistence/1.0.52",
+      "sha512": "oNv2JtYXhpdJrX63nibx1JT3uCESOBQ1LAk7Dtz/sr0+laW0KRM6eKp4CZ3MHDR2siIkKsY8MmUkeP5DKkQQ5w==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/microsoft/vs-solutionpersistence",
+      "repositoryCommit": "19c3ca7dc997dba2b3a86f6c666e9f717f34c8fe",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/2d56342544395b1c-NOTICE",
+          "sha256": "2d56342544395b1cc4bb98192a439031362265125a68b8062942383b8df4309a",
+          "source": "nuget:Microsoft.VisualStudio.SolutionPersistence/1.0.52/NOTICE"
+        },
+        {
+          "path": "licenses/third-party/b5cb7ff7859e7d28-LICENSE",
+          "sha256": "b5cb7ff7859e7d282d98fc43ab081b0dda5dc659dc3385cf65740c759a7e6a6c",
+          "source": "https://raw.githubusercontent.com/microsoft/vs-solutionpersistence/19c3ca7dc997dba2b3a86f6c666e9f717f34c8fe/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.Win32.SystemEvents/8.0.0",
+      "sha512": "9opKRyOKMCi2xJ7Bj7kxtZ1r9vbzosMvRrdEhVhDz8j8MoBGgB+WmC94yH839NPH+BclAjtQ/pyagvi/8gDLkw==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "5535e31a712343a63f5d7d796cd874e563e5ac14",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/19c19dcac9f3ee63-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec",
+          "source": "nuget:Microsoft.Win32.SystemEvents/8.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.Win32.SystemEvents/8.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Mono.TextTemplating/3.0.0",
+      "sha512": "YqueG52R/Xej4VVbKuRIodjiAhV0HR/XVbLbNrJhCZnzjnSjgMJ/dCdV0akQQxavX6hp/LC6rqLGLcXeQYU7XA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/mono/t4",
+      "repositoryCommit": "cb559e2032efd50b926c12927430c82b44d29b1d",
+      "copyright": "",
+      "authors": "Mikayla Hutchinson",
+      "evidence": [
+        {
+          "path": "licenses/third-party/143c56ff6ba2dd12-LICENSE",
+          "sha256": "143c56ff6ba2dd121fa4bbf61c17aa8563378a6223c0bf7c5201e382ebd5f34a",
+          "source": "nuget:Mono.TextTemplating/3.0.0/LICENSE.txt/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Newtonsoft.Json/13.0.3",
+      "sha512": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/JamesNK/Newtonsoft.Json",
+      "repositoryCommit": "0a2e291c0d9c0c7675d445703e51750363a549ef",
+      "copyright": "Copyright © James Newton-King 2008",
+      "authors": "James Newton-King",
+      "evidence": [
+        {
+          "path": "licenses/third-party/b98a397897ff55f7-LICENSE.md",
+          "sha256": "b98a397897ff55f76cddc380041507a95a896b2946e0188703bf0496793d6516",
+          "source": "nuget:Newtonsoft.Json/13.0.3/LICENSE.md"
+        }
+      ]
+    },
+    {
+      "package": "OpenAI/2.8.0",
+      "sha512": "KcYpZ9IhuxFD2hGAJlL5vABtkr00CjeJU0SY8CjZQyzvzkzLop8jhdX3iDvteVJg6e3y4TEiY+Kti4gDJAagnA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/openai/openai-dotnet",
+      "repositoryCommit": "8639c48b359cb3b6b5b9e072116db68e73954717",
+      "copyright": "Copyright (c) 2024 OpenAI (https://openai.com)",
+      "authors": "OpenAI",
+      "evidence": [
+        {
+          "path": "licenses/third-party/5b1ac9960dc46756-LICENSE",
+          "sha256": "5b1ac9960dc46756e316a2962c77fb8cbdee8fa87c9ab1825671235fac6a1f96",
+          "source": "https://raw.githubusercontent.com/openai/openai-dotnet/8639c48b359cb3b6b5b9e072116db68e73954717/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "PdfPig/0.1.14",
+      "sha512": "V2Anq0Yvyn3bGGG8WCQxqEAshG0KHIehB0QOotCz14vTkEk1PR3ErPOSmbnEsyOewhdF3G5XpQHywK2L50Xu+A==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/UglyToad/PdfPig",
+      "repositoryCommit": "88172af1c4d4f440949f59c94966c3880e3f6032",
+      "copyright": "",
+      "authors": "UglyToad",
+      "evidence": [
+        {
+          "path": "licenses/third-party/4c510e162f896ea4-LICENSE",
+          "sha256": "4c510e162f896ea43b4b1cf1b743641d7c756f1004d0e5eaf0615b28b7ded409",
+          "source": "https://raw.githubusercontent.com/UglyToad/PdfPig/88172af1c4d4f440949f59c94966c3880e3f6032/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "SkiaSharp.NativeAssets.Linux/3.119.2",
+      "sha512": "9WzxSyG/s9Id506j0Ht+Bi5ucOpWKPzd1XXr9TD4fuCafHHy2swRSlbZtC3IDQAsvCH63OerkDJajj43uSv5og==",
+      "licenseExpression": "MIT",
+      "repository": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "repositoryCommit": "2888c737ad016d584c74525e2d35db5097ea8576",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/21504c46c4c58aa6-THIRD-PARTY-NOTICES.txt",
+          "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5",
+          "source": "nuget:SkiaSharp.NativeAssets.Linux/3.119.2/THIRD-PARTY-NOTICES.txt"
+        },
+        {
+          "path": "licenses/third-party/89101e35a8c66fd4-LICENSE.txt",
+          "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+          "source": "nuget:SkiaSharp.NativeAssets.Linux/3.119.2/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "SkiaSharp.NativeAssets.macOS/3.119.2",
+      "sha512": "I2jMGQ/26KOnc6iAoR+Mxh9vSJJ2vioJyj9aJ9OL5yEZyXothXJxf4vBMqnSaiXMqiiU1scG7KqtT0CLkmMmWA==",
+      "licenseExpression": "MIT",
+      "repository": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "repositoryCommit": "2888c737ad016d584c74525e2d35db5097ea8576",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/21504c46c4c58aa6-THIRD-PARTY-NOTICES.txt",
+          "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5",
+          "source": "nuget:SkiaSharp.NativeAssets.macOS/3.119.2/THIRD-PARTY-NOTICES.txt"
+        },
+        {
+          "path": "licenses/third-party/89101e35a8c66fd4-LICENSE.txt",
+          "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+          "source": "nuget:SkiaSharp.NativeAssets.macOS/3.119.2/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "SkiaSharp.NativeAssets.Win32/3.119.2",
+      "sha512": "uYe+da6+GXVgPKkCopzvIZ83DmC8SXXKeUAPrNcztJNsg0SjPQAxfKMOPZqmVjbzznrq/QUIjLUlJSZV/e0IPA==",
+      "licenseExpression": "MIT",
+      "repository": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "repositoryCommit": "2888c737ad016d584c74525e2d35db5097ea8576",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/21504c46c4c58aa6-THIRD-PARTY-NOTICES.txt",
+          "sha256": "21504c46c4c58aa64c1055bd2dcbc5f9a136b4b8c412ed3cc6740e22c5b127f5",
+          "source": "nuget:SkiaSharp.NativeAssets.Win32/3.119.2/THIRD-PARTY-NOTICES.txt"
+        },
+        {
+          "path": "licenses/third-party/89101e35a8c66fd4-LICENSE.txt",
+          "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+          "source": "nuget:SkiaSharp.NativeAssets.Win32/3.119.2/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "SkiaSharp/3.119.2",
+      "sha512": "nmy2dOFWPvQKMglfpjz8+/xQQcSrL9jzul3cUyzCJVSwrmSAw+6B1sEgU7jt6NZBptwGq2k/V0kjyu2GizMFtg==",
+      "licenseExpression": "MIT",
+      "repository": "https://go.microsoft.com/fwlink/?linkid=868515",
+      "repositoryCommit": "2888c737ad016d584c74525e2d35db5097ea8576",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/89101e35a8c66fd4-LICENSE.txt",
+          "sha256": "89101e35a8c66fd4d6dffc1763259161d35cb564c169714ec227a768c89f2938",
+          "source": "nuget:SkiaSharp/3.119.2/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "SocketIO.Core/3.1.2",
+      "sha512": "tb6vZ7DYhZooRGLHTPK7/Gifbu+kHbkQRbsee0LAnI28pWc5+Br+juh4pvid3kfIrGTl5dzAfy5huLELVU4svA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/doghappy/socket.io-client-csharp",
+      "repositoryCommit": "dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a",
+      "copyright": "",
+      "authors": "doghappy",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e97ff25fc8529385-LICENSE",
+          "sha256": "e97ff25fc8529385c2a1a12a3a780f07322c32d95f2b00b5a277e7855a900fb8",
+          "source": "https://raw.githubusercontent.com/doghappy/socket.io-client-csharp/dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "SocketIO.Serializer.Core/3.1.2",
+      "sha512": "/cJtU3JVzjqP/Jh3BpMMR0aNzYua6s9e3+hjZ6OnYprFHrGYyg/n9OcST1dBjmOvvgyJ3GwJlyq0NjnPETAHsA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/doghappy/socket.io-client-csharp",
+      "repositoryCommit": "dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a",
+      "copyright": "",
+      "authors": "doghappy",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e97ff25fc8529385-LICENSE",
+          "sha256": "e97ff25fc8529385c2a1a12a3a780f07322c32d95f2b00b5a277e7855a900fb8",
+          "source": "https://raw.githubusercontent.com/doghappy/socket.io-client-csharp/dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "SocketIO.Serializer.SystemTextJson/3.1.2",
+      "sha512": "AA8w3Y4JldC3FaL1D4WuyG4zLPdrzjf8AQx1LCKtzlMlTLOcbEW0UGt+BhKxkUnxYAD5O5fsqRrTNCGXu6VeWA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/doghappy/socket.io-client-csharp",
+      "repositoryCommit": "dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a",
+      "copyright": "",
+      "authors": "doghappy",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e97ff25fc8529385-LICENSE",
+          "sha256": "e97ff25fc8529385c2a1a12a3a780f07322c32d95f2b00b5a277e7855a900fb8",
+          "source": "https://raw.githubusercontent.com/doghappy/socket.io-client-csharp/dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "SocketIOClient/3.1.2",
+      "sha512": "CMmnmhvG1Qf8k6BPh3RLqc/9MNvGUlCOyptjoP8a62bowPQkHTWvN25yy+gQqx5Ry/NgzkQHBJNpmRJhZNZrVQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/doghappy/socket.io-client-csharp",
+      "repositoryCommit": "dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a",
+      "copyright": "",
+      "authors": "doghappy",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e97ff25fc8529385-LICENSE",
+          "sha256": "e97ff25fc8529385c2a1a12a3a780f07322c32d95f2b00b5a277e7855a900fb8",
+          "source": "https://raw.githubusercontent.com/doghappy/socket.io-client-csharp/dc5e7d9d6c26d04d924351c8e242b6e8a8807f7a/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "SourceGear.sqlite3/3.50.4.5",
+      "sha512": "UtnipXhJYZKQOQIfpws/msLK7IRhMplE1CZCaZLIQXRnGD474QVpO/J9nMlQQY8NZueGz1aidjoxDRnrC1NT3Q==",
+      "licenseExpression": "LicenseRef-SQLite-public-domain",
+      "repository": "",
+      "repositoryCommit": "f0b7ea54c8141ff1a209d9371a854307cb6bd8a2",
+      "copyright": "Copyright 2014-2025 SourceGear, LLC",
+      "authors": "Eric Sink",
+      "evidence": [
+        {
+          "path": "licenses/third-party/99464c3a88df7b70-LICENSE.txt",
+          "sha256": "99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95",
+          "source": "nuget:SourceGear.sqlite3/3.50.4.5/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "sqlite-vec/0.1.7-alpha.2.1",
+      "sha512": "JCN6wMW9cX7e6tO6BZRBEdLT1qq8cRlQ5AdPvl6ZRjTKOJ2JjQXYI+wIAMb4EOXiDbbpt0IIv5rkkbPOMlrkRQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/asg017/sqlite-vec",
+      "repositoryCommit": "v0.1.7-alpha.2",
+      "copyright": "",
+      "authors": "Alex Garcia",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6ce72bbe12d975bd-LICENSE-MIT",
+          "sha256": "6ce72bbe12d975bd5286e5ab0a064c069693300c47bccbc57bec18485f1621ea",
+          "source": "https://raw.githubusercontent.com/asg017/sqlite-vec/v0.1.7-alpha.2/LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "package": "SQLitePCLRaw.bundle_e_sqlite3/3.0.3",
+      "sha512": "Zt8jmSL5zcDWGk8rmzhWBJ6IRyLWh1yWS04Pg72+GIvo3Ba4E/rG4Y/4l7AWlSEogEbzyKRTCXUAs1v/O7Pkkg==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "v3.0.3",
+      "copyright": "Copyright 2014-2026 SourceGear, LLC",
+      "authors": "Eric Sink",
+      "evidence": [
+        {
+          "path": "licenses/third-party/cfc7749b96f63bd3-LICENSE.TXT",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v3.0.3/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "SQLitePCLRaw.config.e_sqlite3/3.0.3",
+      "sha512": "caP/ap0X2fyVmstCXu5ueOmcr2XWAxA2XyKghV7H4bOAFmq3nWcsGl9q44iY1HYG+i8Qr4G9XEqdfti0rV6/ZQ==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "96043b8cff323f21919df86a431c136655d81b4a",
+      "copyright": "Copyright 2014-2026 SourceGear, LLC",
+      "authors": "Eric Sink",
+      "evidence": [
+        {
+          "path": "licenses/third-party/cfc7749b96f63bd3-LICENSE.TXT",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/96043b8cff323f21919df86a431c136655d81b4a/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "SQLitePCLRaw.core/3.0.3",
+      "sha512": "bjm6FY4lZyP+t7GmiuvSM0QXpFihAvyE0Y9O2yibm3g95AAWJPNnHOKVNJGyPTGIKuK7Pr4Wh8Rd8/aOtAclQw==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "f3f967adafad853375597a6387cacb7573c5b343",
+      "copyright": "Copyright 2014-2025 SourceGear, LLC",
+      "authors": "Eric Sink",
+      "evidence": [
+        {
+          "path": "licenses/third-party/cfc7749b96f63bd3-LICENSE.TXT",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/f3f967adafad853375597a6387cacb7573c5b343/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "SQLitePCLRaw.provider.e_sqlite3/3.0.3",
+      "sha512": "wd+fGvZTrr3BJNe48opSczmC176Okd61ZgoZNQcdvZwkek6to978ccdpcFmNo5GHxCnk29KwT+f+lAZYgfLVZg==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "f3f967adafad853375597a6387cacb7573c5b343",
+      "copyright": "Copyright 2014-2025 SourceGear, LLC",
+      "authors": "Eric Sink",
+      "evidence": [
+        {
+          "path": "licenses/third-party/cfc7749b96f63bd3-LICENSE.TXT",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/f3f967adafad853375597a6387cacb7573c5b343/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.ClientModel/1.8.1",
+      "sha512": "4oUQgw/vaO4FBOk3YsH40hbrjxRED1l95rRLvTMtHXfQxapXya9IfPpm/KgwValFFtYTfYGFOs/qzGmGyexicQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/Azure/azure-sdk-for-net",
+      "repositoryCommit": "8009447c9a15f1a8256bf98960fa67217961719d",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/9b45236978bb5cd5-LICENSE.txt",
+          "sha256": "9b45236978bb5cd5de992021769e1eeaa79f0116d3b02cf8ba065a1ed603d5fa",
+          "source": "https://raw.githubusercontent.com/Azure/azure-sdk-for-net/8009447c9a15f1a8256bf98960fa67217961719d/LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "package": "System.CodeDom/6.0.0",
+      "sha512": "CPc6tWO1LAer3IzfZufDBRL+UZQcj5uS207NHALQzP84Vp/z6wF0Aa0YZImOQY8iStY0A2zI/e3ihKNPfUm8XA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "4822e3c3aa77eb82b2fb33c9321f923cf11ddde6",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/a6344bfb229bc08d-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "a6344bfb229bc08d1071cec400eea216e307439f961c5943ec1b56d2245acb95",
+          "source": "nuget:System.CodeDom/6.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.CodeDom/6.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition.AttributedModel/9.0.0",
+      "sha512": "iri00l/zIX9g4lHMY+Nz0qV1n40+jFYAmgsaiNn16xvt2RDwlqByNG4wgblagnDYxm3YSQQ0jLlC/7Xlk9CzyA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition.AttributedModel/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition.AttributedModel/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition.Convention/9.0.0",
+      "sha512": "+vuqVP6xpi582XIjJi6OCsIxuoTZfR0M7WWufk3uGDeCl3wGW6KnpylUJ3iiXdPByPE0vR5TjJgR6hDLez4FQg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition.Convention/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition.Convention/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition.Hosting/9.0.0",
+      "sha512": "OFqSeFeJYr7kHxDfaViGM1ymk7d4JxK//VSoNF9Ux0gpqkLsauDZpu89kTHHNdCWfSljbFcvAafGyBoY094btQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition.Hosting/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition.Hosting/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition.Runtime/9.0.0",
+      "sha512": "w1HOlQY1zsOWYussjFGZCEYF2UZXgvoYnS94NIu2CBnAGMbXFAX8PY8c92KwUItPmowal68jnVLBCzdrWLeEKA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition.Runtime/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition.Runtime/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition.TypedParts/9.0.0",
+      "sha512": "aRZlojCCGEHDKqh43jaDgaVpYETsgd7Nx4g1zwLKMtv4iTo0627715ajEFNpEEBTgLmvZuv8K0EVxc3sM4NWJA==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition.TypedParts/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition.TypedParts/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Composition/9.0.0",
+      "sha512": "3Djj70fFTraOarSKmRnmRy/zm4YurICm+kiCtI0dYRqGJnLX6nJ+G3WYuFJ173cAPax/gh96REcbNiVqcrypFQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/40686c6447a7d5b5-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "40686c6447a7d5b5d3693068e4571b5f483d7ed335aeee773ef662440de4c5d5",
+          "source": "nuget:System.Composition/9.0.0/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Composition/9.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Drawing.Common/8.0.22",
+      "sha512": "Bfqx9udaTLSyH3Icb0EjFvewfrZ/hbvKTmOlDsAVtXlheSZGz3+8yljqLRH5wm0hj+IGsqXFwqDSlIMFUBQ32w==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/winforms",
+      "repositoryCommit": "db3d9d83e350dbba9a38c15542fca2dbb297904a",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/093e2589a27ed137-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "093e2589a27ed137e519b9856e425efa7982221a7b3d9e7cea3b5153f711905e",
+          "source": "nuget:System.Drawing.Common/8.0.22/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/a89886665765362e-LICENSE.TXT",
+          "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab",
+          "source": "nuget:System.Drawing.Common/8.0.22/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.IO.Packaging/10.0.2",
+      "sha512": "JTpM4z0wpoIHHDvlCU27HsXo+zVnpWib94HXQpzzr+jc/P9NYf4w353AK4MXyGq/grm1mbLi7eXsOsDU8sGmNg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "44525024595742ebe09023abe709df51de65009b",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6d15e10a101c6bff-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:System.IO.Packaging/10.0.2/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/44525024595742ebe09023abe709df51de65009b/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Memory.Data/8.0.1",
+      "sha512": "BVYuec3jV23EMRDeR7Dr1/qhx7369dZzJ9IWy2xylvb4YfXsrUxspWc4UWYid/tj4zZK58uGZqn2WQiaDMhmAg==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "81cabf2857a01351e5ab578947c7403a5b128ad1",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/b60b2912da28eaa6-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "b60b2912da28eaa6518593c9e2efb5334ee062d3c42e80d8fdfa806b3dc52977",
+          "source": "nuget:System.Memory.Data/8.0.1/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:System.Memory.Data/8.0.1/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "System.Numerics.Tensors/10.0.4",
+      "sha512": "EK8wJVxnVfeCzchnEqVjIfZDpVIcmjfjUs9x1nzI41X2naPGT57QjoHlQJma2vDQUxEtPQiGv/v90mwcflx6mQ==",
+      "licenseExpression": "MIT",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "80d3e14f5e08b4888f464e3cd0d0b2445b63ec46",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "authors": "Microsoft",
+      "evidence": [
+        {
+          "path": "licenses/third-party/6d15e10a101c6bff-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:System.Numerics.Tensors/10.0.4/THIRD-PARTY-NOTICES.TXT"
+        },
+        {
+          "path": "licenses/third-party/ae48df11a335dc1a-LICENSE.TXT",
+          "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+          "source": "https://raw.githubusercontent.com/dotnet/dotnet/80d3e14f5e08b4888f464e3cd0d0b2445b63ec46/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "VersOne.Epub/3.3.6",
+      "sha512": "X7b7Zvw5lLCRYDdDjqWldkZMZ/+rIvSWHAZjRxdq0fCL8+vv4W/OBiSIL0x8fTv2mlPNWGJcL48BIyIfpw2GBg==",
+      "licenseExpression": "Unlicense",
+      "repository": "https://github.com/vers-one/EpubReader",
+      "repositoryCommit": "v3.3.6",
+      "copyright": "Unlicense <http://unlicense.org>",
+      "authors": "vers",
+      "evidence": [
+        {
+          "path": "licenses/third-party/e9b0e94f628e00b5-LICENSE",
+          "sha256": "e9b0e94f628e00b5ed98046cfa041696ff89eebbbdd54108ee350625bc6d0363",
+          "source": "https://raw.githubusercontent.com/vers-one/EpubReader/v3.3.6/LICENSE"
+        }
+      ]
+    }
+  ],
+  "webAssets": [
+    {
+      "name": "Bootstrap",
+      "version": "5.3.3",
+      "licenseExpression": "MIT",
+      "evidence": [
+        {
+          "path": "licenses/third-party/8c14611ae41ac6fd-bootstrap-LICENSE.txt",
+          "sha256": "8c14611ae41ac6fd543c13349f22188eb12c69b3e59105c5eca3925a8e4eca3e",
+          "source": "https://raw.githubusercontent.com/twbs/bootstrap/v5.3.3/LICENSE"
+        }
+      ]
+    }
+  ]
+}

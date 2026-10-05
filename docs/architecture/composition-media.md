@@ -107,8 +107,12 @@ for one exact content identity. Derived preview/reflow caches are never authored
 variants. `DesignedPagePlacementReference` is a rebuildable reverse index only;
 manuscript placements are authoritative.
 
-First release editing clones the complete effective content and authored-layout
-layer. A service operation owns creation, duplication, placement, cross-container
+The first release page edit clones the complete effective page content and
+authored-layout layer once, independently of chapter manuscript inheritance.
+All placements of that page in the exact release use this override. A chapter
+text edit snapshots reference IDs only. Chapter reset preserves page overrides;
+page reset restores all exact release occurrences, and a release-only page has
+no Core reset. A service operation owns creation, duplication, placement, cross-container
 move, removal, effective reads, override/reset, release cloning, and guarded
 deletion. Live placements block deletion. Page-content history/review remains a
 separate dependency group from placement history/review; immutable Git snapshots
@@ -621,15 +625,15 @@ run the project-appropriate native Press checks when output contracts change:
 
 ```powershell
 dotnet build Lorekeeper.sln
-dotnet run --project Lorekeeper --launch-profile http
 cd Lorekeeper.Press
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
 ```
 
-Terminate the HTTP host after its startup check. Do not perform browser,
-Playwright, screenshot, or manual UI checks unless explicitly requested.
+An HTTP startup check, Electron/browser session, screenshot, and every manual
+UI check require explicit authorization. Terminate every host or helper started
+for an authorized check and use disposable synthetic data.
 Image generation, provider calls, and platform-specific behavior are not
 validated by compilation alone. Report those integrations as unexercised
 unless the relevant provider and target platform were actually used.

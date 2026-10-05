@@ -162,11 +162,15 @@ when the interior layout identity actually changed; reopening then refreshes
 pagination before further cover work.
 
 Release-specific manuscript content is opt-in. An untouched release chapter
-reads current Core live. Its first text or layout mutation creates a complete
-copy-on-write snapshot, records the Core revision/hash, and clones referenced
-Designed Page compositions with source identities and stable scene
-relationships. Later Core edits do not alter that snapshot. Reset removes only
-the release-owned manuscript/compositions and returns to live Core inheritance.
+reads current Core live. Its first manuscript mutation snapshots the manuscript
+and placement reference IDs and records the Core revision/hash; it does not clone
+page content or layouts. Designed Pages customize independently on the first
+release page edit and share one override across all exact release placements,
+without creating a chapter override. Core page edits still reach inherited pages
+inside customized chapters. Chapter **Use Core** restores the Core manuscript
+and preserves independent page overrides, including unplaced ones. Page **Use
+Core** restores inherited content/layout across all release occurrences; a
+release-only page cannot reset to Core.
 Project images and Book Text Styles remain shared resources; resetting or
 deleting a release never deletes them. Shared style changes report Core/release
 usage and affect every actual reference.
@@ -568,15 +572,16 @@ unchanged. Artifact image previews also expose the shared image-print action.
 
 ## Relevant verification
 
-Normal source changes require a successful solution build and HTTP-host startup
-check:
+Normal source changes require a successful solution build and the permitted
+data-safety tests. HTTP startup and interactive publishing require explicit
+authorization:
 
 ```powershell
 dotnet build Lorekeeper.sln
-dotnet run --project Lorekeeper --launch-profile http
+dotnet test Lorekeeper.Tests/Lorekeeper.Tests.csproj
 ```
 
-Terminate the host after confirming startup. When publication model or export
+Terminate any authorized host after confirming startup. When publication model or export
 contracts change, inspect the target-aware service callers, effective
 configuration resolver, source-fingerprint inputs, publication-section order
 codec, artifact freshness rules, and immutable view/download endpoints. Search

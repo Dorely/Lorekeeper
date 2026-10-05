@@ -170,6 +170,15 @@ prevent the local workspace from opening. Never treat public release metadata as
 trusted executable content without the package evidence described in the validation
 chapter.
 
+`Dorely/Lorekeeper` is the sole runtime release/update feed. The v1.0.0 bridge
+publication may also be mirrored to `Dorely/Lorekeeper-Releases` so installed
+0.3.x clients can discover it; later releases publish only to the main
+repository. The old feed remains immutable after the separately validated
+handoff and is not deleted by preparation. Linux Free builds discover AppImage
+and Debian artifacts through the same explicit manual-update boundary.
+Stable discovery rejects both GitHub prerelease flags and SemVer prerelease
+tags, even if a release is incorrectly marked stable in GitHub metadata.
+
 The current macOS distribution remains the direct-DMG path. No Mac App Store
 runtime or sandboxed `mas-dev` flavor exists while M0.6 lacks the owner-supplied
 Apple Developer Team ID, MAS development certificate/profile, test App ID,
@@ -312,7 +321,7 @@ product setting or a replacement for target-platform validation.
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Program.cs`](../../Lorekeeper/Program.cs) | Application composition root for host mode, DI, middleware, endpoints, startup gating, Electron window creation, and desktop update setup. |
-| [`Lorekeeper/Lorekeeper.csproj`](../../Lorekeeper/Lorekeeper.csproj) | .NET 10 application definition, warnings-as-errors policy, Electron packaging integration, and managed/native dependency boundary. |
+| [`Lorekeeper/Lorekeeper.csproj`](../../Lorekeeper/Lorekeeper.csproj) | .NET 10 application definition, warnings-as-errors policy, Electron packaging integration, and managed/native dependency boundary. Release alone pins runtime patch 10.0.12; Debug preserves its installed SDK runtime. |
 | [`Lorekeeper/appsettings*.json`](../../Lorekeeper/appsettings.json) | Versioned defaults for desktop, startup, persistence, providers, Blazor, agents, images, ingest, embeddings, and research; environment variables supply deployment overrides. |
 | [`Lorekeeper/Properties/launchSettings.json`](../../Lorekeeper/Properties/launchSettings.json) | Local Electron, HTTP, and HTTPS profiles; Electron is the default product/debug shape and HTTP is the explicit browser-validation profile. |
 | [`Lorekeeper/Properties/electron-builder.json`](../../Lorekeeper/Properties/electron-builder.json) and [`PublishProfiles/`](../../Lorekeeper/Properties/PublishProfiles/) | Electron packaging metadata/targets and runtime-specific self-contained .NET publication profiles. |
@@ -323,6 +332,15 @@ product setting or a replacement for target-platform validation.
 | [`Lorekeeper/Components/ConfirmationDialog.razor`](../../Lorekeeper/Components/ConfirmationDialog.razor) | Required application-owned destructive/consequential confirmation surface. |
 | [`Lorekeeper/wwwroot/app.css`](../../Lorekeeper/wwwroot/app.css) and [`wwwroot/branding/`](../../Lorekeeper/wwwroot/branding/) | Global design tokens and application identity assets shared by browser and desktop hosts. |
 | [`Lorekeeper/Desktop/`](../../Lorekeeper/Desktop/) | Desktop update state and constrained public-release discovery; platform-specific Electron mechanics remain invoked from the composition root. |
+| [`eng/linux/AppRun.sh`](../../eng/linux/AppRun.sh) | Source-owned AppImage launcher; preserves normal Electron sandbox behavior instead of the pinned builder's automatic no-sandbox fallback. Native desktop/AppArmor acceptance is separate evidence. |
+
+Linux packaging uses electron-builder's supported AppImage toolset override with
+the SHA-pinned 1.0.3 archive and official 20251108 static runtime. The temporary
+toolset excludes the old optional `lib/x64` compatibility libraries; the final
+AppImage must have no such bundled compatibility closure, match the exact runtime
+prefix hash, and retain the source-owned launcher. Native desktop/AppArmor
+acceptance and the modified libfuse LGPL source/relink material remain separate
+unresolved evidence.
 
 ## Related chapters
 
@@ -339,8 +357,9 @@ product setting or a replacement for target-platform validation.
 
 ## Relevant verification
 
-For normal host or shared-UI source changes, build the solution and start the
-explicit HTTP profile, confirm the local host reaches a safe startup state without
+For normal host or shared-UI source changes, build the solution and run the
+permitted data-safety tests. Only with explicit authorization, start the HTTP
+profile and confirm the local host reaches a safe startup state without
 startup exceptions, and terminate it. Do not reorder launch profiles to make HTTP
 the default. Electron startup is checked only when explicitly required, and that
 process must also be terminated afterward.

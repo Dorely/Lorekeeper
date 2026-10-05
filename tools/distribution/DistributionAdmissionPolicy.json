@@ -1,7 +1,27 @@
 {
   "schemaVersion": 1,
   "policyId": "lorekeeper-distribution-gate-v1",
-  "purpose": "Engineering distribution gate for the exact local release inputs. This is not legal advice and does not select the application's source license or replace review of the complete license text.",
+  "purpose": "Engineering distribution gate for exact third-party inputs. The owner-approved first-party license alternatives in LICENSE are separate from this permissive dependency policy. Retained package exceptions apply only to the exact reviewed version, bytes, and distribution scope; this policy does not replace full text or target closure review.",
+  "retainedPackageDecisions": [
+    {
+      "package": "LibGit2Sharp.NativeBinaries/2.0.324",
+      "licenseExpression": "LicenseRef-libgit2-unlimited-linking-exception",
+      "evidenceSha256": "e0938121c0554985fe17196ac38fc590d149268e9c46e0c0e7a2eae1354fae71",
+      "scope": "Unmodified compiled libgit2 linked into Lorekeeper only. Its explicit unlimited linking exception admits the combined distribution. Modified or standalone unlinked library distribution must be reviewed separately and is not admitted by this decision."
+    },
+    {
+      "package": "LibGit2Sharp/0.32.0",
+      "licenseExpression": "MIT",
+      "evidenceSha256": "d745334f7db93761cf9c1ffd4c03d0a843618ff87f594077bd6029a73dd0ccb2",
+      "scope": "Unchanged full MIT license retained from this exact package's nuspec-declared App_Readme/LICENSE.md."
+    },
+    {
+      "package": "SourceGear.sqlite3/3.50.4.5",
+      "licenseExpression": "LicenseRef-SQLite-public-domain",
+      "evidenceSha256": "99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95",
+      "scope": "Exact package license dedicates SQLite to the public domain and links sqlite.org/copyright; retain that full evidence."
+    }
+  ],
   "prohibitedRestrictionClasses": [
     "source-disclosure",
     "network-use",

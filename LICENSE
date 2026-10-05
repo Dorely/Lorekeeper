@@ -1,0 +1,39 @@
+Lorekeeper
+
+Required Notice: Copyright (c) 2026 Dorely
+
+The first-party Lorekeeper software, documentation, and branding are offered,
+at your option, under either of these unchanged licenses:
+
+  PolyForm Noncommercial License 1.0.0
+  https://polyformproject.org/licenses/noncommercial/1.0.0
+  Full text: licenses/PolyForm-Noncommercial-1.0.0.txt
+
+  OR
+
+  PolyForm Internal Use License 1.0.0
+  https://polyformproject.org/licenses/internal-use/1.0.0
+  Full text: licenses/PolyForm-Internal-Use-1.0.0.txt
+
+SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 OR PolyForm-Internal-Use-1.0.0
+
+Choose the license that covers your use. Noncommercial use, modification, and
+redistribution are covered by the Noncommercial license. Internal business use
+and modification are covered by the Internal Use license, which does not grant
+redistribution rights. Neither alternative grants rights to sell Lorekeeper,
+commercially distribute it or a derivative, or offer it as a paid hosted
+application to external customers.
+
+These software licenses do not apply to your books, manuscripts, artwork, or
+other creative work merely because you create or process it with Lorekeeper.
+You may use Lorekeeper in commercial bookmaking and sell your own books.
+Your work and any third-party material you use retain their own rights and terms.
+
+Third-party components remain under their respective licenses. Their terms,
+copyright notices, and source records are retained in THIRD-PARTY-NOTICES.txt,
+licenses/third-party/, and the adjacent asset and runtime notice files identified
+there. This license does not replace or restrict those independent grants.
+
+The full applicable license text governs. Lorekeeper is source available;
+these licenses impose use and distribution restrictions and are not OSI-approved
+open-source licenses.

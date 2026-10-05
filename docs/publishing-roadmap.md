@@ -1,6 +1,6 @@
 # Publication artifact roadmap
 
-Last updated: 2026-09-16
+Last updated: 2026-10-05
 
 The [v1 application-release roadmap](v1-roadmap.md) owns the approved v1 scope,
 milestone status, distribution plan, and session handoff. This document retains
@@ -125,8 +125,8 @@ The current application provides:
 - project-owned page setup, flowing Figures, Designed Pages, and structured
   cover scenes;
 - Core Book plus sparse paperback, hardcover, EPUB ebook, and PDF ebook releases;
-- opt-in, chapter-level edition content in Editor with live Core inheritance,
-  copy-on-write snapshots, edition-owned Designed Pages, shared reusable Book
+- opt-in edition content in Editor with live Core inheritance, independent
+  manuscript and Designed Page copy-on-write, shared reusable Book
   Text Styles, reset-to-Core, and Publish difference/diagnostic links;
 - a Lorekeeper-owned Rust renderer with contained assets, deterministic PDF
   output, embedded fonts, page maps, and independent post-write inspection;
@@ -157,10 +157,14 @@ Status: `In progress — native release acceptance remains`
 Status: `Implemented`
 
 - Editor selects Core Book or one release whose edition content is enabled.
-- Chapters inherit Core until their first text/layout mutation, then keep a
-  frozen release snapshot and edition-owned Designed Pages.
-- Reset returns one chapter to Core without deleting project images or shared
-  Book Text Styles.
+- Chapters inherit Core until their first manuscript edit, which snapshots
+  manuscript text and placement reference IDs without copying page bodies.
+- A Designed Page's first release edit independently copies its content and
+  layouts once. All its placements in that release share the page override;
+  Core changes continue to update inherited pages.
+- Chapter Use Core restores inherited manuscript while preserving independent
+  page overrides, even when unplaced. Page Use Core restores every placement
+  of that page in the release; a release-only page cannot reset to Core.
 - Editor assistant, Review Edits, contests, revision workers, previews, search,
   Figures, and Pages carry the protected target; Publish reports bounded
   differences and layout diagnostics with Editor deep links.

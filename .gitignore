@@ -5,6 +5,8 @@
 
 # dotenv files
 .env
+.env.*
+!.env.example
 
 # User-specific files
 *.rsuser
@@ -489,11 +491,21 @@ $RECYCLE.BIN/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.pem
+*.key
+*.p12
 .playwright-mcp/
 .artifacts/
 **/.migration-backups/
 **/.mutation-locks/
 /History/
+tools/msix/store-identity.json
 
 # Rust spike output
 /Lorekeeper.Press/target/

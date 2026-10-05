@@ -491,7 +491,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 
 ## Relevant verification
 
-Compile and run the normal HTTP startup smoke check after provider or worker source
+Compile and run permitted data-safety tests after provider or worker source
 changes. Static inspection must confirm registration lifetime, startup-gate use,
 fresh scope/database-operation boundaries, cancellation propagation, fail-safe
 redaction before any log sink, and no credential logging outside the
@@ -499,7 +499,8 @@ Development-only dev-log layer. A successful build is not evidence that OAuth,
 provider calls, embeddings, web search, guarded fetching, or image generation
 works.
 
-Exercise the exact integration before making such a claim: connect or refresh the
+Only with explicit authorization, exercise the exact integration before making
+such a claim: connect or refresh the
 relevant account credentials, run the applicable chat/vision or embedding probe,
 run discovery only for a user-configured provider, perform the selected web
 provider/fetch flow, or complete and cancel an image job as appropriate. Include

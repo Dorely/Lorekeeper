@@ -19,8 +19,8 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
     ILogger<GitHubDesktopReleaseUpdateChecker> logger) : IDesktopReleaseUpdateChecker
 {
     private const string DefaultReleaseApiUrl =
-        "https://api.github.com/repos/Dorely/Lorekeeper-Releases/releases/latest";
-    private const string AllowedReleasePathPrefix = "/Dorely/Lorekeeper-Releases/releases/";
+        "https://api.github.com/repos/Dorely/Lorekeeper/releases/latest";
+    private const string AllowedReleasePathPrefix = "/Dorely/Lorekeeper/releases/";
     private readonly SemaphoreSlim _checkLock = new(1, 1);
     private EntityTagHeaderValue? _etag;
     private GitHubRelease? _lastRelease;
@@ -43,6 +43,7 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
                 || release.Draft
                 || release.Prerelease
                 || !DesktopReleaseVersion.TryParse(release.TagName, out var latestVersion)
+                || latestVersion.Prerelease.Count > 0
                 || latestVersion.CompareTo(installedVersion) <= 0
                 || !HasCompatibleAsset(release, latestVersion)
                 || !TryValidateReleaseUri(release.HtmlUrl, out var releaseUri))
@@ -70,7 +71,7 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
             || !string.IsNullOrEmpty(releaseApiUri.Query)
             || !string.IsNullOrEmpty(releaseApiUri.Fragment)
             || !releaseApiUri.AbsolutePath.Equals(
-                "/repos/Dorely/Lorekeeper-Releases/releases/latest",
+                "/repos/Dorely/Lorekeeper/releases/latest",
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Desktop:ReleaseApiUrl must be the Lorekeeper GitHub latest-release API URL.");
@@ -138,6 +139,12 @@ public sealed class GitHubDesktopReleaseUpdateChecker(
             };
             return architecture is not null
                 && HasAsset(release, $"Lorekeeper-{versionText}-{architecture}.dmg");
+        }
+
+        if (OperatingSystem.IsLinux() && RuntimeInformation.OSArchitecture == Architecture.X64)
+        {
+            return HasAsset(release, $"Lorekeeper-{versionText}-x86_64.AppImage")
+                && HasAsset(release, $"Lorekeeper-{versionText}-amd64.deb");
         }
 
         return false;

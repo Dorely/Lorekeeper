@@ -463,10 +463,11 @@ For application integration changes, also run:
 
 ```powershell
 dotnet build Lorekeeper.sln
-dotnet run --project Lorekeeper --launch-profile http
+dotnet test Lorekeeper.Tests/Lorekeeper.Tests.csproj
 ```
 
-Terminate the HTTP host after startup confirmation. Inspect protocol fixtures,
+An HTTP startup check requires explicit authorization; terminate that host after
+confirmation. Inspect protocol fixtures,
 negative cases, raw-PDF black-box cases, registry version/hash, packaged
 runtime manifest, artifact length/hash checks, and atomic promotion behavior.
 Search for stale renderer/profile/product names and obsolete machine-tool

@@ -720,7 +720,8 @@ assistant evidence link never silently creates a manuscript citation.
   and cannot simulate a provider or browser. Use compilation, static inspection,
   and explicitly authorized manual integration checks for all other assistant
   behavior.
-- Run `dotnet build Lorekeeper.sln` and the HTTP startup smoke check for normal
-  source changes. Provider calls, model-specific tool behavior, browser UI,
+- Run `dotnet build Lorekeeper.sln` and permitted data-safety tests for normal
+  source changes; the HTTP startup smoke check requires explicit authorization.
+  Provider calls, model-specific tool behavior, browser UI,
   image generation, and publishing flows require explicit integration exercise
   before claiming they work.

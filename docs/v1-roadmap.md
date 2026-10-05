@@ -1,10 +1,10 @@
 # Lorekeeper v1: technical roadmap and release specification
 
-Status: **Approved plan; M0, M1, and M3 execution in progress; M2 complete**
+Status: **Feature work closed; v1 source-sharing, free distribution, and QA preparation in progress**
 
 Approved: 2026-09-16
 
-Last updated: 2026-09-17
+Last updated: 2026-10-05
 
 Planning baseline: v0.3.17, commit `d119615`
 
@@ -26,24 +26,34 @@ Start here when resuming work, then read the relevant specification below.
 
 | Field | Current value |
 |---|---|
-| Active milestone | M5 - rich manuscript, citations, bibliography, Word interchange, and output parity; M0, M1, M3, and M4 remain in progress only for their recorded native, installed-package, OAuth, performance, scale, and Mac evidence |
-| Next bounded step | Owner manual acceptance of the committed feature implementation; resolve feature-blocking findings before the broader authorized validation pass |
+| Active milestone | M6/M7 preparation plus risk-based QA of retained changes; no further feature work |
+| Next bounded step | Commit verified preparation for exact-source local Linux packaging; finish historical artifact/right/closure audit and separately authorized acceptance |
 | Completed implementation | M0.1 aligned focused regression policy; M0.2 is superseded by the owner’s local-validation decision; M0.4 recorded the local distribution inventory and future M6 history-audit procedure; M0.5 added the deterministic update-channel policy and local full-trust MSIX preflight. M1.1 introduces account-owned OpenAI credentials with a guarded forward migration. M1.2 adds a fully local catalog schema v1 for Astra/Sol/Terra/Luna, rejects account-backed model discovery, resolves catalog efforts/capabilities/usable budgets, provides zero-Test catalog readiness, and preserves fail-closed explicit selections. M1.3 replaces redirect-based authorization with account services, a single-use process-local flow registry, serialized refresh/credential replacement, callback-origin validation, a shared allowlisted OpenAI/GitHub external launcher, mounted Settings polling, and a standalone callback page. A focused responsiveness correction also removes provider-backed semantic indexing from blank project creation and gives the Create action immediate busy feedback. M2 replaces chapter/section-owned compositions with reusable Designed Pages, Core/release content and authored layouts, scoped placement references, release override isolation, a project Pages workspace, independent review/history, guarded migration, and current adapters across search, assistants, portability, EPUB, and Press. M3 adds versioned multi-target authoring batches and journals, transactional sessions and durable receipts, exact-precondition conflicts, process-owned bounded delta history, client-first Undo/Redo, recoverable IndexedDB queues, single-writer leases, mutation fences, and delta-based canvas/page/cover editing. M4 adds immutable retained originals, versioned extractions, durable evidence and bibliography identity, the Sources workspace, DOCX source extraction, streamed `.lorekeeper` archives, staged transactional import, policy-scoped dependency traversal, and history schema v8 source manifests and blobs. M5A adds manuscript v6 recursive tables and document-owned notes, UTF-16 positions, rich editor/history replacement, agent projection v3, archive record 2, history schema 9, EPUB exporter v5, and Press protocol 14 table/note pagination; M5B adds managed semantic citations, bibliography ownership/remapping, editable DOCX export and semantic file/paste insertion, rich note editing, nested authoring deltas, reference-aware Press footnotes, and bounded archive/history/source/asset restoration. Current boundaries are manuscript 7, archive record 3, history 10, agent projection 4, EPUB 6, and Press 15 |
-| Next investigation | Exercise the acceptance checklist below. Live OAuth/provider, Word desktop compatibility, native latency, and 50-source/multi-GB memory evidence remain reserved for the later authorized validation pass |
-| Known external dependencies | Owner source-license decision, unresolved dependency/asset provenance, Store accounts/publisher identity, hosted Mac builds and real-device testers, Buy Me a Coffee URL, final Store price |
-| Scope boundary for the next session | Manual acceptance and resolution of reported feature defects. Do not begin broader UI automation, Word desktop, native performance, live OAuth/provider, installed-package/Store, signing, publication, or launch work without the owner's go-ahead |
+| Next investigation | Finish exact historical artifact and AppImage/FUSE/native notices, contribution rights, and target-platform QA limits; evidence lives in evidence/public-sharing-audit.md and evidence/v1-qa.md |
+| Known external dependencies | Real Partner Center identity/certification, installed Windows/Linux acceptance, two unmerged contribution-rights branches, historical binary clearance, and Mac evidence. License, donation URL, branding ownership, free price, and local Linux compute are settled |
+| Scope boundary for the next session | Preparation and explicitly authorized risk-based manual QA only. No visibility/publication/submission/outreach, history/branch deletion, or new feature work |
 | Validation evidence | M0.1 (2026-09-16) aligned policy documents and this handoff. M0.3 tooling generated deterministic fixtures and launched an isolated unsigned Windows Release package but recorded no UI timing sample because this environment exposed no native-app control target. M0.4 generated deterministic JSON/Markdown inventory from restored dependencies and a locally built unsigned Windows closure; it recorded license and provenance gaps without selecting terms, scanning history, signing, publishing, or exercising a Store integration. M0.5 policy tests and a local Store-channel full-trust MSIX preflight establish build metadata, package contents, and CMS signature integrity only. M1.1-M1.3 add deterministic migration rollback, static catalog manifest and account-discovery rejection, zero-Test readiness, catalog-owned usable budget, fail-closed selection, authorization cancellation/denial/expiry/single-use/concurrency, refresh serialization/classification, allowlist, callback-origin, and completion-page regressions plus build/startup smoke evidence; they do not establish live OAuth, provider acceptance, browser UI, or Electron behavior. The project-creation responsiveness correction passes the same-change repository gate and browser-host startup smoke, but has no browser/Electron interaction timing because UI automation was not authorized. M2 (2026-09-17) adds guarded/idempotent migration and recovery coverage, release clone/isolation, scoped placement-index restoration, compound cross-container history, JSON v31/manuscript v5/history v7/Press v13 compatibility, semantic-editor build evidence, the full repository gate, and HTTP startup smoke. M3 (2026-09-17) adds deterministic batch hashing/reduction, transactional receipt replay and rollback, multi-target Undo/Redo, recovery-journal, exact-conflict, writer/fence, migration, semantic-editor JavaScript, full-gate, and HTTP-startup evidence. M4 (2026-09-17) adds retained-source migration and re-extraction coverage, archive closure and adversarial validation, streamed staging, commit/index recovery, history-v8 preservation and restore, DOCX source-extraction safety, full-gate, and HTTP-startup evidence; it does not establish native 50-source navigation or multi-GB portability performance. M5A (this 2026-09-17 change) adds v5-to-v6 and direct legacy migration coverage, recursive table/note validation, exact rich authoring/inverse behavior, output semantics, EPUB v5, and Press v14 conformance. Reference-page footnote reservation was open at that checkpoint; no browser interaction or native latency/platform evidence is claimed. M0.6 has documented prerequisites only: no MAS runtime, entitlement, signing, device, or workflow evidence exists. The feature-completion implementation adds approved citation/DOCX conversion, rich recovery, remapping/closure, predecessor-format, rollback/replay, and Press footnote/occurrence regressions, semantic-editor build checks, repository gates, and isolated HTTP startup checks. These are implementation evidence only; manual acceptance, Word desktop, live integration, and native performance remain separate |
 | Workspace | Rediscover with Git; do not treat the planning baseline as current HEAD or infer a clean checkout from this document |
 
-The user explicitly approved expanding focused regression coverage for
-DOCX/citations, Undo/concurrency, provider configuration, and release-channel
-logic, while avoiding broad brittle UI suites. The accepted specification also
-requires shared-page and portability regressions. M0.1 records those precise
-boundaries in the owning policy documents before adding such tests. This is an
-already approved scope change, not a reason to ask for the same approval again.
-It does not authorize browser sessions, paid provider calls, purchases, repository
-publication, Store submission, or outreach merely because those appear later in
-the plan; follow the user's current task and the applicable execution rules.
+The 2026-10-05 preparation decision supersedes earlier broad-test, paid-Store,
+source-license, Linux-exclusion, and release-feed assumptions in the historical
+ledger below. Current automated tests remain limited to the data-safety core and
+Press conformance matrix in AGENTS.md. The JavaScript test suites and one-off
+distribution policy harness were removed as policy cleanup; deterministic bundle
+builds, production package/license checks, and static inspection remain.
+Manual/UI/provider/Word exercises require explicit authorization. The current
+task is preparation and risk-based QA, with no new features, public visibility,
+publication, Store submission, outreach, or history/branch deletion.
+
+The selected source-available terms are unchanged PolyForm Noncommercial or
+Internal Use 1.0.0 alternatives; commercial authors and internal businesses can
+use Lorekeeper, while commercial software distribution and paid external hosting
+are outside these grants. Install channels are free. Donation URL and branding
+ownership are settled. Linux AppImage/DEB packaging uses local native/WSL compute.
+Exact v1.0.0 is the final old-feed bridge; later releases belong to the main
+repository. Any later v1 visibility handoff requires the explicit launch flag
+after verified publication and fresh unauthenticated asset checks. Historical
+records remain evidence of their date, not current execution permission.
 
 ### Session handoff procedure
 
@@ -110,9 +120,9 @@ the plan; follow the user's current task and the applicable execution rules.
 | M3 | In progress | Immediate manual Undo/Redo, recoverable save queue, incremental history | Latency and failure-recovery gates pass | Deterministic implementation and headless recovery regressions are complete; native latency evidence remains blocked on an authorized Electron input surface |
 | M4 | In progress | Full source readers, retained originals, stable evidence links, scalable portability | Dozens of books remain readable, searchable, exportable, and restorable | Deterministic implementation and headless archive/history/import regressions are complete; native 50-source navigation and multi-GB portability evidence remains |
 | M5 | In progress — implementation ready for manual acceptance | Rich manuscript, citations/bibliographies, Word paste/file import, DOCX export, output parity | Compatibility fixtures pass across editor, DOCX, EPUB, and Press | Deterministic implementation, preservation/output regressions, repository gates, and isolated startup checks precede handoff; manual acceptance and later Word desktop/platform evidence remain |
-| M6 | Not started | Public repository, donations, onboarding, beta, targeted cleanup | Beta exit criteria pass without unresolved data-loss or release-blocking defects | Publication still requires its explicit execution step |
-| M7 | Not started | Free Windows downloads and paid Microsoft Store edition | Clean install, upgrade, migration, and Store update evidence passes | Requires M0-M6 and Windows platform gates |
-| M8 | Not started | Notarized free Mac download and paid Mac App Store edition | Real-device and sandboxed Store validation passes | Cloud-only Mac access initially; recruit device testers |
+| M6 | In progress | Source-available terms, notices, audit, donations, support/privacy/onboarding preparation | Public audit and QA findings resolved before visibility | Preparation does not authorize publication |
+| M7 | In progress | Free Windows direct/MSIX and local Linux AppImage/DEB preparation | Exact package/license closure plus installed OS/update/retention evidence | Store identity, certification, Linux desktop acceptance, and historical handoff remain |
+| M8 | Deferred | Direct Apple Silicon DMG retained; notarization/MAS are later owner-account work | Real-device and signed/sandboxed evidence | No new Mac Store work in this preparation |
 
 Initial M0 substeps (split further only when current-code findings justify it):
 
@@ -220,6 +230,8 @@ M1 implementation substeps:
 | 2026-09-16 | Removed provider-backed indexing from blank project creation | Persist the project, page setup, and empty Book Brief together, seed only local graph defaults before navigation, and prevent duplicate Create submissions while work is pending; semantic profile indexing begins with substantive profile changes or a full rebuild | Owner-reported roughly 30-second unresponsive Create action; source trace showed the creation path awaited the configured embedding provider |
 | 2026-09-17 | Accepted the M2-M5 contract revision | Replaces the prospective CSL/Jint formatter with managed `lorekeeper-citations-v1` for Chicago 18, APA 7, and MLA 9; fixes Designed Page ownership, multi-target authoring/recovery, retained-source migration, policy-scoped portable traversal, and rich table/note defaults before implementation | Owner-approved Astra-reviewed revision |
 | 2026-09-17 | Replaced prospective legal review with a fail-closed engineering dependency gate | Admit only dependencies with verified policy-compatible redistribution terms; resolve, remove, or replace everything else. Do not adopt Commons Clause or another Lorekeeper source license without a later owner decision | Owner decision during remaining-v1 planning |
+| 2026-10-05 | Closed feature work and selected free source-available release preparation | Unchanged dual PolyForm alternatives; commercial bookmaking/internal use allowed, commercial software distribution excluded; owned/generated branding; Buy Me a Coffee confirmed; free Store and Linux AppImage/DEB via local/WSL compute; no publication or visibility change | Owner decisions during sharing preparation |
+| 2026-10-05 | Restored the narrow current test and manual-authorization boundaries | Data-safety and Press tests only; remove JavaScript/one-off suites; static production packaging checks retained. Every startup/manual/UI/provider exercise requires explicit authorization | Current AGENTS.md and owner preparation instruction |
 
 ## 2. Release definition and settled scope
 
@@ -234,21 +246,21 @@ independent Designed Pages, Undo/Redo, OpenAI configuration, and external OAuth.
 | Area | V1 decision |
 |---|---|
 | Windows | Windows 10 22H2 and Windows 11, x64 |
-| macOS | Apple Silicon, macOS 14+, including a paid Mac App Store edition |
+| macOS | Apple Silicon direct DMG retained; notarization and Mac App Store deferred |
+| Linux | Ubuntu 24.04 x64 baseline; AppImage and DEB built locally/native or WSL2 |
 | Free distribution | GitHub downloads; update notifications and manual installation |
-| Paid distribution | One-time Store purchase; Store-managed updates; identical writing features |
-| Price | Owner decision before submission; approximately $10 remains the starting point |
-| License | Owner decision before publication; no source license is currently adopted |
-| Public access | Public source and free beta before v1 |
+| Store distribution | Free MSIX listing, Store signing and managed updates; BYO provider costs remain independent |
+| Price | Free installation and optional donations |
+| License | Source available: unchanged PolyForm Noncommercial OR Internal Use 1.0.0 |
+| Public access | Prepared only; visibility follows a separately authorized validated v1 launch |
 | Language | English UI and the current Latin-script, left-to-right publishing scope |
-| Testing | Expand focused regression coverage beyond the current migration/Press restriction |
-| Excluded | Additional premium features, subscriptions, license servers, Intel Mac, Windows ARM, Linux release support, new OCR, arbitrary Word layout replication |
+| Testing | Data-safety core and Press conformance only; other acceptance is static or explicitly authorized manual evidence |
+| Excluded | New product features, premium tiers, subscriptions, license servers, Intel Mac, Windows ARM, hosted Linux compute, new OCR, arbitrary Word layout replication |
 
-The prior Apache-2.0 plus Commons Clause candidate is not adopted. Do not describe
-Lorekeeper as open source or source available until the owner selects final
-terms. Any future source license must leave manuscripts and other author-created
-content unrestricted; selecting those terms is a publication gate, not an
-engineering dependency gate.
+The Apache-2.0 plus Commons Clause candidate is not adopted. Lorekeeper is source
+available under the selected unchanged alternatives, not OSI open source.
+Author-created work retains its own rights; commercial bookmaking is permitted.
+The first-party choice does not relax third-party redistribution obligations.
 
 ## 3. Sequencing and integration
 
@@ -788,9 +800,9 @@ citations, and Word insertion through the parent manuscript's save and Undo
 boundary. Headless checks cover nested deltas and ownership; keyboard/focus and
 visual interaction remain manual acceptance items.
 
-The six approved feature areas are implemented for manual acceptance. Full
-automated gates, diff review, and isolated HTTP startup precede each committed
-checkpoint. Acceptance should cover:
+The six approved feature areas are implemented for manual acceptance. Required
+data-safety and Press checks and diff review precede each committed checkpoint;
+isolated startup requires explicit authorization. Acceptance should cover:
 
 - Import a DOCX and paste Word content at an explicit cursor; inspect headings,
   lists, merged cells, images, notes, citation metadata, and conversion warnings.
@@ -827,8 +839,8 @@ Concentrate cleanup on measured problems and changed boundaries:
 
 ## 5. Verification and v1 acceptance
 
-M0.1 updates repository instructions to permit focused regression tests for these
-contracts. The automated commit gate is replaced by the build-and-tests
+The current AGENTS.md limits tests to the data-safety core and Press matrix.
+The automated commit gate is replaced by the build-and-tests
 completion rule; Press evidence requirements remain.
 Use the current commands from [AGENTS.md](../AGENTS.md) and
 [validation guidance](architecture/validation-documentation.md); do not copy a
@@ -840,24 +852,22 @@ Every structural migration must prove preservation of manuscript text, stable
 IDs, page scenes, release isolation, source evidence, and assets. Test
 rollback/recovery with malformed and interrupted input.
 
-Use copies of working databases. Never use the developer's original database as
-a migration test target.
+Use disposable synthetic fixtures. Working-database copies require the owner's
+explicit authorization; never mutate a developer's original as a test target.
 
-### Required regression coverage
+### Acceptance coverage
 
-- DOCX fixtures covering styles, lists, merged multi-paragraph cells, images,
-  links, notes, citations, and discarded Word review markup.
-- Citation golden outputs, missing metadata, repeated references,
-  release-specific bibliography, and offline operation.
-- Shared-page placement, duplication, release override/reset, deletion,
-  indexing, artifact invalidation, and historical restore.
-- Undo inverse correctness, grouping, failed persistence, duplicate delivery,
-  reload recovery, and assistant concurrency.
-- Catalog reconciliation, effort/context validation, credential migration,
-  and zero-manual-test readiness.
-- Full/non-structural package closure, legacy import, chunk integrity,
-  and streaming restoration.
-- Store/free channel selection and updater behavior.
+Automated regressions may cover migration, versioned import/export, archive/history
+preservation and fail-closed behavior, recovery, and the Press evidence matrix
+only. Preserve the same production boundaries and synthetic fixture discipline.
+
+Use static inspection and explicitly authorized manual acceptance for Word
+formatting/citations, shared-page authoring and reset, Undo grouping and concurrent
+writers, catalog reconciliation and credential-backed OAuth/provider behavior,
+Store/free updater selection, and installed-platform workflows. Record exact
+versions, fixtures, performed evidence, and unperformed integrations in
+[evidence/v1-qa.md](evidence/v1-qa.md). Build or data-safety tests do not establish
+those interaction or platform claims.
 
 ### Performance gates
 
@@ -878,9 +888,11 @@ machine; it is a comparison environment, not a minimum hardware requirement.
 Include a 250,000-word project, a 1 MiB/10,000-block editor stress document,
 shared/release pages, and a 50-source/few-GB library. These are acceptance
 targets, not current measurements. M0.3 supplies the two v30 project fixtures
-and an opt-in manifest-defined 50-source/3.125 GiB library, but the present
-64 MiB full-memory import UI cannot establish few-GB source-library, streaming
-import/export, history, or M2 shared-page results; those remain M2/M4 work.
+and an opt-in manifest-defined 50-source/3.125 GiB library. At the historical
+M0.3 checkpoint, the 64 MiB full-memory import UI could not establish few-GB
+source-library, streaming, history, or shared-page results. M2/M4 subsequently
+implemented shared pages and streamed archive boundaries; native performance
+acceptance remains unperformed.
 Record hardware, OS, build, sample counts, warm/cold conditions, background
 activity, and measurement method with results.
 
@@ -907,8 +919,8 @@ CI is owner-declined; record unperformed checks explicitly.
 ### Windows
 
 Build a Microsoft Store MSIX edition and separate GitHub installer/portable
-artifacts. MSIX provides the Store signing, commerce, and update route the paid
-edition needs. An EXE listing would leave those responsibilities with the
+artifacts. MSIX provides the Store signing and update route for the free
+edition. An EXE listing would leave those responsibilities with the
 publisher. See [Microsoft's distribution comparison](https://learn.microsoft.com/en-us/windows/apps/distribute-through-store/how-to-distribute-your-win32-app-through-microsoft-store).
 
 - Store builds use Store updates exclusively.
@@ -917,7 +929,16 @@ publisher. See [Microsoft's distribution comparison](https://learn.microsoft.com
 - Encode distribution channel in build metadata, not a user-editable premium flag.
 - Keep development, beta, free stable, and Store update behavior explicit.
 
-### Mac
+### Linux
+
+Build AppImage and DEB on local Ubuntu 24.04 x64 or WSL2 from the exact committed
+source archive. No hosted Linux workflow is added. Verify ELF architecture/native
+dependencies, source-owned sandbox-preserving launcher, Press/editor/source notice
+closure, artifact hashes and provenance, and installed desktop/upgrade behavior.
+AppImage/FUSE/native runtime terms require exact retained evidence; artifact
+production alone does not clear that closure. See README for build commands.
+
+### Mac (deferred beyond this preparation)
 
 Maintain separate Developer ID and Mac App Store packaging.
 
@@ -941,34 +962,33 @@ Budget Apple Developer membership at the US$99/year listed during planning,
 plus hosted build/test costs; recheck before enrollment. Exact Store pricing
 remains an owner-supplied release input. See [Apple enrollment](https://developer.apple.com/programs/enroll/).
 
-### Retire Lorekeeper-Releases safely
+### Retain the final old-feed bridge
 
-1. Prepare and make the main repository public.
-2. Establish releases and update metadata there.
-3. Publish one final bridge release through the old feed so existing installations
-   can reach the new distribution behavior.
-4. Test the transition from an installed v0.3.17.
-5. Stop dual publication and archive the old repository, retaining historical
-   assets and a migration notice.
+The preparation uses `Dorely/Lorekeeper` as the sole runtime update feed and the
+future release authority. On a separately authorized exact v1.0.0 launch:
 
-Do not delete the old feed while installed versions still depend on its final bridge.
+1. Publish identical verified artifact sets to main and the historical feed.
+2. With explicit `-MakeSourcePublicAfterV1`, change source visibility afterward.
+3. Verify both feeds without credentials, including full asset downloads and
+   SHA-256 checks; retain finalized releases if that final check fails.
+4. Exercise handoff from an installed v0.3.17 before declaring the old feed
+   immutable. Keep its final bridge and historical assets available.
+5. Publish all higher versions only to main. Archival remains a separate owner
+   decision; preparation never deletes branches, history, tags, or the old feed.
 
 ### Public repository and donations
 
-Before publication:
+The dual license, retained notices, contribution terms, security/support/privacy
+docs, branding provenance, and confirmed `https://buymeacoffee.com/dorely`
+funding button/README link are prepared. Donations are optional and unrelated to
+feature access. The strict third-party gate remains independent of the restrictive
+first-party terms; exact libgit2 linking-exception scope is retained.
 
-- Audit tracked files and Git history for secrets, private data, and redistribution rights.
-- Resolve findings before changing visibility; do not automatically rewrite history.
-- Add the approved license, third-party notices, contribution terms covering
-  official commercial distribution, security reporting, issue templates,
-  support policy, and build instructions.
-- Keep repository-gate and focused-regression evidence local; do not add general
-  GitHub CI or hosted validation unless the owner explicitly revisits the decision.
-- Configure GitHub's funding button and README donation link using the owner's
-  verified Buy Me a Coffee URL.
-- Keep donations optional and unrelated to feature access.
-- Put donation links on GitHub and the project website; avoid introducing an
-  external payment workflow into the Mac Store app.
+Review [public-sharing audit](evidence/public-sharing-audit.md) for the redacted
+all-ref/GitHub findings and unfinished historical binary, contributor-rights,
+and target closure work. Resolve those and recheck exact final refs before
+visibility. No automatic history rewrite, branch deletion, settings change,
+publication, outreach, or hosted validation is authorized by this plan.
 
 ### Small launch campaign
 
@@ -990,10 +1010,7 @@ outreach or posts are sent without explicit authorization.
 
 ### Owner-supplied publication inputs
 
-- Final Store price.
 - Publisher identity and developer accounts.
-- Verified Buy Me a Coffee URL.
-- Final owner-selected source-license and contribution terms.
 - Real-device Mac testers and required Store/signing access.
 
 These inputs are publication dependencies, not excuses to stop independent

@@ -1,0 +1,289 @@
+{
+  "formatVersion": 1,
+  "packages": [
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.linux-x64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "linux-x64",
+      "sha512": "X8NccILKj/aEVjz1Gt50zGlRplIHbI+H6uRv2yFY9KioM+sKMgdbNTAsRp9QG4aw5RGA9IhZYxcHCQb8ATc+XQ==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/LICENSE.txt",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "52af3d603b6d069e635f8afd08ec44ec01559255b5f3afd161ae9e6fe7e7aa54",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.linux-x64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "linux-x64",
+      "sha512": "M3cZRbtrCjFV1aJ0eA2MbIBe2CB3XO56dkqBoRjIyhAKo3luCzk7AqStyr5u4/7an2/SF+6ejhazWtiAcdTlsA==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/LICENSE.txt",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "52af3d603b6d069e635f8afd08ec44ec01559255b5f3afd161ae9e6fe7e7aa54",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.osx-arm64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "osx-arm64",
+      "sha512": "tn0bDgKsgZOCHkkpIRfO1yzM080LcPxMUhtaHEXcOpWNtZqmqRmyC7zfiaQPmzdKDgJU+urZOJWq+HvL9CCJjg==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/LICENSE.txt",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "52af3d603b6d069e635f8afd08ec44ec01559255b5f3afd161ae9e6fe7e7aa54",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.osx-arm64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "osx-arm64",
+      "sha512": "yxiNGqHQPwU5ecdxXX8eI07UaQ596TQvydUx8f93p3WF2vJyynw7U9zUK0QspzNix2NzmNxMouUjvXAIO+4BTw==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/LICENSE.txt",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "52af3d603b6d069e635f8afd08ec44ec01559255b5f3afd161ae9e6fe7e7aa54",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.win-x64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "sFadl/LMITcaxnci2Vrvjezfhd8bOh/2Nseu7oU3uVKxfVAS05V9iV1m2QEDslcd1Zg2DS+HlhEWgxnud8l5Kw==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/LICENSE.txt",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "307d014f65d8482314f1400ddeae7a0cbabb96c2207bcc77f6233cc10588e5d9",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12",
+      "packageId": "Microsoft.AspNetCore.App.Runtime.win-x64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "n8qSkT3KkkXSpu9UU748wzEbrDwLOJCkOGxY0D/tvWOwUXUbS2qRk5icYG2SukR7+i1eO8YF4sOl+ivbohhRPA==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/LICENSE.txt",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/LICENSE.txt"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "307d014f65d8482314f1400ddeae7a0cbabb96c2207bcc77f6233cc10588e5d9",
+          "source": "nuget:Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.linux-x64/10.0.0",
+      "packageId": "Microsoft.NETCore.App.Runtime.linux-x64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "linux-x64",
+      "sha512": "WJMtkEZM2JbiS7VZc/R2+3qUVxiCR+G3JepQwczM0qWBrsRpeVoXGJu/ZpDbUwr7AqzwJm6iD+aCbYpxK8Jlng==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.linux-x64/10.0.12",
+      "packageId": "Microsoft.NETCore.App.Runtime.linux-x64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "linux-x64",
+      "sha512": "FWJ8ixsfc+snzowYyAUlRGHehPjH9xtmLg0owWDV1Ju9dUeZf+OKuBagE+E/flME5Hhx7rObgcSVTXQak/wvGg==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0",
+      "packageId": "Microsoft.NETCore.App.Runtime.osx-arm64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "osx-arm64",
+      "sha512": "axo6Yu6u/tHfPe/Gtv4eo3/L9ROYcmAaxWm8w6Y3ak3JhgkuHZYexCyXKdnrKiMXb7LDS2x1967gm6gmkg45/A==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12",
+      "packageId": "Microsoft.NETCore.App.Runtime.osx-arm64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "osx-arm64",
+      "sha512": "8rDt9QoxwXsA6a0tVl9b4fD5my0EZtXvJndCEFESf/H5hSlqvi26RBwfnvyiz3b8wS2pdP8G6H7xqdRJbSVkwg==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/LICENSE.TXT",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.win-x64/10.0.0",
+      "packageId": "Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "UcUlPpehQPt77/Zs/JwyENXtjnOU7YdwM7Kcft12Iai5pofK4DMC4kQLBjKQiCG8Q4RElUnEW+DQHmEGR0fz/Q==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.0/LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.win-x64/10.0.0/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.NETCore.App.Runtime.win-x64/10.0.12",
+      "packageId": "Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "Oa/LIiAy6r6+LH+lGjfEkcaw9FZ5ateIhDGXG47vT2icruVFQmA5jOD/r+SRxWWJGzXnOvxnWFo+TEvemVcQ7g==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/LICENSE.TXT",
+          "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.win-x64/10.0.12/LICENSE.TXT"
+        },
+        {
+          "path": "licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT",
+          "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+          "source": "nuget:Microsoft.NETCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.0",
+      "packageId": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "version": "10.0.0",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "wiPzBVW3cvV4ZJ7jTWCV0Fy3Kj6v0s/xPMkVNIabpyadbZXd/+o4t7HOqPRSk1uHdXaQVuB6re8cd3owyaLAoA==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.0/LICENSE",
+          "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab",
+          "source": "nuget:Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.0/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.12",
+      "packageId": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "version": "10.0.12",
+      "runtimeIdentifier": "win-x64",
+      "sha512": "BeGI/KTBBca4pduu1nff61VvZAwlzVwqNmo+eVqT26ltsAJsQsF//DCPJssw+fXpARq+FQ7pVKiQed5igv8KYQ==",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "evidence": [
+        {
+          "path": "licenses/runtime-notices/Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.12/LICENSE",
+          "sha256": "a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab",
+          "source": "nuget:Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.12/LICENSE"
+        }
+      ]
+    }
+  ]
+}

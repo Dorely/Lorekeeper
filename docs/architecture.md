@@ -112,8 +112,9 @@ mandatory task context to become another monolith.
 
 Verification is selected from the routed chapters and
 [`validation-documentation.md`](architecture/validation-documentation.md).
-Normal source changes require a successful solution build followed by the
-explicit HTTP-profile startup smoke check and host termination. Specialized
+Normal source changes require a successful solution build and the permitted
+data-safety tests. Every startup smoke check and manual/UI validation requires
+explicit user authorization; terminate all validation hosts afterward. Specialized
 database, import/export, semantic-editor, Press, Electron, packaging, release,
 provider, or platform claims require their documented evidence. Do not infer an
 integration or target-platform result from compilation alone.

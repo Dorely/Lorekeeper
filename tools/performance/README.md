@@ -17,13 +17,15 @@ dotnet run --project tools\performance\Lorekeeper.PerformanceFixtures.csproj -- 
 The manifest fixes seed `Lorekeeper-M0.3-v1`, v30, counts, text byte lengths,
 and SHA-256 values. `--include-large-sources` deliberately generates 50
 deterministic 64 MiB ASCII source files (3.125 GiB) only when explicitly asked.
-Those files are not an M0.3 measured workload: the current import surface has a
-64 MiB full-memory limit and M4 owns streaming source-library work.
+Those files were not an M0.3 measured workload: the import surface at that
+historical checkpoint had a 64 MiB full-memory limit. M4 subsequently implemented
+streamed archive/import boundaries; see the current persistence architecture.
+The fixture descriptor does not establish native few-GB performance.
 
 Build the unsigned local Windows Release package with
 `scripts/build-windows-release.ps1 -KeepUnpacked`, after confirming that its
 ignored `publish/win-x64-stage` and `publish/win-x64` directories are disposable.
-Then run the local sampler:
+After explicit authorization for the isolated manual session, run the local sampler:
 
 ```powershell
 $packagePath = Join-Path (Get-Location) 'publish\win-x64\win-unpacked'

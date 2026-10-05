@@ -23,10 +23,8 @@ migrations and guarded transformation services, not in retained obsolete
 runtime branches.
 
 The frequently used browser-development database is `Lorekeeper/lorekeeper.db`
-relative to the repository root (for example,
-`C:\Users\jonth\Source\repos\Lorekeeper\Lorekeeper\lorekeeper.db` in the
-primary development checkout). It contains the Falanaras project and other
-developer working data. Migration validation must use a copied database and
+relative to the repository root. It contains developer working data, not a
+disposable fixture. Migration validation must use a copied database and
 must never mutate this developer-owned original.
 
 New Contest batches store a versioned immutable task/target/context envelope in
@@ -589,7 +587,7 @@ dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj --no-restore -c Release --filter "FullyQualifiedName~ProjectReferenceMigrationTests|FullyQualifiedName~V25ExportPreservesRectoSettingsWarnsAndDoesNotInferProjectReferences"
 ```
 
-For startup behavior, run the explicit HTTP profile, confirm no startup
+For startup behavior, only with explicit authorization, run the HTTP profile, confirm no startup
 exception, and terminate the host:
 
 ```powershell

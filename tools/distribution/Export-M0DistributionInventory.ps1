@@ -16,6 +16,7 @@ $semanticEditorDirectory = Join-Path $repoRoot 'tools\semantic-editor'
 $semanticEditorLockPath = Join-Path $semanticEditorDirectory 'package-lock.json'
 $distributionPolicyPath = Join-Path $repoRoot 'tools\distribution\DistributionAdmissionPolicy.json'
 $distributionPolicyScriptPath = Join-Path $repoRoot 'tools\distribution\DistributionAdmissionPolicy.ps1'
+$noticeManifestPath = Join-Path $repoRoot 'licenses/third-party/sources.json'
 $nugetPackageRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.nuget\packages'
 
 . $distributionPolicyScriptPath
@@ -190,10 +191,7 @@ function Get-QuotedMarkdownCell
 }
 
 $windowsStageDirectory = Require-RepositoryPath -Path $WindowsStageDirectory -Description 'Windows stage directory'
-if (-not (Test-Path -LiteralPath $windowsStageDirectory -PathType Container))
-{
-    throw "Build the unsigned Windows package first; stage directory is missing: $windowsStageDirectory"
-}
+$stageAvailable = Test-Path -LiteralPath $windowsStageDirectory -PathType Container
 foreach ($requiredInput in @($projectAssetsPath, $pressProjectPath, $semanticEditorLockPath))
 {
     if (-not (Test-Path -LiteralPath $requiredInput -PathType Leaf))
@@ -202,23 +200,27 @@ foreach ($requiredInput in @($projectAssetsPath, $pressProjectPath, $semanticEdi
     }
 }
 $distributionPolicy = Get-DistributionAdmissionPolicy -Path $distributionPolicyPath
+& (Join-Path $PSScriptRoot 'Export-ThirdPartyNotices.ps1') -CheckOnly
+$noticeManifest = Get-Content -LiteralPath $noticeManifestPath -Raw | ConvertFrom-Json
+$runtimeNoticeManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'licenses/runtime-notices/sources.json') -Raw | ConvertFrom-Json
 
 $entries = [System.Collections.Generic.List[object]]::new()
-$allChannels = @('free-windows', 'store-windows', 'direct-mac', 'mac-app-store')
+$allChannels = @('free-windows', 'store-windows', 'direct-linux', 'direct-mac', 'mac-app-store')
 
-# Application source and distribution ownership are intentionally unresolved until the owner selects terms.
+# The first-party owner decision is separate from the third-party dependency gate.
 $rootLicensePath = Join-Path $repoRoot 'LICENSE'
-$entries.Add((New-InventoryEntry -Kind 'application-source' -Name 'Lorekeeper source license' -Version 'unselected' `
+$firstPartyAdmission = [pscustomobject]@{ admissionStatus = 'admitted'; licenseExpression = 'PolyForm-Noncommercial-1.0.0 OR PolyForm-Internal-Use-1.0.0'; selectedLicenseExpression = 'Owner-approved first-party alternatives'; selectedOrBranches = @(); restrictionClasses = @('commercial-redistribution'); diagnostics = @('First-party owner decision; does not relax the third-party dependency gate.') }
+$entries.Add((New-InventoryEntry -Kind 'application-source' -Name 'Lorekeeper source license' -Version 'owner-approved 2026-10-05' `
     -DependencyCategory 'assets' `
-    -Status 'unresolved-provenance' `
-    -LicenseEvidence $(if (Test-Path -LiteralPath $rootLicensePath) { 'Repository LICENSE exists, but no owner-approved source-license decision is recorded.' } else { 'No repository-wide LICENSE file exists.' }) `
-    -AttributionAction 'Owner must select and add the approved repository license before publication.' `
-    -Channels $allChannels -Sources @('LICENSE')))
-$entries.Add((New-InventoryEntry -Kind 'third-party-notices' -Name 'repository-wide third-party notice' -Version 'absent' `
+    -Status 'satisfied' `
+    -LicenseEvidence 'Root LICENSE offers the unchanged official Noncommercial or Internal Use 1.0.0 terms. Commercial bookmaking and internal business use are permitted; commercial software distribution and paid external hosting are outside these grants.' `
+    -AttributionAction 'Retain LICENSE and both full license texts with every package; first-party scope never replaces third-party licenses.' `
+    -Channels $allChannels -Sources @('LICENSE', 'licenses/PolyForm-Noncommercial-1.0.0.txt', 'licenses/PolyForm-Internal-Use-1.0.0.txt') -Admission $firstPartyAdmission))
+$entries.Add((New-InventoryEntry -Kind 'third-party-notices' -Name 'repository-wide third-party notice' -Version 'generated exact closure' `
     -DependencyCategory 'assets' `
-    -Status 'needs-inclusion' -LicenseEvidence 'No repository-wide NOTICE or THIRD-PARTY-NOTICES file exists.' `
-    -AttributionAction 'Create the consolidated notice from dependencies admitted by the engineering distribution policy.' `
-    -Channels $allChannels -Sources @('NOTICE', 'THIRD-PARTY-NOTICES.txt')))
+    -Status 'satisfied' -LicenseEvidence 'Export-ThirdPartyNotices.ps1 -CheckOnly verified exact package identities and SHA-256 retained license/notice bytes.' `
+    -AttributionAction 'Regenerate and review after dependency changes; ship the root notice, retained full terms, and adjacent native/editor/font notices.' `
+    -Channels $allChannels -Sources @('THIRD-PARTY-NOTICES.txt', 'licenses/third-party/sources.json') -Admission ([pscustomobject]@{ admissionStatus='admitted'; licenseExpression=$null; selectedLicenseExpression='Exact retained notice manifest'; selectedOrBranches=@(); restrictionClasses=@(); diagnostics=@() })))
 
 # Restored managed closure.
 $assets = Get-Content -LiteralPath $projectAssetsPath -Raw | ConvertFrom-Json
@@ -242,13 +244,33 @@ foreach ($property in $assets.libraries.PSObject.Properties | Sort-Object Name)
         -LicenseEvidence $license.evidence `
         -Policy $distributionPolicy `
         -DependencyCategory 'NuGet'
+    $retainedDecision = Get-DistributionRetainedPackageDecision -PackageIdentity $property.Name -Policy $distributionPolicy -Manifest $noticeManifest -RepositoryRoot $repoRoot
+    if ($null -ne $retainedDecision) { $admission = $retainedDecision }
+    $retainedRecord = @($noticeManifest.packages | Where-Object { $_.package -ceq $property.Name })
+    if ($retainedRecord.Count -eq 1) { $license.evidence += ' Full license and bundled transitive notices retained in licenses/third-party/sources.json for the exact package content hash.' }
     $entries.Add((New-InventoryEntry -Kind 'nuget-package' -Name $packageId -Version $packageVersion `
         -DependencyCategory 'NuGet' `
-        -Status $(if ($admission.admissionStatus -eq 'admitted') { 'needs-inclusion' } elseif ($admission.admissionStatus -eq 'blocked') { 'blocked' } else { 'unresolved-provenance' }) `
+        -Status $(if ($admission.admissionStatus -eq 'admitted' -and $retainedRecord.Count -eq 1) { 'satisfied' } elseif ($admission.admissionStatus -eq 'admitted') { 'needs-inclusion' } elseif ($admission.admissionStatus -eq 'blocked') { 'blocked' } else { 'unresolved-provenance' }) `
         -LicenseEvidence $license.evidence `
-        -AttributionAction $(if ($admission.admissionStatus -eq 'admitted') { 'Retain the selected license evidence and include the required notice before distribution.' } elseif ($admission.admissionStatus -eq 'blocked') { 'Remove or replace this dependency before distribution.' } else { $license.action }) `
+        -AttributionAction $(if ($admission.admissionStatus -eq 'admitted') { 'Ship retained full terms and required notices; exact-version exceptions keep their recorded linking/distribution scope.' } elseif ($admission.admissionStatus -eq 'blocked') { 'Remove or replace this dependency before distribution.' } else { $license.action }) `
         -Channels $allChannels -Sources @('Lorekeeper/obj/project.assets.json', "nuget:$packageId/$packageVersion") `
         -Admission $admission))
+}
+
+foreach ($runtime in $runtimeNoticeManifest.packages)
+{
+    $runtimeChannels = switch ($runtime.runtimeIdentifier) {
+        'win-x64' { @('free-windows', 'store-windows') }
+        'linux-x64' { @('direct-linux') }
+        'osx-arm64' { @('direct-mac', 'mac-app-store') }
+        default { throw 'Unknown retained runtime target.' }
+    }
+    $runtimeEvidence = "Exact SDK runtime-pack source $($runtime.package), SHA512 $($runtime.sha512), upstream commit $($runtime.repositoryCommit); full supplier license and available third-party notices retained with byte hashes."
+    $entries.Add((New-InventoryEntry -Kind 'sdk-runtime-pack' -Name $runtime.packageId -Version $runtime.version `
+        -DependencyCategory 'native-vendored' -Status 'satisfied' -LicenseEvidence $runtimeEvidence `
+        -AttributionAction 'Retain licenses/runtime-notices/; verify actual packaged includedFrameworks match this exact version before target distribution.' `
+        -Channels $runtimeChannels -Sources @('licenses/runtime-notices/sources.json', $runtime.evidence.path) `
+        -Admission (Get-DistributionMetadataDecision -LicenseExpression 'MIT' -LicenseEvidence $runtimeEvidence -Policy $distributionPolicy -DependencyCategory 'native-vendored')))
 }
 
 # Locked Press dependency metadata is read without a network request.
@@ -258,6 +280,40 @@ if ($LASTEXITCODE -ne 0)
     throw 'cargo metadata --locked --offline failed; restore the locked Press dependencies locally before inventory generation.'
 }
 $cargoMetadata = ($cargoMetadataText -join [Environment]::NewLine) | ConvertFrom-Json
+$pressRuntimeDirectory = Join-Path $windowsStageDirectory 'resources/bin/press-runtime'
+$pressNoticePath = Join-Path $pressRuntimeDirectory 'THIRD-PARTY-NOTICES.txt'
+$pressSbomPath = Join-Path $pressRuntimeDirectory 'sbom.json'
+$pressIntegrityPath = Join-Path $pressRuntimeDirectory 'lorekeeper-press-runtime.json'
+$pressNoticeText = $null
+$pressSbom = $null
+$lockedCargoChecksums = @{}
+$cargoLockText = [IO.File]::ReadAllText((Join-Path $repoRoot 'Lorekeeper.Press/Cargo.lock')).Replace("`r`n", "`n")
+foreach ($match in [regex]::Matches($cargoLockText, '(?ms)^\[\[package\]\]\s*(?<body>.*?)(?=^\[\[package\]\]|\z)'))
+{
+    $fields = @{}
+    foreach ($name in @('name', 'version', 'source', 'checksum'))
+    {
+        $field = [regex]::Match($match.Groups['body'].Value, ('(?m)^{0} = "(?<value>[^"]*)"$' -f $name))
+        $fields[$name] = $field.Groups['value'].Value
+    }
+    $lockedCargoChecksums["$($fields.name)`0$($fields.version)`0$($fields.source)"] = $fields.checksum
+}
+if ((Test-Path -LiteralPath $pressNoticePath -PathType Leaf) -and
+    (Test-Path -LiteralPath $pressSbomPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $pressIntegrityPath -PathType Leaf))
+{
+    $pressIntegrity = Get-Content -LiteralPath $pressIntegrityPath -Raw | ConvertFrom-Json
+    foreach ($path in @($pressNoticePath, $pressSbomPath))
+    {
+        $records = @($pressIntegrity.files | Where-Object relativePath -CEQ ([IO.Path]::GetFileName($path)))
+        if ($records.Count -ne 1 -or $records[0].sha256 -cne (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant())
+        {
+            throw 'The staged Press notice or SBOM differs from its integrity manifest.'
+        }
+    }
+    $pressNoticeText = [IO.File]::ReadAllText($pressNoticePath).Replace("`r`n", "`n")
+    $pressSbom = Get-Content -LiteralPath $pressSbomPath -Raw | ConvertFrom-Json
+}
 foreach ($package in $cargoMetadata.packages | Where-Object { $_.name -ne 'lorekeeper-press' } | Sort-Object name, version)
 {
     $hasLicense = -not [string]::IsNullOrWhiteSpace([string]$package.license)
@@ -267,12 +323,29 @@ foreach ($package in $cargoMetadata.packages | Where-Object { $_.name -ne 'lorek
         -LicenseEvidence $cargoEvidence `
         -Policy $distributionPolicy `
         -DependencyCategory 'Cargo'
+    $noticeCovered = $false
+    if ($null -ne $pressSbom)
+    {
+        $records = @($pressSbom.packages | Where-Object { $_.name -ceq $package.name -and $_.version -ceq $package.version })
+        $key = "$($package.name)`0$($package.version)`0$($package.source)"
+        $noticeCovered = $records.Count -eq 1 -and $records[0].license -ceq $package.license -and
+            $records[0].source -ceq $package.source -and $records[0].checksum -ceq $lockedCargoChecksums[$key] -and
+            $pressNoticeText.Contains("$($package.name) $($package.version) - $($package.license)`n", [StringComparison]::Ordinal)
+        $packageRoot = Split-Path $package.manifest_path -Parent
+        $licenseFiles = @(Get-ChildItem -LiteralPath $packageRoot -File | Where-Object Name -Match '^(LICENSE|COPYING|UNLICENSE|NOTICE)')
+        if ($package.name -ceq 'hypher') { $licenseFiles += Get-Item -LiteralPath (Join-Path $packageRoot 'README.md') }
+        foreach ($file in $licenseFiles)
+        {
+            if (-not $pressNoticeText.Contains([IO.File]::ReadAllText($file.FullName).Replace("`r`n", "`n"), [StringComparison]::Ordinal)) { $noticeCovered = $false }
+        }
+    }
+    if ($noticeCovered) { $cargoEvidence += ' Exact current Cargo.lock checksum, package/source/license identity, full supplied license texts, and integrity-manifest hashes match the staged Press notice and SBOM.' }
     $entries.Add((New-InventoryEntry -Kind 'cargo-package' -Name ([string]$package.name) -Version ([string]$package.version) `
         -DependencyCategory 'Cargo' `
-        -Status $(if ($cargoAdmission.admissionStatus -eq 'admitted') { 'needs-inclusion' } elseif ($cargoAdmission.admissionStatus -eq 'blocked') { 'blocked' } else { 'unresolved-provenance' }) `
+        -Status $(if ($cargoAdmission.admissionStatus -eq 'admitted' -and $noticeCovered) { 'satisfied' } elseif ($cargoAdmission.admissionStatus -eq 'admitted') { 'needs-inclusion' } elseif ($cargoAdmission.admissionStatus -eq 'blocked') { 'blocked' } else { 'unresolved-provenance' }) `
         -LicenseEvidence $cargoEvidence `
-        -AttributionAction $(if ($cargoAdmission.admissionStatus -eq 'admitted') { 'Retain the selected license evidence in the generated Press notice and SBOM.' } elseif ($cargoAdmission.admissionStatus -eq 'blocked') { 'Remove or replace this dependency before distribution.' } else { 'Obtain authoritative upstream licensing terms before public distribution.' }) `
-        -Channels $allChannels -Sources @('Lorekeeper.Press/Cargo.lock', 'Lorekeeper.Press/Cargo.toml') `
+        -AttributionAction $(if ($noticeCovered -and $cargoAdmission.admissionStatus -eq 'admitted') { 'Retain this exact generated Press notice and SBOM in each platform runtime; native target closure remains separate.' } elseif ($cargoAdmission.admissionStatus -eq 'admitted') { 'Current staged notice/SBOM coverage is absent or mismatched; regenerate from exact Cargo.lock before distribution.' } elseif ($cargoAdmission.admissionStatus -eq 'blocked') { 'Remove or replace this dependency before distribution.' } else { 'Obtain authoritative upstream licensing terms before public distribution.' }) `
+        -Channels $allChannels -Sources @('Lorekeeper.Press/Cargo.lock', 'Lorekeeper.Press/Cargo.toml', 'publish/win-x64/win-unpacked/resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt', 'publish/win-x64/win-unpacked/resources/bin/press-runtime/sbom.json') `
         -Admission $cargoAdmission))
 }
 
@@ -307,7 +380,14 @@ foreach ($property in $semanticLock['packages'].GetEnumerator() | Where-Object {
     }
     else
     {
-        $licenseEvidence = 'Installed package metadata is unavailable; restore the exact lock before release review.'
+        if ($packageName -like '@esbuild/*' -and [bool]$lockEntry['dev'] -and [bool]$lockEntry['optional'])
+        {
+            $esbuildMetadata = Get-Content -LiteralPath (Join-Path $semanticEditorDirectory 'node_modules/esbuild/package.json') -Raw | ConvertFrom-Json
+            if ($esbuildMetadata.version -ne [string]$lockEntry['version'] -or $esbuildMetadata.license -ne 'MIT') { throw 'Optional esbuild platform metadata differs from its exact build-tool version.' }
+            $licenseText = 'MIT'
+            $licenseEvidence = 'Non-host optional esbuild platform package; exact lock version matches the installed MIT-licensed esbuild build tool. It is not shipped in the app runtime.'
+        }
+        else { $licenseEvidence = 'Installed package metadata is unavailable; restore the exact lock before release review.' }
     }
     $isBuildOnly = [bool]$lockEntry['dev']
     $isRuntimeMit = -not $isBuildOnly -and $licenseText -eq 'MIT'
@@ -344,11 +424,11 @@ foreach ($fontDirectory in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'Lore
         -Channels $allChannels -Sources @((Get-RepositoryRelativePath $fontDirectory.FullName), 'Lorekeeper/wwwroot/fonts/SOURCES.md') `
         -Admission $fontAdmission))
 }
-$bootstrapEvidence = 'Shipped CSS/JS headers identify Bootstrap 5.3.3 as MIT, but no Bootstrap license file is retained beside the copied distribution.'
+$bootstrapEvidence = 'Full Bootstrap 5.3.3 MIT text retained from its exact upstream tag in licenses/third-party/sources.json and shipped with the consolidated notice.'
 $entries.Add((New-InventoryEntry -Kind 'shipped-web-asset' -Name 'Bootstrap' -Version '5.3.3' `
     -DependencyCategory 'assets' `
-    -Status 'needs-inclusion' -LicenseEvidence 'Shipped CSS/JS headers identify Bootstrap 5.3.3 as MIT, but no Bootstrap license file is retained beside the copied distribution.' `
-    -AttributionAction 'Add the verified Bootstrap MIT notice to the approved consolidated distribution notice.' `
+    -Status 'satisfied' -LicenseEvidence $bootstrapEvidence `
+    -AttributionAction 'Ship the retained full Bootstrap MIT notice with every package.' `
     -Channels $allChannels -Sources @('Lorekeeper/wwwroot/lib/bootstrap/dist/css/bootstrap.css') `
     -Admission (Get-DistributionMetadataDecision -LicenseExpression 'MIT' -LicenseEvidence $bootstrapEvidence -Policy $distributionPolicy -DependencyCategory 'assets')))
 $visNetworkEvidence = 'Both Apache-2.0 and MIT license texts are retained beside the shipped distribution.'
@@ -360,9 +440,9 @@ $entries.Add((New-InventoryEntry -Kind 'shipped-web-asset' -Name 'vis-network' -
     -Admission (Get-DistributionMetadataDecision -LicenseExpression 'Apache-2.0 AND MIT' -LicenseEvidence $visNetworkEvidence -Policy $distributionPolicy -DependencyCategory 'assets')))
 $entries.Add((New-InventoryEntry -Kind 'branding-asset' -Name 'Lorekeeper branding and icons' -Version 'current' `
     -DependencyCategory 'assets' `
-    -Status 'unresolved-provenance' -LicenseEvidence 'No recorded ownership or source provenance accompanies the bundled branding assets.' `
-    -AttributionAction 'Record ownership or upstream license/provenance before public distribution.' `
-    -Channels $allChannels -Sources @('Lorekeeper/wwwroot/branding')))
+    -Status 'satisfied' -LicenseEvidence 'Maintainer-owned/generated source SVG and icon variants confirmed 2026-10-05 in branding/SOURCES.md.' `
+    -AttributionAction 'Retain first-party ownership/provenance and the root source license.' `
+    -Channels $allChannels -Sources @('Lorekeeper/wwwroot/branding/SOURCES.md') -Admission $firstPartyAdmission))
 $nativeRuntimeDirectory = Join-Path $windowsStageDirectory 'resources/bin/press-runtime'
 $nativeExecutableName = if ($IsWindows) { 'lorekeeper-press.exe' } else { 'lorekeeper-press' }
 $nativeRuntimeExecutable = Join-Path $nativeRuntimeDirectory $nativeExecutableName
@@ -390,7 +470,7 @@ $entries.Add((New-InventoryEntry -Kind 'press-asset' -Name 'CGATS21 CRPC1 ICC pr
     -Admission (Get-DistributionMetadataDecision -LicenseExpression $null -LicenseEvidence 'Lorekeeper.Press/assets/profiles/SOURCE.md records the registry source, SHA-256, and unaltered distribution terms.' -Policy $distributionPolicy -DependencyCategory 'ICC' -AuthoritativeNonSpdxEvidence)))
 
 # The exact unsigned Windows staged closure is recorded without exposing machine paths.
-$stageFiles = @(Get-ChildItem -LiteralPath $windowsStageDirectory -Recurse -File)
+$stageFiles = if ($stageAvailable) { @(Get-ChildItem -LiteralPath $windowsStageDirectory -Recurse -File) } else { @() }
 $closureEvidenceFiles = @(
     $stageFiles |
         Where-Object { $_.Name -match '^(THIRD-PARTY-NOTICES|sbom|semantic-editor\.NOTICES|package(-lock)?\.json)' } |
@@ -399,21 +479,26 @@ $closureEvidenceFiles = @(
 )
 $entries.Add((New-InventoryEntry -Kind 'windows-stage-closure' -Name 'unsigned Windows win-unpacked closure' -Version 'current local Release stage' `
     -DependencyCategory 'assets' `
-    -Status 'unresolved-provenance' -LicenseEvidence "Deterministic aggregate SHA-256 $(Get-DirectoryAggregateHash $windowsStageDirectory) over $($stageFiles.Count) staged files; retained evidence files: $($closureEvidenceFiles -join ', ')." `
+    -Status 'unresolved-provenance' -LicenseEvidence $(if ($stageAvailable) { "Deterministic aggregate SHA-256 $(Get-DirectoryAggregateHash $windowsStageDirectory) over $($stageFiles.Count) staged files; retained evidence files: $($closureEvidenceFiles -join ', ')." } else { 'No current local Windows stage exists; no artifact closure or platform claim is made.' }) `
     -AttributionAction 'Compare the final Windows closure with the approved source license and third-party notice set before publishing.' `
     -Channels @('free-windows', 'store-windows') -Sources @('publish/win-x64/win-unpacked') `
     -Admission (Get-DistributionMetadataDecision -LicenseExpression $null -LicenseEvidence 'The staged closure is an aggregate; each package and asset is inventoried separately.' -Policy $distributionPolicy -DependencyCategory 'assets')))
 
 # Account and publication prerequisites intentionally contain no credentials.
+$entries.Add((New-InventoryEntry -Kind 'native-runtime' -Name 'AppImage embedded runtime and bundled native libraries' -Version 'exact target closure pending' `
+    -DependencyCategory 'native-vendored' -Status 'unresolved-provenance' `
+    -LicenseEvidence 'The pinned electron-builder AppImage toolset contributes runtime and native library bytes beyond the application payload; exact archive inspection and authoritative full license/source obligations remain open.' `
+    -AttributionAction 'Resolve and retain exact runtime/FUSE/native-library terms from the selected toolset and verify the extracted AppImage before Linux distribution.' `
+    -Channels @('direct-linux') -Sources @('scripts/build-linux-release.ps1', 'docs/evidence/public-sharing-audit.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'GitHub public-repository clearance' -Version 'not started' `
     -DependencyCategory 'assets' `
-    -Status 'unresolved-provenance' -LicenseEvidence 'Public repository visibility requires the future M6 tracked-file and history audit.' `
-    -AttributionAction 'Complete the documented M6 audit and resolve findings before changing repository visibility.' `
-    -Channels $allChannels -Sources @('docs/research/m0.4-distribution-inventory.md')))
+    -Status 'unresolved-provenance' -LicenseEvidence 'The redacted all-ref and GitHub metadata audit is recorded separately; a final exact-ref recheck and owner visibility decision remain required.' `
+    -AttributionAction 'Review docs/evidence/public-sharing-audit.md and its explicit limits before any later public visibility change.' `
+    -Channels $allChannels -Sources @('docs/evidence/public-sharing-audit.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'Microsoft Partner Center identity, product, price, and Store signing' -Version 'owner input required' `
     -DependencyCategory 'assets' `
-    -Status 'unresolved-provenance' -LicenseEvidence 'No publisher identity, Store product reservation, pricing decision, or production signing material is in scope.' `
-    -AttributionAction 'Owner supplies the account decisions only when M7 Store submission is authorized.' `
+    -Status 'unresolved-provenance' -LicenseEvidence 'Free price is selected. Real Partner Center package identity and display name remain owner inputs; unsigned Store MSIX preparation does not require a personal production certificate.' `
+    -AttributionAction 'Use tools/msix/store-identity.example.json and Build-WindowsMsix.ps1; submit only after separately authorized Partner Center access and real certification.' `
     -Channels @('store-windows') -Sources @('docs/v1-roadmap.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'Apple Developer identity, MAS profile, and real-device evidence' -Version 'owner input required' `
     -DependencyCategory 'assets' `
@@ -451,7 +536,7 @@ $categorySummary = @(
 )
 $inventory = [pscustomobject][ordered]@{
     formatVersion = 1
-    scope = 'M0.4 local inventory and engineering distribution gate only; no source-license adoption, publication, signing, Store submission, or history scan.'
+    scope = 'Exact local dependency and retained notice inventory. First-party dual terms are selected; no publication, Store submission, visibility change, or target-platform acceptance is implied.'
     distributionPolicy = [pscustomobject][ordered]@{
         policyId = [string]$distributionPolicy.policyId
         schemaVersion = [int]$distributionPolicy.schemaVersion
@@ -460,7 +545,7 @@ $inventory = [pscustomobject][ordered]@{
         gateStatus = if ($admissionSummary.blocked -gt 0) { 'blocked' } elseif ($admissionSummary.unresolved -gt 0) { 'unresolved' } else { 'admitted' }
         admissionSummary = [pscustomobject]$admissionSummary
     }
-    channels = @('direct-mac', 'free-windows', 'mac-app-store', 'store-windows')
+    channels = $allChannels
     summary = [pscustomobject]$summary
     categorySummary = $categorySummary
     entries = $orderedEntries
@@ -471,9 +556,9 @@ $markdown = [System.Text.StringBuilder]::new()
 $markdownCodeTick = [char]0x60
 [void]$markdown.AppendLine('# M0.4 local license and distribution inventory')
 [void]$markdown.AppendLine()
-[void]$markdown.AppendLine('Status: **Inventory only — no license has been adopted, no repository has been published, and no Store account or signing action has been taken.**')
+[void]$markdown.AppendLine('Status: **Source-available dual terms and retained third-party notices are prepared. No repository visibility change, release publication, or Store submission has occurred.**')
 [void]$markdown.AppendLine()
-[void]$markdown.AppendLine('This deterministic report is generated from restored local dependency metadata, locked Press and semantic-editor inputs, shipped web/font assets, and the unsigned Windows `win-unpacked` closure. It contains no credentials, machine paths, author data, or network-derived content.')
+[void]$markdown.AppendLine('This deterministic report uses restored exact dependency metadata, locked Press/editor inputs, retained authoritative license evidence, and shipped web/font assets. A Windows stage is measured only when present. Platform closure and account prerequisites remain explicit; this report contains no credentials or machine paths.')
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine("The **$($distributionPolicy.policyId)** result is an engineering distribution gate, not legal advice. An ${markdownCodeTick}admitted${markdownCodeTick} expression is a recorded policy decision for the exact metadata observed here; it does not replace review of the complete license text, attribution, provenance, or target-specific closure. Missing or non-machine-readable metadata is **unresolved**, not an automatic rejection. No dependency is admitted when a known prohibited restriction or an unresolved required expression is the only available evidence.")
 [void]$markdown.AppendLine()
@@ -505,14 +590,13 @@ foreach ($category in $categorySummary)
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('## Current blockers')
 [void]$markdown.AppendLine()
-[void]$markdown.AppendLine('- The repository has no selected source license or consolidated third-party notice.')
-[void]$markdown.AppendLine('- Bootstrap attribution must be retained in the future consolidated notice.')
-[void]$markdown.AppendLine('- Lorekeeper branding ownership/provenance is unrecorded.')
-[void]$markdown.AppendLine('- The macOS closure and all Store identities remain future M0.6/M7 work.')
+[void]$markdown.AppendLine('- Exact first-party terms, Bootstrap, managed/native package notices, and branding provenance are retained. The restrictive first-party owner decision does not relax the permissive third-party gate.')
+[void]$markdown.AppendLine('- libgit2 is admitted only as the unchanged compiled library linked into Lorekeeper under its exact retained unlimited linking exception; modifications or standalone redistribution require separate review.')
+[void]$markdown.AppendLine('- Packaged platform closures, real Store identities/certification, and any Mac App Store work require their own recorded evidence. Absence is not silently treated as approval.')
 [void]$markdown.AppendLine()
-[void]$markdown.AppendLine('## Future M6 public-history audit procedure')
+[void]$markdown.AppendLine('## Public-sharing audit')
 [void]$markdown.AppendLine()
-[void]$markdown.AppendLine('Before public visibility, create a disposable local mirror containing every remote ref and tag. Run approved secret, private-data, and redistribution-right scanners plus manual review against that mirror; retain detailed findings only in ignored local evidence. Resolve every finding before visibility changes. Do not automatically rewrite history, change repository visibility, or publish while an unresolved finding remains.')
+[void]$markdown.AppendLine('See `docs/evidence/public-sharing-audit.md` for the all-ref mirror, redacted scanner, GitHub metadata review, current findings, and limits. Keep detailed findings ignored and private. Recheck final refs before public visibility. Never automatically rewrite history, delete branches, change repository settings, or publish to resolve a finding.')
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('## Inventory')
 [void]$markdown.AppendLine()

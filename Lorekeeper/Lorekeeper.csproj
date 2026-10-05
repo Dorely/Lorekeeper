@@ -10,11 +10,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <RuntimeFrameworkVersion Condition="'$(Configuration)' == 'Release'">10.0.12</RuntimeFrameworkVersion>
     <LorekeeperDistributionChannel Condition="'$(LorekeeperDistributionChannel)' == '' and '$(Configuration)' == 'Release'">Free</LorekeeperDistributionChannel>
     <LorekeeperDistributionChannel Condition="'$(LorekeeperDistributionChannel)' == ''">Development</LorekeeperDistributionChannel>
     <Title>Lorekeeper</Title>
-    <Description>AI-assisted narrative coherence engine.</Description>
-    <Version>0.3.17</Version>
+    <Description>A local bookmaking workspace for writing, worldbuilding, research, design, and publishing.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Dorely</Authors>
+    <Company>Dorely</Company>
+    <ProjectUrl>https://github.com/Dorely/Lorekeeper</ProjectUrl>
+    <License>PolyForm-Noncommercial-1.0.0 OR PolyForm-Internal-Use-1.0.0</License>
+    <PackageProjectUrl>https://github.com/Dorely/Lorekeeper</PackageProjectUrl>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageId>Lorekeeper</PackageId>
     <ElectronVersion>43.6.0</ElectronVersion>
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
@@ -45,6 +52,7 @@
     <PackageReference Include="OpenAI" Version="2.8.0" />
     <PackageReference Include="PdfPig" Version="0.1.14" />
     <PackageReference Include="SkiaSharp" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.2" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.2" />
     <PackageReference Include="sqlite-vec" Version="0.1.7-alpha.2.1" />
     <PackageReference Include="VersOne.Epub" Version="3.3.6" />
@@ -54,6 +62,10 @@
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
     <AssemblyMetadata Include="LorekeeperDistributionChannel" Value="$(LorekeeperDistributionChannel)" />
     <Content Include="ElectronHostHook\index.js" Link=".electron\ElectronHostHook\index.js" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="..\eng\linux\AppRun.sh" Link=".electron\packaging\linux\AppRun.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+    <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="" />
+    <Content Include="..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\licenses\**\*" Link="licenses\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\print-artifact-profiles-v1.json" Link="PrintArtifactProfiles\print-artifact-profiles-v1.json" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v2.json" Link="Typography\manuscript-typography-v2.json" />
   </ItemGroup>

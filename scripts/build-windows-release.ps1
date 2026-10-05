@@ -25,6 +25,7 @@ $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-edit
 $dependencyAuditScript = Join-Path $repoRoot 'eng\ReleaseDependencyAudit.ps1'
 
 . $dependencyAuditScript
+. (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
 
 if ([string]::IsNullOrWhiteSpace($Version))
 {
@@ -236,6 +237,10 @@ try
         'restore',
         $solutionPath,
         '--force-evaluate',
+        '-p:Configuration=Release',
+        '-p:PublishProfile=win-x64',
+        '-p:RuntimeIdentifier=win-x64',
+        '-p:SelfContained=true',
         '-p:NuGetAudit=true',
         '-p:NuGetAuditMode=all',
         '-p:NuGetAuditLevel=low',
@@ -273,6 +278,9 @@ try
     }
 
     $packagedPressRoot = Join-Path $outputDirectory 'win-unpacked\resources\bin\press-runtime'
+    Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot `
+        -ManagedRoot (Join-Path $outputDirectory 'win-unpacked/resources/bin') `
+        -DesktopRoot (Join-Path $outputDirectory 'win-unpacked')
     $packagedPressExecutable = Join-Path $packagedPressRoot 'lorekeeper-press.exe'
     foreach ($requiredPressFile in @(
         $packagedPressExecutable,

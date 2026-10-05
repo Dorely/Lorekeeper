@@ -401,7 +401,8 @@ and semantic conversion implementation.
   validation chapter owns the full permitted-test boundary; ordinary search,
   graph, context, World, and assistant behavior is verified through builds
   and static inspection.
-- Run `dotnet build Lorekeeper.sln` and the documented HTTP startup smoke check
+- Run `dotnet build Lorekeeper.sln` and permitted data-safety tests; run the
+  documented HTTP startup smoke check only with explicit authorization
   for normal source changes. Exercise provider calls, web access, embeddings,
   ingest models, or browser UI only when that integration is explicitly in
   scope, and report anything not exercised.

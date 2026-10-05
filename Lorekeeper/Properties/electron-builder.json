@@ -9,7 +9,7 @@
   "publish": {
     "provider": "github",
     "owner": "Dorely",
-    "repo": "Lorekeeper-Releases",
+    "repo": "Lorekeeper",
     "private": false,
     "releaseType": "release"
   },
@@ -64,10 +64,49 @@
       }
     ],
     "category": "Office",
-    "executableArgs": [
-      "--no-sandbox"
+    "files": [
+      "!packaging{,/**/*}"
     ],
-    "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "extraFiles": [
+      {
+        "from": "packaging/linux/AppRun.sh",
+        "to": "AppRun"
+      }
+    ],
+    "maintainer": "Dorely <Dorely@users.noreply.github.com>",
+    "vendor": "Dorely",
+    "publish": null
+  },
+  "appImage": {
+    "executableArgs": [],
+    "artifactName": "${productName}-${version}-x86_64.${ext}"
+  },
+  "toolsets": {
+    "appimage": "1.0.3"
+  },
+  "deb": {
+    "artifactName": "${productName}-${version}-amd64.${ext}",
+    "depends": [
+      "libgtk-3-0",
+      "libnotify4",
+      "libnss3",
+      "libxss1",
+      "libxtst6",
+      "xdg-utils",
+      "libatspi2.0-0",
+      "libuuid1",
+      "libsecret-1-0",
+      "libfontconfig1",
+      "libicu74",
+      "libssl3t64",
+      "libasound2t64",
+      "libgbm1",
+      "libxkbcommon0",
+      "libdrm2",
+      "libnspr4",
+      "libatk-bridge2.0-0t64",
+      "libcups2t64"
+    ]
   },
   "mac": {
     "icon": "icon.png",

@@ -3,7 +3,7 @@
 Prepares and publishes a stable Lorekeeper release from main in one command.
 .DESCRIPTION
 Invocation authorizes a version commit, a normal push to main, native builds,
-and publication to both release repositories. Defaults to the next patch version,
+and publication to the main repository (also the old download repository for v1.0.0 only). Defaults to the next patch version,
 or reuses an already prepared unpublished version. Never commits unrelated files.
 .EXAMPLE
 .\scripts\release.ps1 -CheckOnly
@@ -19,6 +19,8 @@ param(
     [ValidateSet('Patch', 'Minor', 'Major')]
     [string]$Bump = 'Patch',
     [switch]$WindowsOnly,
+    [string]$LinuxDistribution = 'Ubuntu',
+    [switch]$MakeSourcePublicAfterV1,
     [switch]$CheckOnly,
     [string]$Notes,
     [string]$NotesFile
@@ -30,12 +32,13 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
 $projectRelativePath = 'Lorekeeper/Lorekeeper.csproj'
 $projectPath = Join-Path $repoRoot $projectRelativePath
-$repositories = @('Dorely/Lorekeeper', 'Dorely/Lorekeeper-Releases')
+$sourceRepository = 'Dorely/Lorekeeper'
+$repositories = @($sourceRepository)
 $stablePattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT)
 {
-    throw 'Run the release driver on Windows; macOS is built on its native Actions runner.'
+    throw 'Run the release driver on Windows; Linux uses WSL2 and macOS uses its native Actions runner.'
 }
 if ($Version -and $PSBoundParameters.ContainsKey('Bump')) { throw 'Use -Version or -Bump, not both.' }
 if ($Notes -and $NotesFile) { throw 'Use -Notes or -NotesFile, not both.' }
@@ -129,13 +132,13 @@ try
     {
         $info = (Invoke-ReleaseCommand gh @('api', "repos/$repository") | Out-String) | ConvertFrom-Json
         if (-not $info.permissions.push) { throw "GitHub write access is required for $repository." }
-        if ($repository -eq $repositories[1] -and $info.private) { throw 'The public release repository must be public.' }
     }
     if (-not $WindowsOnly)
     {
-        $enabled = Invoke-ReleaseCommand gh @('api', "repos/$($repositories[0])/actions/permissions", '--jq', '.enabled')
-        $workflow = Invoke-ReleaseCommand gh @('api', "repos/$($repositories[0])/actions/workflows/build-macos-release.yml", '--jq', '.state')
+        $enabled = Invoke-ReleaseCommand gh @('api', "repos/$sourceRepository/actions/permissions", '--jq', '.enabled')
+        $workflow = Invoke-ReleaseCommand gh @('api', "repos/$sourceRepository/actions/workflows/build-macos-release.yml", '--jq', '.state')
         if ($enabled -ne 'true' -or $workflow -ne 'active') { throw 'Enable the macOS release workflow before releasing.' }
+        if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { throw 'Install WSL2 and the configured Linux distribution before releasing.' }
     }
 
     $sdk = [Version](Invoke-ReleaseCommand dotnet @('--version'))
@@ -147,11 +150,16 @@ try
     try { Invoke-ReleaseCommand rustc @('--version') }
     finally { Pop-Location }
 
-    $sourceVersion = Get-StableReleaseVersion $repositories[0]
-    $publicVersion = Get-StableReleaseVersion $repositories[1]
-    if ($sourceVersion -ne $publicVersion)
+    $sourceVersion = Get-StableReleaseVersion $sourceRepository
+    $previousRepositories = @($sourceRepository)
+    if ($sourceVersion -le [Version]'1.0.0')
     {
-        throw "The repositories disagree on the latest stable release ($sourceVersion / $publicVersion). Resolve incomplete publication before creating another release."
+        $publicVersion = Get-StableReleaseVersion 'Dorely/Lorekeeper-Releases'
+        if ($sourceVersion -ne $publicVersion)
+        {
+            throw "The pre-transition repositories disagree on the latest stable release ($sourceVersion / $publicVersion). Resolve incomplete publication before creating another release."
+        }
+        $previousRepositories += 'Dorely/Lorekeeper-Releases'
     }
     $currentVersion = Get-LorekeeperVersion $projectPath
     if ($currentVersion -notmatch $stablePattern) { throw 'The one-command driver requires a stable project version. Use the lower-level publisher for prereleases.' }
@@ -159,7 +167,7 @@ try
     if ($sourceVersion -gt [Version]'0.0.0')
     {
         $previousAssets = $null
-        foreach ($repository in $repositories)
+        foreach ($repository in $previousRepositories)
         {
             $release = (Invoke-ReleaseCommand gh @('api', "repos/$repository/releases/tags/v$sourceVersion") |
                 Out-String) | ConvertFrom-Json
@@ -176,11 +184,11 @@ try
             }
             $previousAssets = $assetSignature
         }
-        $publishedHead = Invoke-ReleaseCommand gh @('api', "repos/$($repositories[0])/commits/v$sourceVersion", '--jq', '.sha')
+        $publishedHead = Invoke-ReleaseCommand gh @('api', "repos/$sourceRepository/commits/v$sourceVersion", '--jq', '.sha')
         Invoke-ReleaseCommand git @('merge-base', '--is-ancestor', $publishedHead, 'HEAD')
         if ($publishedHead -eq $head -and -not $Version -and -not $PSBoundParameters.ContainsKey('Bump'))
         {
-            Write-Host "Current main is already published as v$sourceVersion in both repositories. Nothing to release." -ForegroundColor Green
+            Write-Host "Current main is already published as v$sourceVersion. Nothing to release." -ForegroundColor Green
             return
         }
     }
@@ -205,15 +213,51 @@ try
     {
         throw "Version $Version must be newer than published $sourceVersion and cannot decrease project version $currentVersion."
     }
-    foreach ($repository in $repositories) { Assert-ReleaseTagUnused -Repository $repository -Tag "v$Version" }
+    $repositories = @(Get-LorekeeperReleaseRepositories $Version)
+    if ($MakeSourcePublicAfterV1 -and $Version -cne '1.0.0')
+    {
+        throw '-MakeSourcePublicAfterV1 is only valid for the v1.0.0 launch.'
+    }
+    foreach ($repository in $repositories)
+    {
+        $info = (Invoke-ReleaseCommand gh @('api', "repos/$repository") | Out-String) | ConvertFrom-Json
+        if (-not $info.permissions.push) { throw "GitHub write access is required for $repository." }
+        if ($info.private)
+        {
+            if ($repository -ne $sourceRepository -or $Version -cne '1.0.0')
+            {
+                throw "$repository must be public for this release."
+            }
+            if (-not $CheckOnly -and -not $MakeSourcePublicAfterV1)
+            {
+                throw 'The private-main v1.0.0 launch requires -MakeSourcePublicAfterV1 to authorize making the source public after both releases are published.'
+            }
+            if ($MakeSourcePublicAfterV1 -and $info.permissions.admin -ne $true)
+            {
+                throw 'GitHub administrative permission on Dorely/Lorekeeper is required to make the source public after v1.0.0 publication.'
+            }
+            Write-Host 'v1 launch: publish both verified releases, make the source public, then verify anonymous downloads before announcement.'
+        }
+        Assert-ReleaseTagUnused -Repository $repository -Tag "v$Version"
+    }
     if (@(Invoke-ReleaseCommand git @('tag', '--list', "v$Version")).Count -gt 0)
     {
         throw "Local tag v$Version already exists. Inspect it before releasing; tags will not be overwritten."
     }
-    $platforms = if ($WindowsOnly) { 'Windows x64' } else { 'Windows x64 and macOS arm64' }
-    Write-Host "Release plan: $currentVersion -> $Version; $platforms; main -> both release repositories." -ForegroundColor Green
+    $platforms = if ($WindowsOnly) { 'Windows x64' } else { "Windows x64, Linux x64 (WSL2/$LinuxDistribution), and macOS arm64" }
+    Write-Host "Release plan: $currentVersion -> $Version; $platforms; main -> $($repositories -join ', ')." -ForegroundColor Green
     Write-Host 'The driver will verify, commit only the project version if needed, verify again, push main, build, and publish.'
-    if ($CheckOnly) { return }
+    if (-not $WindowsOnly)
+    {
+        & (Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1') -Distribution $LinuxDistribution -CheckOnly
+    }
+    if ($CheckOnly)
+    {
+        Invoke-ReleasePreflight $repoRoot
+        Assert-CleanReleaseTree
+        if ((Invoke-ReleaseCommand git @('rev-parse', 'HEAD')) -ne $head) { throw 'HEAD changed during preview verification.' }
+        return
+    }
 
     Assert-CleanReleaseTree
     $preparationHead = Invoke-ReleaseCommand git @('rev-parse', 'HEAD')
@@ -254,11 +298,13 @@ try
     if ((Invoke-ReleaseCommand git @('rev-parse', 'origin/main')) -ne $releaseHead) { throw 'origin/main moved after the push. Rerun verification on its new state.' }
     $publishArguments = @{ Version = $Version; AllowDirectMainPush = $true }
     if ($WindowsOnly) { $publishArguments.WindowsOnly = $true }
+    $publishArguments.LinuxDistribution = $LinuxDistribution
+    if ($MakeSourcePublicAfterV1) { $publishArguments.MakeSourcePublicAfterV1 = $true }
     if ($Notes) { $publishArguments.Notes = $Notes }
     if ($NotesFile) { $publishArguments.NotesFile = $NotesFile }
     & (Join-Path $PSScriptRoot 'publish-release.ps1') @publishArguments
     Assert-CleanReleaseTree
-    Write-Host "Release $Version completed: https://github.com/$($repositories[1])/releases/tag/v$Version" -ForegroundColor Green
+    Write-Host "Release $Version completed: https://github.com/$sourceRepository/releases/tag/v$Version" -ForegroundColor Green
 }
 catch
 {

@@ -144,15 +144,19 @@ revision worker, Figure, Designed Page, context, preview, search, and assistant
 mutation carries that target. Tool inputs and UI state must not permit a target
 switch during an operation.
 
-Core owns the canonical chapter. Release content is copy-on-write: an untouched
-release chapter reads Core live, while its first manuscript or layout mutation
-snapshots the complete current document, records the Core base revision/hash,
-and creates complete release content-and-layout overrides for referenced Designed
-Pages while preserving stable page and scene relationships. Later Core edits do
-not rewrite those release snapshots. Reset deletes only the release chapter
-snapshot and its page overrides, returning the chapter and shared pages to live
-Core inheritance. Release-only pages are separate project records scoped to the
-release. Shared images and Book Text Styles survive reset, discard, and release
+Core owns the canonical chapter. Chapter and Designed Page content have
+independent copy-on-write boundaries. An untouched release chapter reads Core
+live; its first manuscript mutation snapshots the document and placement
+reference IDs and records the Core base revision/hash. It never snapshots page
+bodies or layouts. A page's first release edit clones its complete effective
+content/layout once; every occurrence of that page in the release resolves the
+same override, without creating a chapter override. Core edits continue to
+update inherited page content even inside a customized chapter, while customized
+pages remain isolated. Chapter **Use Core** removes only the chapter snapshot
+and its placement index rows and preserves independent page overrides, including
+unplaced ones. Page **Use Core** removes that page's release override and restores
+Core for all exact release occurrences. Release-only pages have no Core content
+to reset. Shared images and Book Text Styles survive reset, discard, and release
 deletion.
 
 `IChapterService` owns outline-level chapter lifecycle while `ChapterService`
@@ -707,13 +711,13 @@ and Word desktop compatibility remain manual acceptance work.
   release behavior, outdated-state fallback, action coalescing, stale-stream
   reconciliation, Git pending/historical review, dependency retention, and
   export exclusion.
-- In addition to startup migration and versioned import/export safety, the
-  validation chapter permits deterministic, headless DOCX/citation and
-  authoring-operation/Undo/save-recovery contract regressions. Do not add broad
-  editor, assistant, annotation, style, or service test suites, or tests that
-  simulate browser UI or external integrations.
+- Automated application tests are limited to migration, versioned import/export,
+  archive/history preservation and fail-closed behavior, and recovery. Ordinary
+  DOCX formatting, citation output, authoring operations, Undo, UI, assistants,
+  and providers use static inspection and explicitly authorized manual acceptance;
+  they are not additional automated-test scopes.
 - Run `dotnet build Lorekeeper.sln`, relevant approved migration/import tests,
-  and the HTTP startup smoke check for source changes. Documentation-only edits
+  and an HTTP startup smoke check only when explicitly authorized. Documentation-only edits
   require link/path validation and the broader verification selected by the
   coordinating task.
 Voice sample/profile editors and the World Brief editor share NarrativeTextEditor.

@@ -213,134 +213,99 @@ See [Press production](press-production.md) for artifact-level claims.
 
 ### Desktop packaging and release verification
 
-Build current Windows artifacts on Windows with:
+Windows uses `scripts/build-windows-release.ps1`; Linux uses
+`scripts/build-linux-release-wsl.ps1` on Windows or
+`scripts/build-linux-release.ps1` natively on Ubuntu 24.04 x64.
+The builders use exact dependency/editor/Press inputs, check immutable channel
+metadata and notice hashes, probe the packaged renderer contract, and verify
+artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
+`Lorekeeper-<version>-x86_64.AppImage` and
+`Lorekeeper-<version>-amd64.deb` with source/archive provenance. WSL packaging
+uses an exact committed Git archive in isolated ext4 storage and local compute.
+Release builds pin .NET/ASP.NET runtime 10.0.12 in the project. Builders restore
+with the target Release publish profile and self-contained settings before
+publishing without restore, so every platform selects the reviewed runtime.
+Retained runtime notices cover the current Debug and Release dependency graphs;
+the packaged runtime configuration must match an exact retained identity.
+The pinned Linux launcher in `eng/linux/AppRun.sh` must retain its exact source
+hash and executable mode and never add `--no-sandbox`; native desktop/AppArmor
+acceptance and complete AppImage/FUSE license closure remain separate evidence.
+The supported toolset override selects SHA-pinned AppImage tools 1.0.3 and the
+official 20251108 static runtime, excludes old optional compatibility libraries,
+and checks the final runtime prefix and empty compatibility-library directory.
+The static runtime's modified LGPL libfuse needs corresponding source and
+recipient relinking material; notices and local packaging do not establish
+public distribution clearance.
 
-```powershell
-.\scripts\build-windows-release.ps1
-```
+The dependency audit permits only the two exact known
+`image-size@1.2.1` advisories while Electron.NET's optional splash call is
+unreachable. Changed package, call, splash configuration, or advisories fail
+closed. `Export-ThirdPartyNotices.ps1 -CheckOnly` verifies the exact NuGet package
+set/content identities, retained full upstream texts, and deterministic root
+notice. Refresh evidence deliberately after package changes and review the
+result. First-party dual PolyForm terms are an owner decision separate from the
+permissive third-party gate. libgit2 is admitted only for the exact unchanged
+compiled library linked into Lorekeeper under its full retained unlimited
+linking exception; modified or standalone library distribution is not admitted.
 
-The builder validates tool versions and SemVer, audits managed and shipped
-npm/Electron dependencies, rebuilds isolated staging/output, rebuilds and checks
-the semantic editor, builds the locked Press runtime, probes packaged renderer and
-print-artifact profile registry identity, and verifies release artifacts and
-checksums. The shared dependency policy permits only the two exact known
-`image-size@1.2.1` parser advisories while Electron.NET's generated call remains
-provably confined to an unconfigured splash-image path. A package version, call
-site, splash configuration, or advisory change fails closed.
-
-Release builds default to the `Free` distribution channel. For the local Windows
-Store-channel package preflight only, first build an unpacked Store closure and
-then run the MSIX script:
+For Store preparation:
 
 ```powershell
 .\scripts\build-windows-release.ps1 -KeepUnpacked -DistributionChannel Store
-.\tools\msix\Build-M0MsixFeasibility.ps1
+.\tools\msix\Build-WindowsMsix.ps1 -IdentityPath .\tools\msix\store-identity.json
+.\tools\msix\Build-WindowsMsix.ps1 -LocalValidation -CheckOnly
 ```
 
-The script accepts only that local `win-unpacked` closure, validates its immutable
-Store metadata, packs a full-trust desktop MSIX with `MakeAppx` (without `/nv`),
-unpacks and checks required contents, then uses an ephemeral current-user test
-certificate to sign the package and verify its embedded CMS integrity and exact
-signer. All package output stays under ignored `.artifacts/m0.5-msix/`; the exact
-certificate is removed before the script returns. It never writes a trusted-root
-entry, installs a package, or contacts Store, GitHub, providers, or an updater.
-Windows trust-chain acceptance and installation in a disposable Windows profile,
-including packaged process/data/import/export/print boundaries, require separate
-owner authorization. This preflight does not establish Store acceptance or
-app-container confinement: the manifest intentionally uses the documented
-full-trust desktop model.
+The production identity comes from Partner Center and the production package is
+unsigned for Store signing. `-LocalValidation` uses its separate identity and
+an ephemeral signer, verifies CMS integrity, and deletes certificate and private
+key without trusting or installing the package. `-CheckOnly` performs neither
+package nor certificate operations. Output stays under ignored
+`.artifacts/msix/store/` or `.artifacts/msix/local-validation/`.
+MakeAppx runs semantic validation without `/nv`. The manifest deliberately
+uses the full-trust desktop model; it does not imply AppContainer confinement.
+Source SemVer maps to MSIX `major+1.minor.patch.0`.
+Install, upgrade, data retention, Windows 11, OAuth/print/file behavior,
+Store submission, and certification require separately authorized target evidence.
+The free price and BYO-provider charges are documented in the MSIX runbook.
 
-The native Apple Silicon builder is
-[`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1). It must
-run on macOS arm64, performs the corresponding dependency/editor/native-runtime
-checks, creates an ad-hoc-signed DMG, verifies architectures/signatures, mounts and
-smoke-tests the application, and writes a checksum. Do not substitute a
-cross-compiled artifact for that native evidence.
+The native macOS arm64 builder performs dependency/editor/Press checks and
+creates an ad-hoc-signed DMG. Its app startup exercise requires explicit manual
+authorization. The dispatch-only macOS workflow supplies native Mac compute;
+general CI, hosted validation, and hosted Linux compute remain excluded.
+Mac App Store feasibility still lacks a signed MAS runtime, entitlements,
+publisher/profile inputs, and real-device acceptance. Direct-DMG evidence is not
+MAS or notarization evidence.
 
-M0.6 Mac App Store feasibility is blocked, not implemented, until the owner
-supplies an Apple Developer Team ID, MAS development certificate/profile, test App
-ID, an Apple-silicon test Mac, and selects the signed build host. The existing
-direct-DMG builder is not a MAS builder and must remain unchanged. Once unblocked,
-the acceptance build uses Electron’s MAS runtime with App Sandbox and distinct app/
-helper entitlement files. Begin only with evidenced sandbox, loopback/network
-client/server, user-selected read/write-file, and printing entitlements; do not
-add broad filesystem access, App Groups, or a library-validation exception without
-a reproducible signed-device failure. Capture sanitized signing/entitlement,
-process-tree, loopback, SQLite/history, file-picker, print-handoff, and Store
-updater-suppression evidence on the selected device. Stop the Store channel rather
-than weaken the sandbox speculatively if a required native boundary fails. Do not
-upload, notarize, publish, submit to App Store Connect, add GitHub signing secrets,
-or change the macOS workflow without a new explicit authorization.
+The stable driver `scripts/release.ps1` owns clean-main version selection, the
+version-only commit, preflight before that commit and again on its exact source,
+normal push, native packaging, and publication. `-CheckOnly` previews without
+editing, committing, pushing, packaging, or publishing. `-WindowsOnly` omits
+Linux and macOS; `-LinuxDistribution` selects the local WSL distribution.
+Completed feature files must already be committed. Divergence, unrelated dirty
+work, altered verification source, staged/concurrent version changes, and
+partial publication require inspection; no reset, force push, or tag overwrite
+is performed.
 
-The Windows stable-release entry point is `scripts/release.ps1`, also exposed by
-the **Release Lorekeeper** VS Code task. Invoking it authorizes preparation and
-direct publication from `main`. It requires a clean worktree/index, the intended
-GitHub origin and write access to both repositories, the SDK/Node/Rust tools, and
-the macOS workflow when applicable. It fetches with pruning, fast-forwards a
-behind-only `main` and reloads itself, accepts verified local commits ahead of
-the remote, and stops for divergence. An exclusive local file handle prevents
-two drivers from running concurrently in this checkout.
+The publisher requires clean source at fetched `origin/main`, matching project
+version, and `-AllowDirectMainPush`. Exact v1.0.0 creates the final bridge in both
+repositories; all later releases use `Dorely/Lorekeeper` only, and this is the sole
+runtime update authority. At v1 launch, the additional explicit
+`-MakeSourcePublicAfterV1` flag publishes the verified asset sets first, changes
+source visibility second, then performs fresh credential-free metadata and full
+asset-download/hash checks. Private main is allowed during v1 preview/preparation.
+Finalized releases and the old-feed bridge survive a failed public check; only
+new drafts can be rolled back. Preparation never runs this publishing path,
+changes visibility, removes branches, rewrites history, or archives the old feed.
+An installed v0.3.x handoff remains required before that feed becomes immutable.
 
-The driver reads the sole application version from `Lorekeeper.csproj`, compares
-both repositories' highest stable releases and matching uploaded asset digests,
-requires published source ancestry, and rejects candidate release/tag collisions.
-It reuses a higher unpublished project version or increments the patch version;
-an already published exact source is a no-op. `-Bump Minor`, `-Bump Major`, and
-`-Version <major.minor.patch>` select deliberate alternatives. Prereleases use the
-lower-level publisher. Documentation uses version-independent examples.
-
-Only the project version is edited and committed. The driver runs the
-build-and-test preflight through `eng/ReleaseWorkflow.ps1` before that commit
-and again on the committed source before pushing and publishing. .NET preflight
-outputs use the isolated artifacts directory and the previous environment is
-restored.
-Verification rejects unexpected source/index changes. On failure it restores
-only its exact unstaged version edit; committed preparation remains available
-for a retry. Staged/concurrent edits and partial publication need inspection.
-There is no reset, force push, tag overwrite, dependency upgrade, or automatic
-commit of feature work.
-
-`-CheckOnly` (the **Preview Lorekeeper release** task) performs preflight and
-reports the selected version/platforms without source edits, builds, commits,
-pushes, or publication. It still fetches metadata, requires a clean checkout,
-and reports a behind checkout instead of fast-forwarding it. `-WindowsOnly`
-omits the macOS build. Preview is the release-driver validation surface; do not
-publish a new version merely to exercise tooling changes.
-
-The lower-level publisher runs from a clean tree at fetched `origin/main`:
-
-```powershell
-.\scripts\release.ps1
-.\scripts\release.ps1 -CheckOnly
-.\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
-```
-
-The publisher rejects detached or dirty source, a version different from the
-project, and any commit other than fetched `origin/main`. It requires the
-explicit `-AllowDirectMainPush` authorization and does not query pull requests.
-It rechecks worktree and local/remote source identity after packaging.
-The cross-platform path dispatches one correlated macOS
-arm64 workflow, builds Windows locally, verifies one requested artifact set,
-creates matching draft releases in the private source and public release
-repositories, verifies both asset sets, and only then publishes both. On a failed
-dual publication it removes the exact releases/tags created by that run when
-GitHub permits, and reports any resource requiring manual inspection. Temporary
-Actions artifacts are deleted only after successful publication. The public
-release repository is the automatic and manual update authority.
-
-The owner has declined general hosted CI, hosted validation workflows, and
-non-macOS GitHub compute for v1. The dispatch-only macOS arm64 release builder
-remains the sole hosted workflow because native Mac packaging needs a Mac host.
-GitHub Actions stays restricted to that builder with read-only repository
-workflow permissions. Every normal build-and-test completion run stays local,
-with evidence recorded in the commit message or work
-item; do not turn the release builder into a general validation lane without a
-new owner decision.
-
-Packaging and updater claims require execution on the relevant operating system.
-Never claim OAuth, provider calls, embeddings, web search, image generation,
-publishing output, packaging, automatic updates, or platform-specific Electron
-behavior solely from compilation or static inspection.
+Raw mirror/scanner/GitHub evidence remains ignored and private; only sanitized
+scope, fingerprints, decisions, counts, and limits belong in
+`docs/evidence/public-sharing-audit.md`. Recheck final exact refs before public
+visibility and resolve contribution rights or content findings. A successful
+build never substitutes for historical artifact, platform, UI, provider,
+Store, or update evidence. Record performed and unperformed checks in
+`docs/evidence/v1-qa.md`.
 
 Static managed acceptance inspection covers flowing Figures, Designed Pages,
 publication sections, selected covers, and structured physical cover scenes;
@@ -375,10 +340,13 @@ suite.
 | [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs) | Account/token migration rollback and obsolete discovery-column removal without external OAuth/provider simulation. |
 | [`eng/ReleaseDependencyAudit.ps1`](../../eng/ReleaseDependencyAudit.ps1) | Shared fail-closed shipped Electron dependency policy and its narrowly bounded dormant-splash advisory exception. |
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared build-and-test preflight/version/tag checks, and explicit editor entry points. |
-| [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree, dual-repository release orchestrator. |
+| [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree main-repository publisher, with the final v1 old-feed handoff. |
+| [`scripts/build-linux-release.ps1`](../../scripts/build-linux-release.ps1), [`scripts/build-linux-release-wsl.ps1`](../../scripts/build-linux-release-wsl.ps1), and [`eng/linux/AppRun.sh`](../../eng/linux/AppRun.sh) | Local native/WSL exact-source Linux package and provenance checks; source-owned launcher sandbox behavior is owned by runtime-host.md. |
+| [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, and pending installed/certification boundary. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
-| [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1) and [M0.4 inventory](../research/m0.4-distribution-inventory.md) | Deterministic local release-input inventory. It reads restored managed/Cargo/npm metadata, shipped assets, and the unsigned Windows `win-unpacked` closure; it writes only the committed research JSON/Markdown and records unresolved obligations rather than selecting a license, credential, account, or publication action. |
+| [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. |
+| [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1), [inventory](../research/m0.4-distribution-inventory.md), and [public-sharing audit](../evidence/public-sharing-audit.md) | Local dependency/notice and platform-prerequisite inventory plus sanitized all-ref/GitHub clearance; detailed findings stay ignored/private and no publication is performed. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |
 | [`.mcp.json`](../../.mcp.json) and [`.commandcode/settings.json`](../../.commandcode/settings.json) | Project-only optional Command Code Roslynk configuration mirroring the Codex allowlist: the same stdio server with permission rules that expose the read-only tools and deny the mutating tools plus `reload_solution`; not an application dependency or final-verification substitute. |
 
@@ -431,15 +399,14 @@ raw trace, five warm-ups plus 30 samples per metric, and nearest-rank p95. This
 is an explicitly authorized local UI session, not an automated browser/UI suite;
 terminate the app and retain only the summarized committed evidence.
 
-For M0.4, first confirm `publish/win-x64-stage` and `publish/win-x64` are
-disposable ignored outputs, then run
-`scripts/build-windows-release.ps1 -KeepUnpacked` without signing or publishing. Run
+The dependency inventory began with M0.4 and now records the retained v1 license
+and notice decisions. Confirm generated Windows directories are disposable before
+building an unpacked closure. Run
 `tools/distribution/Export-M0DistributionInventory.ps1` twice and compare the
-JSON and Markdown SHA-256 hashes. Inspect the generated source-controlled report
-for the required missing root license/notice, Bootstrap, branding, macOS-closure,
-and account blockers. The inventory may define a future history-audit procedure,
-but it must not scan history, add CI, adopt license terms, create credentials,
-or modify external distribution state.
+JSON and Markdown SHA-256 hashes. Inspect resolved obligations and remaining
+platform, rights, and account findings against actual evidence. Inventory generation
+does not scan history or modify credentials or external distribution state;
+the separately authorized sharing audit has its own scope and private evidence.
 
 For printing changes, syntax-check the print browser modules and desktop hook,
 then use explicitly authorized preview checks for source orientation, fit/crop,

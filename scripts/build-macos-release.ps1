@@ -35,6 +35,7 @@ $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-edit
 $dependencyAuditScript = Join-Path $repoRoot 'eng/ReleaseDependencyAudit.ps1'
 
 . $dependencyAuditScript
+. (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
 $profileName = $runtimeIdentifier
 $artifactArchitecture = 'arm64'
 $machArchitecture = 'arm64'
@@ -248,6 +249,7 @@ try
 
     Invoke-CheckedCommand dotnet @(
         'restore', $projectPath, '--force-evaluate',
+        '-p:Configuration=Release', "-p:PublishProfile=$profileName", '-p:SelfContained=true',
         "-p:RuntimeIdentifier=$runtimeIdentifier",
         $sqliteVecPlatformCheck,
         '-p:NuGetAudit=true', '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low',
@@ -338,6 +340,8 @@ try
         throw "Expected one unpacked Lorekeeper.app, found $($unpackedApps.Count)."
     }
     $appPath = $unpackedApps[0].FullName
+    Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot `
+        -ManagedRoot (Join-Path $appPath 'Contents/Resources/bin') -DesktopRoot $appPath
     $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
     $pressExecutable = Join-Path $pressRoot 'lorekeeper-press'
     # The ad-hoc signature added by electron-builder mutates the Mach-O, so the

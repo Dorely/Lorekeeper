@@ -3,6 +3,47 @@
 Lorekeeper is a local, desktop-first AI-assisted bookmaking workbench for
 long-form story planning, drafting, research, ingest, and publishing.
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-dorely-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dorely)
+
+Lorekeeper is free to install and source available under the unchanged
+[PolyForm Noncommercial or Internal Use 1.0.0 alternatives](LICENSE).
+You can use and modify it for personal work or internal business, including
+commercial bookmaking, and sell your own books. Noncommercial software forks
+and redistribution are permitted; selling or commercially distributing
+Lorekeeper or a derivative, or offering it as a paid hosted app to external
+customers, is outside these grants. Third-party components retain their own
+licenses. Your creative work is not licensed by Lorekeeper merely because you
+create or process it here.
+
+AI, search, embedding, and image services use your own accounts and may charge
+separately. See [privacy](PRIVACY.md), [support](SUPPORT.md),
+[security reporting](SECURITY.md), and [contributing](CONTRIBUTING.md).
+Use GitHub issues for support; the package maintainer's GitHub noreply address
+is not monitored for support.
+
+## Installation
+
+Application downloads and future release notes belong to
+[Dorely/Lorekeeper releases](https://github.com/Dorely/Lorekeeper/releases).
+The v1 release is being prepared; publication, public repository visibility,
+and a Microsoft Store listing have not been performed by this preparation.
+Existing published packages remain available from the
+[historical download repository](https://github.com/Dorely/Lorekeeper-Releases/releases).
+
+- **Windows x64:** per-user installer or portable executable; no .NET or Node.js
+  installation is required. Direct downloads are unsigned. The free Microsoft
+  Store MSIX edition is prepared separately for Store signing and managed updates;
+  its listing and certification are pending.
+- **Linux x64:** AppImage and Debian package built on Ubuntu 24.04. Install a DEB
+  with `sudo apt install ./Lorekeeper-<version>-amd64.deb`, or make
+  `Lorekeeper-<version>-x86_64.AppImage` executable and run it as your regular
+  user. The AppImage requires the system FUSE support. Desktop startup and sandbox
+  acceptance must be verified on the target desktop; package preparation alone
+  does not establish that evidence.
+- **macOS Apple Silicon:** direct `arm64` DMG. Current packages use ad-hoc signing
+  and may require **Open Anyway** in System Settings > Privacy & Security.
+  Developer ID notarization and Mac App Store distribution are not established.
+
 See [VISION.md](VISION.md) for the product direction and
 [docs/architecture.md](docs/architecture.md) for the compact technical map and
 task-routed architecture chapters covering current boundaries, ownership, and
@@ -290,9 +331,14 @@ its planned features are not claims about current capabilities.
   overrides; ISBN, destination, package, and artifact settings remain
   release-specific. No release or ISBN is created automatically.
 - Opt-in edition-specific manuscript editing in Editor. Untouched chapters
-  inherit Core live; the first release edit freezes a chapter snapshot and its
-  Designed Pages, while reset returns that chapter to Core. Saved Book Text
-  Styles and project images remain reusable across Core and every release.
+  inherit Core live; the first release text edit freezes only the manuscript
+  and its page-placement reference IDs. Designed Page content and layout have
+  independent inheritance: the first release page edit creates one override
+  used by every occurrence of that page in that release, without freezing a
+  chapter. Chapter **Use Core** preserves independent page overrides, even when
+  unplaced; page **Use Core** restores all of that release's occurrences of the
+  page together. Release-only pages have no Core reset. Saved Book Text Styles
+  and project images remain reusable across Core and every release.
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
@@ -540,149 +586,150 @@ callback agree.
 
 ## Contributing
 
-Verification and the maintainer release workflow are documented in
-[`docs/architecture/validation-documentation.md`](docs/architecture/validation-documentation.md)
-and [`AGENTS.md`](AGENTS.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), and the
+[validation chapter](docs/architecture/validation-documentation.md) for scope,
+verification, and contribution terms.
 
 ## Desktop Packaging
 
-Build the current Windows packages without publishing them:
+Build packages without publishing:
 
 ```powershell
 .\scripts\build-windows-release.ps1
+.\scripts\build-linux-release-wsl.ps1 -Version <version> -Distribution Ubuntu
 ```
 
-The project version comes from `Lorekeeper/Lorekeeper.csproj`. Pass `-Version <version>` only when
-validating a different future SemVer. This build-only script verifies the
-solution, audits NuGet and the shipped npm/Electron runtime, probes the packaged
-Press protocol/registry contract, and produces the installer and portable
-executable under `publish/win-x64/`. Electron.NET currently ships
-`image-size@1.2.1` solely for its optional splash-image path. Lorekeeper has no
-splash image; the release audit accepts only the two exact known advisories when
-that path remains unreachable and fails for any changed package, usage,
-configuration, or advisory.
+The Windows builder produces `Lorekeeper-Setup-<version>-x64.exe` and the
+portable executable under `publish/win-x64/`. It audits managed and shipped
+Electron dependencies, rebuilds the exact semantic editor and contained Press
+runtime, checks required notices and platform metadata, and writes checksums.
+Electron.NET's dormant optional splash path currently contains
+`image-size@1.2.1`; only the two exact known advisories are accepted while that
+path remains unreachable. A changed package, call, configuration, or advisory
+fails the audit.
 
-The underlying packaging command is:
+Linux builds use local WSL2 Ubuntu 24.04 x64, or native Ubuntu 24.04 with
+`pwsh scripts/build-linux-release.ps1 -Version <version>`. They produce
+`Lorekeeper-<version>-x86_64.AppImage`,
+`Lorekeeper-<version>-amd64.deb`, checksums, and release provenance under
+`publish/linux-x64/`. The WSL wrapper builds an exact committed Git archive in
+isolated ext4 storage, so commit completed preparation first. It does not copy
+working databases, History, credentials, or uncommitted changes. Use
+`-CheckOnly` for toolchain prerequisites; this is not an artifact or desktop
+acceptance check. Linux builds use local compute. Native desktop startup,
+sandbox behavior, update discovery, and complete AppImage/FUSE notice closure
+remain separate release evidence.
+The Linux builder selects the pinned AppImage toolset 1.0.3 through its supported
+override, verifies the official archive and 20251108 static runtime hashes, and
+excludes the old optional compatibility libraries. The extracted runtime prefix
+and source-owned launcher are checked. Its modified LGPL libfuse still requires
+corresponding source and recipient relinking material before public distribution.
 
-```bash
-dotnet publish Lorekeeper/Lorekeeper.csproj -c Release /p:PublishProfile=win-x64
-```
+The native Apple Silicon builder is `scripts/build-macos-release.ps1`, run on
+macOS arm64. The dispatch-only GitHub workflow supplies the Mac host; general CI
+and hosted Linux validation are not part of this release process. Current DMGs
+are ad-hoc signed; notarization and Mac App Store acceptance remain unperformed.
 
-The build produces a per-user NSIS installer and a portable executable in
-`publish/win-x64/`. The installer is the recommended file to share. It installs
-without administrator rights, and recipients do not need .NET or Node.js. Share
-`publish/win-x64/Lorekeeper-Setup-<version>-x64.exe` with testers.
+The project version in `Lorekeeper/Lorekeeper.csproj` is the single version
+source. Build-only version overrides are for deliberate packaging validation.
 
-For a complete stable release, install and authenticate
-[GitHub CLI](https://cli.github.com/), commit your completed feature work, and run
-this from Windows:
+### Free Microsoft Store package
+
+Build the Store closure, then prepare an unsigned submission package with the
+exact Partner Center identity:
 
 ```powershell
-.\scripts\release.ps1
+.\scripts\build-windows-release.ps1 -KeepUnpacked -DistributionChannel Store
+.\tools\msix\Build-WindowsMsix.ps1 -IdentityPath .\tools\msix\store-identity.json
 ```
 
-Or choose **Tasks: Run Task → Release Lorekeeper** in VS Code. Invoking the driver
-authorizes the version commit, direct push to main, Windows and native Apple
-Silicon macOS builds, and publication to both repositories. The project's
-`<Version>` is the single version source; documentation needs no per-release edits.
+Copy the empty [identity example](tools/msix/store-identity.example.json) and
+supply the reserved package name, publisher, publisher display name, and app
+display name. The production path uses MakeAppx semantic validation, retains the
+complete notice set, and leaves the MSIX unsigned for Microsoft Store signing.
+It does not install certificates or submit a listing. The package is prepared
+for a free listing with Store-managed updates and your own independently billed
+provider accounts. See the [MSIX runbook](tools/msix/README.md) and
+[listing material](tools/msix/store-listing.md).
 
-The driver checks tools, GitHub write access, origin identity, clean source/index,
-remote ancestry, matching latest stable releases/assets, and unused tags.
-It fast-forwards a behind-only main and reloads the driver; divergence and
-unrelated uncommitted work block execution. By default it reuses a higher
-unpublished project version, otherwise increments the patch version. If the
-exact current commit is already published, it exits without another release.
+`-LocalValidation` instead uses a separate local identity and an ephemeral
+certificate to check package structure and CMS integrity, then removes the
+certificate and private key. It never trusts or installs the package.
+`-CheckOnly` checks an existing Store closure without packaging or certificate
+operations. Source `1.0.0` maps to MSIX `2.0.0.0` through the reserved major
+offset, preserving monotonic upgrades from the prior feasibility series.
+Install, upgrade, uninstall/data retention, Windows 11, and Store certification
+remain target-specific acceptance checks.
 
-It updates only `Lorekeeper/Lorekeeper.csproj`, runs the build-and-test
-preflight, commits the version, reruns the preflight on the committed source, and pushes main
-normally before building and publishing. Existing local commits on main are
-included. Failed verification restores only the driver's exact unstaged version
-edit. Committed preparation remains available so a retry reuses that version.
-A staged edit after a failed commit, concurrent changes, or a tag/partial release
-left by interrupted publication requires inspection rather than automatic
-discarding or overwriting. The driver does not install tools or upgrade dependencies.
+### Maintainer release
 
-Preview and optional overrides:
+Install and authenticate [GitHub CLI](https://cli.github.com/), commit verified
+preparation, and preview on clean `main`:
 
 ```powershell
 .\scripts\release.ps1 -CheckOnly
-.\scripts\release.ps1 -Bump Minor
-.\scripts\release.ps1 -Bump Major
-.\scripts\release.ps1 -Version <major.minor.patch>
-.\scripts\release.ps1 -WindowsOnly
 ```
 
-**Preview Lorekeeper release** is also available as a VS Code task.
-`-CheckOnly` fetches remote metadata and performs preflight, but never edits
-source, commits, pushes, builds, or publishes. It requires a clean checkout and
-reports a behind checkout rather than fast-forwarding it. Use `-Version` or `-Bump`,
-not both. The driver handles stable releases; prereleases remain an explicit
-lower-level publishing operation.
+The driver verifies source/index cleanliness, tools, repository access, release
+and tag state, and the build-and-test preflight. It never publishes in preview.
+For a separately authorized stable release, `scripts/release.ps1` owns version
+selection, its version-only commit, preflight before and after that commit, the
+normal push, native packaging, checksum verification, and publication. Use
+`-Version <major.minor.patch>` or `-Bump Minor|Major` for a deliberate version,
+`-LinuxDistribution <name>` for the configured WSL distribution, and
+`-WindowsOnly` to omit Linux and macOS. Do not use publication to test tooling.
 
-For already prepared and verified source at fetched origin/main, the lower-level
-publisher accepts direct publication:
+The lower-level publisher requires clean source whose HEAD equals fetched
+`origin/main`, a matching project version, and explicit
+`-AllowDirectMainPush`. Exact v1.0.0 publishes the same verified artifacts to
+`Dorely/Lorekeeper` and `Dorely/Lorekeeper-Releases` as the final bridge.
+Later releases use the main repository only. Public visibility at the v1 launch
+requires the additional explicit `-MakeSourcePublicAfterV1` flag: publication
+finishes before the visibility change, followed by credential-free verification
+of both metadata and complete asset downloads. The preparation task has not run
+this path. Finalized releases are immutable and survive a failed public check;
+only new drafts are rollback candidates. The historical feed must remain
+available until installed-version handoff is exercised.
+
+Every build embeds an immutable distribution channel. Development disables
+updates. Free builds check `Dorely/Lorekeeper` only when you select **Check for
+updates**, then offer a browser link for manual installation; no download,
+installation, restart, or background polling occurs. Store builds make no GitHub
+update query or browser handoff and explain that Microsoft Store manages updates.
+The installed v0.3.x-to-v1 bridge and all platform update paths require explicit
+integration evidence.
+
+Packages retain `LICENSE`, both first-party full texts,
+`THIRD-PARTY-NOTICES.txt`, `licenses/third-party/`, exact SDK runtime-pack
+licenses and notices under `licenses/runtime-notices/`, adjacent asset notices,
+Press notices/SBOM, and Electron/Chromium notices. After dependency changes,
+refresh authoritative evidence and review it, then run the offline check:
 
 ```powershell
-.\scripts\publish-release.ps1 -Version <version> -AllowDirectMainPush
+.\tools\distribution\Export-ThirdPartyNotices.ps1 -RefreshEvidence
+.\tools\distribution\Export-ThirdPartyNotices.ps1 -CheckOnly
+.\tools\distribution\Export-M0DistributionInventory.ps1
 ```
 
-The requested version must match the project.
+Use `-AssetsPath <produced project.assets.json>` when building with an isolated
+artifacts path. A runtime-pack change requires `-RefreshRuntimeEvidence` and
+review of the exact selected full texts; packaging must match the actual
+contained framework versions to that evidence.
+Release publication pins .NET and ASP.NET Core runtime patch 10.0.12; Debug
+uses the installed SDK's current 10.0.0 graph. Both active configurations' exact
+runtime notice sets are retained. Builders restore with the same Release profile
+and self-contained properties used for publication.
 
-The Windows-only path omits macOS and publishes the installer, portable
-executable, Electron-generated release metadata, blockmap, and checksum file as
-the latest release.
-Portable/macOS discovery ignores releases without an applicable platform asset.
-Unless `-WindowsOnly` is used, the publisher dispatches
-`.github/workflows/build-macos-release.yml` for the Apple Silicon package,
-builds Windows locally at the same time, waits for the correlated Actions run,
-downloads the verified DMG, and publishes every artifact together only if all
-builds succeeded. The workflow must already be committed and pushed to `main`;
-it uses the source repository's read-only `GITHUB_TOKEN` and never publishes a
-release itself. The orchestrator uploads the same verified artifact set and
-release notes to draft releases in both the private `Dorely/Lorekeeper` source
-repository and the public `Dorely/Lorekeeper-Releases` repository. It verifies
-both asset sets before publishing either release and removes releases/tags it
-created if dual publication fails. It warns if GitHub prevents compensating
-cleanup. The public repository remains the manual-update-notification and
-user-download authority.
+The [dependency inventory](docs/research/m0.4-distribution-inventory.md),
+[public-sharing audit](docs/evidence/public-sharing-audit.md), and
+[v1 QA evidence](docs/evidence/v1-qa.md) record unresolved prerequisites and
+performed checks. Package output is git-ignored. No repository visibility,
+publication, Store submission, or historical-feed archival is implied by a
+successful build.
 
-Each completed release contains the Windows installer, portable executable,
-Electron-generated release metadata and blockmap,
-`Lorekeeper-<version>-arm64.dmg`, and one checksum file covering every asset. Add
-`-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
-prereleases are published as GitHub prereleases by the lower-level publisher.
-Published versions are immutable; fixes require a higher version.
-
-Every build carries immutable distribution-channel metadata. Development builds
-never check for updates. Release builds default to the `Free` channel: the user
-may select **Check for updates**, which queries the public GitHub release
-metadata and, for a newer release, offers **Download Update** to open that
-release in the default browser. Lorekeeper never downloads, installs, or
-restarts itself for a Free update. A `Store` package must be explicitly built
-with the Store channel; it makes no GitHub query or browser handoff and instead
-states that updates are managed by Microsoft Store. The existing release builder
-uses `Free` by default; `-DistributionChannel Store` is reserved for local
-Store-channel packaging evidence until a separately authorized Store submission.
-Generated Electron update metadata can remain a release artifact, but it is not
-an automatic-update contract.
-
-Release builds store the SQLite database in per-user application data, outside
-the installed application, mounted DMG, and portable executable's extraction
-directory. Desktop development continues to use the repository-local database.
-
-Windows packages are unsigned, so Windows may show an unknown-publisher or
-SmartScreen warning. macOS packages are ad-hoc signed but not Developer ID signed
-or notarized. On Apple Silicon, download the `arm64` DMG, drag Lorekeeper into
-Applications, then use **Open Anyway** in System Settings > Privacy & Security if
-Gatekeeper blocks the first launch. Lorekeeper 0.3.6 is the final Intel macOS
-package; its `x64` DMG remains available, but later releases do not provide Intel
-artifacts. These packages are intended for trusted testers.
-
-The `/publish/` directory is git-ignored. Release binaries are mirrored as
-GitHub Release assets in the private source repository and the public
-[`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
-repository rather than committed to source control. The private source
-repository also consumes GitHub Actions minutes for its hosted macOS job.
+The [feature trailer materials](media/trailer/README.md) contain the planned
+60-second sequence, captions, and export recipe. Real accepted-build footage,
+the finished video, and its poster remain pending functional QA.
 
 ## Local Data
 
