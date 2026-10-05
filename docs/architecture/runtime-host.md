@@ -342,6 +342,14 @@ prefix hash, and retain the source-owned launcher. Native desktop/AppArmor
 acceptance and the modified libfuse LGPL source/relink material remain separate
 unresolved evidence.
 
+Packaged application metadata declares `desktopName` as
+`com.lorekeeper.app.desktop`, and Linux `syncDesktopName` uses that identity for
+both AppImage and DEB desktop filenames. Electron reads the ASAR metadata before
+application startup; its desktop-name setter applies only on Linux. The desktop
+entry uses `com.lorekeeper.app` for `StartupWMClass` and `Icon`, with `AppRun %U`
+for AppImage and `/opt/Lorekeeper/com.lorekeeper.app %U` for DEB. These packaging
+contracts do not establish native window grouping or icon-display acceptance.
+
 ## Related chapters
 
 - [Architecture index](../architecture.md) — global invariants and task-to-chapter routing.

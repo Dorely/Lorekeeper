@@ -2,6 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "productName": "Lorekeeper",
   "appId": "com.lorekeeper.app",
+  "extraMetadata": {
+    "desktopName": "com.lorekeeper.app.desktop"
+  },
   "compression": "maximum",
   "directories": {
     "buildResources": "bin/wwwroot/branding"
@@ -49,6 +52,7 @@
   },
   "linux": {
     "icon": "icon.png",
+    "syncDesktopName": true,
     "target": [
       {
         "target": "AppImage",

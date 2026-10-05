@@ -229,6 +229,19 @@ keeps its `-text` attributes. The editor gate still requires an exact byte hash
 match with the committed bundle.
 Linux reads the npm lock as a dictionary, preserving its empty root-package key;
 declared, locked and installed Electron versions must still match.
+Linux verification passively reads the actual `resources/app.asar` manifest in
+the unpacked payload and extracted AppImage/DEB through installed pinned
+`@electron/asar` 3.4.1. The reader accepts only a regular packed `package.json`
+of at most one MiB and parses JSON without executing packaged application code.
+It checks application/version/desktop identity and identical ASAR/manifest hashes
+across all three copies. Each package must contain exactly one expected desktop
+entry with matching name, class, icon and executable command; existing launcher
+hash/mode and sandbox checks remain. Required key spelling and duplicate-key
+checks use ordinal comparison, as required by the
+[Desktop Entry format](https://specifications.freedesktop.org/desktop-entry/latest/basic-format.html).
+Provenance retains the actual manifest and
+desktop-entry hashes. These static checks do not validate installed launch,
+window/icon association, Wayland/X11 behavior, or AppArmor acceptance.
 Release builds pin .NET/ASP.NET runtime 10.0.12 in the project. Builders restore
 with the target Release publish profile and self-contained settings before
 publishing without restore, so every platform selects the reviewed runtime.

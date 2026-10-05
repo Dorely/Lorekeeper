@@ -26,6 +26,12 @@ $appImageToolsetDirectory = Join-Path $repoRoot 'publish/linux-appimage-tools'
 $appImageManifestPath = Join-Path $repoRoot 'licenses/appimage-runtime/sources.json'
 $appImageManifest = Get-Content -LiteralPath $appImageManifestPath -Raw | ConvertFrom-Json
 $electronBuilderConfiguration = Get-Content -LiteralPath (Join-Path $repoRoot 'Lorekeeper/Properties/electron-builder.json') -Raw | ConvertFrom-Json
+$linuxDesktopName = 'com.lorekeeper.app.desktop'
+if ([string]$electronBuilderConfiguration.extraMetadata.desktopName -cne $linuxDesktopName -or
+    $electronBuilderConfiguration.linux.syncDesktopName -ne $true)
+{
+    throw 'Linux packaging must keep the packaged desktopName and installed desktop filename synchronized.'
+}
 $appImageToolsetVersion = [string]$electronBuilderConfiguration.toolsets.appimage
 $appImageToolsetSha256 = [string]$appImageManifest.toolset.sha256
 $appImageToolsetUrl = [string]$appImageManifest.toolset.url
@@ -244,6 +250,117 @@ function Assert-PressClosure
         throw 'The packaged Press executable failed its capability contract.'
     }
     return $description
+}
+
+function Assert-LinuxAppMetadata
+{
+    param([Parameter(Mandatory)][string]$DesktopRoot)
+
+    $asarPath = Join-Path $DesktopRoot 'resources/app.asar'
+    $archive = Get-Item -LiteralPath $asarPath
+    if ($archive.PSIsContainer -or ($archive.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+    {
+        throw 'The Linux application ASAR must be a regular owned file.'
+    }
+    $readerRoot = Join-Path $stageDirectory 'node_modules/@electron/asar'
+    $readMetadata = @'
+const path = require('node:path');
+const crypto = require('node:crypto');
+const readerRoot = process.argv[1];
+const reader = require(path.join(readerRoot, 'package.json'));
+if (reader.name !== '@electron/asar' || reader.version !== '3.4.1')
+    throw new Error('The passive ASAR reader must be the pinned @electron/asar 3.4.1.');
+const asar = require(readerRoot);
+const archive = process.argv[2];
+const entry = asar.statFile(archive, 'package.json', false);
+if ('link' in entry || 'files' in entry || entry.unpacked ||
+    !Number.isSafeInteger(entry.size) || entry.size < 1 || entry.size > 1024 * 1024)
+    throw new Error('The packaged application manifest must be a bounded regular packed ASAR file.');
+const bytes = asar.extractFile(archive, 'package.json', false);
+if (bytes.length !== entry.size)
+    throw new Error('The packaged application manifest length differs from its ASAR declaration.');
+const data = JSON.parse(bytes.toString('utf8'));
+for (const key of ['name', 'productName', 'version', 'desktopName']) {
+    if (typeof data[key] !== 'string')
+        throw new Error('The packaged application manifest has an invalid identity field.');
+}
+process.stdout.write(JSON.stringify({
+    name: data.name, productName: data.productName, version: data.version,
+    desktopName: data.desktopName ?? null,
+    packageJsonSha256: crypto.createHash('sha256').update(bytes).digest('hex')
+}));
+'@
+    $metadataJson = (& node -e $readMetadata $readerRoot $asarPath) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not passively read the packaged Linux application manifest.' }
+    $metadata = $metadataJson | ConvertFrom-Json
+    if ($metadata.name -cne 'com.lorekeeper.app' -or $metadata.productName -cne 'Lorekeeper' -or
+        $metadata.version -cne $Version -or $metadata.desktopName -cne $linuxDesktopName)
+    {
+        throw 'The actual ASAR manifest does not match the Linux application, version and desktop identity.'
+    }
+    return [ordered]@{
+        name = $metadata.name
+        productName = $metadata.productName
+        version = $metadata.version
+        desktopName = $metadata.desktopName
+        packageJsonSha256 = $metadata.packageJsonSha256
+        asarSha256 = (Get-FileHash -LiteralPath $asarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+function Assert-LinuxDesktopEntry
+{
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$AppMetadata,
+        [Parameter(Mandatory)][string]$ExpectedExec,
+        [Parameter(Mandatory)][string]$ExecutablePath
+    )
+
+    $file = Get-Item -LiteralPath $Path
+    if ($file.Name -cne $AppMetadata.desktopName -or $file.PSIsContainer -or
+        ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $file.Length -gt 64 * 1024)
+    {
+        throw 'The Linux desktop entry must be one bounded regular file matching the ASAR desktopName.'
+    }
+    $text = [IO.File]::ReadAllText($file.FullName)
+    if ($text -match '--no-sandbox') { throw 'The Linux desktop entry must not disable the Electron sandbox.' }
+    $entry = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $inEntry = $false
+    $entryCount = 0
+    foreach ($line in $text -split '\r?\n')
+    {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#', [StringComparison]::Ordinal)) { continue }
+        if ($line.StartsWith('[', [StringComparison]::Ordinal))
+        {
+            $inEntry = $line -ceq '[Desktop Entry]'
+            if ($inEntry) { $entryCount++ }
+            continue
+        }
+        if (-not $inEntry) { continue }
+        $parts = $line -split '=', 2
+        if ($parts.Count -ne 2 -or $entry.ContainsKey($parts[0])) { throw 'The Linux desktop entry has malformed or duplicate keys.' }
+        $entry[$parts[0]] = $parts[1]
+    }
+    foreach ($key in @('Name', 'Type', 'Terminal', 'Icon', 'StartupWMClass', 'Exec'))
+    {
+        if (-not $entry.ContainsKey($key)) { throw "The Linux desktop entry is missing the exact required key '$key'." }
+    }
+    $wmClass = [IO.Path]::GetFileNameWithoutExtension([string]$AppMetadata.desktopName)
+    if ($entryCount -ne 1 -or $entry['Name'] -cne $AppMetadata.productName -or
+        $entry['Type'] -cne 'Application' -or $entry['Terminal'] -cne 'false' -or
+        $entry['Icon'] -cne $AppMetadata.name -or $entry['StartupWMClass'] -cne $wmClass -or
+        $entry['Exec'] -cne $ExpectedExec -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf))
+    {
+        throw 'The Linux desktop filename, class, icon and executable do not match the actual application manifest.'
+    }
+    return [ordered]@{
+        fileName = $file.Name
+        sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        startupWMClass = $entry['StartupWMClass']
+        icon = $entry['Icon']
+        exec = $entry['Exec']
+    }
 }
 
 function Assert-DesktopClosure
@@ -476,6 +593,7 @@ $electronFindings = @($fullAudit.vulnerabilities.PSObject.Properties | Where-Obj
 if ($electronFindings.Count -gt 0) { throw 'The packaged Electron runtime has a blocking security advisory.' }
 
 $pressDescription = Assert-DesktopClosure -DesktopRoot (Join-Path $outputDirectory 'linux-unpacked') -BundleHash $bundleHash
+$unpackedMetadata = Assert-LinuxAppMetadata -DesktopRoot (Join-Path $outputDirectory 'linux-unpacked')
 $appImagePath = Join-Path $outputDirectory "Lorekeeper-$Version-x86_64.AppImage"
 $debPath = Join-Path $outputDirectory "Lorekeeper-$Version-amd64.deb"
 foreach ($path in @($appImagePath, $debPath))
@@ -503,11 +621,11 @@ try
         throw 'The AppImage did not retain the fail-closed source launcher. Refusing an upstream sandbox fallback.'
     }
     $desktopFiles = @(Get-ChildItem -LiteralPath $appImageRoot -File -Filter '*.desktop')
-    if ($desktopFiles.Count -ne 1 -or [IO.File]::ReadAllText($desktopFiles[0].FullName) -match '--no-sandbox')
-    {
-        throw 'The AppImage desktop entry must not disable the Electron sandbox.'
-    }
+    if ($desktopFiles.Count -ne 1) { throw 'The AppImage must contain exactly one root desktop entry.' }
     $null = Assert-DesktopClosure -DesktopRoot $appImageRoot -BundleHash $bundleHash
+    $appImageMetadata = Assert-LinuxAppMetadata -DesktopRoot $appImageRoot
+    $appImageDesktop = Assert-LinuxDesktopEntry -Path $desktopFiles[0].FullName -AppMetadata $appImageMetadata `
+        -ExpectedExec 'AppRun %U' -ExecutablePath (Join-Path $appImageRoot 'com.lorekeeper.app')
     $debRoot = Join-Path $verificationRoot 'deb'
     Invoke-CheckedCommand -FilePath dpkg-deb -Arguments @('--extract', $debPath, $debRoot)
     $debArchitecture = (& dpkg-deb --field $debPath Architecture).Trim()
@@ -522,6 +640,24 @@ try
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin/Lorekeeper') -PathType Leaf })
     if ($debResources.Count -ne 1) { throw 'The DEB does not contain exactly one Lorekeeper application closure.' }
     $null = Assert-DesktopClosure -DesktopRoot $debResources[0].Parent.FullName -BundleHash $bundleHash
+    $debMetadata = Assert-LinuxAppMetadata -DesktopRoot $debResources[0].Parent.FullName
+    $debDesktopFiles = @(Get-ChildItem -LiteralPath (Join-Path $debRoot 'usr/share/applications') -File -Filter '*.desktop')
+    if ($debDesktopFiles.Count -ne 1) { throw 'The DEB must contain exactly one installed desktop entry.' }
+    $debExecutable = Join-Path $debRoot 'opt/Lorekeeper/com.lorekeeper.app'
+    if ($debResources[0].Parent.FullName -cne (Join-Path $debRoot 'opt/Lorekeeper'))
+    {
+        throw 'The DEB application closure does not match its installed executable path.'
+    }
+    $debDesktop = Assert-LinuxDesktopEntry -Path $debDesktopFiles[0].FullName -AppMetadata $debMetadata `
+        -ExpectedExec '/opt/Lorekeeper/com.lorekeeper.app %U' -ExecutablePath $debExecutable
+    foreach ($metadata in @($appImageMetadata, $debMetadata))
+    {
+        if ($metadata.asarSha256 -cne $unpackedMetadata.asarSha256 -or
+            $metadata.packageJsonSha256 -cne $unpackedMetadata.packageJsonSha256)
+        {
+            throw 'The AppImage and DEB must retain the exact verified unpacked application ASAR.'
+        }
+    }
 }
 finally { Remove-GeneratedDirectory -Path $verificationRoot }
 
@@ -566,6 +702,12 @@ $provenance = [ordered]@{
         legacyCompatibilityLibrariesIncluded = $false
     }
     electron = $installedElectron.version
+    desktopMetadata = [ordered]@{
+        application = $unpackedMetadata
+        appImage = $appImageDesktop
+        deb = $debDesktop
+        nativeWindowAssociationValidated = $false
+    }
     semanticEditorSha256 = $bundleHash.ToLowerInvariant()
     optionalDiagnostics = @(
         if ($optionalLttngUnavailable)

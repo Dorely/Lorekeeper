@@ -115,6 +115,15 @@ old release repository are separate launch actions.
   remains unperformed.
 - Linux parses npm's lockfile as a dictionary so its standard empty root key
   survives. The declared, locked and installed Electron identity checks remain.
+- Passive inspection of the existing `9eec7b8` Linux unpacked/AppImage/DEB
+  manifests found identical ordinary packed JSON with no `desktopName`. Both
+  desktop files were named `com.lorekeeper.app.desktop` but declared
+  `StartupWMClass=Lorekeeper`; their icon and executable commands matched the
+  intended package paths. The focused metadata correction supplies the matching
+  desktop name/class and adds passive ASAR/desktop hash checks to packaging.
+  Exact-source Windows/Linux rebuilds remain pending; the prior artifact bytes
+  are unchanged. Native install, window/icon, and AppArmor acceptance remain
+  unperformed, and no accepted-build claim follows from these static checks.
 - Ubuntu DEB metadata now includes the official .NET runtime prerequisites and
   uses the Ubuntu 24.04 GTK/AT-SPI package names. Build prerequisites and final
   DEB metadata are checked against the same declared inventory. The optional
