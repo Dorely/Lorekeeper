@@ -1,0 +1,5 @@
+/** Change the permission bits of a file
+	 *
+	 * `fi` will always be NULL if the file is not currently open, but
+	 * may also be NULL if the file is open.
+	 */

@@ -1,0 +1,1671 @@
+{
+  "formatVersion": 1,
+  "scope": "Full component notices for the selected AppImage runtime; source/relink and public-distribution clearance remain pending",
+  "runtime": {
+    "release": "20251108",
+    "commit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+    "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+    "actualAssetCreatedAt": "2025-12-08T17:52:05Z",
+    "officialAssetUrl": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64"
+  },
+  "toolset": {
+    "version": "appimage@1.0.3",
+    "sha256": "84021a78ee214ae6fd33a2d62a92ba25542dd10bc86bf117a9b2d0bba44e7665",
+    "url": "https://github.com/electron-userland/electron-builder-binaries/releases/download/appimage%401.0.3/appimage-tools-runtime-20251108.tar.gz",
+    "optionalLegacyLibraries": "The production curated toolset excludes lib/x64 compatibility libraries; the actual AppImage closure must verify their absence"
+  },
+  "dependencyProvenance": {
+    "alpineRecipeCommit": "590fd1489813473277cf110fd88b1c3888d19367",
+    "confidence": "inferred from official branch state at actual supplier build time; supplier logs unavailableHTTP410; binary/debug version evidence agrees",
+    "recipientRelinkEvidence": "Not performed"
+  },
+  "modifiedLibfuse": {
+    "version": "3.15.0",
+    "license": "LGPL-2.1 according to upstream LICENSE",
+    "supplierPatchOriginalCommit": "f5636118e0d8645e7f572771b5ac98b6da931f95",
+    "supplierPatchChangeDate": "2024-11-24",
+    "patch": {
+      "path": "licenses/appimage-runtime/libfuse/patches/mount.c.diff",
+      "bytes": 3060,
+      "sha256": "1c7fd9e26717545a476b226b083a9f9d05676c180edbd71a04bbd8a73599dc44",
+      "source": "https://raw.githubusercontent.com/AppImage/type2-runtime/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/patches/libfuse/mount.c.diff"
+    },
+    "change": "FUSERMOUNT_PROG environment selection for fusermount",
+    "correspondingSourceAndRelinkStatus": "Ignored reviewable preparation bundle exists; public clearance and recipient relink acceptance remain pending",
+    "notice": {
+      "path": "licenses/appimage-runtime/MODIFIED-LIBFUSE-NOTICE.txt",
+      "bytes": 1540,
+      "sha256": "45a5b83dc69fe0cf3f15b7c1cb7ce29a5b568dace6e76548c644dde72d7990ca",
+      "source": "Curated supplier modification/date notice; original upstream full terms and exact original supplier patch retained separately"
+    }
+  },
+  "components": [
+    {
+      "component": "AppImage type2 runtime",
+      "version": "20251108",
+      "license": "MIT",
+      "proof": "Official hash-matching runtime asset and supplier commit; actual asset created2025-12-08",
+      "sourceArchive": {
+        "url": "https://codeload.github.com/AppImage/type2-runtime/tar.gz/dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+        "sha256": "f5fec23be76e50e2445ed2d018bac49b367490fc483c62c4637e99ec705d27ba",
+        "sha512": "d857891d779a3c050b1532eb911af36234ad4b67e3a967734494c7a2fa4476195c310ea1aa5349c15eb6affc042c1d798450d454fb7dfc6edbdc8ebad0e6072a"
+      },
+      "sourceCommit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+      "alpinePackageCandidate": null,
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/appimage-type2-runtime/type2-runtime-dd6cebedcbddde9c82f89b011e8e1d40b6e43868/LICENSE",
+          "bytes": 1678,
+          "sha256": "aa154fc9070614bbe7921f89db11efd1dba7a1f3a41685958110e2230f9c0ca1",
+          "source": "https://codeload.github.com/AppImage/type2-runtime/tar.gz/dd6cebedcbddde9c82f89b011e8e1d40b6e43868#type2-runtime-dd6cebedcbddde9c82f89b011e8e1d40b6e43868/LICENSE"
+        }
+      ]
+    },
+    {
+      "component": "libfuse",
+      "version": "3.15.0",
+      "license": "LGPL-2.1 library according to upstream LICENSE; utilities carry separate GPL-2.0 terms",
+      "proof": "Exact supplier build URL/checksum plus supplier mount.c patch; modified libfuse is statically linked",
+      "sourceArchive": {
+        "url": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz",
+        "sha256": "70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0",
+        "sha512": "5046b827c2cdccd03031761aeb995caf159f075a16cdda7248fcdd81177500f337368208948e0ff0e4bee32d06dd3d2d966828d3b5e82a79339f28a01727b1ae"
+      },
+      "sourceCommit": null,
+      "alpinePackageCandidate": null,
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/GPL2.txt",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/GPL2.txt"
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/LGPL2.txt",
+          "bytes": 26530,
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/LGPL2.txt"
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/LICENSE",
+          "bytes": 435,
+          "sha256": "b8832d9caaa075bbbd2aef24efa09f8b7ab66a832812d88c602da0c7b4397fad",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/LICENSE"
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_misc.h.0.txt",
+          "bytes": 196,
+          "sha256": "6d3c05e54fc6fa4530cea7db08e4d064911ed1889e94fd78dafc9399e2aef57a",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_misc.h",
+          "sourceFileSha256": "1fd5171637a280cca1b3e9e82cc0dd0eff00984db22f933c5991b7306a26fa4e",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 196
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_loop_mt.c.0.txt",
+          "bytes": 256,
+          "sha256": "c6e0a7db8a6f6d20a732e962892fa67a29ba1f1c8d7947bb33728651696bd627",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_loop_mt.c",
+          "sourceFileSha256": "74c042da10432cb76cfd11a0dde9a81fcc5fabc7ccbaa8cf44bacc7a83bc171b",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 256
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_i.h.0.txt",
+          "bytes": 196,
+          "sha256": "6d3c05e54fc6fa4530cea7db08e4d064911ed1889e94fd78dafc9399e2aef57a",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_i.h",
+          "sourceFileSha256": "46e9956749a615400dc6d9505b8f1bc7b1d4d20fb294a9efc4733920b5173413",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 196
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_signals.c.0.txt",
+          "bytes": 246,
+          "sha256": "c862a37f215084c5dbe8b36d1557c83d4a142e33395cb62f1eb460af0f411434",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_signals.c",
+          "sourceFileSha256": "d28598979f50732cf82c84f035f84ede8618c62ca3580453d8c504eec1c053af",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 246
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/mount_util.h.0.txt",
+          "bytes": 197,
+          "sha256": "3bf5479b53620a9b1f4f876509094eef181ff8cbf9035b68875a443f182e29e1",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/mount_util.h",
+          "sourceFileSha256": "805a1567cf18892ca282dfc7a82991832b3b6c1e908609cfab1378a7381d27f2",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 197
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/cuse_lowlevel.c.0.txt",
+          "bytes": 246,
+          "sha256": "42d600cd5f22fd16c4011cb09ecfe1dddcde7a13cdafca696ee4047fc17e6bdc",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/cuse_lowlevel.c",
+          "sourceFileSha256": "e8438a694ef904915e61dfadf5cc9129221fc6332ed8fb0e9997b8c38b6ca3f2",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 246
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_lowlevel.c.0.txt",
+          "bytes": 315,
+          "sha256": "37e1856ba5e7003311759785345cd1e55793e2f98e8697690f67b16d2e2e18a1",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_lowlevel.c",
+          "sourceFileSha256": "9a7d58d3e0b37e3e40142fac60f7d73ab757b869cac53e775af6e36f385d8f89",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 315
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/mount.c.0.txt",
+          "bytes": 252,
+          "sha256": "4362dae2b01b015f3f03badb4ed61113ac2cbb77b50dac95b98cfd8885ce0f3f",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/mount.c",
+          "sourceFileSha256": "dabd63d3e71166940aa52a06adad594bbb72508e446cf80098ef16fce78c9e1f",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 252
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_log.c.0.txt",
+          "bytes": 186,
+          "sha256": "64a8d85e55dfb43c4a2be36d2e502a667a220c227dc21db896d9fa915c8af656",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_log.c",
+          "sourceFileSha256": "440b0ca16191d84d0da3a3bdcb378a07fd76a689dfdc1d523d4e23b1b74ba051",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 186
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/modules/iconv.c.0.txt",
+          "bytes": 209,
+          "sha256": "adb43524eaba02bb2b6a10ce8d5cfa82eb24f6cf573086c92d4a168d596d8120",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/modules/iconv.c",
+          "sourceFileSha256": "95fde9ec3f8d0fcbbcd5155650b288560e7809bd19e4ecd2b006b9e553ee752c",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 209
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/modules/subdir.c.0.txt",
+          "bytes": 216,
+          "sha256": "4225faff62ce04e2c931a8d982dfa241310662c5a242e8026580144cf9b5e595",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/modules/subdir.c",
+          "sourceFileSha256": "7e5fb5c53902f044f3169913482e9bd5c13b69e5b533a85eb590af78270737ca",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 216
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/helper.c.0.txt",
+          "bytes": 397,
+          "sha256": "03a71e421f756bb0e49f9795c0b3c7c9e436c3bbdd66b1cac6da6670914507b2",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/helper.c",
+          "sourceFileSha256": "080137923af5f47ad82d6ffbc180aeba5650d1eb627f4b5814cb78cb878f0ec4",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 397
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_loop.c.0.txt",
+          "bytes": 256,
+          "sha256": "8eb4e4a9cbf4dd96977fb04d6a9c817adee3f41a53f5b3771b8eb1b802ef2e65",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_loop.c",
+          "sourceFileSha256": "2a60900a9bb0602fdad6eb3795f51d012746bf765b351b94a0ee8b9d1908c1cd",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 256
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse.c.0.txt",
+          "bytes": 272,
+          "sha256": "29bb841a7e8528cdda7f0029f14bb071b4e2539016322a5fe86aaf7da1532a8a",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse.c",
+          "sourceFileSha256": "5626dfce133a7608f40553329ccba37942605935449a86599b2d23f960d5bc23",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 272
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/mount_bsd.c.0.txt",
+          "bytes": 250,
+          "sha256": "4671bd8cce2798f2342c1408d0684eabc046dbbc55ac2be0620ea1f7f95bbe1c",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/mount_bsd.c",
+          "sourceFileSha256": "1e36804a785ad0c8442c598e1f91d0fd000d1b88b076b454d676018881c5ad6f",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 250
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/mount_util.c.0.txt",
+          "bytes": 240,
+          "sha256": "fc7c5e5d1c18d0edcfd21b6691485e850365b3eb8d59173a7e92fd2ac605def0",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/mount_util.c",
+          "sourceFileSha256": "04552b6167e24865092472eb294322fc9d99f2bd320e64fcb0d09f9e0e0af509",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 240
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/compat.c.0.txt",
+          "bytes": 397,
+          "sha256": "03a71e421f756bb0e49f9795c0b3c7c9e436c3bbdd66b1cac6da6670914507b2",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/compat.c",
+          "sourceFileSha256": "46c37aaf3f87c173374c8b546d98fcf8d21a64e24ab43187a070956d6feb35dd",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 397
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/fuse_opt.c.0.txt",
+          "bytes": 278,
+          "sha256": "62800c701a6f58dd294d522a79a6a2bb106a005f420fa1b6396e8ba248bc7155",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/fuse_opt.c",
+          "sourceFileSha256": "6d16382e0267b1eeb856eb16047022b0993af036f009c7f729a2e8a9e1247382",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 278
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/lib/buffer.c.0.txt",
+          "bytes": 267,
+          "sha256": "3b0263ac242ec6c1635ffe4efe1c45940ce71c98bef45e104f91ee12de2324a2",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/lib/buffer.c",
+          "sourceFileSha256": "a3de0569fda7b925fd097a782c612c770b6283d5bda36a06bd4d62c92966e775",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 267
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_mount_compat.h.0.txt",
+          "bytes": 222,
+          "sha256": "f70db31c173b4a3d6505141d635a9c1fc16f20dd3e8f0965c7efc9c2b60e468a",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_mount_compat.h",
+          "sourceFileSha256": "4c58f417dec96aff4206271c3ccf68d88b0d8296deee22fa59ea4ada75b8c261",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 222
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_kernel.h.0.txt",
+          "bytes": 82,
+          "sha256": "21225367dea0677382be368d1bdce32188bbcfe75bf898444779678813532f74",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_kernel.h",
+          "sourceFileSha256": "a2dd4c088dd44ebafe0b25827a272df537480aa1c098d255e8d8e6072c85729a",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 82
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_kernel.h.1.txt",
+          "bytes": 1692,
+          "sha256": "2d632be0eec18e8f80ced80bc9b56011f98aee05003b26c53efc4ef07360e78f",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_kernel.h",
+          "sourceFileSha256": "a2dd4c088dd44ebafe0b25827a272df537480aa1c098d255e8d8e6072c85729a",
+          "sourceByteOffset": 83,
+          "sourceByteLength": 1692
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_kernel.h.2.txt",
+          "bytes": 2670,
+          "sha256": "28a7f159d588de90d9eddf914746ec34107141d23ad02c3a49a5278d82b0cf05",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_kernel.h",
+          "sourceFileSha256": "a2dd4c088dd44ebafe0b25827a272df537480aa1c098d255e8d8e6072c85729a",
+          "sourceByteOffset": 9173,
+          "sourceByteLength": 2670
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_opt.h.0.txt",
+          "bytes": 197,
+          "sha256": "3bf5479b53620a9b1f4f876509094eef181ff8cbf9035b68875a443f182e29e1",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_opt.h",
+          "sourceFileSha256": "472c9ee7a84bb9c20e58957a3ff47f34c18b4a159ad63b4db7f90aad1e8ff4ce",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 197
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_lowlevel.h.0.txt",
+          "bytes": 197,
+          "sha256": "3bf5479b53620a9b1f4f876509094eef181ff8cbf9035b68875a443f182e29e1",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_lowlevel.h",
+          "sourceFileSha256": "1ff525b643be415566154f919602ca82824058685ecc7e009e525e17b250854a",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 197
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_lowlevel.h.1.txt",
+          "bytes": 1201,
+          "sha256": "b65d061ecf5588a32842f98132fd4f29b98cb4159e179f14f53af4a87cba9ef3",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_lowlevel.h",
+          "sourceFileSha256": "1ff525b643be415566154f919602ca82824058685ecc7e009e525e17b250854a",
+          "sourceByteOffset": 4794,
+          "sourceByteLength": 1201
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_lowlevel.h.2.txt",
+          "bytes": 2202,
+          "sha256": "72580c872777c96b5e9215cdb5677189b9d934ed7f3aa63d68f426710c56dc46",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_lowlevel.h",
+          "sourceFileSha256": "1ff525b643be415566154f919602ca82824058685ecc7e009e525e17b250854a",
+          "sourceByteOffset": 14935,
+          "sourceByteLength": 2202
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_lowlevel.h.3.txt",
+          "bytes": 633,
+          "sha256": "b43b1732b216b68c9a810fbc720b259198f8975b50c7df498f8e6653fbd0cd1a",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_lowlevel.h",
+          "sourceFileSha256": "1ff525b643be415566154f919602ca82824058685ecc7e009e525e17b250854a",
+          "sourceByteOffset": 29270,
+          "sourceByteLength": 633
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_lowlevel.h.4.txt",
+          "bytes": 1118,
+          "sha256": "4345ed6cad48b152b4dc53b0f5828e9b7f1baff4aba8e2b16ccf53442e9cd8d3",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_lowlevel.h",
+          "sourceFileSha256": "1ff525b643be415566154f919602ca82824058685ecc7e009e525e17b250854a",
+          "sourceByteOffset": 64561,
+          "sourceByteLength": 1118
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/cuse_lowlevel.h.0.txt",
+          "bytes": 284,
+          "sha256": "99daf5e183c0f3f38ac585a88f4a6399f7df1ec18b65ee7b91ad65f81d3feded",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/cuse_lowlevel.h",
+          "sourceFileSha256": "8898c9f5375575852458718e35b54b2c45b14d43b91803195bf8f743ceb94959",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 284
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.0.txt",
+          "bytes": 197,
+          "sha256": "3bf5479b53620a9b1f4f876509094eef181ff8cbf9035b68875a443f182e29e1",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 197
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.1.txt",
+          "bytes": 132,
+          "sha256": "3bb7020ed172d6e3299864ab69db826f5ac40e8f6f99afd091164dfc995cd2d3",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 2925,
+          "sourceByteLength": 132
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.2.txt",
+          "bytes": 979,
+          "sha256": "948d64ea1d4dd0b0b2248e4a34454387b5ddaa557ac5225b81a35ed3d2ccaaa2",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 9378,
+          "sourceByteLength": 979
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.3.txt",
+          "bytes": 159,
+          "sha256": "21515a5dd5d4d4d9209c5c2bf1b0f22bc033193e0b58d86e34ed2f0b6e993c94",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 12509,
+          "sourceByteLength": 159
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.4.txt",
+          "bytes": 2030,
+          "sha256": "408132fe1662371d13ec629e43355d688636d9009c4113e40ce2d1111029c902",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 13423,
+          "sourceByteLength": 2030
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.5.txt",
+          "bytes": 322,
+          "sha256": "0cf729f0b119320830ad8c139a65ab5ddda7226f57a6452d0160e9978587dcb9",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 19139,
+          "sourceByteLength": 322
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse.h.6.txt",
+          "bytes": 256,
+          "sha256": "c63c03692bb46ec0f30cbe39e94858229845ca21a77463d3da3f44c1fe9b0b83",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse.h",
+          "sourceFileSha256": "958bcf195f0aa239f4e970e451afd3f90a2eef9792d8b3342840aacad472ef7e",
+          "sourceByteOffset": 21602,
+          "sourceByteLength": 256
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_common.h.0.txt",
+          "bytes": 196,
+          "sha256": "855176174d5ff3cc47eaf320be5201973414a08d9e74424a930e0c72420af0c0",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_common.h",
+          "sourceFileSha256": "267c0f5b740e87ebb2abfc673a61b65b2994cdab5d2633928819c5b3d732e5ca",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 196
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_common.h.1.txt",
+          "bytes": 691,
+          "sha256": "ab5dad22a0a4e5fe9be6fc82edaef0d3098a03d65027a42c7229c881fc3c4091",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_common.h",
+          "sourceFileSha256": "267c0f5b740e87ebb2abfc673a61b65b2994cdab5d2633928819c5b3d732e5ca",
+          "sourceByteOffset": 11617,
+          "sourceByteLength": 691
+        },
+        {
+          "path": "licenses/appimage-runtime/libfuse/fuse-3.15.0/file-notices/include/fuse_log.h.0.txt",
+          "bytes": 171,
+          "sha256": "58b98fb0a1c4d455a4afb14f9b61a9691311ae5b225677f7b23e580e0f7e6f8b",
+          "source": "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz#fuse-3.15.0/include/fuse_log.h",
+          "sourceFileSha256": "7f79a177c6ad78e0c5b5e3773c9e923286308c1dba1ece3a22cb278299d9bcdc",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 171
+        }
+      ],
+      "headerLicenseSelection": "include/fuse_kernel.h offers BSD-2-Clause OR GPL-2.0 WITH Linux-syscall-note; select BSD-2-Clause and retain its full original header copyright/disclaimer"
+    },
+    {
+      "component": "squashfuse",
+      "version": "0.5.2",
+      "license": "BSD-2-Clause",
+      "proof": "Exact supplier build URL/checksum",
+      "sourceArchive": {
+        "url": "https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz",
+        "sha256": "db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3",
+        "sha512": "4380d73afa47105e2188a4eebc6b54c5961a2ba38e5986865b7fd762ed0aea7d24b0d9f5b674abd9c29f73a336bd69142db7869a548560723f60559859cdd7f3"
+      },
+      "sourceCommit": "775b4cc72ab47641637897f11ce0da15d5c1f115",
+      "alpinePackageCandidate": null,
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/squashfuse/squashfuse-0.5.2/LICENSE",
+          "bytes": 1592,
+          "sha256": "9e909cc8a8ba27b1a649c964cf9eda37de911f3138c2b64e6d2f01703904ac13",
+          "source": "https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz#squashfuse-0.5.2/LICENSE"
+        }
+      ]
+    },
+    {
+      "component": "musl",
+      "version": "1.2.5",
+      "license": "MIT with component notices in COPYRIGHT",
+      "proof": "Version from matching runtime.debug DWARF path; source archive matches official Alpine recipe checksum; exact Alpine patch level inferred from build date",
+      "sourceArchive": {
+        "url": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz",
+        "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4",
+        "sha512": "7bb7f7833923cd69c7a1a9b8a5f1784bfd5289663eb6061dcd43d583e45987df8a68a1be05d75cc1c88a3f5b610653d1a70f4a9cff4d8f7fd41ae73ee058c17c"
+      },
+      "sourceCommit": null,
+      "alpinePackageCandidate": "1.2.5-r9",
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/COPYRIGHT",
+          "bytes": 6204,
+          "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/COPYRIGHT"
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/__cexp.c.0.txt",
+          "bytes": 1372,
+          "sha256": "929837e06c3b9c37e61b955742111a53906b7d3382fab6fd7f9a6d8c708b8e92",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/__cexp.c",
+          "sourceFileSha256": "ffcf569466b0ac3defff943c989b6b181c7c41dc4f9538c32944459a5272203b",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/__cexpf.c.0.txt",
+          "bytes": 1372,
+          "sha256": "929837e06c3b9c37e61b955742111a53906b7d3382fab6fd7f9a6d8c708b8e92",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/__cexpf.c",
+          "sourceFileSha256": "3cedd5c25cc80d78713bd44c53c7f3170dad26fde14ea5eb3b0028bfede24517",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/catan.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/catan.c",
+          "sourceFileSha256": "056cc1842d173fe90297adb4c088745cb3bcb37c95b56d72c246ae505e470eb5",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/catanf.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/catanf.c",
+          "sourceFileSha256": "2dbd38c8d786140372a04bfde641a9e290a842fe29133d3d0cd9f629170b9fc7",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/catanl.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/catanl.c",
+          "sourceFileSha256": "3857a0a047869d9219421a12a4ada0f384e9fbe7c21b3c9516622852f475cf1a",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/ccosh.c.0.txt",
+          "bytes": 1356,
+          "sha256": "3a1692b72fb1f66d3f082862dea0bbf69cba16bba5c9d1ec144d683aba49cf53",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/ccosh.c",
+          "sourceFileSha256": "9997abb272468781bc9b6b61a1550e95d1f956df109e0a646d578a3dc2c3aef9",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 1356
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/ccoshf.c.0.txt",
+          "bytes": 1356,
+          "sha256": "3a1692b72fb1f66d3f082862dea0bbf69cba16bba5c9d1ec144d683aba49cf53",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/ccoshf.c",
+          "sourceFileSha256": "6ebf4355682268356685ba79621a47f2f955ca910bf13ca6ed32bb52e893574f",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 1356
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/cexp.c.0.txt",
+          "bytes": 1372,
+          "sha256": "929837e06c3b9c37e61b955742111a53906b7d3382fab6fd7f9a6d8c708b8e92",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/cexp.c",
+          "sourceFileSha256": "30943458b19d417812e326d8a61a2413ebce139c826c997ad6598dcddb6e673d",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/cexpf.c.0.txt",
+          "bytes": 1372,
+          "sha256": "929837e06c3b9c37e61b955742111a53906b7d3382fab6fd7f9a6d8c708b8e92",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/cexpf.c",
+          "sourceFileSha256": "7de06c6bebd823987c5eefe19821b8a473332ec724d6cc0a6a27955a33ba3734",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/csinh.c.0.txt",
+          "bytes": 1356,
+          "sha256": "3a1692b72fb1f66d3f082862dea0bbf69cba16bba5c9d1ec144d683aba49cf53",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/csinh.c",
+          "sourceFileSha256": "ed236ed0232c73d39a372a6799ba63b2eaeccc5f03aca0045fcb1504bb489489",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 1356
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/csinhf.c.0.txt",
+          "bytes": 1356,
+          "sha256": "3a1692b72fb1f66d3f082862dea0bbf69cba16bba5c9d1ec144d683aba49cf53",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/csinhf.c",
+          "sourceFileSha256": "4ed3be03188b48d701d8edaa88b0e282cb2ec88b8af1c2f0e2a3f76fba60a773",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 1356
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/csqrt.c.0.txt",
+          "bytes": 1372,
+          "sha256": "6679e9aa1a98bbb9f73d944ecc84eaf508b2df5d30f620a3af64aa40e5df55fc",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/csqrt.c",
+          "sourceFileSha256": "4f6cfa6aec61754c1ee2ea683ec00e7837eaa1993edafbc516c6c4978e3567b4",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/csqrtf.c.0.txt",
+          "bytes": 1372,
+          "sha256": "6679e9aa1a98bbb9f73d944ecc84eaf508b2df5d30f620a3af64aa40e5df55fc",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/csqrtf.c",
+          "sourceFileSha256": "8dd69a3ec2052cf54f38e61156b057c2ff74d00da9db64da63f646e30a36e8e3",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 1372
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/ctanh.c.0.txt",
+          "bytes": 1335,
+          "sha256": "f11ac8260c79e3792b711323df93ff6dd6ef7866b95708c3a83626b65e579df2",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/ctanh.c",
+          "sourceFileSha256": "7daa31e0831e9805934bd0e6a33816daf16c0bf1076babeb9799fe6e185ac045",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 1335
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/complex/ctanhf.c.0.txt",
+          "bytes": 1335,
+          "sha256": "f11ac8260c79e3792b711323df93ff6dd6ef7866b95708c3a83626b65e579df2",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/complex/ctanhf.c",
+          "sourceFileSha256": "1ebb7bddc872c96bf3e7c8d1a529c14f28db4cf75cc8237fdb1ad62764b405bf",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 1335
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/crypt/crypt_blowfish.c.0.txt",
+          "bytes": 2029,
+          "sha256": "a17e0d141e431d3f15bd03901da69575531e23e4556847a1de209e79c6f3a1fb",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/crypt/crypt_blowfish.c",
+          "sourceFileSha256": "0f9054739e295e3e981e7aa29c8f287a190aef065b84a82a4c6817120d5da05d",
+          "sourceByteOffset": 155,
+          "sourceByteLength": 2029
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/crypt/crypt_des.c.0.txt",
+          "bytes": 1928,
+          "sha256": "30c3222fecfdbda6900218b4da3fe68f4753cba41a3a71dac7e05345447c40fb",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/crypt/crypt_des.c",
+          "sourceFileSha256": "546b4ee35446fb2a551d7414779395789f81d53aefbabd8914375686af5d228e",
+          "sourceByteOffset": 847,
+          "sourceByteLength": 1928
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__cos.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__cos.c",
+          "sourceFileSha256": "3f0f774aab60a18d7ef935ffdf121bcda17cbadabff14096c614da22e31a42c1",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__cosdf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__cosdf.c",
+          "sourceFileSha256": "0ba872cc7e26b93bb9784d19fee84b263e1fa3543a76ec3c0893aea47453a2a7",
+          "sourceByteOffset": 181,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__cosl.c.0.txt",
+          "bytes": 450,
+          "sha256": "eba82a2e9f34f53e0faf5a5b6f4d9f588760d888e6aae20a2f8d7406eb256167",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__cosl.c",
+          "sourceFileSha256": "fd644ce4ab8797b1220e2197b284212094a3b299bdf2c4faf66ead81b0fc620d",
+          "sourceByteOffset": 109,
+          "sourceByteLength": 450
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__polevll.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__polevll.c",
+          "sourceFileSha256": "4fef0127318ba19fd5796b6b69a938030d22adb16aaab2ade3e634c8c5c93479",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__rem_pio2.c.0.txt",
+          "bytes": 415,
+          "sha256": "c90662135910b0f0edd97131d0e116a027ec79e46b2785b7b596fa617cca78e3",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__rem_pio2.c",
+          "sourceFileSha256": "938329e0939cd83ee2185a52154b41242f618d4a6df1b08395f344da33d4f1e6",
+          "sourceByteOffset": 57,
+          "sourceByteLength": 415
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__rem_pio2_large.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__rem_pio2_large.c",
+          "sourceFileSha256": "b97f19fb5951c83a0c10506fab35646caefde13bd03100ad2af55ef00af0b9fb",
+          "sourceByteOffset": 57,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__rem_pio2f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__rem_pio2f.c",
+          "sourceFileSha256": "b73a0219ba4a34e39ed904b5008126ff1b12dfa1a4a380941363c8db5088d756",
+          "sourceByteOffset": 186,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__rem_pio2l.c.0.txt",
+          "bytes": 485,
+          "sha256": "5660964828a36e1680c465c6c3ac8669926917d347dc66f803897708af319f29",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__rem_pio2l.c",
+          "sourceFileSha256": "70f1c69285c0d211d696d5c048e269d46000e5d75fc6a80623ef45e861447a94",
+          "sourceByteOffset": 58,
+          "sourceByteLength": 485
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__sin.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__sin.c",
+          "sourceFileSha256": "f3a37ef9bcfb8a2f9c809d8c7f1aa2c17c8c3319ad7fb2fe7c0a6284ea8859d2",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__sindf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__sindf.c",
+          "sourceFileSha256": "de7026bcd159b7d06a8cbcc162df722014f3b1a3cc4183116b6b7829eef1d118",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__sinl.c.0.txt",
+          "bytes": 450,
+          "sha256": "eba82a2e9f34f53e0faf5a5b6f4d9f588760d888e6aae20a2f8d7406eb256167",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__sinl.c",
+          "sourceFileSha256": "b6dfffc327cac147a0a2b17a12e9f4ec8ff6df463733db55c316a55ef4bcdb96",
+          "sourceByteOffset": 109,
+          "sourceByteLength": 450
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__tan.c.0.txt",
+          "bytes": 314,
+          "sha256": "5a534ed1f9266ed799e9f2e3f830f15411762021829da121b23df5edc498c6b6",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__tan.c",
+          "sourceFileSha256": "e18b65b69fced8dbb2d3ed1a3dc6daea0e9f857f2762f274380bd89a6f89d2c4",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 314
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__tandf.c.0.txt",
+          "bytes": 314,
+          "sha256": "5a534ed1f9266ed799e9f2e3f830f15411762021829da121b23df5edc498c6b6",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__tandf.c",
+          "sourceFileSha256": "60455f3cc0ac743f3eaf0017a3a4f0adbab37c0ee30d29397852d22904c40444",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 314
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/__tanl.c.0.txt",
+          "bytes": 384,
+          "sha256": "a8a75da52cf114b28d33e48992435876d121c7d410ebf740ce651821afcc79aa",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/__tanl.c",
+          "sourceFileSha256": "3788db7251d2e14b17e761bc2eccd0d8faa3c72c16eef7a56ca2ca75eca177df",
+          "sourceByteOffset": 109,
+          "sourceByteLength": 384
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/acos.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/acos.c",
+          "sourceFileSha256": "cc6f9017e7e2e0ef01516fa12c68aa63865e6415c90dc039dfce9abffae09a4c",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/acosf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/acosf.c",
+          "sourceFileSha256": "b20b3dcb58ce7cc55963945f8cb83efbf064b29d2da3011f2cec5d08459f2aa7",
+          "sourceByteOffset": 137,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/acosl.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/acosl.c",
+          "sourceFileSha256": "ed40b99c604aa593ee2ee71c02f928cb68c1afdf8a18243b0e7b6cc9a65586c1",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/asin.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/asin.c",
+          "sourceFileSha256": "9302dd0b2f302f7b7decce82e737ed250bae1bcc65c19eaf3d7ec19010892e63",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/asinf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/asinf.c",
+          "sourceFileSha256": "6bc9b2392b81efa4c6a80c8602a2c0898d3b5c77444f6d3266ac71c18df222c5",
+          "sourceByteOffset": 137,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/asinl.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/asinl.c",
+          "sourceFileSha256": "4a0e729842b1bf3181bad43b2f048dd3652b73456e0a3f44f6e65c2c51765e9f",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atan.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atan.c",
+          "sourceFileSha256": "1cffb67a65456ae0bc5f07a94df04a4f18ebc1ac0bffe3219250c4e0555ee01d",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atan2.c.0.txt",
+          "bytes": 383,
+          "sha256": "11f476f899dacfef801a097465ad0755ad4546afe03b02c9a17aa38e228344e1",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atan2.c",
+          "sourceFileSha256": "a5f94b09b10b4e72bb15d94ae403c9dfd27d7ad881ecd729000004429acfca63",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 383
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atan2f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atan2f.c",
+          "sourceFileSha256": "31a61a0a4c7b00db625b708525f24673a83df868a3e363042c9cc9dcf0aaeec8",
+          "sourceByteOffset": 138,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atan2l.c.0.txt",
+          "bytes": 383,
+          "sha256": "11f476f899dacfef801a097465ad0755ad4546afe03b02c9a17aa38e228344e1",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atan2l.c",
+          "sourceFileSha256": "c13d4d9e1329ffcbbf3ef1dd755602c771612f2dd98f38464fc9fb0f7bdf3c68",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 383
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atanf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atanf.c",
+          "sourceFileSha256": "e0533d7b72aabce311a758a1f94fd15e5d4067be73b716cb1f425df5bc9039d6",
+          "sourceByteOffset": 137,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/atanl.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/atanl.c",
+          "sourceFileSha256": "5c6f655740e6f594db8a045e529582f20613d14ac2bca8bf3f881145bf459325",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/cbrt.c.0.txt",
+          "bytes": 414,
+          "sha256": "11a1dc1ce0b6b2879da93a266c5aebe81c4324e749c77a2ce3048b5b24ab58c0",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/cbrt.c",
+          "sourceFileSha256": "af442893d4048c0eb485b93b5628792fb796d45ffc0f88c682041366c7da611d",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 414
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/cbrtf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/cbrtf.c",
+          "sourceFileSha256": "87b7065f44ac0cef6d21385c2b453dde7e15a51e9008ae0d726cd9eaa2dc43da",
+          "sourceByteOffset": 182,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/cbrtl.c.0.txt",
+          "bytes": 609,
+          "sha256": "57c0d6534118d909d6b3e78366981596013f999307b9d0d7711a8998a0410d61",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/cbrtl.c",
+          "sourceFileSha256": "ee82c17b1a24681dfd7de0161088b45ecbd2d0346ddeda9d4594b48e4da0d3e5",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 609
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/cos.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/cos.c",
+          "sourceFileSha256": "3a74e054057d636fa494bdd76a53a40db5cee618264f6ab31cb0538ba63c6bda",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/cosf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/cosf.c",
+          "sourceFileSha256": "33cf828e8e733da2b72c723b9ff20057b9a4f10df72a3923dadcb626c23d222c",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/erf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/erf.c",
+          "sourceFileSha256": "795f05c9388ac277ab27cb5dc63fb4f82620a0ee11eaf8403201df5bc65c0f5b",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/erff.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/erff.c",
+          "sourceFileSha256": "876ad823d25e58330628ccdc5d24a3f10cc255135046a4e2903daf33cb75c18f",
+          "sourceByteOffset": 136,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/erfl.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/erfl.c",
+          "sourceFileSha256": "dcce5b86a37215aee265ae27c1a00526542ab13d1dd609a560de3e3e9049a3e6",
+          "sourceByteOffset": 58,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/erfl.c.1.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/erfl.c",
+          "sourceFileSha256": "dcce5b86a37215aee265ae27c1a00526542ab13d1dd609a560de3e3e9049a3e6",
+          "sourceByteOffset": 438,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp.c.0.txt",
+          "bytes": 111,
+          "sha256": "7e52a70e5de1143e4fdb710116f76b27eced3e41be7ab70310138928a3b34e5e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp.c",
+          "sourceFileSha256": "7db56f21ca9b8915d36dd5099b707aafeb6a736eae798e19b76b074764e75f34",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp2.c.0.txt",
+          "bytes": 111,
+          "sha256": "e8f314eb6ab51b691f02a126ad69d2c7996a5eeb091f95f5033b1a806288e5d1",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp2.c",
+          "sourceFileSha256": "b771de769e1b69b931d1f95baa39b429a73c9904e8b5607e1736771c6ace92b1",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp2f.c.0.txt",
+          "bytes": 116,
+          "sha256": "9cd52ae0042ec9364291994dc497f2497414eeddaac23e792f1ab477576dfacf",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp2f.c",
+          "sourceFileSha256": "1753e636d3b395160a03e9dd4a4ed4fba2abcd9ee12e4cf2d919f5a6bd7e2732",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 116
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp2f_data.c.0.txt",
+          "bytes": 127,
+          "sha256": "eb8e488b7148e706986f5be08c5efbfcc96edb4ed7415391c12be3e512b24c74",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp2f_data.c",
+          "sourceFileSha256": "3da38c471cc5eb8dc1c2e283c6c00a36b1d353ba5c8ca1e82d95180948e26bd5",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 127
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp2f_data.h.0.txt",
+          "bytes": 79,
+          "sha256": "72a9b46f0fe5f4ab99af914882d3ad50f72612ca79b3192db87f37a06b841853",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp2f_data.h",
+          "sourceFileSha256": "fb52b690bef63df2e8996f2d2b3fd77f9ea08795863e73afdc882df04460e850",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 79
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp2l.c.0.txt",
+          "bytes": 1377,
+          "sha256": "a0f470d9d239f56f7d6504b1bfcd80a0dbe8f90a895558d4040d4395100ad607",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp2l.c",
+          "sourceFileSha256": "0eeba2725b540b0d5dd84b732d4c496d8e8d9492cf863dbb5c83fe102771352c",
+          "sourceByteOffset": 93,
+          "sourceByteLength": 1377
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp_data.c.0.txt",
+          "bytes": 119,
+          "sha256": "f6b5b71ae6dc49255b8982a8de10bb97d66035b0b6ad91843da71fcde64cf45f",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp_data.c",
+          "sourceFileSha256": "c55dff64e369fe816cd8ce367064989bb119f85783599680d1a329031c660689",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 119
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/exp_data.h.0.txt",
+          "bytes": 74,
+          "sha256": "6ac2dcacfaa533da778dce54dac87709a1285f08d070d9d95790b50199f71486",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/exp_data.h",
+          "sourceFileSha256": "df77fca837edd02b260dd09a2914202775909ae67a059218ae38cfab104e6d16",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 74
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/expf.c.0.txt",
+          "bytes": 116,
+          "sha256": "722fce9131e08cd408ec1029bb4fc7ad15c899b6e62ebacb911b298ad069728d",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/expf.c",
+          "sourceFileSha256": "225123b9b3a47a083c06f2580c6b73d5cadae5cec545f9e928f7041ff837b4b4",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 116
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/expl.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/expl.c",
+          "sourceFileSha256": "7218f10e56cd73c76f01a6924373dd1918730a0e793cf3c64670a34346173e68",
+          "sourceByteOffset": 58,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/expm1.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/expm1.c",
+          "sourceFileSha256": "c4764166cea03420f2dfc1840a6a7615934192d851b96d5d2dcc321cc1e39460",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/expm1f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/expm1f.c",
+          "sourceFileSha256": "a7d4e8f8b41f04d4b977deb59e6bf96067371387062a5987fcc3b4464f54f5e9",
+          "sourceByteOffset": 138,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/expm1l.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/expm1l.c",
+          "sourceFileSha256": "a8362abd18ef31f00a7dd74c8b618ef658a4e9c3919c456d03d65a12fe445c2f",
+          "sourceByteOffset": 60,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/fmaf.c.0.txt",
+          "bytes": 1377,
+          "sha256": "c9479241e4e7e711c5cf43e95b86a79af7209b5ea23b8c55f8b95f1788eb5a82",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/fmaf.c",
+          "sourceFileSha256": "e5baf54228b74b036da629902d811f9f57de26133a03ce290879b5ec6de04433",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 1377
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/fmal.c.0.txt",
+          "bytes": 1377,
+          "sha256": "c9479241e4e7e711c5cf43e95b86a79af7209b5ea23b8c55f8b95f1788eb5a82",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/fmal.c",
+          "sourceFileSha256": "1c7587e59b9f249bd5e8dfabb154b602978fbb490348f92af5300ee8eadce518",
+          "sourceByteOffset": 53,
+          "sourceByteLength": 1377
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/j0.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/j0.c",
+          "sourceFileSha256": "88fc190ff03d253791b9fab281caf82e5943e5d4251052c91cc29b14b39055bd",
+          "sourceByteOffset": 51,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/j0f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/j0f.c",
+          "sourceFileSha256": "d0721c1c30f12badb67820e33299a2db0d9cec0209f7993fddee2a40d8d296a4",
+          "sourceByteOffset": 135,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/j1.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/j1.c",
+          "sourceFileSha256": "73ec22fae7f2e3fccd2cc6ea777b296d0022a7c1d137035f1ef45cbf0c75ed4e",
+          "sourceByteOffset": 51,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/j1f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/j1f.c",
+          "sourceFileSha256": "1b16747ce913d4e65dec522710265bd004f923a7f33b5e88d7e4057b9c7b8d79",
+          "sourceByteOffset": 135,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/jn.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/jn.c",
+          "sourceFileSha256": "cd602fc99cea2f33d8b39462f9f0523c8bc3da646fa349de87e206eb3bb2aded",
+          "sourceByteOffset": 51,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/jnf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/jnf.c",
+          "sourceFileSha256": "cab6c734e9a718a3e7c41b22e0e69893453befa805f2ebdafca3264d81dbcf71",
+          "sourceByteOffset": 135,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/lgamma_r.c.0.txt",
+          "bytes": 383,
+          "sha256": "11f476f899dacfef801a097465ad0755ad4546afe03b02c9a17aa38e228344e1",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/lgamma_r.c",
+          "sourceFileSha256": "df81910c12c2ba5e82295cea6bfc6f3863e367cc6043d1bf91be1fb9597b2811",
+          "sourceByteOffset": 57,
+          "sourceByteLength": 383
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/lgammaf_r.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/lgammaf_r.c",
+          "sourceFileSha256": "5aa1db729889e0705ef94b2cb4d7ab5fa6a615d28fd74b7bdf7579a22f6e7ed4",
+          "sourceByteOffset": 141,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/lgammal.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/lgammal.c",
+          "sourceFileSha256": "852284cc7fb67db860bcf39a3a33c74481ef28ffa7818a16de82d7e2d534c312",
+          "sourceByteOffset": 61,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/lgammal.c.1.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/lgammal.c",
+          "sourceFileSha256": "852284cc7fb67db860bcf39a3a33c74481ef28ffa7818a16de82d7e2d534c312",
+          "sourceByteOffset": 441,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log.c.0.txt",
+          "bytes": 114,
+          "sha256": "7d44f8a20ce2b9ab074ce883201b78815c98e669108b1dbdf3a699098444c326",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log.c",
+          "sourceFileSha256": "a0694d8587a0d145d0f8ae87cbffba014d7988bc2ebcbfad94cea73b394c9ecc",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 114
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log10.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log10.c",
+          "sourceFileSha256": "ef9b4b1f0918cf1fcb797f9fa4d4ffe177bfa27f668d74a41d613bfbcd83850a",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log10f.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log10f.c",
+          "sourceFileSha256": "b8de5c0f14be2c622eca1cb33e80e5b131576c7c229aeffb8ea9f1d61555f6b9",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log10l.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log10l.c",
+          "sourceFileSha256": "d23e3d61fe4111628efdef794ae7cd614e3443a81f70742e29070f99fdd078c4",
+          "sourceByteOffset": 60,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log1p.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log1p.c",
+          "sourceFileSha256": "c76bbf714cd456a9f0de6e2c94853c27e7865581a2edfdef6d1f861739bbcb46",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log1pf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log1pf.c",
+          "sourceFileSha256": "6c01aff9fcee1dcaca4d4581f17357e0f069643321c00288c672adc3521d0cc8",
+          "sourceByteOffset": 55,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log1pl.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log1pl.c",
+          "sourceFileSha256": "3846b55cbd55e3d3f90d7484216663030ec98c4c353e644ce3c4e3122080e4c4",
+          "sourceByteOffset": 60,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2.c.0.txt",
+          "bytes": 115,
+          "sha256": "c359dfaf15768892478461e9cb40da11d380123e47c50f29b3ede8207c04486d",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2.c",
+          "sourceFileSha256": "281e4fc0f737419e245019d8bc8a8ca53032c2d88c31d08561e9e59dcb4b4640",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 115
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2_data.c.0.txt",
+          "bytes": 95,
+          "sha256": "74ae9464d17802e1e8394431844a842eb25efad729748a359a518d26685beedf",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2_data.c",
+          "sourceFileSha256": "5a62bb213f19dc1364cddb612e3d13831e382f5ae6f7fafd7064362f53478dfb",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 95
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2_data.h.0.txt",
+          "bytes": 74,
+          "sha256": "6ac2dcacfaa533da778dce54dac87709a1285f08d070d9d95790b50199f71486",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2_data.h",
+          "sourceFileSha256": "b56e1a56f73a8700caa9787cd399fecf7f96038af56c2a590aeb6f0f8662ea8e",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 74
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2f.c.0.txt",
+          "bytes": 117,
+          "sha256": "dfbd4e6eba80a4f25005d42aef337397554ca46598f64439e166633baa58cb3f",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2f.c",
+          "sourceFileSha256": "f2393ef18e78e6dc540e7349dbfea000018246d64fca3eefe73f11a286403352",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 117
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2f_data.c.0.txt",
+          "bytes": 112,
+          "sha256": "719c803a410da68f48b70270cd181806b44d0c87ccec10bcba36973c8382a2a9",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2f_data.c",
+          "sourceFileSha256": "9261d7fdef29db26bd75310f029823593639ecf7c1cc089a6014623d49d21abe",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 112
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2f_data.h.0.txt",
+          "bytes": 79,
+          "sha256": "72a9b46f0fe5f4ab99af914882d3ad50f72612ca79b3192db87f37a06b841853",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2f_data.h",
+          "sourceFileSha256": "cb65ee48f557b19c8a6366a05f16ffba38aa46b00c4c136faf2dea8f53675a9b",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 79
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log2l.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log2l.c",
+          "sourceFileSha256": "c3294ef6fcf96c061c4511fb3f6cd2886b2f513938deadcfb16fc19fb2a9ff03",
+          "sourceByteOffset": 59,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log_data.c.0.txt",
+          "bytes": 94,
+          "sha256": "d22e34751c18a13e5cb7e974c1b94c2cc89caad9d2b4f2ef1c85994d32292805",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log_data.c",
+          "sourceFileSha256": "e96bcd99d88fc57e0f3686299014f4b949a6212603ce237f39e16cedc155617a",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 94
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/log_data.h.0.txt",
+          "bytes": 74,
+          "sha256": "6ac2dcacfaa533da778dce54dac87709a1285f08d070d9d95790b50199f71486",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/log_data.h",
+          "sourceFileSha256": "a8dced6f0821f30cad040ba326b03e419fbe0a750ed8f3b0d7145992bee4bccc",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 74
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/logf.c.0.txt",
+          "bytes": 116,
+          "sha256": "ffd4560b424a532b17b1f8af4405f11b4ceeaf9880ca33ad43f896b620bfb52c",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/logf.c",
+          "sourceFileSha256": "eecf8e5dd0afd5f64f938ccae07c85b0a8e82919f5d4269936a3b8493fb64e47",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 116
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/logf_data.c.0.txt",
+          "bytes": 111,
+          "sha256": "7b69dd50886f7e59e969f2d7c91f6d694a42989bde841e57bed58f71a6d34fde",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/logf_data.c",
+          "sourceFileSha256": "60b08342fcef877b393a76fc36d92c576d6340ce153459aad03aad3d4716f9b5",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/logf_data.h.0.txt",
+          "bytes": 79,
+          "sha256": "72a9b46f0fe5f4ab99af914882d3ad50f72612ca79b3192db87f37a06b841853",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/logf_data.h",
+          "sourceFileSha256": "80176d1f045f162e917ca5c2879994ab0ed9e27b479086d752e5793c91135adf",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 79
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/logl.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/logl.c",
+          "sourceFileSha256": "e1612b2bb9a010c1914beb93fa242981f69f323392bd9816415cafaaec0d94b0",
+          "sourceByteOffset": 58,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/pow.c.0.txt",
+          "bytes": 111,
+          "sha256": "5fa165f5ae7e7b676b5ea1e2ab501f258932355ebad0ffaa76865149b47cc00a",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/pow.c",
+          "sourceFileSha256": "b06f0a08d74fcff8cced7afa2c0e47e301e3e8a19c0de5becdec28cd7b014027",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/pow_data.c.0.txt",
+          "bytes": 110,
+          "sha256": "8867dc852d8c09b25648ac08bb5e7d7effdbff03e10614f13f8e681774ec1414",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/pow_data.c",
+          "sourceFileSha256": "2052ec913f9b4a2170a98a6fcbcd7694f5dec220036b00c36106a2b4b65a4c55",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 110
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/pow_data.h.0.txt",
+          "bytes": 74,
+          "sha256": "6ac2dcacfaa533da778dce54dac87709a1285f08d070d9d95790b50199f71486",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/pow_data.h",
+          "sourceFileSha256": "5014345a7958adcf6ff835b5e96afa99dd5a98c40dfe968442288e002b8e01a3",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 74
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/powf.c.0.txt",
+          "bytes": 79,
+          "sha256": "72a9b46f0fe5f4ab99af914882d3ad50f72612ca79b3192db87f37a06b841853",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/powf.c",
+          "sourceFileSha256": "74069b3a380cf954361e0243b38de2094ae680e2ecfb3e50af61ab576f13babf",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 79
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/powf_data.c.0.txt",
+          "bytes": 111,
+          "sha256": "0bf37177bf53722a813bbd05dce155746ceb21a1aeee3c7b13a3927554fe53d6",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/powf_data.c",
+          "sourceFileSha256": "136f491b0f904842b926784134d0adba7a9103d2ce8a226276dd6e9260457398",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/powf_data.h.0.txt",
+          "bytes": 79,
+          "sha256": "72a9b46f0fe5f4ab99af914882d3ad50f72612ca79b3192db87f37a06b841853",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/powf_data.h",
+          "sourceFileSha256": "5d632276e5f21cdcd47f35c53cf792640ad347aabce1e1bd5774fad5371fc8d8",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 79
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/powl.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/powl.c",
+          "sourceFileSha256": "b1c9f5993fe37ce04e4291cdeaa8d690587f25076525a417c9657f082b7ae987",
+          "sourceByteOffset": 58,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/scalb.c.0.txt",
+          "bytes": 380,
+          "sha256": "74344ebf347f27ca446e00f1c1921f705546f4b20e0fb31c183cd2c8464b1bc5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/scalb.c",
+          "sourceFileSha256": "7f7eda8fd9d537105136d56661d70788f912b9584bb116dea185db340c78ada5",
+          "sourceByteOffset": 54,
+          "sourceByteLength": 380
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/scalbf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/scalbf.c",
+          "sourceFileSha256": "b4a0485f7a11d994960c31947f0132c45afd47f599abbae4a9f2041f7f346a3f",
+          "sourceByteOffset": 138,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/sin.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/sin.c",
+          "sourceFileSha256": "24e53a9d85f196f66919cc19247be5480bb607ef38844b1a24bc47c4fe4974ef",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/sincos.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/sincos.c",
+          "sourceFileSha256": "2b88cfba380b8d5aa8f8f6b9f055aee91fe112de9f967a4484807afcb5405d9d",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/sincosf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/sincosf.c",
+          "sourceFileSha256": "0196bf2ccfa370be120b917f2379bb533950ea50818d329aeee076081690c95d",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/sinf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/sinf.c",
+          "sourceFileSha256": "2583af55446f07da3225186c368a7aae5a0a0a0edab268967f4122b92e222b87",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/tan.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/tan.c",
+          "sourceFileSha256": "422d411bac962a1077ae394d14e54313012a6faa3476c20b2a66d3fb3f7a923f",
+          "sourceByteOffset": 52,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/tanf.c.0.txt",
+          "bytes": 379,
+          "sha256": "0c3d0381d2cd647be68590170490be5f624c962d9f95eb698489e578c1de8f05",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/tanf.c",
+          "sourceFileSha256": "38b39aaf03d33341e606b67b3743ee5fa436b7e8338af155994d4b794b366003",
+          "sourceByteOffset": 168,
+          "sourceByteLength": 379
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/math/tgammal.c.0.txt",
+          "bytes": 796,
+          "sha256": "d9d69faa82c4f80279a3832834c9a1482c52b8b3b5895f2cc869c0e4db33f36e",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/math/tgammal.c",
+          "sourceFileSha256": "b9f00584454232f6d4c6cf76b8198221a4cc047c92fa749e5f41476c9b54579f",
+          "sourceByteOffset": 61,
+          "sourceByteLength": 796
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/regex/regcomp.c.0.txt",
+          "bytes": 1444,
+          "sha256": "8313e732fdeef03ee534e30bdb0b2df8fea4c9e6618aa5abda363f873c5c961a",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/regex/regcomp.c",
+          "sourceFileSha256": "56b0a765e084a5cd3ed7113a893b50d259265ba76b6bea98889c45d7aec302a0",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1444
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/regex/regexec.c.0.txt",
+          "bytes": 1446,
+          "sha256": "6b0193762d619afafa7f796e10097fbf7c255a8e96dbfa25f75ab072620a87c5",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/regex/regexec.c",
+          "sourceFileSha256": "072e8a1092c98830b48e784fb74ce486f7c39e27207f79f1dd161e2c5d86ba77",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1446
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/regex/tre-mem.c.0.txt",
+          "bytes": 1415,
+          "sha256": "da041cb2f902d426453521b2aa036ff79e9ed03236519518d2aa0290bddf88ac",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/regex/tre-mem.c",
+          "sourceFileSha256": "4721979ce365a395fd7644335c847a8a97913e87f14348641f7f199b57b93e28",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1415
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/regex/tre.h.0.txt",
+          "bytes": 1424,
+          "sha256": "920d6efc69e820c76c990f76db6c6da46c6a8f8ebd306b2004918896a26e4521",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/regex/tre.h",
+          "sourceFileSha256": "e734e68decc33b5ee983db12cabcbdd2589c2d16088677228087b0e5dc365cf3",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1424
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/stdlib/qsort.c.0.txt",
+          "bytes": 1117,
+          "sha256": "87da201b9c63a4bbc969e88cc99c75b630749ffb45d9abc5b90c58f16e40e016",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/stdlib/qsort.c",
+          "sourceFileSha256": "3a838cc7f83f4746df6063f567be1ebb2f7d204243342122acd43f44d2434ec6",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1117
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/string/aarch64/memcpy.S.0.txt",
+          "bytes": 111,
+          "sha256": "6eca170c32acaced38b3e559fda9908b2f16717fc7b4cde36ced5fb407f4f114",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/string/aarch64/memcpy.S",
+          "sourceFileSha256": "1ead3716276e8a58e2e015e89fd565d9f33c10b2bc482c303b68b90c9d0f7cef",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 111
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/string/aarch64/memset.S.0.txt",
+          "bytes": 127,
+          "sha256": "b538ed96d0c4574442e0e3d9be99ca108335ab88db8ef8ca96a08bc9e8d74fa8",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/string/aarch64/memset.S",
+          "sourceFileSha256": "4eacce5e57f178a284fd5a48925f4398d593df6cb2b6f727bb495a78fd3cbabf",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 127
+        },
+        {
+          "path": "licenses/appimage-runtime/musl/musl-1.2.5/file-notices/src/string/arm/memcpy.S.0.txt",
+          "bytes": 1397,
+          "sha256": "695731bda1c73c7f88c0d04d76ae94efa1eb1cc820b9e97fc384d274571a20d1",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/musl-1.2.5.tar.gz#musl-1.2.5/src/string/arm/memcpy.S",
+          "sourceFileSha256": "f963aa07a7e5296c62dbe892b9e3e8383a95683bb282e68d75a3c0553ba184ee",
+          "sourceByteOffset": 0,
+          "sourceByteLength": 1397
+        }
+      ]
+    },
+    {
+      "component": "zstd",
+      "version": "1.5.6",
+      "license": "BSD-3-Clause OR GPL-2.0-only; select BSD-3-Clause",
+      "proof": "Version from matching runtime strings and official build-date Alpine recipe; exact package build flags inferred",
+      "sourceArchive": {
+        "url": "https://github.com/facebook/zstd/archive/v1.5.6.tar.gz",
+        "sha256": "30f35f71c1203369dc979ecde0400ffea93c27391bfd2ac5a9715d2173d92ff7",
+        "sha512": "ca12dffd86618ca008e1ecc79056c1129cb4e61668bf13a3cd5b2fa5c93bc9c92c80f64c1870c68b9c20009d9b3a834eac70db72242d5106125a1c53cccf8de8"
+      },
+      "sourceCommit": "794ea1b0afca0f020f4e57b6732332231fb23c70",
+      "alpinePackageCandidate": "1.5.6-r2",
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/zstd/zstd-1.5.6/build/LICENSE",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source": "https://github.com/facebook/zstd/archive/v1.5.6.tar.gz#zstd-1.5.6/build/LICENSE"
+        },
+        {
+          "path": "licenses/appimage-runtime/zstd/zstd-1.5.6/COPYING",
+          "bytes": 18091,
+          "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+          "source": "https://github.com/facebook/zstd/archive/v1.5.6.tar.gz#zstd-1.5.6/COPYING"
+        },
+        {
+          "path": "licenses/appimage-runtime/zstd/zstd-1.5.6/LICENSE",
+          "bytes": 1549,
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "source": "https://github.com/facebook/zstd/archive/v1.5.6.tar.gz#zstd-1.5.6/LICENSE"
+        }
+      ]
+    },
+    {
+      "component": "zlib",
+      "version": "1.3.1",
+      "license": "Zlib",
+      "proof": "Version from matching runtime inflate copyright string and official build-date Alpine recipe; exact package build flags inferred",
+      "sourceArchive": {
+        "url": "https://distfiles.alpinelinux.org/distfiles/v3.21/zlib-1.3.1.tar.gz",
+        "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+        "sha512": "580677aad97093829090d4b605ac81c50327e74a6c2de0b85dd2e8525553f3ddde17556ea46f8f007f89e435493c9a20bc997d1ef1c1c2c23274528e3c46b94f"
+      },
+      "sourceCommit": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+      "alpinePackageCandidate": "1.3.1-r2",
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/zlib/zlib-1.3.1/contrib/dotzlib/LICENSE_1_0.txt",
+          "bytes": 1359,
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/zlib-1.3.1.tar.gz#zlib-1.3.1/contrib/dotzlib/LICENSE_1_0.txt"
+        },
+        {
+          "path": "licenses/appimage-runtime/zlib/zlib-1.3.1/LICENSE",
+          "bytes": 1002,
+          "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+          "source": "https://distfiles.alpinelinux.org/distfiles/v3.21/zlib-1.3.1.tar.gz#zlib-1.3.1/LICENSE"
+        }
+      ]
+    },
+    {
+      "component": "mimalloc",
+      "version": "2.1.7",
+      "license": "MIT",
+      "proof": "Matching runtime disassembly mi_version217 agrees with official v2.1.7 header; Alpine recipe and CMake suffix patch inferred from build date",
+      "sourceArchive": {
+        "url": "https://github.com/microsoft/mimalloc/archive/v2.1.7/mimalloc-2.1.7.tar.gz",
+        "sha256": "0eed39319f139afde8515010ff59baf24de9e47ea316a315398e8027d198202d",
+        "sha512": "4e30976758015c76a146acc1bfc8501e2e5c61b81db77d253de0d58a8edef987669243f232210667b32ef8da3a33286642acb56ba526fd24c4ba925b44403730"
+      },
+      "sourceCommit": "8c532c32c3c96e5ba1f2283e032f69ead8add00f",
+      "alpinePackageCandidate": "mimalloc2 2.1.7-r0",
+      "evidence": [
+        {
+          "path": "licenses/appimage-runtime/mimalloc/mimalloc-2.1.7/LICENSE",
+          "bytes": 1096,
+          "sha256": "19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d",
+          "source": "https://github.com/microsoft/mimalloc/archive/v2.1.7/mimalloc-2.1.7.tar.gz#mimalloc-2.1.7/LICENSE"
+        }
+      ]
+    }
+  ]
+}

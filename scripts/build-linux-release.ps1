@@ -23,9 +23,36 @@ $projectPath = Join-Path $repoRoot 'Lorekeeper/Lorekeeper.csproj'
 $stageDirectory = Join-Path $repoRoot 'publish/linux-x64-stage'
 $outputDirectory = Join-Path $repoRoot 'publish/linux-x64'
 $appImageToolsetDirectory = Join-Path $repoRoot 'publish/linux-appimage-tools'
-$appImageToolsetSha256 = '84021a78ee214ae6fd33a2d62a92ba25542dd10bc86bf117a9b2d0bba44e7665'
-$appImageRuntimeSha256 = '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d'
-$appImageRuntimeSourceCommit = 'dd6cebedcbddde9c82f89b011e8e1d40b6e43868'
+$appImageManifestPath = Join-Path $repoRoot 'licenses/appimage-runtime/sources.json'
+$appImageManifest = Get-Content -LiteralPath $appImageManifestPath -Raw | ConvertFrom-Json
+$electronBuilderConfiguration = Get-Content -LiteralPath (Join-Path $repoRoot 'Lorekeeper/Properties/electron-builder.json') -Raw | ConvertFrom-Json
+$appImageToolsetVersion = [string]$electronBuilderConfiguration.toolsets.appimage
+$appImageToolsetSha256 = [string]$appImageManifest.toolset.sha256
+$appImageToolsetUrl = [string]$appImageManifest.toolset.url
+$appImageRuntimeSha256 = [string]$appImageManifest.runtime.sha256
+$appImageRuntimeSourceCommit = [string]$appImageManifest.runtime.commit
+$appImageRuntimeRelease = [string]$appImageManifest.runtime.release
+if ($appImageManifest.formatVersion -ne 1 -or $appImageToolsetVersion -cne '1.0.3' -or
+    [string]$appImageManifest.toolset.version -cne "appimage@$appImageToolsetVersion" -or
+    $appImageToolsetSha256 -cnotmatch '^[a-f0-9]{64}$' -or $appImageRuntimeSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    $appImageRuntimeSourceCommit -cnotmatch '^[a-f0-9]{40}$' -or $appImageRuntimeRelease -cnotmatch '^\d{8}$')
+{
+    throw 'The retained AppImage runtime/toolset identity is malformed or differs from the supported pinned configuration.'
+}
+$appImageArchiveName = "appimage-tools-runtime-$appImageRuntimeRelease.tar.gz"
+if ($appImageToolsetUrl -cne "https://github.com/electron-userland/electron-builder-binaries/releases/download/appimage%40$appImageToolsetVersion/$appImageArchiveName" -or
+    [string]$appImageManifest.runtime.officialAssetUrl -cne "https://github.com/AppImage/type2-runtime/releases/download/$appImageRuntimeRelease/runtime-x86_64")
+{
+    throw 'AppImage artifacts must use the official GitHub supplier host and exact selected release path.'
+}
+$runtimeComponents = @($appImageManifest.components | Where-Object component -CEQ 'AppImage type2 runtime')
+$libfuseComponents = @($appImageManifest.components | Where-Object component -CEQ 'libfuse')
+if ($runtimeComponents.Count -ne 1 -or $libfuseComponents.Count -ne 1 -or
+    [string]$runtimeComponents[0].version -cne $appImageRuntimeRelease -or
+    [string]$libfuseComponents[0].version -cne [string]$appImageManifest.modifiedLibfuse.version)
+{
+    throw 'The selected AppImage runtime or modified-libfuse version differs from its retained component notices.'
+}
 $semanticEditorDirectory = Join-Path $repoRoot 'tools/semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.NOTICES.txt'
@@ -246,8 +273,8 @@ function Prepare-AppImageToolset
     # libraries: Electron 43 uses the Ubuntu 24.04 dependencies declared by DEB.
     Remove-GeneratedDirectory -Path $appImageToolsetDirectory
     New-Item -ItemType Directory -Path $appImageToolsetDirectory | Out-Null
-    $archivePath = Join-Path $appImageToolsetDirectory 'appimage-tools-runtime-20251108.tar.gz'
-    Invoke-WebRequest -Uri 'https://github.com/electron-userland/electron-builder-binaries/releases/download/appimage%401.0.3/appimage-tools-runtime-20251108.tar.gz' -OutFile $archivePath
+    $archivePath = Join-Path $appImageToolsetDirectory $appImageArchiveName
+    Invoke-WebRequest -Uri $appImageToolsetUrl -OutFile $archivePath
     if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $appImageToolsetSha256)
     {
         throw 'The pinned AppImage 1.0.3 toolset archive fingerprint failed.'
@@ -478,6 +505,9 @@ $provenance = [ordered]@{
     sourceCommit = $SourceCommit
     sourceTree = $SourceTree
     sourceArchiveSha256 = $SourceArchiveSha256
+    sourceArchiveConfiguration = if ([string]::IsNullOrWhiteSpace($SourceArchivePath)) { $null } else {
+        [ordered]@{ format = 'tar'; coreAutocrlf = $false; coreEol = 'lf' }
+    }
     sourceVersion = $sourceVersion
     platform = 'linux'
     architecture = 'x64'
@@ -491,11 +521,13 @@ $provenance = [ordered]@{
     cargo = (& cargo --version) -join ''
     npm = (& npm --version) -join ''
     appImageToolset = [ordered]@{
-        version = '1.0.3'
+        version = $appImageToolsetVersion
+        archiveUrl = $appImageToolsetUrl
         archiveSha256 = $appImageToolsetSha256
-        runtimeRelease = '20251108'
+        runtimeRelease = $appImageRuntimeRelease
         runtimeSourceCommit = $appImageRuntimeSourceCommit
         runtimeSha256 = $appImageRuntimeSha256
+        noticeManifestSha256 = (Get-FileHash -LiteralPath $appImageManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
         legacyCompatibilityLibrariesIncluded = $false
     }
     electron = $installedElectron.version

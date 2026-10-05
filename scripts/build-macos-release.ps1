@@ -433,9 +433,19 @@ try
     }
 
     $mountPoint = $null
-    $tempInstallRoot = Join-Path ([System.IO.Path]::GetTempPath()) "Lorekeeper-release-$([Guid]::NewGuid().ToString('N'))"
+    # History rejects symlink ancestors, including macOS /var -> /private/var.
+    $resolvedTempDirectory = ((& node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' ([IO.Path]::GetTempPath())) -join '')
+    if ($LASTEXITCODE -ne 0 -or -not [IO.Path]::IsPathFullyQualified($resolvedTempDirectory))
+    {
+        throw 'Could not resolve the native temporary directory for isolated startup validation.'
+    }
+    $tempInstallRoot = Join-Path $resolvedTempDirectory "Lorekeeper-release-$([Guid]::NewGuid().ToString('N'))"
     $installedApp = Join-Path $tempInstallRoot 'Lorekeeper.app'
     $process = $null
+    $stdoutStream = $null
+    $stderrStream = $null
+    $stdoutCopyTask = $null
+    $stderrCopyTask = $null
     try
     {
         $mountOutput = @(& hdiutil attach -nobrowse -readonly $dmgPath)
@@ -449,10 +459,47 @@ try
         $mountedApp = Get-ChildItem -LiteralPath $mountPoint -Filter 'Lorekeeper.app' -Directory | Select-Object -First 1
         if (-not $mountedApp) { throw 'The generated DMG does not contain Lorekeeper.app.' }
         New-Item -ItemType Directory -Path $tempInstallRoot | Out-Null
+        [IO.File]::SetUnixFileMode($tempInstallRoot, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite -bor [IO.UnixFileMode]::UserExecute)
         Invoke-CheckedCommand ditto @($mountedApp.FullName, $installedApp)
         Invoke-CheckedCommand codesign @('--verify', '--deep', '--strict', '--verbose=2', $installedApp)
 
-        $process = Start-Process -FilePath (Join-Path $installedApp 'Contents/MacOS/Lorekeeper') -PassThru
+        $dataDirectory = Join-Path $tempInstallRoot 'data'
+        $historyDirectory = Join-Path $tempInstallRoot 'history'
+        New-Item -ItemType Directory -Path $dataDirectory, $historyDirectory | Out-Null
+        $stdoutPath = Join-Path $tempInstallRoot 'startup.stdout.log'
+        $stderrPath = Join-Path $tempInstallRoot 'startup.stderr.log'
+        $stdoutStream = [IO.File]::Open($stdoutPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $stderrStream = [IO.File]::Open($stderrPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        foreach ($logPath in @($stdoutPath, $stderrPath))
+        {
+            [IO.File]::SetUnixFileMode($logPath, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
+        }
+
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = Join-Path $installedApp 'Contents/MacOS/Lorekeeper'
+        $startInfo.WorkingDirectory = $tempInstallRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.ArgumentList.Add("--user-data-dir=$(Join-Path $tempInstallRoot 'electron-user-data')")
+        $databasePath = Join-Path $dataDirectory 'lorekeeper.db'
+        $startInfo.Environment['ConnectionStrings__DefaultConnection'] = 'Data Source="' + $databasePath.Replace('"', '""') + '"'
+        $startInfo.Environment['VersionHistory__HistoryRoot'] = $historyDirectory
+        $startInfo.Environment['ASPNETCORE_ENVIRONMENT'] = 'Production'
+        $startInfo.Environment['DOTNET_ENVIRONMENT'] = 'Production'
+        $startInfo.Environment['Desktop__BindHost'] = 'localhost'
+        $startInfo.Environment['Desktop__HttpPort'] = '1455'
+        $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+        if (@($listeners | Where-Object Port -EQ 1455).Count -gt 0)
+        {
+            throw 'TCP port 1455 is already occupied; refusing to launch a competing validation host.'
+        }
+        $process = [Diagnostics.Process]::Start($startInfo)
+        if ($null -eq $process) { throw 'The isolated packaged Mac application did not start.' }
+        # Upstream Electron logs loopback authentication material. Keep both
+        # streams private and never copy their contents into workflow output.
+        $stdoutCopyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdoutStream)
+        $stderrCopyTask = $process.StandardError.BaseStream.CopyToAsync($stderrStream)
         $ready = $false
         for ($attempt = 0; $attempt -lt 90; $attempt++)
         {
@@ -469,15 +516,29 @@ try
     }
     finally
     {
-        if ($process -and -not $process.HasExited)
+        try
         {
-            & pkill -TERM -P $process.Id 2>$null
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            if ($process)
+            {
+                if (-not $process.HasExited) { $process.Kill($true) }
+                if (-not $process.WaitForExit(10000)) { throw 'The owned Mac validation process did not stop.' }
+            }
+            if ($stdoutCopyTask -and $stderrCopyTask -and
+                -not [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutCopyTask, $stderrCopyTask)).Wait(10000))
+            {
+                throw 'The private Mac validation streams did not close.'
+            }
         }
-        if ($mountPoint) { & hdiutil detach $mountPoint -force | Out-Null }
-        if (Test-Path -LiteralPath $tempInstallRoot)
+        finally
         {
-            Remove-Item -LiteralPath $tempInstallRoot -Recurse -Force
+            if ($stdoutStream) { $stdoutStream.Dispose() }
+            if ($stderrStream) { $stderrStream.Dispose() }
+            if ($process) { $process.Dispose() }
+            if ($mountPoint) { & hdiutil detach $mountPoint -force | Out-Null }
+            if (Test-Path -LiteralPath $tempInstallRoot)
+            {
+                Remove-Item -LiteralPath $tempInstallRoot -Recurse -Force
+            }
         }
     }
 

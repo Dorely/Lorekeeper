@@ -1,0 +1,28 @@
+/**
+ * Create a low level session.
+ *
+ * Returns a session structure suitable for passing to
+ * fuse_session_mount() and fuse_session_loop().
+ *
+ * This function accepts most file-system independent mount options
+ * (like context, nodev, ro - see mount(8)), as well as the general
+ * fuse mount options listed in mount.fuse(8) (e.g. -o allow_root and
+ * -o default_permissions, but not ``-o use_ino``).  Instead of `-o
+ * debug`, debugging may also enabled with `-d` or `--debug`.
+ *
+ * If not all options are known, an error message is written to stderr
+ * and the function returns NULL.
+ *
+ * Option parsing skips argv[0], which is assumed to contain the
+ * program name. To prevent accidentally passing an option in
+ * argv[0], this element must always be present (even if no options
+ * are specified). It may be set to the empty string ('\0') if no
+ * reasonable value can be provided.
+ *
+ * @param args argument vector
+ * @param op the (low-level) filesystem operations
+ * @param op_size sizeof(struct fuse_lowlevel_ops)
+ * @param userdata user data
+ *
+ * @return the fuse session on success, NULL on failure
+ **/

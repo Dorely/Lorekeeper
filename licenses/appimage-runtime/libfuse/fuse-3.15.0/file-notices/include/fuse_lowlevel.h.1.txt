@@ -1,0 +1,27 @@
+/**
+ * Low level filesystem operations
+ *
+ * Most of the methods (with the exception of init and destroy)
+ * receive a request handle (fuse_req_t) as their first argument.
+ * This handle must be passed to one of the specified reply functions.
+ *
+ * This may be done inside the method invocation, or after the call
+ * has returned.  The request handle is valid until one of the reply
+ * functions is called.
+ *
+ * Other pointer arguments (name, fuse_file_info, etc) are not valid
+ * after the call has returned, so if they are needed later, their
+ * contents have to be copied.
+ *
+ * In general, all methods are expected to perform any necessary
+ * permission checking. However, a filesystem may delegate this task
+ * to the kernel by passing the `default_permissions` mount option to
+ * `fuse_session_new()`. In this case, methods will only be called if
+ * the kernel's permission check has succeeded.
+ *
+ * The filesystem sometimes needs to handle a return value of -ENOENT
+ * from the reply function, which means, that the request was
+ * interrupted, and the reply discarded.  For example if
+ * fuse_reply_open() return -ENOENT means, that the release method for
+ * this file will not be called.
+ */

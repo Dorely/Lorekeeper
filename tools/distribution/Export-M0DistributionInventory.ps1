@@ -484,12 +484,26 @@ $entries.Add((New-InventoryEntry -Kind 'windows-stage-closure' -Name 'unsigned W
     -Channels @('free-windows', 'store-windows') -Sources @('publish/win-x64/win-unpacked') `
     -Admission (Get-DistributionMetadataDecision -LicenseExpression $null -LicenseEvidence 'The staged closure is an aggregate; each package and asset is inventoried separately.' -Policy $distributionPolicy -DependencyCategory 'assets')))
 
+$appImageNoticeManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'licenses/appimage-runtime/sources.json') -Raw | ConvertFrom-Json
+$appImageNoticeEvidence = @($appImageNoticeManifest.components.evidence) + @($appImageNoticeManifest.modifiedLibfuse.patch, $appImageNoticeManifest.modifiedLibfuse.notice)
+foreach ($evidence in $appImageNoticeEvidence)
+{
+    $path = Require-RepositoryPath -Path (Join-Path $repoRoot $evidence.path) -Description 'AppImage notice evidence'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $evidence.sha256) { throw 'Retained AppImage notice/patch evidence is absent or changed.' }
+}
+$entries.Add((New-InventoryEntry -Kind 'third-party-notices' -Name 'AppImage runtime full component notices' -Version 'type2-runtime 20251108; toolset 1.0.3' `
+    -DependencyCategory 'native-vendored' -Status 'satisfied' `
+    -LicenseEvidence 'Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date. This satisfies full notice retention only.' `
+    -AttributionAction 'Ship licenses/appimage-runtime with the root notice; source/relink and target artifact clearance remain separate unresolved obligations.' `
+    -Channels @('direct-linux') -Sources @('licenses/appimage-runtime/sources.json', 'THIRD-PARTY-NOTICES.txt') `
+    -Admission ([pscustomobject]@{ admissionStatus='unresolved'; licenseExpression='MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib'; selectedLicenseExpression=$null; selectedOrBranches=@(); restrictionClasses=@('copyleft'); diagnostics=@('Full notice retention is satisfied; no distribution-policy exception or public static LGPL source/relink clearance is inferred.') })))
 # Account and publication prerequisites intentionally contain no credentials.
-$entries.Add((New-InventoryEntry -Kind 'native-runtime' -Name 'AppImage embedded runtime and bundled native libraries' -Version 'exact target closure pending' `
+$entries.Add((New-InventoryEntry -Kind 'native-runtime' -Name 'AppImage embedded runtime and bundled native libraries' -Version 'type2-runtime 20251108; toolset 1.0.3' `
     -DependencyCategory 'native-vendored' -Status 'unresolved-provenance' `
-    -LicenseEvidence 'The pinned electron-builder AppImage toolset contributes runtime and native library bytes beyond the application payload; exact archive inspection and authoritative full license/source obligations remain open.' `
-    -AttributionAction 'Resolve and retain exact runtime/FUSE/native-library terms from the selected toolset and verify the extracted AppImage before Linux distribution.' `
-    -Channels @('direct-linux') -Sources @('scripts/build-linux-release.ps1', 'docs/evidence/public-sharing-audit.md')))
+    -LicenseEvidence 'Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. Exact Alpine patch/build provenance and successful recipient relink remain unconfirmed; full source material is prepared privately.' `
+    -AttributionAction 'Verify the extracted target runtime and absence of excluded libraries, establish exact source/relink closure, and deliver complete source material alongside any later authorized binary publication.' `
+    -Channels @('direct-linux') -Sources @('scripts/build-linux-release.ps1', 'licenses/appimage-runtime/sources.json', 'docs/evidence/public-sharing-audit.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'GitHub public-repository clearance' -Version 'not started' `
     -DependencyCategory 'assets' `
     -Status 'unresolved-provenance' -LicenseEvidence 'The redacted all-ref and GitHub metadata audit is recorded separately; a final exact-ref recheck and owner visibility decision remain required.' `
@@ -592,6 +606,7 @@ foreach ($category in $categorySummary)
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('- Exact first-party terms, Bootstrap, managed/native package notices, and branding provenance are retained. The restrictive first-party owner decision does not relax the permissive third-party gate.')
 [void]$markdown.AppendLine('- libgit2 is admitted only as the unchanged compiled library linked into Lorekeeper under its exact retained unlimited linking exception; modifications or standalone redistribution require separate review.')
+[void]$markdown.AppendLine('- AppImage full component notice retention is satisfied. Its statically linked modified LGPL libfuse still requires complete source/relink and exact dependency provenance; the admission gate remains unresolved and no permissive exception is inferred.')
 [void]$markdown.AppendLine('- Packaged platform closures, real Store identities/certification, and any Mac App Store work require their own recorded evidence. Absence is not silently treated as approval.')
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('## Public-sharing audit')

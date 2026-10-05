@@ -1,0 +1,23 @@
+The selected AppImage type2 runtime release 20251108 incorporates statically
+linked libfuse 3.15.0 with the AppImage supplier's FUSERMOUNT_PROG modification.
+The modification permits the environment to select the fusermount executable.
+The original supplier change is dated 2024-11-24, commit
+f5636118e0d8645e7f572771b5ac98b6da931f95 in AppImage/type2-runtime.
+The exact patch is retained at libfuse/patches/mount.c.diff and identified by
+SHA-256 in sources.json. The selected runtime source commit is
+dd6cebedcbddde9c82f89b011e8e1d40b6e43868.
+
+Libfuse library files retain their upstream GNU Lesser General Public License
+version 2.1 terms, copyrights and modification rights. The full upstream
+libfuse/fuse-3.15.0/LICENSE, libfuse/fuse-3.15.0/LGPL2.txt and separately
+applicable libfuse/fuse-3.15.0/GPL2.txt are retained under this notice directory.
+Original library/header copyright and license comments are also retained under
+libfuse/fuse-3.15.0/file-notices/. The kernel-interface header's separately
+offered BSD-2-Clause branch is selected, retaining its full original copyright,
+conditions and disclaimer. Lorekeeper's first-party terms do not replace them.
+
+This is notice evidence for local package preparation. Public AppImage
+redistribution clearance remains pending: corresponding modified-library
+source and complete runtime build/relink material must be supplied alongside
+the binary, with exact dependency provenance and practical recipient relink
+acceptance established. Full notices alone do not establish that clearance.

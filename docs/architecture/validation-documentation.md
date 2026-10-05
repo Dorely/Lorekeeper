@@ -222,6 +222,11 @@ artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
 `Lorekeeper-<version>-x86_64.AppImage` and
 `Lorekeeper-<version>-amd64.deb` with source/archive provenance. WSL packaging
 uses an exact committed Git archive in isolated ext4 storage and local compute.
+Its archive command sets `core.autocrlf=false` and `core.eol=lf` only for that
+invocation, so Windows Git cannot change committed text bytes before the native
+build. The provenance records those archive settings; retained license evidence
+keeps its `-text` attributes. The editor gate still requires an exact byte hash
+match with the committed bundle.
 Release builds pin .NET/ASP.NET runtime 10.0.12 in the project. Builders restore
 with the target Release publish profile and self-contained settings before
 publishing without restore, so every platform selects the reviewed runtime.
@@ -233,9 +238,17 @@ acceptance and complete AppImage/FUSE license closure remain separate evidence.
 The supported toolset override selects SHA-pinned AppImage tools 1.0.3 and the
 official 20251108 static runtime, excludes old optional compatibility libraries,
 and checks the final runtime prefix and empty compatibility-library directory.
-The static runtime's modified LGPL libfuse needs corresponding source and
-recipient relinking material; notices and local packaging do not establish
-public distribution clearance.
+The retained notice manifest supplies the download URL, hashes, release and
+source commit; the builder checks field syntax, official supplier path families,
+the pinned configuration, and matching runtime/libfuse component versions.
+Seven exact AppImage component source/version records, full terms and per-file
+musl copyright/license blocks are retained under `licenses/appimage-runtime/`,
+with the original modified-libfuse patch/date notice. The notice generator checks
+their hashes and every package retains that evidence. The static runtime's
+modified LGPL libfuse still needs complete corresponding source, exact dependency
+provenance and practical recipient relinking evidence. Its reviewable source
+bundle remains ignored/private; notice retention and local packaging do not
+establish public distribution clearance or a permissive admission exception.
 
 The dependency audit permits only the two exact known
 `image-size@1.2.1` advisories while Electron.NET's optional splash call is
@@ -271,7 +284,13 @@ The free price and BYO-provider charges are documented in the MSIX runbook.
 
 The native macOS arm64 builder performs dependency/editor/Press checks and
 creates an ad-hoc-signed DMG. Its app startup exercise requires explicit manual
-authorization. The dispatch-only macOS workflow supplies native Mac compute;
+authorization. The startup check refuses an occupied TCP port 1455, gives only
+its child process absolute temporary SQLite/history paths and separate Electron
+user data, and captures stdout/stderr in private temporary files that are never
+echoed or uploaded. It resolves the macOS temporary-directory symlink prefix,
+terminates the owned process tree, and deletes the isolated files afterward.
+These controls require native Mac validation before making platform claims.
+The dispatch-only macOS workflow supplies native Mac compute;
 general CI, hosted validation, and hosted Linux compute remain excluded.
 Mac App Store feasibility still lacks a signed MAS runtime, entitlements,
 publisher/profile inputs, and real-device acceptance. Direct-DMG evidence is not
@@ -345,7 +364,7 @@ suite.
 | [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, and pending installed/certification boundary. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
-| [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. |
+| [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), [`licenses/appimage-runtime/sources.json`](../../licenses/appimage-runtime/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/runtime source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. AppImage source/relink clearance is separate from notice inclusion. |
 | [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1), [inventory](../research/m0.4-distribution-inventory.md), and [public-sharing audit](../evidence/public-sharing-audit.md) | Local dependency/notice and platform-prerequisite inventory plus sanitized all-ref/GitHub clearance; detailed findings stay ignored/private and no publication is performed. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |
 | [`.mcp.json`](../../.mcp.json) and [`.commandcode/settings.json`](../../.commandcode/settings.json) | Project-only optional Command Code Roslynk configuration mirroring the Codex allowlist: the same stdio server with permission rules that expose the read-only tools and deny the mutating tools plus `reload_solution`; not an application dependency or final-verification substitute. |

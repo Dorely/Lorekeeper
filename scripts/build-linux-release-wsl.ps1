@@ -182,7 +182,7 @@ finally
 try
 {
     [IO.File]::WriteAllText($bootstrapPath, $bootstrap, [Text.UTF8Encoding]::new($false))
-    & git -C $repoRoot archive --format=tar "--output=$sourceArchive" $sourceCommit
+    & git -c core.autocrlf=false -c core.eol=lf -C $repoRoot archive --format=tar "--output=$sourceArchive" $sourceCommit
     if ($LASTEXITCODE -ne 0) { throw 'Could not export the exact committed release source.' }
     $archiveHash = (Get-FileHash -LiteralPath $sourceArchive -Algorithm SHA256).Hash.ToLowerInvariant()
     $bootstrapArguments = @('pwsh', '-NoProfile', '-NonInteractive', '-File', (Convert-ToWslPath -Path $bootstrapPath),
@@ -196,7 +196,10 @@ try
     }
     $provenance = Get-Content -Raw -LiteralPath (Join-Path $incomingDirectory 'release-provenance.json') | ConvertFrom-Json
     if ($provenance.sourceCommit -cne $sourceCommit -or $provenance.sourceTree -cne $sourceTree -or
-        $provenance.sourceArchiveSha256 -cne $archiveHash -or $provenance.sourceVersion -cne $sourceVersion)
+        $provenance.sourceArchiveSha256 -cne $archiveHash -or $provenance.sourceVersion -cne $sourceVersion -or
+        $provenance.sourceArchiveConfiguration.format -cne 'tar' -or
+        $provenance.sourceArchiveConfiguration.coreAutocrlf -ne $false -or
+        $provenance.sourceArchiveConfiguration.coreEol -cne 'lf')
     {
         throw 'The copied Linux artifacts have mismatched source provenance.'
     }

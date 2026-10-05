@@ -14,7 +14,7 @@
     "gateStatus": "unresolved",
     "admissionSummary": {
       "admitted": 238,
-      "unresolved": 7,
+      "unresolved": 8,
       "blocked": 0
     }
   },
@@ -26,7 +26,7 @@
     "mac-app-store"
   ],
   "summary": {
-    "satisfied": 238,
+    "satisfied": 239,
     "needs-inclusion": 0,
     "blocked": 0,
     "unresolved-provenance": 7
@@ -62,9 +62,9 @@
     },
     {
       "dependencyCategory": "native-vendored",
-      "entries": 16,
+      "entries": 17,
       "admitted": 14,
-      "unresolved": 2,
+      "unresolved": 3,
       "blocked": 0
     },
     {
@@ -4240,16 +4240,17 @@
     {
       "kind": "native-runtime",
       "name": "AppImage embedded runtime and bundled native libraries",
-      "version": "exact target closure pending",
+      "version": "type2-runtime 20251108; toolset 1.0.3",
       "dependencyCategory": "native-vendored",
       "status": "unresolved-provenance",
-      "licenseEvidence": "The pinned electron-builder AppImage toolset contributes runtime and native library bytes beyond the application payload; exact archive inspection and authoritative full license/source obligations remain open.",
-      "attributionAction": "Resolve and retain exact runtime/FUSE/native-library terms from the selected toolset and verify the extracted AppImage before Linux distribution.",
+      "licenseEvidence": "Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. Exact Alpine patch/build provenance and successful recipient relink remain unconfirmed; full source material is prepared privately.",
+      "attributionAction": "Verify the extracted target runtime and absence of excluded libraries, establish exact source/relink closure, and deliver complete source material alongside any later authorized binary publication.",
       "channels": [
         "direct-linux"
       ],
       "sources": [
         "docs/evidence/public-sharing-audit.md",
+        "licenses/appimage-runtime/sources.json",
         "scripts/build-linux-release.ps1"
       ],
       "admissionStatus": "unresolved",
@@ -5567,10 +5568,10 @@
     {
       "kind": "nuget-package",
       "name": "Microsoft.AspNetCore.App.Internal.Assets",
-      "version": "10.0.0",
+      "version": "10.0.12",
       "dependencyCategory": "NuGet",
       "status": "satisfied",
-      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.AspNetCore.App.Internal.Assets/10.0.0). Full license and bundled transitive notices retained in licenses/third-party/sources.json for the exact package content hash.",
+      "licenseEvidence": "NuGet nuspec license expression 'MIT' (Microsoft.AspNetCore.App.Internal.Assets/10.0.12). Full license and bundled transitive notices retained in licenses/third-party/sources.json for the exact package content hash.",
       "attributionAction": "Ship retained full terms and required notices; exact-version exceptions keep their recorded linking/distribution scope.",
       "channels": [
         "direct-linux",
@@ -5581,7 +5582,7 @@
       ],
       "sources": [
         "Lorekeeper/obj/project.assets.json",
-        "nuget:Microsoft.AspNetCore.App.Internal.Assets/10.0.0"
+        "nuget:Microsoft.AspNetCore.App.Internal.Assets/10.0.12"
       ],
       "admissionStatus": "admitted",
       "licenseExpression": "MIT",
@@ -7499,6 +7500,32 @@
     },
     {
       "kind": "third-party-notices",
+      "name": "AppImage runtime full component notices",
+      "version": "type2-runtime 20251108; toolset 1.0.3",
+      "dependencyCategory": "native-vendored",
+      "status": "satisfied",
+      "licenseEvidence": "Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date. This satisfies full notice retention only.",
+      "attributionAction": "Ship licenses/appimage-runtime with the root notice; source/relink and target artifact clearance remain separate unresolved obligations.",
+      "channels": [
+        "direct-linux"
+      ],
+      "sources": [
+        "licenses/appimage-runtime/sources.json",
+        "THIRD-PARTY-NOTICES.txt"
+      ],
+      "admissionStatus": "unresolved",
+      "licenseExpression": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib",
+      "selectedLicenseExpression": null,
+      "selectedOrBranches": [],
+      "restrictionClasses": [
+        "copyleft"
+      ],
+      "policyDiagnostics": [
+        "Full notice retention is satisfied; no distribution-policy exception or public static LGPL source/relink clearance is inferred."
+      ]
+    },
+    {
+      "kind": "third-party-notices",
       "name": "repository-wide third-party notice",
       "version": "generated exact closure",
       "dependencyCategory": "assets",
@@ -7529,7 +7556,7 @@
       "version": "current local Release stage",
       "dependencyCategory": "assets",
       "status": "unresolved-provenance",
-      "licenseEvidence": "Deterministic aggregate SHA-256 f2fe0c324bc79eed247837ec05f41144b395273aa73796cabfca79e64fc9b003 over 834 staged files; retained evidence files: resources/bin/press-runtime/sbom.json, resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt, resources/bin/THIRD-PARTY-NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.br, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.gz.",
+      "licenseEvidence": "Deterministic aggregate SHA-256 3ce283df60e352455321d7ae209baf5af91fd9d6c81a4ea54607bbec0b289194 over 861 staged files; retained evidence files: resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/press-runtime/sbom.json, resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt, resources/bin/THIRD-PARTY-NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.br, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.gz.",
       "attributionAction": "Compare the final Windows closure with the approved source license and third-party notice set before publishing.",
       "channels": [
         "free-windows",

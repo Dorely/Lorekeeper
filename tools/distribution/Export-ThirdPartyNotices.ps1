@@ -15,6 +15,8 @@ $manifestPath = Join-Path $evidenceRoot 'sources.json'
 $noticePath = Join-Path $repoRoot 'THIRD-PARTY-NOTICES.txt'
 $runtimeEvidenceRoot = Join-Path $repoRoot 'licenses/runtime-notices'
 $runtimeManifestPath = Join-Path $runtimeEvidenceRoot 'sources.json'
+$appImageEvidenceRoot = Join-Path $repoRoot 'licenses/appimage-runtime'
+$appImageManifestPath = Join-Path $appImageEvidenceRoot 'sources.json'
 if ([string]::IsNullOrWhiteSpace($AssetsPath)) { $AssetsPath = Join-Path $repoRoot 'Lorekeeper/obj/project.assets.json' }
 $resolvedAssetsPath = [IO.Path]::GetFullPath($AssetsPath)
 $assets = Get-Content -LiteralPath $resolvedAssetsPath -Raw | ConvertFrom-Json
@@ -110,6 +112,26 @@ foreach ($record in $runtimeManifest.packages)
         if (-not $path.StartsWith($runtimeEvidenceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
             -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Hash $path) -cne $evidence.sha256) { throw 'Retained runtime notice bytes are missing or changed.' }
     }
+}
+if (-not (Test-Path -LiteralPath $appImageManifestPath -PathType Leaf)) { throw 'Selected AppImage full notice evidence is missing.' }
+$appImageManifest = Get-Content -LiteralPath $appImageManifestPath -Raw | ConvertFrom-Json
+$expectedAppImageComponents = @('AppImage type2 runtime', 'libfuse', 'squashfuse', 'musl', 'zstd', 'zlib', 'mimalloc')
+if (Compare-Object $expectedAppImageComponents @($appImageManifest.components.component)) { throw 'Selected AppImage component notice set is incomplete.' }
+if (@($appImageManifest.components | Where-Object { $_.evidence.Count -eq 0 }).Count -ne 0) { throw 'An AppImage component lacks retained full terms.' }
+$runtimeComponents = @($appImageManifest.components | Where-Object component -CEQ 'AppImage type2 runtime')
+$libfuseComponents = @($appImageManifest.components | Where-Object component -CEQ 'libfuse')
+if ($runtimeComponents.Count -ne 1 -or $libfuseComponents.Count -ne 1 -or
+    [string]$runtimeComponents[0].version -cne [string]$appImageManifest.runtime.release -or
+    [string]$libfuseComponents[0].version -cne [string]$appImageManifest.modifiedLibfuse.version)
+{
+    throw 'The selected AppImage runtime or modified-libfuse version differs from its retained component notices.'
+}
+$appImageEvidence = @($appImageManifest.components.evidence) + @($appImageManifest.modifiedLibfuse.patch, $appImageManifest.modifiedLibfuse.notice)
+foreach ($evidence in $appImageEvidence)
+{
+    $path = [IO.Path]::GetFullPath((Join-Path $repoRoot $evidence.path))
+    if (-not $path.StartsWith($appImageEvidenceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Hash $path) -cne $evidence.sha256) { throw 'Retained AppImage full notice or patch bytes are missing or changed.' }
 }
 if ($RefreshEvidence)
 {
@@ -257,6 +279,13 @@ foreach ($record in $runtimeManifest.packages)
     foreach ($evidence in $record.evidence) { [void]$builder.AppendLine("  Retained full terms/notice: $($evidence.path) (SHA-256 $($evidence.sha256))") }
 }
 [void]$builder.AppendLine('- ICC profile: Lorekeeper.Press/assets/profiles/SOURCE.md records the registry source, hash, and unchanged distribution requirement; Press notices repeat the terms.')
+[void]$builder.AppendLine("- AppImage type2 runtime $($appImageManifest.runtime.release): exact component full terms and modified-libfuse notice/patch metadata are retained under licenses/appimage-runtime/sources.json. Full notice inclusion is prepared; LGPL corresponding-source, dependency provenance and recipient relink clearance remain pending before public AppImage distribution.")
+foreach ($component in $appImageManifest.components)
+{
+    [void]$builder.AppendLine("  $($component.component) $($component.version); $($component.license)")
+    foreach ($evidence in $component.evidence) { [void]$builder.AppendLine("  Retained full terms/notice: $($evidence.path) (SHA-256 $($evidence.sha256))") }
+}
+[void]$builder.AppendLine("  Modified-libfuse notice: $($appImageManifest.modifiedLibfuse.notice.path); original supplier patch/date and exact runtime hash are recorded in sources.json.")
 [void]$builder.AppendLine('- First-party branding provenance: wwwroot/branding/SOURCES.md (source checkout: Lorekeeper/wwwroot/branding/).')
 $content = $builder.ToString().Replace("`r`n", "`n")
 if ($CheckOnly)

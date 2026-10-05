@@ -47,10 +47,16 @@ old release repository are separate launch actions.
   host answered HTTP requests, but native capture repeatedly timed out and the
   browser controller remained unavailable after reconnection. No provider
   calls or synthetic current-app projects were created through those attempts.
-- WSL Ubuntu initially reported `ERROR_NO_SYSTEM_RESOURCES`, then recovered.
-  Actual WSL2 Ubuntu 24.04 prerequisite validation now passes using an isolated,
-  checksum-verified toolchain. Exact-source Linux packaging is the next check;
-  native graphical install/launch acceptance remains unverified.
+- WSL Ubuntu intermittently reports `ERROR_NO_SYSTEM_RESOURCES`. The retry of
+  candidate `6ba993a5103accef77b5a878903027c15023d17f` started Ubuntu 24.04
+  successfully, exported exact source into isolated ext4 storage, and passed
+  npm installation/audit. Packaging then failed closed because the rebuilt
+  semantic-editor bundle differed from the committed bytes. No Linux package
+  was produced by that attempt. Cross-platform reproducibility and native
+  graphical install/launch acceptance remain open.
+- The user subsequently stopped Computer Use with the physical Escape key.
+  Desktop interaction stopped immediately; no further UI/provider/trailer
+  acceptance is inferred or performed in that turn.
 - Production MSIX requires owner-supplied Partner Center identities. Store
   certification is external acceptance and remains pending.
 - No automated test suites will be added outside the existing data-safety and
@@ -71,6 +77,14 @@ old release repository are separate launch actions.
   self-contained settings. The previous Windows package used 10.0.0 while the
   prepared WSL SDK selected 10.0.12. Earlier package checks must be repeated on
   this final runtime and notice closure.
+- Linux source export now sets Git's line-ending configuration per archive
+  command. Windows archive conversion had inserted 25 CR bytes into the editor
+  bundle; the Linux rebuild matched the committed LF blob exactly. The exact-byte
+  reproducibility gate remains unchanged.
+- Mac packaged startup validation now keeps upstream Electron authentication
+  output in private temporary files, uses disposable SQLite/history/Electron
+  state, and refuses an occupied port. Static checks passed; native Mac evidence
+  remains unperformed.
 
 ## Verification and artifact identity
 
@@ -111,8 +125,34 @@ Preparation checks on the current v1 worktree:
 
 Record the final verified commit and artifact hashes after native packaging.
 Trailer preparation currently includes title, 60-second English captions and a
-gated export recipe only; no real footage, poster, or finished MP4 is claimed.
+gated export recipe and an original 60-second stereo audio preview under ignored
+`.artifacts/trailer/v1/audio/`; no real footage, poster, or finished MP4 is claimed.
 Capture must wait for functional acceptance, using synthetic content only.
+
+### Candidate package checks
+
+Package validation source: `6ba993a5103accef77b5a878903027c15023d17f`.
+Source tree: `8aedfac3dc836f8fdba8941a218e64f79d3b91fd`.
+This identifies package preparation, not functional acceptance.
+
+- Final Windows Store and Free builds passed with zero managed warnings/errors,
+  actual 1.0.0/candidate assembly metadata and the correct immutable channel,
+  .NET/ASP.NET 10.0.12, native Press and retained notice closure.
+- Free installer SHA-256:
+  `0f822d42be8dd3315849cb8c2d8d7bf488466b5f4045d83c70b76b92e786d8c7`.
+  Portable SHA-256:
+  `47127db5e398c0fc3bfedef4978bd1b68995f28a45cd71ff2a62eb4100c79636`.
+  Actual Authenticode inspection found those artifacts and app/Press executables
+  unsigned. The bundled Microsoft `createdump.exe` retains its valid signature.
+- Local MSIX SHA-256:
+  `712c0ca16b424b06e8925123b86be8a75d545014dcca205d16bb643a8bd6b489`.
+  Semantic MakeAppx pack/unpack, CMS integrity/exact signer, certificate absence,
+  and unchanged private-key-file inventory passed on Windows 10 build 19045 with
+  SDK 10.0.26100. No installation or trust-chain acceptance was performed.
+- Detailed logs, identity/hash evidence, and the pinned DEB installation-template
+  review remain in ignored `.artifacts/v1-sharing/windows-final-6ba993a/`.
+  The upstream DEB template provides a scoped AppArmor user-namespace profile;
+  AppImage desktop startup on restrictive Ubuntu remains unverified.
 
 This preparation is **not signed off** while any data-loss, credential exposure,
 broken core workflow, installation, or update blocker remains unresolved.
