@@ -36,7 +36,7 @@ old release repository are separate launch actions.
 | Data safety | Full/non-structural archives, checkpoints and restore, assets/evidence preservation, disposable migration and recovery | Pending |
 | Providers | Ordinary reply, tool read/mutation, follow-up, cancellation, model selection, replay and supported reasoning for each tested connection/model | Pending |
 | Windows | Free installer/portable closure, isolated data/history, MSIX local validation, uninstall preservation, Store update suppression | Packaging/local MSIX passed on the recorded candidate; installed acceptance pending |
-| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Build/tests passed; package verification retry and desktop acceptance pending |
+| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Build/tests and package verification passed on the recorded candidate; desktop acceptance pending |
 | Mac | Existing native build and package evidence | Unperformed; no local Mac host |
 | Update handoff | Old install discovers v1, both draft sets match, anonymous main downloads and installed v1 main-feed transition | Launch-time check; not performed during preparation |
 
@@ -63,8 +63,8 @@ old release repository are separate launch actions.
   pinned runtime's optional LTTng tracing provider, whose old `so.0` dependency
   is absent on Ubuntu 24.04. The exact supplier source tolerates that load
   failure. A hash/version/path-bound optional-dependency report is implemented;
-  mandatory and unknown library failures remain fatal. No Linux package has
-  completed final validation yet.
+  mandatory and unknown library failures remain fatal. Candidate `9eec7b8`
+  subsequently passed final package validation and verified output transfer.
 - The user subsequently stopped Computer Use with the physical Escape key.
   Desktop interaction stopped immediately; no further UI/provider/trailer
   acceptance is inferred or performed in that turn.
@@ -157,39 +157,57 @@ Capture must wait for functional acceptance, using synthetic content only.
 
 ### Candidate package checks
 
-Package validation source: `441c96e3ac208b67ec0a0bb85f6be6e3fa73011d`.
-Source tree: `14acca4439443646b49382b57bc684ec8ad7154c`.
+Package validation source: `9eec7b825c0052299beccb844c544aea875490c3`.
+Source tree: `33bb4bf61a797b490408f9b47cbdee939fd3f67b`.
 This identifies package preparation, not functional acceptance.
 
 - Final Windows Store and Free builds passed with zero managed warnings/errors,
   actual 1.0.0/candidate assembly metadata and the correct immutable channel,
   .NET/ASP.NET 10.0.12, native Press and retained notice closure.
 - Free installer SHA-256:
-  `5c5cb8e51075d620be32088f5e151b63dfc3134ee7abcfdfcc28c15d7fe67271`.
+  `b9f99d5348be882a2c1d6cb7b96352db43be11dd50da7607615273cac16be0af`.
   Portable SHA-256:
-  `53a94da574bc542203b1fa9cea856b6352976751aef04804393a972886be0d36`.
+  `fd0ec088baff1769245158cc09e63693ac2ee76fc382bc45b23c05af975777fc`.
   Actual Authenticode inspection found those artifacts and app/Press executables
   unsigned. The bundled Microsoft `createdump.exe` retains its valid signature.
 - Local MSIX SHA-256:
-  `885125bc63f4f7984530ee168952c3326767bb90afcdaf6687d9717fc26bcf51`.
+  `8f690541ed4154e920b8548fc838bbacebe95e4723216ca83a746a3bd00fddbc`.
   Semantic MakeAppx pack/unpack, CMS integrity/exact signer, certificate absence,
   and unchanged private-key-file inventory passed on Windows 10 build 19045 with
   SDK 10.0.26100. No installation or trust-chain acceptance was performed.
 - Detailed logs, identity/hash evidence, and the pinned DEB installation-template
-  review remain in ignored `.artifacts/v1-sharing/windows-final-441c96e/`.
+  review remain in ignored `.artifacts/v1-sharing/windows-final-9eec7b8/`.
   The upstream DEB template provides a scoped AppArmor user-namespace profile;
   AppImage desktop startup on restrictive Ubuntu remains unverified.
 - Linux on that candidate passed zero-warning/error Release compilation,
   **167 data-safety**, **47 Press unit** and **104 Press conformance** checks.
-  AppImage and DEB construction completed, but the npm root-key parser failure
-  prevented identity, notice, native-dependency and runtime-prefix verification.
-  The wrapper cleaned its isolated source/output; no Linux artifacts are claimed.
-  Attempt log SHA-256:
-  `c6cd3041916acc30e6f5312c34f876e2f1edc9afe39798431146964d40753c69`.
+  Unpacked, AppImage-extracted and DEB-extracted closures passed editor, native
+  ELF/dependency, Press and notice checks. The AppRun hash/mode, sandbox flags,
+  exact original runtime prefix, omitted legacy libraries and declared DEB
+  dependencies passed. The wrapper verified transferred bytes and cleaned its
+  isolated source; local packages, checksums, provenance and unpacked closure
+  remain under ignored `publish/linux-x64/`.
+- AppImage SHA-256:
+  `3a438833501c08ae5e5fcb43c9ef6485310926718c18c58f914ec7a2565ddbc6`.
+  DEB SHA-256:
+  `94f1a4ea85f20e9dacacbfb590f386b88f2531de5dc0d93ed8b5b754ec7dd599`.
+  Native run log SHA-256:
+  `bb9cd93b8ff6b4c5cd4c10611ce4fecfc884bf38fc48cd52f89ed884444c4880`.
+  Provenance SHA-256:
+  `c0bfe231a8dcf30c49dd29670cedcc0a1d4b024eb15de63d3c49b6d179e5a31f`.
+- The native provenance explicitly records optional CoreCLR LTTng tracing as
+  unavailable, with integration validation false. The builder also warned that
+  desktop window association lacks `desktopName`; this is a minor metadata
+  finding pending correction and desktop verification. No Linux application,
+  desktop installer, provider, printing or update workflow was launched.
 - Standard `scripts/release.ps1 -Version 1.0.0 -CheckOnly` passed: both repository
   permissions/tag checks, retained Mac workflow readiness, WSL prerequisites,
-  final build/tests/notices and unchanged clean HEAD. No version commit, push,
-  package build, release creation or visibility change was performed by preview.
+  final build/tests/notices and unchanged clean HEAD. The blocked AppImage
+  publication warning was expected; local readiness checks continued. No version
+  commit, push, package build, release creation or visibility change was performed
+  by preview.
+  Preview log SHA-256:
+  `98bdf593c9b18c4b734a1370622f6cd802bab52edb07057b8c65a3a7d5d3263a`.
 
 This preparation is **not signed off** while any data-loss, credential exposure,
 broken core workflow, installation, or update blocker remains unresolved.

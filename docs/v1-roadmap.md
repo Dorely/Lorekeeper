@@ -55,6 +55,17 @@ repository. Any later v1 visibility handoff requires the explicit launch flag
 after verified publication and fresh unauthenticated asset checks. Historical
 records remain evidence of their date, not current execution permission.
 
+The `9eec7b8` preparation candidate passed local Windows Store-channel closure
+and MSIX pack/signature checks, native Ubuntu 24.04 AppImage/DEB payload gates,
+artifact transfer/hash/provenance checks, and the release-driver `-CheckOnly`
+preflight. These are static packaging evidence. AppImage publication remains
+blocked on corresponding-source/relink and precise supplier provenance; retained
+full notices and a private source-preparation bundle do not close that boundary.
+Installed desktop/update/uninstall, Store identity/certification, live providers,
+Mac execution, and trailer captures remain unperformed as recorded in
+[v1 QA evidence](evidence/v1-qa.md). The public-sharing audit has exact committed
+source/all-ref results and a partial, explicitly limited historical asset audit.
+
 ### Session handoff procedure
 
 1. Follow [AGENTS.md](../AGENTS.md), read VISION and the architecture map, and
@@ -936,7 +947,11 @@ source archive. No hosted Linux workflow is added. Verify ELF architecture/nativ
 dependencies, source-owned sandbox-preserving launcher, Press/editor/source notice
 closure, artifact hashes and provenance, and installed desktop/upgrade behavior.
 AppImage/FUSE/native runtime terms require exact retained evidence; artifact
-production alone does not clear that closure. See README for build commands.
+production alone does not clear that closure. The retained manifest and
+`eng/appimage-publication.json` bind the selected runtime/toolset and required
+source asset while explicitly blocking publication until clearance is reviewed.
+Local payload checks passed for `9eec7b8`; GUI/AppArmor and installed behavior
+remain separate acceptance items. See README for build commands.
 
 ### Mac (deferred beyond this preparation)
 

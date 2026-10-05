@@ -10,23 +10,29 @@ under ignored `.artifacts/sharing-audit/`. Do not upload that directory.
 - A disposable origin mirror contains every advertised remote head/tag and every
   available pull-request head/merge ref. All local refs were also fetched into a
   separate mirror namespace. The refreshed preparation snapshot includes
-  candidate `6ba993a5103accef77b5a878903027c15023d17f`: 70 refs and 641
+  candidate `9eec7b825c0052299beccb844c544aea875490c3`: 70 refs and 644
   unique reachable commits.
 - Gitleaks **8.30.1** from its official release was checksum-verified. The Windows
   x64 archive SHA-256 is
   `d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e`.
   Scans used full redaction, all refs, full history including merge diffs, and
   bounded decoding/archive inspection. That refreshed all-ref scan traversed
-  639 diff-bearing commits and approximately 76.01 MB of text with zero findings
+  642 diff-bearing commits and 76,365,898 text bytes with zero findings
   after the 16 individually reviewed false-positive exclusions below.
 - The private ref snapshot SHA-256 is
-  `801dc36594b7cb1efdf11269f58e5ee5e90290f3123fc686d68f9f47ce4c70a2`.
+  `17eb39d6d50f44a1a8cf4865242ff8d74cf41bf525751a5bab6d5d5a368baf56`.
   This binds that snapshot, not later commits. Recheck exact final refs before
-  public visibility; subsequent platform/notice preparation is not yet included.
-  An exact committed-source archive of that candidate contains 1,343 files
-  (approximately 45.47 MB); its SHA-256 is
-  `25d8d83f41ba58d0f35e54b854b352261ec2876596091e3772c0f97789b846cf`.
-  Its eight raw generic-key matches were individually reviewed as seven public
+  public visibility; subsequent commits are not yet included. An exact
+  committed-source ZIP of that candidate, forced to LF with Git's
+  `core.autocrlf=false` and `core.eol=lf`, contains 1,519 regular files and
+  **59,227,766 uncompressed file bytes**. The ZIP itself is 15,399,068 bytes;
+  its SHA-256 is
+  `204d1a3274baf324e80894ea49d2dcb0f3cff54236c08cdb8ed7f649096ba622`.
+  Gitleaks inspected **44,952,715 text bytes**, a different metric. The earlier
+  report's approximately 45.47 MB described inspected text, not total source
+  file bytes. Like-for-like LF archives of `6ba993a` and `441c96e` contain
+  58,885,004 and 59,209,172 uncompressed bytes respectively.
+  The candidate's eight raw generic-key matches were reviewed as seven public
   print-profile identifiers and the bundled vis-network constant. The current
   library also matches the exact npm source after line-ending normalization.
 - No LFS entries were present across the mirror's available refs. The repository
@@ -45,17 +51,36 @@ under ignored `.artifacts/sharing-audit/`. Do not upload that directory.
   Historical executable/image downloads and payload inspection are still in
   progress. Matching advertised digests will only deduplicate an asset after the
   downloaded bytes are independently verified. No released executable is run.
-- Static asset work has produced 101 per-digest reports: 82 text/YAML/blockmap
-  assets and 19 DMG assets. All 27 blockmaps' 185 generic-key candidates were
-  verified as differential-download checksum arrays under their exact schema.
-  The 55 text/YAML objects had no scanner findings. Of the 19 hash-verified DMGs
-  (approximately 4.20 GB), ten have no recorded extraction limit and nine retain
-  listing/extraction limits requiring retry. Their 379 scanner candidates still
-  require complete context triage; no user-data/database/history/credential-file
-  path was found in the extracted regular files inspected so far. Sixty-five
-  unique assets have no payload report yet, including the Windows installers.
-  This is partial inspection, not historical binary clearance. Heavy work is
-  paused while the native Linux build needs local resources.
+- The historical inspection checkpoint before the resumed sequential retries
+  contains **135 per-digest reports**:
+  82 text/YAML/blockmap assets, 28 DMGs, and 25 EXEs. All 27 blockmaps' 185
+  generic-key candidates were verified as differential-download checksum arrays
+  under their exact schema. The 55 text/YAML objects had no scanner findings.
+  Of the 28 hash-verified DMGs (5,939,693,183 bytes), ten have completed
+  payload/string scans and 18 retain
+  HFS link/listing/extraction limits requiring retry. All 25 hash-verified EXEs
+  (4,689,572,499 bytes) have completed payload/string scans. Thirty-one EXEs have
+  no completed payload report. The 35 completed binary/image scans contain 955
+  raw candidates: 160 public Apple CMS `cdhashes` values, 490 current public
+  print-profile identifiers, and 125 exact historical public product/profile
+  identifiers have been reviewed. Apple's
+  [codesigning source](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/signer.cpp)
+  constructs `cdhashes` from the signing hash list; the inspected values decode
+  to 20-byte CodeDirectory hashes. **180 vis-network matches remain unreviewed**
+  because earlier bounded gzip/minified contexts were inadequately aligned with
+  decoded scanner coordinates. No user-data/database/history/credential-file
+  path or persistent credential has been confirmed in the extracted regular
+  files inspected so far. This does not cover missing payloads, limited DMGs,
+  unresolved contexts, or expired logs. This is partial inspection, not
+  historical binary clearance. Further work is serialized to one extractor and
+  scanner at a time around local native-build resource requirements.
+- Sixteen legacy private records labelled `download-failure` were local
+  read-only-directory cleanup errors (`WinError 5`), caught under an inaccurate
+  pipeline label. They do not establish network failures. Later successful
+  verified payload reports supersede those records; original limits remain
+  retained privately. New failures record the actual stage. Acquisition
+  diagnostics retain timing, HTTP status, sanitized hostname, length and hashes,
+  without authorization headers, signed redirect queries or bearer URLs.
 - Eight of 40 Actions run log archives were still available and were scanned;
   32 returned HTTP 410 after retention expiry. Source/context review identified
   six expired, process-scoped Electron loopback authorization values from three
@@ -77,7 +102,8 @@ profile-identity fingerprint. These **16 reviewed false-positive fingerprints**
 are narrowly retained in `.gitleaksignore`; no whole file, directory, key rule,
 or credential provider is suppressed. No persistent credential finding has been
 confirmed; transient Actions-log exposure is described separately above.
-The final rerun after retaining the merge fingerprint reported zero findings.
+The final all-ref rerun after retaining the merge fingerprint reported zero
+findings; current-source raw candidates are accounted for separately above.
 
 Tracked settings contain the documented public GitHub OAuth application client
 ID, which is an identifier rather than a secret. API keys and tokens remain in
@@ -125,13 +151,20 @@ notice records the original supplier change date and exact patch/hash. This
 satisfies full notice retention only. A reviewable approximately 24 MB source
 preparation bundle remains ignored and private: it includes original archives,
 patched preferred libfuse source, supplier build inputs, Alpine recipes/patches,
-all terms and recipient relink instructions. Binary/debug version evidence is
-distinguished from Alpine patch/build provenance inferred from the build date;
-the supplier build logs are unavailable. A changed-library rebuild/relink/repack
+all terms and corrected recipient relink instructions. The archive contains
+1,884 files, is 24,409,771 bytes, and has SHA-256
+`0cb245b2f9cb21253a2440eba5de2960c3b1599f6247b391354c442d32ef0693`.
+Binary/debug version evidence is distinguished from Alpine patch/build
+provenance inferred from the build date;
+the supplier build logs are unavailable. Debug line tables expose source paths
+and some compiler producer options, but no exact source-file checksum witness
+has been established. A changed-library rebuild/relink/repack
 has not been performed. Full notices and prepared source alone do not close
 the LGPL source/relink and precise-provenance obligations or the permissive
 admission gate. Local packaging for validation does not establish public
-AppImage clearance.
+AppImage clearance. `eng/appimage-publication.json` binds the reviewed runtime,
+toolset and required source-preparation release asset while remaining explicitly
+blocked; it is a fail-closed publication boundary, not clearance.
 
 ## Remaining clearance
 
