@@ -121,9 +121,10 @@ old release repository are separate launch actions.
   `StartupWMClass=Lorekeeper`; their icon and executable commands matched the
   intended package paths. The focused metadata correction supplies the matching
   desktop name/class and adds passive ASAR/desktop hash checks to packaging.
-  Exact-source Windows/Linux rebuilds remain pending; the prior artifact bytes
-  are unchanged. Native install, window/icon, and AppArmor acceptance remain
-  unperformed, and no accepted-build claim follows from these static checks.
+  Exact-source Windows/Linux rebuilds on `182cf1e` passed; all three Linux ASAR
+  copies and both desktop entries agree on the intended identities. Native
+  install, window/icon, and AppArmor acceptance remain unperformed, and no
+  accepted-build claim follows from these package checks.
 - Ubuntu DEB metadata now includes the official .NET runtime prerequisites and
   uses the Ubuntu 24.04 GTK/AT-SPI package names. Build prerequisites and final
   DEB metadata are checked against the same declared inventory. The optional
@@ -132,6 +133,12 @@ old release repository are separate launch actions.
 - Failed publication retains all drafts, releases and tags for inspection. The
   former draft-check/delete sequence could delete a release finalized by another
   actor between those calls; the publisher no longer performs release deletion.
+- Chaining Store packaging, local MSIX validation and a Free rebuild exposed a
+  packaging-script regression: loading the application assembly kept its DLL
+  mapped in the PowerShell process, so subsequent cleanup failed. A single
+  bounded passive PE metadata reader replaces both assembly loads and disposes
+  its reader and stream on success and failure. The immutable Store channel and
+  exactly-one/current informational-version checks remain fail closed.
 - Public AppImage publication now has a separate, blocked source/relink clearance
   record. A later approved corresponding-source archive must be a verified Linux
   release asset; current private preparation cannot qualify without actual
@@ -141,6 +148,13 @@ old release repository are separate launch actions.
 
 Preparation checks on the current v1 worktree:
 
+- Final source build after the passive MSIX metadata correction passed with
+  zero warnings/errors; the existing data-safety suite passed **167 tests**,
+  none failed or skipped. Exact notice freshness verified **71 identities**.
+  The private log is `.artifacts/v1-final-source-build-tests.log`, SHA-256
+  `4568cda50207327ed9bb106cf6a16f785537bae6d18883095427c4b51a896db7`.
+  Press sources were unchanged after the successful native package checks
+  recorded below. No UI/provider acceptance or new suite follows from this.
 - The focused World/Voice corrections were committed as
   `176bd2430d44ee001417166cf845335d93110268`. The final shared
   `Invoke-ReleasePreflight` passed with zero build warnings/errors, **167
@@ -192,9 +206,76 @@ Capture must wait for functional acceptance, using synthetic content only.
 
 ### Candidate package checks
 
+Current package preparation source:
+`182cf1e7f77ee747733f400a604d8206ebd62923`, tree
+`6af9e15a34a38d10108061f7ffaeeb83a6d21dc5`.
+Both actual Windows app DLLs report `1.0.0+182cf1e7f77ee747733f400a604d8206ebd62923`.
+These local artifacts include the World/Voice corrections; their functional
+retesting remains pending. Later MSIX tooling and evidence edits do not change
+that packaged runtime source identity.
+
+| Local artifact | Bytes | SHA-256 |
+|---|---:|---|
+| Free Windows installer | 193,666,820 | `6714980ecc1b231587ac598755d5865aa3398947d8540ea5271a23f7df87f567` |
+| Free Windows portable | 193,449,209 | `8fc5b8a96cfcdfd4766443612b484c67deed8896787467fd2773fd0c3a5e3036` |
+| Local-validation MSIX | 280,060,533 | `66174b9855ab9b7d17bd2efefb82777f7b4ef8bb3538bd8ccc9c4bc9aae2baaa` |
+| Ubuntu x64 AppImage | 211,240,503 | `9706700775ae7b34253a35ffe16b16c35090ab298b2aec7ebb25c8cc27438c6f` |
+| Ubuntu amd64 DEB | 176,968,928 | `2396895ca59ceaa77b763f9ac52825db22e85555b617227e26b69c212d3ff05e` |
+
+- Windows Store and Free builders passed zero-warning/error compilation,
+  exact channel/runtime/editor/dependency/Press/notices and checksum checks.
+  Actual Authenticode inspection found the Free installer, portable, app,
+  Electron, elevation helper and Press executables unsigned; Microsoft's
+  `createdump.exe` retains its valid signature. Store-channel input survives
+  in the local MSIX closure, while the regular Windows output contains Free.
+  The first chained Free attempt stopped at the DLL lock described above.
+  The standalone retry completed; the surrounding command incorrectly treated
+  the accepted npm audit's stale native exit code as a builder failure.
+  Its complete log and verified artifacts establish the successful retry.
+- Corrected MSIX tooling passed `-CheckOnly` and full semantic pack/unpack and
+  CMS/exact-signer validation in one PowerShell session. Exclusive DLL opens
+  succeeded after both modes and after rejection of the actual Free closure.
+  Fresh current-user certificate and CNG private-key-file inventories were
+  unchanged afterward. No trust or install operation occurred. The private
+  receipt is `.artifacts/v1-sharing/windows-final-182cf1e/msix-validation.json`,
+  SHA-256 `abc44b4e23069545a5bb341baab44c7cb46caea9a98d091266be2c52a87043ea`.
+  The generated input copy under `publish/msix-store-validation-182cf1e/`
+  remains ignored because automatic approval review rejected its deletion with
+  `blocked by policy`; it is not a running host or a release asset.
+- Ubuntu 24.04 x64 passed zero-warning/error Release compilation, **167
+  data-safety**, **47 Press unit** and **104 conformance** checks. All three
+  actual ASAR manifests and both desktop entries passed matching application,
+  version, desktop name/class, icon, executable and hash checks. Native closure,
+  ELF/dependency, notices, Press, exact launcher/runtime, sandbox and DEB
+  metadata checks passed. The wrapper verified transferred hashes, stopped its
+  owned processes and removed its ext4 source/staging. Kept unpacked outputs
+  are intentional. Optional LTTng tracing remains unavailable; native graphical
+  association validation remains false.
+- Linux provenance SHA-256:
+  `f70fb3afa7da5922c768a2ae808a722dd580782331840bab3f2fe715bd38d770`.
+  Exact LF source archive SHA-256:
+  `09de03e317795f4435563204d065a4ba8d03d2e43f50cd4727eb7560cb55aab5`.
+  Native run log SHA-256:
+  `eed4d3875c8de28bc8a40d7e078fdd13f9119c6dfc4cacac67798c253bd9186c`.
+- A separate ignored pinned replacement-runtime experiment successfully built
+  a baseline and genuinely modified libfuse, relinked and repacked the retained
+  prior application payload, preserving all 1,133 file/mode/link entries.
+  This is a different native runtime identity from the selected vendor binary.
+  Its source-only review candidate is 280,350,720 bytes with 366 regular members,
+  SHA-256 `dbc71e8b913d3dc35ac5978e303731fba457b847446d9c0c7e89569e7677118d`.
+  Outer member inspection excludes toolchain, APK/rootfs, app and native-object
+  binaries. Portable recipes, compatible recipient terms, dated preferred-source
+  notice, a fresh adopted baseline, native source review and production identity
+  integration remain open. The separate private toolchain aggregate is not a
+  redistributable source asset. Neither experiment nor candidate clears the
+  selected runtime or changes the blocked public AppImage gate.
+
+### Retained earlier package baseline
+
 Package validation source: `9eec7b825c0052299beccb844c544aea875490c3`.
 Source tree: `33bb4bf61a797b490408f9b47cbdee939fd3f67b`.
-This identifies package preparation, not functional acceptance.
+These earlier artifacts are retained privately; they precede the World/Voice and
+desktop metadata corrections and do not establish current functional acceptance.
 
 - Final Windows Store and Free builds passed with zero managed warnings/errors,
   actual 1.0.0/candidate assembly metadata and the correct immutable channel,
