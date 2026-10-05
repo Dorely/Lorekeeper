@@ -316,6 +316,10 @@ an ephemeral signer, verifies CMS integrity, and deletes certificate and private
 key without trusting or installing the package. `-CheckOnly` performs neither
 package nor certificate operations. Output stays under ignored
 `.artifacts/msix/store/` or `.artifacts/msix/local-validation/`.
+Channel and informational-version inspection uses bounded passive PE metadata,
+never loads the application assembly, and closes the reader and stream before
+any later package build in the same PowerShell process. Malformed metadata or
+unexpected framework attribute constructors fail closed.
 MakeAppx runs semantic validation without `/nv`. The manifest deliberately
 uses the full-trust desktop model; it does not imply AppContainer confinement.
 Source SemVer maps to MSIX `major+1.minor.patch.0`.

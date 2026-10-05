@@ -260,27 +260,94 @@ function Export-PackageLogo
     }
 }
 
-function Get-StoreChannelMetadata
+function Get-PackagedAssemblyMetadata
 {
     param([Parameter(Mandatory)][string]$AssemblyPath)
 
+    $stream = $null
+    $peReader = $null
     try
     {
-        $assembly = [System.Reflection.Assembly]::LoadFrom($AssemblyPath)
-        $values = @(
-            $assembly.GetCustomAttributesData() |
-                Where-Object {
-                    $_.AttributeType.FullName -eq 'System.Reflection.AssemblyMetadataAttribute' -and
-                        $_.ConstructorArguments.Count -eq 2 -and
-                        [string]$_.ConstructorArguments[0].Value -eq 'LorekeeperDistributionChannel'
-                } |
-                ForEach-Object { [string]$_.ConstructorArguments[1].Value }
-        )
-        return $values
+        # Read metadata only: loading the application assembly keeps its DLL mapped
+        # and prevents a later Windows package build in the same PowerShell process.
+        $stream = [System.IO.File]::Open($AssemblyPath, [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        if ($stream.Length -le 0 -or $stream.Length -gt 64MB)
+        {
+            throw 'The packaged application assembly exceeds the 64 MiB inspection limit.'
+        }
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream,
+            [System.Reflection.PortableExecutable.PEStreamOptions]::LeaveOpen)
+        if (-not $peReader.HasMetadata -or $peReader.PEHeaders.CorHeader.MetadataDirectory.Size -le 0 -or
+            $peReader.PEHeaders.CorHeader.MetadataDirectory.Size -gt 16MB)
+        {
+            throw 'The packaged application must contain CLI metadata of at most 16 MiB.'
+        }
+        $reader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader,
+            [System.Reflection.Metadata.MetadataReaderOptions]::None)
+        if (-not $reader.IsAssembly -or $reader.GetString($reader.GetAssemblyDefinition().Name) -cne 'Lorekeeper')
+        {
+            throw 'The packaged input must be the Lorekeeper assembly.'
+        }
+        $attributes = $reader.GetAssemblyDefinition().GetCustomAttributes()
+        if ($attributes.Count -gt 256) { throw 'The packaged application has too many assembly attributes.' }
+        $channels = [System.Collections.Generic.List[string]]::new()
+        $versions = [System.Collections.Generic.List[string]]::new()
+        foreach ($attributeHandle in $attributes)
+        {
+            $attribute = $reader.GetCustomAttribute($attributeHandle)
+            if ($attribute.Constructor.Kind -ne [System.Reflection.Metadata.HandleKind]::MemberReference) { continue }
+            $constructor = $reader.GetMemberReference([System.Reflection.Metadata.MemberReferenceHandle]$attribute.Constructor)
+            if ($constructor.Parent.Kind -ne [System.Reflection.Metadata.HandleKind]::TypeReference) { continue }
+            $attributeType = $reader.GetTypeReference([System.Reflection.Metadata.TypeReferenceHandle]$constructor.Parent)
+            $typeName = $reader.GetString($attributeType.Name)
+            if ($reader.GetString($attributeType.Namespace) -cne 'System.Reflection' -or
+                $typeName -cnotin @('AssemblyMetadataAttribute', 'AssemblyInformationalVersionAttribute')) { continue }
+            if ($attributeType.ResolutionScope.Kind -ne [System.Reflection.Metadata.HandleKind]::AssemblyReference)
+            {
+                throw 'Packaged version/channel attributes must reference the framework assembly.'
+            }
+            $scope = $reader.GetAssemblyReference([System.Reflection.Metadata.AssemblyReferenceHandle]$attributeType.ResolutionScope)
+            $signature = $reader.GetBlobReader($constructor.Signature)
+            $expectedSignature = if ($typeName -ceq 'AssemblyMetadataAttribute') { '2002010E0E' } else { '2001010E' }
+            if ($reader.GetString($scope.Name) -cne 'System.Runtime' -or
+                [Convert]::ToHexString($reader.GetBlobBytes($scope.PublicKeyOrToken)) -cne 'B03F5F7F11D50A3A' -or
+                $reader.GetString($constructor.Name) -cne '.ctor' -or
+                $signature.Length -ne ($expectedSignature.Length / 2) -or
+                [Convert]::ToHexString($reader.GetBlobBytes($constructor.Signature)) -cne $expectedSignature)
+            {
+                throw 'Packaged version/channel attributes have an unexpected framework constructor.'
+            }
+            $blob = $reader.GetBlobReader($attribute.Value)
+            if ($blob.Length -gt 4KB -or $blob.ReadUInt16() -ne 1)
+            {
+                throw 'Packaged version/channel attributes have malformed or oversized values.'
+            }
+            $value = $blob.ReadSerializedString()
+            if ($typeName -ceq 'AssemblyMetadataAttribute')
+            {
+                $metadataValue = $blob.ReadSerializedString()
+                if ($value -ceq 'LorekeeperDistributionChannel') { $channels.Add($metadataValue) }
+            }
+            else { $versions.Add($value) }
+            if ($blob.ReadUInt16() -ne 0 -or $blob.RemainingBytes -ne 0)
+            {
+                throw 'Packaged version/channel attributes must have no named or trailing arguments.'
+            }
+        }
+        return [pscustomobject]@{
+            DistributionChannels = $channels.ToArray()
+            InformationalVersions = $versions.ToArray()
+        }
     }
     catch
     {
-        throw "Could not inspect distribution-channel metadata in $AssemblyPath. $($_.Exception.Message)"
+        throw "Could not inspect packaged assembly metadata in $AssemblyPath. $($_.Exception.Message)"
+    }
+    finally
+    {
+        try { if ($null -ne $peReader) { $peReader.Dispose() } }
+        finally { if ($null -ne $stream) { $stream.Dispose() } }
     }
 }
 
@@ -303,20 +370,18 @@ foreach ($requiredInput in @(
     }
 }
 
-$storeMetadata = @(Get-StoreChannelMetadata (Join-Path $windowsUnpackedDirectory 'resources\bin\Lorekeeper.dll'))
-if ($storeMetadata.Count -ne 1 -or $storeMetadata[0] -ne 'Store')
+$managedRoot = Join-Path $windowsUnpackedDirectory 'resources\bin'
+$assemblyMetadata = Get-PackagedAssemblyMetadata (Join-Path $managedRoot 'Lorekeeper.dll')
+$storeMetadata = @($assemblyMetadata.DistributionChannels)
+if ($storeMetadata.Count -ne 1 -or $storeMetadata[0] -cne 'Store')
 {
     throw "MSIX requires exactly one Store distribution-channel metadata value; found '$($storeMetadata -join ', ')'."
 }
 
-$managedRoot = Join-Path $windowsUnpackedDirectory 'resources\bin'
 Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot -ManagedRoot $managedRoot -DesktopRoot $windowsUnpackedDirectory
 $sourceVersion = Get-LorekeeperVersion (Join-Path $repoRoot 'Lorekeeper\Lorekeeper.csproj')
-$assembly = [System.Reflection.Assembly]::LoadFrom((Join-Path $managedRoot 'Lorekeeper.dll'))
-$assemblyVersion = $assembly.GetCustomAttributesData() |
-    Where-Object { $_.AttributeType.FullName -eq 'System.Reflection.AssemblyInformationalVersionAttribute' } |
-    ForEach-Object { ([string]$_.ConstructorArguments[0].Value).Split('+')[0] }
-if (@($assemblyVersion).Count -ne 1 -or $assemblyVersion -ne $sourceVersion)
+$assemblyVersion = @($assemblyMetadata.InformationalVersions | ForEach-Object { $_.Split('+')[0] })
+if ($assemblyVersion.Count -ne 1 -or $assemblyVersion[0] -cne $sourceVersion)
 {
     throw 'The unpacked application version must match the current source version.'
 }

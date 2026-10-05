@@ -31,6 +31,11 @@ listing. See [store-listing.md](store-listing.md) for prepared copy, free pricin
 capability explanations, privacy link, screenshot/trailer requirements, and the
 later owner-operated upload.
 
+Channel and informational-version checks read bounded PE metadata without
+loading application code. Inspection handles close on success and failure, so
+later packaging commands can replace the input DLL in the same PowerShell
+session.
+
 For disposable package-structure evidence with no real Store identity:
 
 ```powershell
