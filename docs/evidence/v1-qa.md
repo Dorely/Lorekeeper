@@ -75,6 +75,23 @@ old release repository are separate launch actions.
 
 ## Preparation fixes found during review
 
+- Read-only code/caller analysis established three World/Voice regressions:
+  same-project Voice `character` query changes retained the previous character,
+  and a failed writer registration left every recovery action disabled even
+  after the competing writer or fence ended; disposal also released a writer
+  after a failed save and could unblock dependent work. The focused correction routes
+  query changes through the existing save-before-selection guard and allows the
+  existing retry action to reacquire its exact target while input remains
+  disabled until ownership succeeds. It preserves dirty revision/content tokens,
+  serializes acquisition, and drains acquisition/saves before disposal. Disposal
+  releases only a clean writer; a failed draft remains an unreachable fence
+  blocker, and late reload callbacks cannot clear it. Text drafts have no local
+  recovery journal. Hard shutdown/circuit destruction does not promise draft
+  recovery; restart clears the blocker without recovering failed text.
+  Affected UI retesting remains pending after the physical Escape pause. The
+  prior `9eec7b8` package evidence is not functional acceptance of this corrected
+  source. Designed Page acquisition/disposal and journal recovery were also
+  reviewed in code; rapid navigation and restart acceptance remain pending.
 - Stable update discovery now rejects prerelease SemVer tags even when GitHub's
   release flag says stable. Main is the sole allowed update feed, and Linux
   discovery requires the exact AppImage and DEB names.

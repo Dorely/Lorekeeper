@@ -7,16 +7,16 @@
 <div class="d-flex flex-column h-100 gap-2">
     @if (EditTitle)
     {
-        <input class="form-control" aria-label="Title" value="@_title" @oninput="TitleChangedAsync" disabled="@(_frozen || _lease is null)" />
+        <input class="form-control" aria-label="Title" value="@_title" @oninput="TitleChangedAsync" disabled="@EditingLocked" />
     }
     <textarea class="form-control flex-grow-1" style="min-height: 20rem; resize: vertical"
               aria-label="@Label" placeholder="@Placeholder" value="@_body"
-              @oninput="BodyChangedAsync" disabled="@(_frozen || _lease is null)"></textarea>
+              @oninput="BodyChangedAsync" disabled="@EditingLocked"></textarea>
     @if (_error is not null)
     {
         <div class="alert alert-danger" role="alert">@_error Your local text is retained.
-            <button class="btn btn-sm btn-outline-secondary" @onclick="SaveAsync" disabled="@(_frozen || _lease is null)">Retry save</button>
-            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmReload = true" disabled="@(_frozen || _lease is null)">Reload saved text</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="RetrySaveAsync" disabled="@(_frozen || _acquiring || _disposing || _disposed)">@(_lease is null ? "Retry editing" : "Retry save")</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmReload = true" disabled="@EditingLocked">Reload saved text</button>
         </div>
     }
     <span class="small text-muted">@(_dirty ? "Unsaved" : "Saved")</span>
@@ -38,6 +38,7 @@
     private readonly Guid _session = Guid.NewGuid();
     private readonly Guid _writer = Guid.NewGuid();
     private readonly SemaphoreSlim _saveGate = new(1);
+    private readonly SemaphoreSlim _writerGate = new(1);
     private IAsyncDisposable? _lease;
     private AuthoringTargetReferenceV1 _target = null!;
     private Func<NarrativeTextSnapshot, Task<NarrativeTextSnapshot>> _save = null!;
@@ -52,13 +53,35 @@
     private bool _confirmReload;
     private bool _frozen;
     private bool _initialized;
+    private bool _acquiring;
+    private bool _disposing;
+    private bool _disposed;
+    private bool EditingLocked => _frozen || _lease is null || _disposing || _disposed;
 
     protected override async Task OnParametersSetAsync()
     {
+        if (_disposing || _disposed) return;
         if (!_initialized)
         {
             _initialized = true;
             _target = new(ProjectId, TargetId);
+            await AcquireWriterAsync();
+        }
+        ReadSavedParameters();
+    }
+
+    private void ReadSavedParameters()
+    {
+        if (!_dirty) { _title = Title; _body = Body; _savedBody = Body; _revision = Revision; _save = Save; }
+    }
+
+    private async Task AcquireWriterAsync()
+    {
+        await _writerGate.WaitAsync();
+        try
+        {
+            if (_lease is not null || _disposing || _disposed) return;
+            _acquiring = true;
             try
             {
                 _lease = await Fence.RegisterWriterAsync(new(_target, _session, _writer,
@@ -67,32 +90,61 @@
                         AuthoringWriterFlushResult result = null!;
                         await InvokeAsync(async () =>
                         {
+                            if (_disposed)
+                            {
+                                result = new(_saved, _dirty, !_dirty, IsReachable: false);
+                                return;
+                            }
                             _frozen = true;
                             await SaveAsync();
                             result = new(_saved, _dirty, !_dirty, true, ErrorMessage: _error);
-                            StateHasChanged();
+                            if (!_disposing && !_disposed) StateHasChanged();
                         });
                         return result;
                     },
                     async _ => await InvokeAsync(async () =>
                     {
+                        if (_disposing || _disposed) return;
                         _frozen = false;
                         await OnResumed.InvokeAsync();
-                        StateHasChanged();
+                        if (!_disposing && !_disposed) StateHasChanged();
                     })));
+                _error = null;
             }
             catch (InvalidOperationException exception) { _error = exception.Message; }
         }
-        if (!_dirty) { _title = Title; _body = Body; _savedBody = Body; _revision = Revision; _save = Save; }
+        finally { _acquiring = false; _writerGate.Release(); }
+    }
+
+    private async Task RetrySaveAsync()
+    {
+        if (_frozen || _disposing || _disposed) return;
+        try
+        {
+            if (_lease is null)
+            {
+                if (!_dirty)
+                {
+                    await OnResumed.InvokeAsync();
+                    if (_disposing || _disposed) return;
+                    ReadSavedParameters();
+                }
+                await AcquireWriterAsync();
+            }
+            await SaveAsync();
+        }
+        catch (Exception exception) { _error = exception.Message; }
     }
 
     private async Task TitleChangedAsync(ChangeEventArgs args)
     {
+        if (EditingLocked) return;
         _title = args.Value?.ToString() ?? "";
         await ChangedAsync();
     }
     private async Task BodyChangedAsync(ChangeEventArgs args)
     {
+        if (EditingLocked) return;
         _body = args.Value?.ToString() ?? "";
         await ChangedAsync();
     }
@@ -113,7 +165,7 @@
         await _saveGate.WaitAsync();
         try
         {
-            if (!_dirty || _lease is null) return;
+            if (_disposed || !_dirty || _lease is null) return;
             var sequence = _sequence;
             var result = await _save(new(_title, _body, _revision, _savedBody));
             _revision = result.Revision;
@@ -127,10 +179,13 @@
     }
     private async Task ReloadSavedAsync()
     {
+        if (EditingLocked) return;
         await _saveGate.WaitAsync();
         try
         {
+            if (EditingLocked) return;
             await OnResumed.InvokeAsync();
+            if (_disposing || _disposed) return;
             _dirty = false;
             _saved = _sequence;
             _error = null;
@@ -152,7 +207,26 @@
     }
     public async ValueTask DisposeAsync()
     {
+        if (_disposing || _disposed) return;
+        _disposing = true;
+        await _writerGate.WaitAsync();
+        _writerGate.Release();
         await SaveAsync();
-        if (_lease is not null) await _lease.DisposeAsync();
+        await _saveGate.WaitAsync();
+        try
+        {
+            if (_lease is not null)
+            {
+                if (!_dirty)
+                    await _lease.DisposeAsync();
+                else
+                    Fence.UpdateWriterState(new(_target, _session, _writer, 0,
+                        _sequence, _sequence, _saved,
+                        IsDirty: true, IsRecoverable: false, IsReachable: false));
+            }
+            _lease = null;
+            _disposed = true;
+        }
+        finally { _saveGate.Release(); }
     }
 }

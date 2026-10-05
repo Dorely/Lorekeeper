@@ -170,6 +170,19 @@ ownership. Profile writes compare the exact previously read content; sample
 writes compare their persisted Revision. Manual and assistant edits use the same
 services. NarrativeTextEditor registers with the authoring fence and blocks
 dependent work while a failed or unacknowledged save remains dirty.
+An ownership or active-fence rejection keeps text input disabled. The existing
+retry action refreshes clean saved text and reacquires the same target without
+releasing another writer or changing a dirty draft's revision/content token.
+Acquisition and save gates drain before disposal releases a clean owned lease;
+failed disposal saves retain a dirty, unrecoverable, unreachable fence writer
+that blocks dependent work. Late input, reload, and resume callbacks cannot
+reopen a disposed editor or clear that retained failure. Text drafts have no
+local recovery journal: hard shutdown or circuit destruction does not promise
+draft recovery. Restart clears an unreachable blocker without recovering its
+failed draft. Same-project
+`character` query navigation uses the same save-before-selection path as manual
+Voice selection. Ordinary refreshes with an unchanged query preserve the
+author's current sample/profile selection.
 
 ### Project creation and profile indexing
 

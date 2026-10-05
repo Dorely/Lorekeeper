@@ -56,6 +56,7 @@
     private WritingSample? _current;
     private Guid? _characterId;
     private Guid? _loadedProject;
+    private Guid? _loadedCharacterQuery;
     private bool _charactersView;
     private string? _error;
     private StoryEntity? CurrentCharacter => _characters.FirstOrDefault(value => value.Id == _characterId);
@@ -63,11 +64,23 @@
     private string? CurrentBody => _charactersView && CurrentCharacter is { } character ? VoiceProfileService.Read(character) : _current?.Body;
     protected override async Task OnParametersSetAsync()
     {
-        if (Project is null || _loadedProject == Project.Id) return;
-        _loadedProject = Project.Id;
-        _characterId = CharacterId;
-        _charactersView = CharacterId.HasValue;
-        await ReloadAsync();
+        if (Project is null) return;
+        if (_loadedProject != Project.Id)
+        {
+            _loadedProject = Project.Id;
+            _loadedCharacterQuery = CharacterId;
+            _characterId = CharacterId;
+            _charactersView = CharacterId.HasValue;
+            await ReloadAsync();
+            return;
+        }
+        if (_loadedCharacterQuery == CharacterId) return;
+        var projectId = Project.Id;
+        var characterId = CharacterId;
+        if (!await CanLeaveAsync() || Project?.Id != projectId || CharacterId != characterId) return;
+        _loadedCharacterQuery = characterId;
+        _characterId = characterId;
+        _charactersView = characterId.HasValue;
     }
     private async Task ReloadAsync()
     {
