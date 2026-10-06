@@ -170,7 +170,9 @@ try
         '-b:v','50M','-maxrate','50M','-bufsize','100M','-g','15','-keyint_min','15','-sc_threshold','0','-bf','2','-x264-params','open-gop=0:cabac=1:b-adapt=0:nal-hrd=vbr',
         '-c:a','aac','-profile:a','aac_low','-ar','48000','-ac','2','-b:a','384k','-movflags','+faststart','-use_editlist','0',$masterPath)
     $githubPath = Join-Path $exportRoot 'lorekeeper-v1-github.mp4'
-    $videoArguments = @('-hide_banner','-loglevel','warning','-y','-i',$masterPath,'-t','60','-vf','scale=1280:720','-c:v','libx264','-preset','slow',
+    # Without edit lists the master's video starts after its B-frame delay, so a 60-second cut drops its last
+    # frames. Take all 1800 frames and restamp both streams from zero to keep a constant 30/1 rate.
+    $videoArguments = @('-hide_banner','-loglevel','warning','-y','-i',$masterPath,'-t','60.1','-frames:v','1800','-vf','setpts=N/30/TB,scale=1280:720','-af','asetpts=N/SR/TB','-c:v','libx264','-preset','slow',
         '-profile:v','high','-pix_fmt','yuv420p','-b:v','1000k','-passlogfile','github-pass')
     $nullTarget = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'NUL' } else { '/dev/null' }
     Invoke-TrailerCommand ffmpeg ($videoArguments + @('-pass','1','-an','-f','null',$nullTarget))
