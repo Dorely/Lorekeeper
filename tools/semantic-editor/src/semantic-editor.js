@@ -3032,15 +3032,17 @@ export function operationsForTarget(operations, ordinal = 0) {
         operation.targetOrdinal ?? operation.TargetOrdinal ?? 0) === ordinal);
 }
 
-function applyAuthoringOperations(view, operations) {
+function applyAuthoringOperations(view, operations, imageById = new Map(), designedPageById = new Map()) {
     const positionForIndex = (doc, index) => {
         let position = 0;
         for (let current = 0; current < Math.max(0, Math.min(index, doc.childCount)); current++)
             position += doc.child(current).nodeSize;
         return position;
     };
-    const nodeFromWire = operation => documentFromDomain({content: [operation.canonicalBlock]}).firstChild;
-    const insertNodeFromWire = operation => documentFromDomain({content: [
+    const hydratedFromWire = domain => documentFromDomain(hydrateDesignedPageSummaries(
+        hydrateFigureImageUrls(structuredClone(domain), imageById), designedPageById));
+    const nodeFromWire = operation => hydratedFromWire({content: [operation.canonicalBlock]}).firstChild;
+    const insertNodeFromWire = operation => hydratedFromWire({content: [
         String(operation.kind).toLowerCase() === "insertdesignedpageplacement"
             ? {id: operation.placementBlockId, type: "designedPage", styleRole: "designed-page", designedPageId: operation.pageId, content: []}
             : {
@@ -3062,7 +3064,7 @@ function applyAuthoringOperations(view, operations) {
                 ? transaction.replaceWith(existing, existing + view.state.doc.nodeAt(existing).nodeSize, replacement)
                 : transaction.insert(positionForIndex(view.state.doc, operation.index), replacement);
         } else if (kind === "replacerichdocument" || kind === "insertsemanticfragment") {
-            const replacement = documentFromDomain(kind === "insertsemanticfragment"
+            const replacement = hydratedFromWire(kind === "insertsemanticfragment"
                 ? insertSemanticFragment(domainFromDocument(view.state.doc, operation.position.documentId, 0),
                     operation.position, operation.richDocument, operation.secondBlockId)
                 : operation.richDocument);
@@ -3249,7 +3251,9 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             = authoringSequenceWatermarks(Number(authoringSession?.nextSequence || 0)));
         const target = authoringSession?.targets?.find(item => item.targetId === authoringTarget.targetId);
         if (target?.manuscriptJson) {
-            initial = JSON.parse(target.manuscriptJson);
+            initial = hydrateDesignedPageSummaries(
+                hydrateFigureImageUrls(JSON.parse(target.manuscriptJson), imageById),
+                designedPageById);
             manuscriptId = initial.manuscriptId;
             revision = initial.revision;
             confirmedDocument = structuredClone(initial);
@@ -4483,7 +4487,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             historyMoveInFlight = true;
             applyEffectiveReadOnly();
             applyingAuthoringHistory = true;
-            try { applyAuthoringOperations(view, transition.inverse); }
+            try { applyAuthoringOperations(view, transition.inverse, imageById, designedPageById); }
             finally { applyingAuthoringHistory = false; }
             const selectionPoint = transition.beforeSelection?.targets?.[0];
             if (selectionPoint?.blockId)
@@ -4516,7 +4520,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
         if (!visibleAlreadyApplied) {
             applyingAuthoringHistory = true;
-            try { applyAuthoringOperations(view, visibleOperations); }
+            try { applyAuthoringOperations(view, visibleOperations, imageById, designedPageById); }
             finally { applyingAuthoringHistory = false; }
         }
         confirmedHistoryCursor = nextCursor;
@@ -4581,7 +4585,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 // The server cursor rejected the request. Restore the pre-click
                 // visible state instead of silently adopting another document.
                 applyingAuthoringHistory = true;
-                try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward); }
+                try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward, imageById, designedPageById); }
                 finally { applyingAuthoringHistory = false; }
                 confirmedHistoryCursor = redoDirection ? confirmedHistoryCursor - 1 : confirmedHistoryCursor + 1;
                 pendingVisibleHistoryMove = false;
@@ -4600,7 +4604,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             return true;
         } catch (error) {
             applyingAuthoringHistory = true;
-            try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward); }
+            try { applyAuthoringOperations(view, redoDirection ? transition.inverse : transition.forward, imageById, designedPageById); }
             finally { applyingAuthoringHistory = false; }
             confirmedHistoryCursor = redoDirection ? confirmedHistoryCursor - 1 : confirmedHistoryCursor + 1;
             pendingVisibleHistoryMove = false;
