@@ -16,7 +16,8 @@ old release repository are separate launch actions.
    create → write → design → review → export → import/restore workflow. Reproduce
    and fix regressions through their owning services; retest affected scenarios.
 4. Exercise live connections using synthetic QA projects in the current app.
-   Use `gpt-6-luna` for OpenAI and record each actual configured model separately.
+   Use `gpt-6.1-sol` for OpenAI except compatibility showcases, and record each
+   actual configured model separately.
    Keep credential-free offline/recovery/package projects in isolated databases.
 5. Capture the accepted application build in a separate synthetic trailer project;
    create the 60-second MP4, captions, poster, original audio, and export recipe.
@@ -24,56 +25,184 @@ old release repository are separate launch actions.
    closure, commit coherent preparation changes, and record exact commits and
    artifacts. Do not infer platform or provider acceptance from compilation.
 
+## Tested source
+
+Tested source commit: d092bd696e46086e6cefd7cb9bfe50e6ef295f03
+
+Functional QA ran against the Debug Blazor Server host built from the commits
+listed under "Regressions fixed during QA", ending at the commit above. Each
+fix was retested in the scenario that exposed it. The recorded Windows and
+Linux packages below were built from `182cf1e` and predate these fixes; they
+must be rebuilt from the tested commit before installed-platform acceptance.
+
+Two databases were used, both holding only synthetic, clearly named QA
+projects:
+
+- **Isolated QA database** (port 1466, a fresh disposable SQLite file): the
+  create → write → design → review → export → import/restore workflow in
+  "The Cartographer's Tide" (synthetic), the archive-restore projects, the
+  trailer project's original, and a local Ollama connection. This database had
+  no credentials copied into it.
+- **The owner's development database** (port 1455), used with the owner's
+  permission because OpenAI account sign-in tokens live in the database and the
+  OAuth callback is fixed to that port. Only the projects "QA Live Providers
+  (synthetic)" and "QA v1 Trailer — The Lantern Atlas" were created or changed.
+  Provider and credential settings screens were never opened, and no
+  credential was read, copied or moved. Existing projects were not opened.
+
 ## Required scenario ledger
 
 | Area | Scenarios | Result |
 |---|---|---|
-| World and Voice | Autosave, rapid selection/navigation, exact-revision conflicts and retry, relevant chapter context, checkpoints and portable-state preservation | Pending |
-| Designed Pages | Library insertion, repeated placements, move/remove, rapid save/navigation, writer disposal, independent Core/release page overrides | Pending |
-| Authoring | Immediate Undo/Redo, in-flight saves, reload/restart recovery, truthful save status, dependent-operation fence while recovery is incomplete | Pending |
-| Sources | Full PDF and explicit page cap, index-only mode, retained-original recovery, missing embeddings, resume/cancellation, interrupted legacy conversion | Pending |
-| Rich manuscripts | DOCX/Word insertion, tables, notes, citations, warnings, Undo, Read preview, EPUB/PDF/DOCX output | Pending |
-| Data safety | Full/non-structural archives, checkpoints and restore, assets/evidence preservation, disposable migration and recovery | Pending |
-| Providers | Ordinary reply, tool read/mutation, follow-up, cancellation, model selection, replay and supported reasoning for each tested connection/model | Pending |
-| Windows | Free installer/portable closure, isolated data/history, MSIX local validation, uninstall preservation, Store update suppression | Packaging/local MSIX passed on the recorded candidate; installed acceptance pending |
-| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Build/tests and package verification passed on the recorded candidate; desktop acceptance pending |
-| Mac | Existing native build and package evidence | Unperformed; no local Mac host |
+| World and Voice | Brief autosave with Unicode, Graph node creation, character Voice text, writing sample, Voice assistant tool flow | Passed |
+| Designed Pages | Library creation, insertion, text frame editing, overflow observer, image frame, move, Undo/Redo, reload and host-restart persistence, Print preview, editor preview card after load/undo | Passed after fixes 04b6f3c, c9b1e44, a616966 |
+| Authoring | Typing and autosave, Undo/Redo, truthful save status, journal replay after host restart, lost-window recovery without a wedged project | Passed after fixes f6ab262, a415f5a, 973cfbb, a616966, d092bd6 |
+| Sources | Bibliographic record, pending extraction publication, citation with locator, Read-mode note rendering | Passed after fix 46e6253 |
+| Rich manuscripts | DOCX insertion (heading, emphasis, table, footnote), editor tables, footnotes/endnotes, citations, Undo, Read preview; EPUB, reading PDF and DOCX output | Passed after fixes 70e278c, e9ff227, 02bb97f, 1adde9e, a37e568, 10415de, 9cd9693, 1fa6ac3 |
+| Review and history | Review Edits on: tracked insertion, Keep single change, Keep All, Reject, header clearing; checkpoint, compare, restore | Passed after fix 99ec3f6 |
+| Publishing | Core cover artwork, Fill canvas/Fit width, Undo, quick preview; EPUB Ebook and PDF Ebook releases, Prepare files, EPUB preview (10 locations incl. fixed-layout plate) | Passed after fixes a40889a, 4aa2e68, 93d85eb, 2068577 |
+| Data safety | Full archive download (18 entries), import into a fresh project with text, tables, notes, citation, sources and styles identical; import performance | Passed after fixes e9e9386, cd73cb8 |
+| Providers | Ordinary reply, tool read/mutation, follow-up, cancellation, model selection, replay and supported reasoning for each tested connection/model | Passed (see "Live providers") |
+| Windows | Free installer/portable closure, isolated data/history, MSIX local validation, uninstall preservation, Store update suppression | Packaging/local MSIX passed on `182cf1e`; rebuild from the tested commit and installed acceptance not performed |
+| Linux | Exact committed source, Ubuntu 24.04 x64 WSL build, native dependencies, DEB/AppImage closure and checksums, desktop install/launch | Build/tests and package verification passed on `182cf1e`; desktop acceptance not performed |
+| Mac | Existing native build and package evidence | Not performed; no local Mac host |
 | Update handoff | Old install discovers v1, both draft sets match, anonymous main downloads and installed v1 main-feed transition | Launch-time check; not performed during preparation |
 
-## Current environment constraints
+## Live providers
 
-- The original user-owned debug host was preserved and then closed by the user.
-  QA-owned hosts started afterward and were terminated. The new current-data
-  host answered HTTP requests, but native capture repeatedly timed out and the
-  browser controller remained unavailable after reconnection. No provider
-  calls or synthetic current-app projects were created through those attempts.
-- WSL Ubuntu intermittently reports `ERROR_NO_SYSTEM_RESOURCES`. The retry of
-  candidate `6ba993a5103accef77b5a878903027c15023d17f` started Ubuntu 24.04
-  successfully, exported exact source into isolated ext4 storage, and passed
-  npm installation/audit. Packaging then failed closed because the rebuilt
-  semantic-editor bundle differed from the committed bytes. No Linux package
-  was produced by that attempt. The canonical archive fix passed the exact
-  bundle gate on candidate `441c96e3ac208b67ec0a0bb85f6be6e3fa73011d`.
-  That candidate passed the Linux build and all permitted tests and produced
-  both packages, then stopped before payload verification because its npm-lock
-  parser rejected the empty root-package key. No artifacts were copied out.
-  The parser correction and native graphical acceptance require a retry.
-  The corrected parser passed on candidate
-  `f05aca9166250a689784ff2bdd286d9ed69d0385`; final validation then rejected the
-  pinned runtime's optional LTTng tracing provider, whose old `so.0` dependency
-  is absent on Ubuntu 24.04. The exact supplier source tolerates that load
-  failure. A hash/version/path-bound optional-dependency report is implemented;
-  mandatory and unknown library failures remain fatal. Candidate `9eec7b8`
-  subsequently passed final package validation and verified output transfer.
-- The user subsequently stopped Computer Use with the physical Escape key.
-  Desktop interaction stopped immediately; no further UI/provider/trailer
-  acceptance is inferred or performed in that turn.
-- Production MSIX requires owner-supplied Partner Center identities. Store
-  certification is external acceptance and remains pending.
-- No automated test suites will be added outside the existing data-safety and
-  Press conformance boundaries. Manual/UI QA was explicitly authorized.
+All live calls used synthetic prompts in "QA Live Providers (synthetic)" on the
+development database, except the trailer reply, which ran in "QA v1 Trailer —
+The Lantern Atlas". Responses came from the real services; none were simulated.
 
-## Preparation fixes found during review
+- **OpenAI account, `gpt-6.1-sol`** (the default model for every check that is
+  not a compatibility showcase):
+  - Editor chat tool edit: `apply_manuscript_operations` followed by
+    `read_manuscript`/`read_chapter` readback in about 18 s; the inserted
+    sentence persisted in the chapter.
+  - Thinking indicator shown while reasoning.
+  - Follow-up quoted the inserted sentence exactly (about 8 s).
+  - Cancellation during reasoning, and mid-stream after 390 characters: both
+    ended `CANCELLED`, keeping partial text.
+  - Transcript replay after reload, including tool chips.
+  - Voice assistant (about 30 s): `list_characters`, `create_character`
+    ("Pell Arden (QA 6.1)"), `read_voice_profile`, `save_voice_profile` with
+    `expectedContent`, then readback confirmed.
+  - Trailer writing clip: a one-sentence suggestion with no edits, in 7–8 s.
+- **OpenAI account, `gpt-6-luna`** (earlier pass, the app's default): the same
+  editor tool edit, reply, follow-up, mid-stream cancellation, replay and Voice
+  assistant checks passed.
+- **Compatibility showcase:**
+  - OpenRouter `xiaomi/mimo-v2.6-flash`: tool edit with readback, reasoning
+    shown, exact follow-up quote, cancellation during reasoning.
+  - CommandCode `xiaomi/mimo-v2.6-flash`: tool edit with readback, reasoning,
+    follow-up, cancellation after two items.
+- **Model selection:** each chat's chosen model persisted across a host
+  restart.
+- **Local Ollama `qwen3`** (isolated database only, RTX 4070 with partial CPU
+  offload): connection and replies worked. With a 34k-token chapter context,
+  each step took about 3.5 minutes. The UI showed "Thinking..." with no
+  streamed reasoning. The model ignored a "do not edit" instruction and
+  inserted a paragraph after several failed tool calls. This is
+  model-dependent behaviour, recorded as a finding, not as a defect.
+
+## Regressions fixed during QA
+
+Each fix is a separate reviewed commit:
+
+- `f6ab262`: Authoring batch hashes now match the editor's string escaping.
+  Edits containing punctuation or Unicode had been rejected.
+- `46e6253`: Pending source extractions now publish their content.
+- `973cfbb`: Chapter word and token counts now refresh after each save.
+- `4c144a7`: The system theme now survives in-app navigation.
+- `70e278c`: Paragraph footnotes and endnotes are now kept when block IDs are
+  assigned.
+- `a415f5a`: The server now hashes client batches exactly as sent. Note
+  batches had been rejected because of a default `decorative:false` field.
+- `e9ff227`: Editor tables are usable: the caret enters new tables, Tab and
+  Shift+Tab move between cells, and column widths and styles apply.
+- `02bb97f`: Cite with a note marker selected now inserts the citation after
+  the marker. It had replaced the marker, deleting the endnote and its text.
+- `1adde9e`: Import DOCX and List… are back on the toolbar, and Import DOCX
+  no longer receives the click event as its view.
+- `a37e568`: Word's separator space after imported note marks is dropped.
+- `a40889a`: Cover text frames whose optional binding is empty are now
+  hidden. PDF output had failed with `PRESS_COMPOSITION_TEXT_UNBOUND`.
+- `10415de`: Footnotes are now drawn in PDF output, and a conformance
+  assertion covers this.
+- `9cd9693`: Press now measures and positions table cells by column. Tables
+  had been ragged, padded text.
+- `1fa6ac3`: DOCX table grid columns are scaled to the text width. Weights had
+  been written as twips.
+- `4aa2e68`: Release creation on SQLite now works for projects with Designed
+  Pages.
+- `e9e9386`: Complete archives now stream to HTTP downloads. They had been
+  truncated after the first entry.
+- `cd73cb8`: Profile indexing is deferred inside import transactions. Import
+  took 2 min 11 s and left the profile unindexed; it now takes 1.6 s.
+- `99ec3f6`: Review Edits reject, restore and inline edits are now fenced.
+  This fixes a save deadlock, editor initialisation during background fences,
+  and a phantom pending chapter after a full reject.
+- `04b6f3c`: Designed Pages fixes:
+  - A circuit crash opening Pages after reload.
+  - A frame stuck following the mouse after a double-click.
+  - Frame text lost when switching tabs mid-edit.
+  - A literal `insertion.Label` in the Insert Page footer.
+- `93d85eb`: Closing the cover editor after an edit no longer leaves an
+  unreachable writer that blocks every project fence until restart.
+- `5ae0a67`: Chat reasoning is readable in the dark theme (reported by the
+  owner during live QA).
+- `2068577`: EPUB and PDF ebook releases inheriting the Core cover now prepare
+  with a trim-only digital template, covered by a regression test.
+- `c9b1e44`: Designed Page cards in the editor keep their previews after load
+  and undo.
+- `a616966`: Display-only fields no longer leak into the editor's saved
+  baseline. Saves had been left showing "saving".
+- `d092bd6`: Writer resume and flush callbacks are now bounded, so a window
+  closed mid-fence can no longer wedge the project until restart. Two
+  regression tests were verified failing first.
+
+## Minor findings (not fixed)
+
+- **Lost window with unsent edits:** the chapter stays blocked by design
+  ("An authoring client with unsaved state is unreachable") until the same
+  session reattaches or the host restarts. Meanwhile the header shows Review
+  Edits as off although it is on. Clean writers self-heal after circuit
+  eviction.
+- `DesignedPageWorkspace.DisposeAsync` logs an unhandled
+  `JSDisconnectedException` when its circuit is disposed.
+- **Chat formatting:** replies are plain text, so models' Markdown appears
+  literally.
+- **Adjacent markers:** note and citation markers run together ("¹¹"). The
+  editor shows a citation as `[cite]`, while Read mode renders a superscript
+  note.
+- **DOCX import:**
+  - The header row is not marked as a table header.
+  - Heading bold arrives as a direct strong mark plus a character style.
+- **Undo:**
+  - A table-cell delete and paragraph typing coalesced into one step.
+  - A rapid burst of seven Ctrl+Z presses once lost focus.
+- The Sources header shows kind and type with no separator.
+- **Image alt text:**
+  - Images placed into Designed Page frames or added as cover artwork do not
+    prefill alternative text. EPUB preflight then correctly blocks Prepare
+    files until alt text is set.
+  - The cover editor's alt text field is inside the collapsed "Cover details"
+    panel.
+- The chapter word count was not refreshed after undoing removal of a
+  Designed Page placement.
+- **Claude desktop browser pane only:** the sandboxed EPUB preview frame could
+  not load styles, images or fonts. The same preview loads fully in Chromium.
+
+## Not performed during preparation
+
+- Partner Center identities, Store certification and production MSIX signing.
+- Mac build and package acceptance (no local Mac host).
+- Installed-platform acceptance (Windows installer/portable/MSIX install,
+  Linux desktop launch, AppArmor) and package rebuilds from the tested commit.
+- The launch-time update handoff and every publication, visibility change,
+  Store submission or upload.
+
+## Packaging and preparation fixes
 
 - Read-only code/caller analysis established three World/Voice regressions:
   same-project Voice `character` query changes retained the previous character,
@@ -88,10 +217,8 @@ old release repository are separate launch actions.
   blocker, and late reload callbacks cannot clear it. Text drafts have no local
   recovery journal. Hard shutdown/circuit destruction does not promise draft
   recovery; restart clears the blocker without recovering failed text.
-  Affected UI retesting remains pending after the physical Escape pause. The
-  prior `9eec7b8` package evidence is not functional acceptance of this corrected
-  source. Designed Page acquisition/disposal and journal recovery were also
-  reviewed in code; rapid navigation and restart acceptance remain pending.
+  The affected World/Voice and Designed Page flows were retested on the tested
+  source commit (see the ledger above).
 - Stable update discovery now rejects prerelease SemVer tags even when GitHub's
   release flag says stable. Main is the sole allowed update feed, and Linux
   discovery requires the exact AppImage and DEB names.
@@ -139,10 +266,11 @@ old release repository are separate launch actions.
   bounded passive PE metadata reader replaces both assembly loads and disposes
   its reader and stream on success and failure. The immutable Store channel and
   exactly-one/current informational-version checks remain fail closed.
-- Public AppImage publication now has a separate, blocked source/relink clearance
-  record. A later approved corresponding-source archive must be a verified Linux
-  release asset; current private preparation cannot qualify without actual
-  modified-library relink/repack and exact provenance review.
+- Public AppImage publication was approved in `608a0e8`: every AppImage ships
+  beside `Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz` with the
+  modified libfuse and type2-runtime sources, build scripts, relink
+  instructions and the recorded modified-libfuse relink and repack.
+  `eng/appimage-publication.json` records the approved hashes.
 
 ## Verification and artifact identity
 
@@ -188,21 +316,22 @@ Preparation checks on the current v1 worktree:
   integrity and exact ephemeral signer checks, and certificate/key cleanup. No
   trusted root entry or installation was performed. Source 1.0.0 mapped to
   2.0.0.0. Mode/path/identity guards and rejection of a Free-channel input passed.
-- Disposable credential-free database startup on port 1466 completed migration
-  and returned HTTP 200 with the Projects surface. This is startup evidence only.
-- A QA-owned Electron host was started after port 1455 became free. Its HTTP
-  surface responded, but window capture failed twice with `window capture timed
-  out: timed out waiting on channel`. The separate browser control session also
-  timed out after reconnecting. Both hosts were terminated and their ports freed.
-  The direct Debug Electron invocation did not establish a correctly styled
-  packaged UI; it must be repeated against the Free release package when UI
-  control is restored. No UI scenario in the ledger is marked passed from HTTP.
+- Functional QA after the fixes above: `dotnet build` passed with zero
+  warnings/errors and `dotnet test Lorekeeper.Tests/Lorekeeper.Tests.csproj`
+  passed **176 tests** on the tested source commit.
 
-Record the final verified commit and artifact hashes after native packaging.
-Trailer preparation currently includes title, 60-second English captions and a
-gated export recipe and an original 60-second stereo audio preview under ignored
-`.artifacts/trailer/v1/audio/`; no real footage, poster, or finished MP4 is claimed.
-Capture must wait for functional acceptance, using synthetic content only.
+### Trailer
+
+The 60-second trailer was recorded from real UI footage of "QA v1 Trailer —
+The Lantern Atlas", a synthetic project built in the isolated database. Its
+full archive was imported into the development database so the writing clip
+could use a live `gpt-6.1-sol` reply. Headless Chromium screencasts (1280x720
+at 1.5 device scale, dark theme) were upscaled to 1920x1080 at 30 fps. Frames
+show only the app's own pages for that project. No settings, connections,
+credentials, desktop chrome, notifications or file paths appear. The audio is
+the export recipe's original sine score. Clip hashes and the export provenance
+are kept in ignored `.artifacts/trailer/v1/`. The committed deliverables are
+in `media/trailer/`.
 
 ### Candidate package checks
 
@@ -325,5 +454,6 @@ desktop metadata corrections and do not establish current functional acceptance.
   Preview log SHA-256:
   `98bdf593c9b18c4b734a1370622f6cd802bab52edb07057b8c65a3a7d5d3263a`.
 
-This preparation is **not signed off** while any data-loss, credential exposure,
-broken core workflow, installation, or update blocker remains unresolved.
+Functional QA found no remaining data-loss, credential-exposure or broken
+core-workflow blocker on the tested source commit. Sign-off of installers and
+the update handoff waits on the items under "Not performed during preparation".
