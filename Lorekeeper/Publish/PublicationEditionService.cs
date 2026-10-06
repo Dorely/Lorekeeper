@@ -807,7 +807,7 @@ public sealed class PublicationEditionService(
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.DesignedPageId.HasValue)
             .Select(block => block.DesignedPageId!.Value));
         compositionIds = compositionIds.Distinct().OrderBy(id => id).ToList();
-        var compositions = await db.DesignedPages.AsNoTracking()
+        var compositionCandidates = await db.DesignedPages.AsNoTracking()
             .Where(page => compositionIds.Contains(page.Id)
                 && (page.ScopeEditionId == null || page.ScopeEditionId == editionId))
             .OrderBy(page => page.Id)
@@ -815,16 +815,9 @@ public sealed class PublicationEditionService(
             {
                 page.Id,
                 page.Name,
-                // A publication target hashes only the exact effective
-                // content layer: the release override when present, otherwise
-                // Core. A release-only page never falls back to Core content.
+                page.ScopeEditionId,
                 Contents = page.Contents
-                    .Where(content => page.ScopeEditionId == editionId
-                        ? content.EditionId == editionId
-                        : content.EditionId == editionId || content.EditionId == null)
-                    .OrderByDescending(content => content.EditionId == editionId)
-                    .ThenBy(content => content.Id)
-                    .Take(1)
+                    .Where(content => content.EditionId == editionId || content.EditionId == null)
                     .Select(content => new
                 {
                     content.Id, content.EditionId, content.SemanticManuscriptJson, content.Revision,
@@ -835,6 +828,22 @@ public sealed class PublicationEditionService(
                 }),
             })
             .ToListAsync(cancellationToken);
+        // A publication target hashes only the exact effective content layer: the release override when
+        // present, otherwise Core. A release-only page never falls back to Core content. The layer is
+        // chosen in memory because SQLite cannot translate the correlated APPLY that choice needs.
+        var compositions = compositionCandidates
+            .Select(page => new
+            {
+                page.Id,
+                page.Name,
+                Contents = page.Contents
+                    .Where(content => page.ScopeEditionId != editionId || content.EditionId == editionId)
+                    .OrderByDescending(content => content.EditionId == editionId)
+                    .ThenBy(content => content.Id)
+                    .Take(1)
+                    .ToList(),
+            })
+            .ToList();
         var bibliography = await PublicationCitationDependencies.ReadAsync(db, projectId,
             chapters.Select(item => item.ManuscriptJson)
                 .Concat(publicationSections.Select(item => item.ManuscriptJson))
