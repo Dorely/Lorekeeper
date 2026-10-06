@@ -75,9 +75,19 @@ public static class PublicationTextBindings
         CompositionScene scene,
         IReadOnlyDictionary<string, string> bindings) => scene with
         {
-            Objects = scene.Objects.Select(item => item.Kind == CompositionObjectKind.Text
-                ? item with { TextBinding = Resolve(item.TextBinding, bindings) }
-                : item).ToList(),
+            Objects = scene.Objects.Select(item =>
+            {
+                if (item.Kind != CompositionObjectKind.Text)
+                    return item;
+                var text = Resolve(item.TextBinding, bindings);
+                // An empty optional field such as a subtitle hides its frame, as the canvas preview does;
+                // Press rejects a visible text frame with no text or content references.
+                return item with
+                {
+                    TextBinding = text,
+                    Visible = item.Visible && (string.IsNullOrWhiteSpace(item.TextBinding) || !string.IsNullOrWhiteSpace(text)),
+                };
+            }).ToList(),
         };
 
     public static bool UsesBinding(string? template, string key) =>

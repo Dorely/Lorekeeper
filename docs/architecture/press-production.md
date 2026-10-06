@@ -333,10 +333,11 @@ reading-copy and publication renders retain strict overflow validation.
 Publication renders reject meaningful images until alternative text or an
 explicit decorative decision is present. Core reading copies may retain an
 unresolved image as a warning-bearing private artifact so tagged reading order
-remains structurally valid. Cover scene text retains canonical bindings until
-Press materializes the resolved title, subtitle, author, spine, and Description;
-an optional binding or valid semantic content reference that resolves to empty
-is omitted without creating a text frame, while a frame with neither binding
+remains structurally valid. The application resolves cover scene bindings and
+inline tokens to the effective title, subtitle, author, spine, and Description
+before Press, hiding a frame whose binding resolves to empty; Press likewise
+omits a canonical binding or valid semantic content reference that resolves to
+empty without creating a text frame, while a visible frame with neither text
 nor reference remains a hard layout error. Application-side cover validation
 also decodes placed image assets before rendering and reports effective-DPI
 warnings using the selected profile threshold; final Press evidence remains
