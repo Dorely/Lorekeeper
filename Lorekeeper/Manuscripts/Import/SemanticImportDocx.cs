@@ -155,6 +155,8 @@ public sealed partial class SemanticImportService
             var content = new List<ManuscriptInline>();
             var figures = new List<ManuscriptBlock>();
             var fields = new Stack<Field>();
+            // Word separates its own note mark from the note text with a space; Lorekeeper draws the mark itself.
+            var trimAfterNoteMark = false;
             void Append(ManuscriptInline inline)
             {
                 if (fields.TryPeek(out var field)) { if (field.Results) field.Display.Add(inline); }
@@ -211,9 +213,21 @@ public sealed partial class SemanticImportService
                     foreach (var inline in ResolveField(field.Code.ToString(), field.Display, _builder, _sources)) Append(inline);
                     return;
                 }
+                if (inNote && (element.Name == W + "footnoteRef" || element.Name == W + "endnoteRef"))
+                {
+                    trimAfterNoteMark = true;
+                    return;
+                }
                 if (element.Name == W + "t" || element.Name == W + "tab" || element.Name == W + "br" || element.Name == W + "cr")
                 {
-                    Append(new() { Text = name is "br" or "cr" ? "\n" : name == "tab" ? "\t" : element.Value, Marks = Marks(inherited) });
+                    var text = name is "br" or "cr" ? "\n" : name == "tab" ? "\t" : element.Value;
+                    if (trimAfterNoteMark)
+                    {
+                        text = text.TrimStart();
+                        if (text.Length == 0) return;
+                        trimAfterNoteMark = false;
+                    }
+                    Append(new() { Text = text, Marks = Marks(inherited) });
                     return;
                 }
                 if (element.Name == W + "footnoteReference" || element.Name == W + "endnoteReference")
