@@ -1948,6 +1948,8 @@ else
             {
                 _current = updated;
                 ReplaceCachedChapter(updated);
+                if (await Manuscripts.GetManuscriptAsync(_contentTarget, updated.Id) is { } effective)
+                    UpdateChapterMetrics(effective.PlainText);
                 if (_contentTarget.EditionId is Guid editionId && Project is not null)
                     _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, updated.Id);
                 _previewRefreshSignal++;
