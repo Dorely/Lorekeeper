@@ -3196,6 +3196,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             (String(style.kind).toLowerCase() === "character" ? characterRoles : paragraphRoles).delete(style.role);
         }
     };
+    const canonicalInitial = structuredClone(initial);
     hydrateFigureImageUrls(initial, imageById);
     hydrateDesignedPageSummaries(initial, designedPageById);
     let manuscriptId = initial.manuscriptId;
@@ -3229,8 +3230,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     // persistence mechanism. It is rebuilt from the server cursor on remount.
     let confirmedHistory = [];
     let confirmedHistoryCursor = 0;
-    let confirmedDocument = structuredClone(initial);
-    let queuedDocument = structuredClone(initial);
+    let confirmedDocument = structuredClone(canonicalInitial);
+    let queuedDocument = structuredClone(canonicalInitial);
     let dispatchPaused = false;
     let journalFailure = null;
     let pendingJournalCount = 0;
@@ -3251,13 +3252,16 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             = authoringSequenceWatermarks(Number(authoringSession?.nextSequence || 0)));
         const target = authoringSession?.targets?.find(item => item.targetId === authoringTarget.targetId);
         if (target?.manuscriptJson) {
+            // The confirmed baseline must stay canonical; only the visible
+            // document carries display-only image and Designed Page details.
+            const canonical = JSON.parse(target.manuscriptJson);
+            confirmedDocument = structuredClone(canonical);
+            queuedDocument = structuredClone(canonical);
             initial = hydrateDesignedPageSummaries(
-                hydrateFigureImageUrls(JSON.parse(target.manuscriptJson), imageById),
+                hydrateFigureImageUrls(canonical, imageById),
                 designedPageById);
             manuscriptId = initial.manuscriptId;
             revision = initial.revision;
-            confirmedDocument = structuredClone(initial);
-            queuedDocument = structuredClone(initial);
             targetVersion = {generation: target.generation, fingerprint: target.fingerprint};
             elementFingerprints = new Map(Object.entries(target.elementFingerprints || {}));
         }
