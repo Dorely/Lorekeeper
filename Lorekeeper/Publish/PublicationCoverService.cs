@@ -1038,6 +1038,8 @@ public sealed class PublicationCoverService(
         CancellationToken cancellationToken,
         string? surfaceRole = null)
     {
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            return DigitalTemplate(edition, design);
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
         var currentFingerprint = await editions.GetPaginationFingerprintAsync(edition.ProjectId, edition.Id, cancellationToken);
@@ -1089,6 +1091,19 @@ public sealed class PublicationCoverService(
             CoverRegionYInches = (double)geometry.CoverRegionYInches,
             CoverRegionHeightInches = (double)geometry.CoverRegionHeightInches,
         };
+    }
+
+    // Digital covers are a single trim-sized surface: they have no spine, bleed,
+    // vendor product or interior page count, so no print artifact profile applies.
+    private static PublicationCoverTemplate DigitalTemplate(PublicationEdition edition, PublicationCoverDesign design)
+    {
+        var fingerprintSource = string.Join('|', "digital-cover-v1", edition.Format,
+            edition.PageWidthInches.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+            edition.PageHeightInches.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintSource))).ToLowerInvariant();
+        return new(0, edition.PageWidthInches, edition.PageHeightInches, 0, 0,
+            edition.PageWidthInches, edition.PageHeightInches, 0.25, 2, 1.2, fingerprint,
+            string.Equals(fingerprint, design.AcknowledgedTemplateFingerprint, StringComparison.Ordinal));
     }
 
     private async Task RequireCurrentInteriorPaginationAsync(
