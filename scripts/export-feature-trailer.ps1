@@ -63,7 +63,7 @@ foreach ($command in @('ffmpeg', 'ffprobe', 'git'))
 }
 $manifestPath = Join-Path $captureRoot 'captures.json'
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Reviewed captures.json is required before exporting real footage.' }
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$manifest = [System.IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
 if ($manifest.sourceCommit -cnotmatch '^[0-9a-f]{40}$' -or
     $manifest.qaAccepted -isnot [bool] -or $manifest.qaAccepted -ne $true -or
     $manifest.reviewed -isnot [bool] -or $manifest.reviewed -ne $true)
