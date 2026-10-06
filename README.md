@@ -167,7 +167,8 @@ its planned features are not claims about current capabilities.
   **Sources → Manage jobs**.
 - **World** combines world development and research in one conversation, with a
   free-form **World Brief** editor and a separate Research Activity view. Local
-  world building works without a search provider; web search requires configuration.
+  world building works without a search provider. OpenAI account models search the
+  web with their built-in search; other models need a SerpApi or Brave provider.
   The brief becomes persistent project context for all six assistants and revision
   work, and is preserved in full/non-structural archives and version history.
   Fiction and nonfiction use the same brief name with content suited to the book.

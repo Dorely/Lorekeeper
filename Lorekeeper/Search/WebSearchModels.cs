@@ -1,11 +1,8 @@
-using Lorekeeper.Models;
-
 namespace Lorekeeper.Search;
 
 public sealed record WebSearchRequest(string Query, int Count = 10);
 
 public sealed record WebSearchResponse(
-    SearchProviderKind ProviderKind,
     string ProviderName,
     string Query,
     IReadOnlyList<WebSearchResult> Results,

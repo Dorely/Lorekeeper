@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
+using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Llm;
@@ -14,7 +15,7 @@ namespace Lorekeeper.Llm;
 /// IChatClient implementation that calls the Codex Responses API at
 /// chatgpt.com/backend-api/codex/responses using an OAuth token.
 /// </summary>
-public sealed class CodexChatClient : IChatClient
+public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
 {
     private const int MaxBufferedResponseAttempts = 2;
 
@@ -118,15 +119,7 @@ public sealed class CodexChatClient : IChatClient
 
         _logger.LogDebug("Codex request body: {Body}", LogRedaction.RedactJson(json));
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
-        request.Content = new StringContent(json, Encoding.UTF8);
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-        request.Headers.TryAddWithoutValidation("chatgpt-account-id", _accountId);
-        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
-        request.Headers.TryAddWithoutValidation("originator", "pi");
-        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        using var request = CreateResponsesRequest(json);
 
         _logger.LogDebug(
             "Codex request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
@@ -394,9 +387,24 @@ public sealed class CodexChatClient : IChatClient
             functionCallCount);
     }
 
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
+    public object? GetService(Type serviceType, object? serviceKey = null) =>
+        serviceKey is null && serviceType == typeof(IModelWebSearch) ? this : null;
 
     public void Dispose() { }
+
+    private HttpRequestMessage CreateResponsesRequest(string json)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
+        request.Content = new StringContent(json, Encoding.UTF8);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+        request.Headers.TryAddWithoutValidation("chatgpt-account-id", _accountId);
+        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
+        request.Headers.TryAddWithoutValidation("originator", "pi");
+        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        return request;
+    }
 
     private static bool IsResponseEnded(HttpIOException exception) =>
         exception.HttpRequestError == HttpRequestError.ResponseEnded;

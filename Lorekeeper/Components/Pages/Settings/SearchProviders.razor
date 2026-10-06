@@ -6,9 +6,9 @@
 
 <PageTitle>Search Providers</PageTitle>
 
-<ConfigurationShell Title="Search provider" Description="Connect the web search service used by World for discovery and source-grounded investigation.">
+<ConfigurationShell Title="Search provider" Description="Connect the web search service used by World for discovery and source-grounded investigation. OpenAI account models always use their built-in web search instead.">
     @if (!string.IsNullOrWhiteSpace(_statusMessage)){<div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">@_statusMessage<button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button></div>}
-    <div class="search-toolbar"><div><span class="lk-section-kicker">Web search integration</span><strong>@(_providers.FirstOrDefault(provider => provider.IsActive)?.DisplayName ?? _providers.FirstOrDefault(provider => provider.IsActive)?.Name ?? "No active provider")</strong><small>@(_providers.Any(provider => provider.IsActive) ? "Web search is enabled" : "Web search is unavailable")</small></div><button class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button></div>
+    <div class="search-toolbar"><div><span class="lk-section-kicker">Web search integration</span><strong>@(_providers.FirstOrDefault(provider => provider.IsActive)?.DisplayName ?? _providers.FirstOrDefault(provider => provider.IsActive)?.Name ?? "No active provider")</strong><small>@(_providers.Any(provider => provider.IsActive) ? "Web search is enabled for models without built-in search" : "Only OpenAI account models can search the web, using their built-in search")</small></div><button class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button></div>
 
     @if (_adding)
     {

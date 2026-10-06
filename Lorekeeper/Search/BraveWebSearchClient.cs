@@ -50,7 +50,7 @@ public sealed class BraveWebSearchClient(IHttpClientFactory httpClientFactory) :
             }
         }
 
-        return new WebSearchResponse(provider.ProviderKind, provider.DisplayName ?? provider.Name, request.Query, results, json);
+        return new WebSearchResponse(provider.DisplayName ?? provider.Name, request.Query, results, json);
     }
 
     private static string? ReadString(JsonElement element, string propertyName) =>

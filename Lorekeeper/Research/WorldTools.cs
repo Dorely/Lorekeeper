@@ -18,7 +18,8 @@ public sealed class WorldToolContext(
     Guid projectId,
     Guid conversationId,
     Action onMutated,
-    bool visionReady = false)
+    bool visionReady = false,
+    IModelWebSearch? modelWebSearch = null)
 {
     private readonly List<EntityVisualContextReference> _entityVisuals = [];
     private readonly List<ReferenceVisualReadResult> _referenceVisuals = [];
@@ -27,6 +28,8 @@ public sealed class WorldToolContext(
     public Guid ConversationId { get; } = conversationId;
     public Action OnMutated { get; } = onMutated;
     public bool VisionReady { get; } = visionReady;
+    /// <summary>The selected chat model's built-in search, used instead of any configured search provider.</summary>
+    public IModelWebSearch? ModelWebSearch { get; } = modelWebSearch;
     public void QueueEntityVisuals(IEnumerable<EntityVisualContextReference> values) => _entityVisuals.AddRange(values);
     public void QueueReferenceVisual(ReferenceVisualReadResult value) { if (value.DataDelivered) _referenceVisuals.Add(value); }
     public void QueueSourceVisual(SourceVisualCandidateData value) => _sourceVisuals.Add(value);
@@ -74,7 +77,7 @@ public sealed class WorldTools(
             AIFunctionFactory.Create(
                 method: (string query, int count = 5) => WebSearchAsync(context, query, count),
                 name: "web_search",
-                description: "Search the public web with the active configured search provider. Persists each result as a cached research source and returns stable page ids plus title, URL, and snippet."),
+                description: "Search the public web with the selected model's built-in web search when it has one, otherwise with the active configured search provider. Persists each result as a cached research source and returns stable page ids plus title, URL, and snippet."),
 
             AIFunctionFactory.Create(
                 method: (Guid pageId, int? pageNumber = null) => ReadSearchResultAsync(context, pageId, pageNumber),
@@ -153,16 +156,27 @@ public sealed class WorldTools(
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
         count = Math.Clamp(count, 1, 10);
-        var active = await searchProviders.GetActiveAsync()
-            ?? throw new InvalidOperationException("No active search provider is configured.");
-        var response = await searchProviders.SearchAsync(new WebSearchRequest(query.Trim(), count));
+        var request = new WebSearchRequest(query.Trim(), count);
+        // A model with built-in search uses it; configured providers serve every other model.
+        SearchProvider? active = null;
+        WebSearchResponse response;
+        if (context.ModelWebSearch is { } modelSearch)
+            response = await modelSearch.SearchAsync(request);
+        else if (await searchProviders.HasActiveProviderAsync())
+        {
+            active = await searchProviders.GetActiveAsync();
+            response = await searchProviders.SearchAsync(request);
+        }
+        else
+            return "Error: web search is unavailable. Configure a search provider in Settings > Search, or select an OpenAI account model, whose built-in web search needs no configuration.";
+
         var resultPayloads = new List<object>();
         foreach (var result in response.Results)
         {
             var candidate = await candidates.CreateFromSearchResultAsync(
                 context.ProjectId,
                 context.ConversationId,
-                active.Id,
+                active?.Id,
                 response.ProviderName,
                 response.Query,
                 result);

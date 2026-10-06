@@ -42,7 +42,7 @@ else
             <div class="research-side-head">
                 <div>
                     <div class="research-section-title">Research Activity</div>
-                    <div class="small text-muted">Search: @(_activeSearchProvider?.DisplayName ?? _activeSearchProvider?.Name ?? "Not configured — local work is available")</div>
+                    <div class="small text-muted">Search: OpenAI account models use built-in search; other models use @(_activeSearchProvider?.DisplayName ?? _activeSearchProvider?.Name ?? "a search provider (not configured)")</div>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadActivityAsync">Refresh</button>
             </div>

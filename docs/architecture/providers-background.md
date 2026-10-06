@@ -266,11 +266,22 @@ indexing rules belong to [Narrative context](narrative-context.md).
 
 ### Web search and guarded fetch
 
-World web search is selected through a single active `SearchProvider` and a
-provider factory. The current clients normalize SerpApi Google results and Brave
-Search results into the shared `WebSearchResult` contract. Search-provider CRUD,
-activation, readiness tests, and execution belong to `ISearchProviderService`;
-the World surface must not construct provider requests directly.
+World web search has two sources behind the shared `WebSearchResult` contract.
+A chat client whose model has built-in search exposes `IModelWebSearch` through
+`IChatClient.GetService`; World's `web_search` uses it whenever it is present,
+so OpenAI account models need no search provider. `CodexChatClient` runs a
+separate Responses request with the hosted `web_search` tool, low reasoning
+effort, and `web_search_call.action.sources` included. Results are only URLs the
+hosted search cited, in citation order, then other reported sources; the
+model's own text never supplies a URL, the provider's `utm_source=openai` tag
+is removed, and a reply that ran no search fails rather than returning
+unsearched results. Every other model uses the single active `SearchProvider`
+through a provider factory, whose clients normalize SerpApi Google and Brave
+Search results. Search-provider CRUD, activation, readiness tests, and execution
+belong to `ISearchProviderService`; the World surface must not construct
+provider requests directly. Both sources persist results as cached research
+candidates; built-in results carry no `SearchProviderId` and name the model in
+their provider provenance.
 
 Page reads use a separate safe-fetch boundary. URL normalization, navigation and
 static-link filtering, redirect handling, private-network blocking, response byte
@@ -465,12 +476,12 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, persisted connection/model ownership, working-default resolution, and shared credential lookup. Account-backed discovery is rejected. |
-| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport, verification probes, timeouts, and normalized failures. |
+| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
 | [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
 | [`Lorekeeper/Llm/EmbeddingClient.cs`](../../Lorekeeper/Llm/EmbeddingClient.cs), [`EmbeddingConfigurationService.cs`](../../Lorekeeper/Llm/EmbeddingConfigurationService.cs), and [`ProviderEmbeddingService.cs`](../../Lorekeeper/Llm/ProviderEmbeddingService.cs) | Embedding transport, test-before-save configuration, active-provider resolution, batching, truncation, and dimension validation. |
 | [`Lorekeeper/Llm/EmbeddingRebuild*`](../../Lorekeeper/Llm/) | Versioned/coalesced rebuild queue, hosted worker, scoped bulk index rebuild, throttling, retry, and cancellation. |
-| [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
+| [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
 | [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`CodexProjectImageProvider.cs`](../../Lorekeeper/Images/CodexProjectImageProvider.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Image provider abstraction/adapter and singleton FIFO execution with regional-guide input normalization, previews, cancellation, and terminal waiters. |
 | [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | Code-owned image model IDs, supported quality levels, and request normalization for model, background, output format, and compression. |

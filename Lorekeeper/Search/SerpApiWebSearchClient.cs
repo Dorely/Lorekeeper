@@ -30,7 +30,7 @@ public sealed class SerpApiWebSearchClient(IHttpClientFactory httpClientFactory)
         {
             var errorMessage = error.GetString();
             if (string.Equals(errorMessage?.Trim(), NoResultsError, StringComparison.Ordinal))
-                return new WebSearchResponse(provider.ProviderKind, provider.DisplayName ?? provider.Name, request.Query, [], json);
+                return new WebSearchResponse(provider.DisplayName ?? provider.Name, request.Query, [], json);
 
             throw new InvalidOperationException(errorMessage ?? "SerpApi returned an error.");
         }
@@ -56,7 +56,7 @@ public sealed class SerpApiWebSearchClient(IHttpClientFactory httpClientFactory)
             }
         }
 
-        return new WebSearchResponse(provider.ProviderKind, provider.DisplayName ?? provider.Name, request.Query, results, json);
+        return new WebSearchResponse(provider.DisplayName ?? provider.Name, request.Query, results, json);
     }
 
     private static string? ReadString(JsonElement element, string propertyName) =>

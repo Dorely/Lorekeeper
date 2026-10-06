@@ -27,7 +27,7 @@ public sealed class WorldService(
         Direct build/edit requests authorize saves. Brainstorming and comparison remain conversational until a direction is chosen. Distinguish fictional invention, sourced fact, inference, and unresolved questions.
         Read the current World Brief and revision before updating it. Keep detailed canon in entities, facts, and relationships and source material in Sources. Do not duplicate whole sources in the brief or automatically promote sources to canon.
         Search existing entities before creating them. Preserve useful provenance and surface conflicts with the Book Brief, World Brief, or established canon.
-        Use configured web_search when external evidence is needed, then read pages before relying on them. Cached reads are paginated; follow continuations as needed.
+        Use web_search when external evidence is needed, then read pages before relying on them. Cached reads are paginated; follow continuations as needed.
         Missing web search configuration does not block creative work or local project research. Explain an unavailable external capability without fabricating evidence.
         Preserve the guarded fetching, source promotion, and explicit visual-reference approval rules of the web tools.
         Read back saved changes. Close with a self-contained account of established decisions, saved changes, sources, and unresolved questions.
@@ -296,7 +296,8 @@ public sealed class WorldService(
             systemPrompt = initialAssembly.Assemble();
             // World tools always mutate the live project. Review derives pending work from
             // the version-history baseline rather than a per-turn staging overlay.
-            toolContext = new WorldToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady);
+            toolContext = new WorldToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady,
+                modelWebSearch: chat.GetService<IModelWebSearch>());
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)

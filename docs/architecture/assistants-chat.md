@@ -387,8 +387,10 @@ Voice uses shared prompts, mutation fencing, workspace refresh, and checkpoints.
 
 World is one adaptive assistant for world development and research. It combines
 bounded project/direct-reference reads, guarded cached webpage reads, source/image
-promotion, and entity/fact/relationship tools. Only web_search requires a search
-provider; local work and ordinary chat do not. The World Brief view shares its
+promotion, and entity/fact/relationship tools. web_search uses the selected
+model's built-in search when its chat client offers one (OpenAI account models)
+and otherwise the active search provider; local work and ordinary chat need
+neither. The World Brief view shares its
 conversation with a separate Research Activity view, derived from touched
 entities and cached sources. Search/fetch security stays in research services.
 World primarily maintains the free-form World Brief through read_world_brief and

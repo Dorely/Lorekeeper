@@ -1,8 +1,6 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
-@using Lorekeeper.Search
 @inject IProjectService Projects
-@inject ISearchProviderService SearchProviders
 @inject NavigationManager Nav
 
 @if (_loading)
@@ -28,7 +26,7 @@ else
             </div>
 
             <ul class="project-tabs" aria-label="Project sections">
-                @foreach (var t in VisibleTabs)
+                @foreach (var t in Tabs)
                 {
                     <li class="nav-item">
                         <a class="nav-link @(string.Equals(t.Key, Tab, StringComparison.OrdinalIgnoreCase) ? "active" : "")"
@@ -67,18 +65,13 @@ else
 
     public Project? Project { get; private set; }
     private bool _loading = true;
-    private bool _researchEnabled;
     private string? _loadedSlug;
-
-    private IEnumerable<(string Key, string Label)> VisibleTabs =>
-        _researchEnabled ? Tabs : Tabs.Where(tab => tab.Key != "research");
 
     protected override async Task OnParametersSetAsync()
     {
         if (_loadedSlug == Slug) return;
         _loading = true;
         Project = await Projects.GetBySlugAsync(Slug);
-        _researchEnabled = await SearchProviders.HasActiveProviderAsync();
         _loadedSlug = Slug;
         _loading = false;
     }
