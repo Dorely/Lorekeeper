@@ -70,9 +70,11 @@ internal sealed class AuthoringBatchService(
 
     public Task<AuthoringBatchResultV1> ApplyBatchAsync(
         AuthoringBatchV1 batch,
+        JsonElement request,
         CancellationToken cancellationToken = default) =>
         ApplyBatchCoreAsync(
             batch,
+            request,
             recordHistory: true,
             allowCanonicalInverseOperations: false,
             historyRequestFingerprint: null,
@@ -200,6 +202,7 @@ internal sealed class AuthoringBatchService(
             batch = batch with { RequestHash = AuthoringBatchHash.Compute(batch) };
             var result = await ApplyBatchCoreAsync(
                 batch,
+                request: null,
                 recordHistory: false,
                 allowCanonicalInverseOperations: true,
                 historyRequestFingerprint: requestFingerprint,
@@ -244,12 +247,13 @@ internal sealed class AuthoringBatchService(
 
     private async Task<AuthoringBatchResultV1> ApplyBatchCoreAsync(
         AuthoringBatchV1 batch,
+        JsonElement? request,
         bool recordHistory,
         bool allowCanonicalInverseOperations,
         string? historyRequestFingerprint,
         CancellationToken cancellationToken)
     {
-        ValidateBatch(batch);
+        ValidateBatch(batch, request);
         await using var operation = await database.OpenWriteAsync(batch.ProjectId, cancellationToken);
         operation.ShareWithNestedOperations();
         var db = operation.Db;
@@ -483,7 +487,7 @@ internal sealed class AuthoringBatchService(
             throw new InvalidOperationException($"Unsupported authoring protocol '{protocolId}'.");
     }
 
-    private static void ValidateBatch(AuthoringBatchV1 batch)
+    private static void ValidateBatch(AuthoringBatchV1 batch, JsonElement? request)
     {
         ValidateProtocol(batch.ProtocolId);
         if (batch.ProjectId == Guid.Empty || batch.SessionId == Guid.Empty || batch.BatchId == Guid.Empty)
@@ -509,7 +513,7 @@ internal sealed class AuthoringBatchService(
                 throw new ArgumentException("The imported authoring payload exceeds the recoverable size limit.");
             Lorekeeper.Manuscripts.Import.SemanticImportService.ValidateResources(resources);
         }
-        var computed = AuthoringBatchHash.Compute(batch);
+        var computed = request is { } sent ? AuthoringBatchHash.Compute(sent) : AuthoringBatchHash.Compute(batch);
         if (!string.Equals(computed, batch.RequestHash, StringComparison.Ordinal))
             throw new AuthoringIdempotencyException("The authoring request hash does not match the canonical batch content.");
     }

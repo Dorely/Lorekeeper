@@ -491,8 +491,12 @@ omits null/request-hash fields, and prefixes the lowercase SHA-256 digest.
 Strings are escaped exactly as `JSON.stringify` does: only `"`, `\`, control
 characters, and lone surrogates are escaped, and everything else (apostrophes,
 HTML-sensitive characters, non-ASCII text, emoji) is hashed as literal UTF-8.
-`AuthoringBatchHashTests` checks editor-produced batches with punctuation,
-non-ASCII text, and control characters under
+The server hashes a client batch exactly as received, never after a model
+round trip, because deserializing adds defaults the editor omits (such as
+`decorative: false` on every block). Only server-built Undo/Redo batches hash
+the serialized model. `AuthoringBatchHashTests` checks editor-produced batches
+with punctuation, non-ASCII text, control characters, and a full-document
+footnote insertion under
 [`Lorekeeper.Tests/Fixtures/AuthoringBatches/`](../../Lorekeeper.Tests/Fixtures/AuthoringBatches/).
 
 An unreachable dirty writer remains registered as a dependent-operation blocker.

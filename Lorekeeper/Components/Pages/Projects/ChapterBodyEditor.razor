@@ -481,7 +481,7 @@
         var batch = payload.Deserialize<AuthoringBatchV1>(ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The authoring batch is missing.");
         ValidateAuthoringBatch(batch);
-        var result = await AuthoringBatches.ApplyBatchAsync(batch);
+        var result = await AuthoringBatches.ApplyBatchAsync(batch, payload);
         if (result.Status is AuthoringBatchStatusV1.Committed or AuthoringBatchStatusV1.Replayed)
         {
             await AuthoringSaved.InvokeAsync(result);

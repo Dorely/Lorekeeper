@@ -11,8 +11,15 @@ public static class AuthoringBatchHash
     {
         ArgumentNullException.ThrowIfNull(batch);
         using var document = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(batch, ManuscriptCodec.JsonOptions));
+        return Compute(document.RootElement);
+    }
+
+    // Hashes a client request exactly as sent. Re-serializing it through the model would add
+    // defaults the editor omits (for example "decorative": false on every block).
+    public static string Compute(JsonElement request)
+    {
         var canonical = new StringBuilder();
-        WriteCanonical(canonical, document.RootElement, isRoot: true);
+        WriteCanonical(canonical, request, isRoot: true);
         return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()))).ToLowerInvariant();
     }
 

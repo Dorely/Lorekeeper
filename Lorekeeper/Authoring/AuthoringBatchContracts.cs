@@ -228,8 +228,10 @@ public interface IAuthoringBatchService
         AuthoringSessionOpenRequestV1 request,
         CancellationToken cancellationToken = default);
 
+    // request is the client payload that batch was deserialized from; its canonical hash must equal batch.RequestHash.
     Task<AuthoringBatchResultV1> ApplyBatchAsync(
         AuthoringBatchV1 batch,
+        JsonElement request,
         CancellationToken cancellationToken = default);
 
     Task AcknowledgeReceiptAsync(
