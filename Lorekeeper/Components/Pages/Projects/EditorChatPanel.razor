@@ -48,6 +48,12 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
+            @if (OnEditProjectGuidance.HasDelegate)
+            {
+                <button type="button" class="btn btn-link btn-sm editor-chat-reset"
+                        title="Edit the Project Guidance the assistant follows in every chat"
+                        @onclick="OnEditProjectGuidance">Guidance</button>
+            }
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
                     disabled="@(_loading || _running || _resetting || ContestCandidateCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
@@ -110,6 +116,7 @@
     [Parameter] public EventCallback<EditorWorkspaceMutated> OnWorkspaceMutated { get; set; }
     [Parameter] public EventCallback OnContestStateChanged { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
+    [Parameter] public EventCallback OnEditProjectGuidance { get; set; }
 
     private int _forceScrollKey;
     private int _scrollKey;

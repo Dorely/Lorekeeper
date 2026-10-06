@@ -38,7 +38,8 @@ projection participates here.
 A `Project` is the ownership root for Project Guidance, one structured Book
 Brief, acts, chapters, writing samples, conversations, images, fonts, jobs,
 publishing state, and graph rows. Project Guidance is optional user-authored
-direction. The Book Brief is canonical high-level direction with validated
+direction, edited from its Assistant Memory item or the Editor Chat header's
+Guidance link. The Book Brief is canonical high-level direction with validated
 partial updates: `null` means unchanged, while an explicit clear list removes a
 field. Code-owned professional instructions must never be copied into either
 user-owned field.

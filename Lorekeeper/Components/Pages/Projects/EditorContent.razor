@@ -82,7 +82,8 @@ else
                              OnWorkspaceChanged="OnWorkspaceChangedAsync"
                              OnWorkspaceMutated="OnAiWorkspaceMutatedAsync"
                              OnContestStateChanged="OnContestStateChangedAsync"
-                             OnContestResultsReady="OpenReviewForContestResultsAsync" />
+                             OnContestResultsReady="OpenReviewForContestResultsAsync"
+                             OnEditProjectGuidance="OpenProjectGuidance" />
         </aside>
 
         @if (EffectiveChatPaneCollapsed)
@@ -1083,6 +1084,15 @@ else
                         OnConfirm="ConfirmContestActionAsync"
                         OnCancel="CancelContestAction" />
 
+    @* A shortcut to the Project Guidance item that otherwise sits mid-way down Assistant Memory. *@
+    <ContextItemDetailModal ProjectId="Project.Id"
+                            Project="Project"
+                            FeedItem="_projectGuidanceItem"
+                            IsOpen="@(_projectGuidanceItem is not null)"
+                            AllowProjectGuidanceEdit="true"
+                            OnClose="CloseProjectGuidance"
+                            OnSaved="OnContextChangedAsync" />
+
 }
 
 @if (_pageInsertion is { } insertion && Project?.Id == insertion.ProjectId && _activeChapterId == insertion.ChapterId && _contentTarget == insertion.Target)
@@ -1165,6 +1175,7 @@ else
     private bool _chapterLocked;
     private EditorContestLockState _projectContestLock = EditorContestLockState.Unlocked;
     private ContextFeedPanel? _contextPanel;
+    private ContextItem? _projectGuidanceItem;
     private int _contextRefreshSignal;
     private bool _contextResetBusy;
     private string? _contextResetError;
@@ -5294,6 +5305,27 @@ else
     }
 
     private async Task OnContextChangedAsync() => await RefreshContextSurfacesAsync();
+
+    private void OpenProjectGuidance()
+    {
+        if (Project is null) return;
+        var body = string.IsNullOrWhiteSpace(Project.ProjectGuidance)
+            ? "No additional Project Guidance has been supplied."
+            : Project.ProjectGuidance.Trim();
+        _projectGuidanceItem = new ContextItem(
+            EditorContextKeys.ProjectGuidance,
+            ContextItemKind.ProjectGuidance,
+            "Project Guidance (user authored)",
+            body,
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: "Author",
+            Origin: ContextItemOrigin.User,
+            IsProtected: true,
+            EstimatedTokens: Math.Max(1, TokenCounter.Count(body).TokenCount));
+    }
+
+    private void CloseProjectGuidance() => _projectGuidanceItem = null;
 
     private async Task ResetAssistantMemoryAsync()
     {
