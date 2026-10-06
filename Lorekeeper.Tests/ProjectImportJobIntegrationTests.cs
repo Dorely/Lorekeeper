@@ -1498,7 +1498,10 @@ public sealed class ProjectImportJobIntegrationTests
         public Task ReindexProjectProfileAsync(
             Guid projectId,
             CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            QueueAsync(
+                VectorIndexWorkKind.ContextProjectProfile,
+                projectId.ToString("N"),
+                cancellationToken);
 
         public Task DeleteProjectProfileAsync(
             Guid projectId,

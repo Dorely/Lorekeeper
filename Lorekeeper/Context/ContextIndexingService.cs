@@ -166,41 +166,50 @@ public sealed class ContextIndexingService(
     public Task DeleteIngestSourceChunkAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.IngestSourceChunk, sourceChunkId, cancellationToken);
 
+    // Queued like the other context projections: the search index writes on its own connection, so inside an
+    // open write transaction (an import applying a book brief) it would wait on that transaction's lock.
     public async Task ReindexProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Project? project;
-            BookBrief? brief;
-            string worldBrief;
-            await using (var operation = await database.OpenReadAsync(cancellationToken))
-            {
-                project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken);
-                worldBrief = await operation.Db.WorldBriefs.Where(item => item.ProjectId == projectId).Select(item => item.Content).SingleOrDefaultAsync(cancellationToken) ?? "";
-                brief = await operation.Db.BookBriefs
-                    .AsNoTracking()
-                    .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
-            }
+        await indexWork.QueueOrRunAsync(
+                    VectorIndexWorkKind.ContextProjectProfile,
+                    projectId.ToString("N"),
+                    async ct =>
+                    {
+                        try
+                        {
+                            Project? project;
+                            BookBrief? brief;
+                            string worldBrief;
+                            await using (var operation = await database.OpenReadAsync(ct))
+                            {
+                                project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, ct);
+                                worldBrief = await operation.Db.WorldBriefs.Where(item => item.ProjectId == projectId).Select(item => item.Content).SingleOrDefaultAsync(ct) ?? "";
+                                brief = await operation.Db.BookBriefs
+                                    .AsNoTracking()
+                                    .SingleOrDefaultAsync(item => item.ProjectId == projectId, ct);
+                            }
 
-            if (project is null)
-            {
-                await DeleteProjectProfileAsync(projectId, cancellationToken);
-                return;
-            }
+                            if (project is null)
+                            {
+                                await DeleteProjectProfileAsync(projectId, ct);
+                                return;
+                            }
 
-            await StoreChunksAsync(
-                projectId,
-                ContextVectorSourceTypes.ProjectProfile,
-                projectId,
-                $"Project profile {project.Name}",
-                ProjectProfileFormatter.Build(project, brief, worldBrief),
-                null,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to reindex project profile {ProjectId}", projectId);
-        }
+                            await StoreChunksAsync(
+                                projectId,
+                                ContextVectorSourceTypes.ProjectProfile,
+                                projectId,
+                                $"Project profile {project.Name}",
+                                ProjectProfileFormatter.Build(project, brief, worldBrief),
+                                null,
+                                ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to reindex project profile {ProjectId}", projectId);
+                        }
+                    },
+                    cancellationToken);
     }
 
     public Task DeleteProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default) =>

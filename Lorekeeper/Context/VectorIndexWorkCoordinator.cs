@@ -7,6 +7,7 @@ public enum VectorIndexWorkKind
     ContextChapter,
     ContextAct,
     ContextEntity,
+    ContextProjectProfile,
 }
 
 public interface IVectorIndexWorkCoordinator
@@ -133,6 +134,7 @@ public sealed class VectorIndexWorkCoordinator(ILogger<VectorIndexWorkCoordinato
         VectorIndexWorkKind.ContextChapter => 1,
         VectorIndexWorkKind.ContextAct => 2,
         VectorIndexWorkKind.ContextEntity => 2,
+        VectorIndexWorkKind.ContextProjectProfile => 2,
         _ => 10,
     };
 
