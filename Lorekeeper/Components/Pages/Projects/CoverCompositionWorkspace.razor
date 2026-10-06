@@ -1118,10 +1118,12 @@
     {
         _disposeStarted = true;
         _autosaveCancellation?.Cancel();
-        _autosaveCancellation?.Dispose();
         var flushed = false;
         try { flushed = await FlushAsync(); }
         catch { }
+        // FlushAsync cancels the pending autosave, so its source must outlive the flush.
+        _autosaveCancellation?.Dispose();
+        _autosaveCancellation = null;
         if (_authoringWriterLease is not null && flushed)
             await _authoringWriterLease.DisposeAsync();
         else if (_authoringWriterLease is not null)
