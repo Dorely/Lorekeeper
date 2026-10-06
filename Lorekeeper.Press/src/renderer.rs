@@ -6544,6 +6544,8 @@ fn paint_footnotes(pages: &mut [LayoutPage], plan: &FootnotePlan, trim: &crate::
             continue;
         };
         let mut y = trim.margin_inches * 72.0 + page.footnote_height - step;
+        let (line_start, image_start, shape_start) =
+            (page.lines.len(), page.images.len(), page.shapes.len());
         for chunk in chunks {
             let semantic_id = format!("footnote-{}", chunk.note_id);
             let order = Some(100_000 + chunk.number as i32);
@@ -6586,6 +6588,15 @@ fn paint_footnotes(pages: &mut [LayoutPage], plan: &FootnotePlan, trim: &crate::
                 }
                 y -= unit.height;
             }
+        }
+        // The page's paint order is already fixed, so the note region must join it to be drawn.
+        if !page.paint_order.is_empty() {
+            page.paint_order.extend(
+                (shape_start..page.shapes.len())
+                    .map(LayoutPaint::Shape)
+                    .chain((image_start..page.images.len()).map(LayoutPaint::Image))
+                    .chain((line_start..page.lines.len()).map(LayoutPaint::Line)),
+            );
         }
     }
 }

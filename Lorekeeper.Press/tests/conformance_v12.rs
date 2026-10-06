@@ -186,6 +186,18 @@ fn v15_footnotes_reserve_space_at_references_and_continue_with_styled_table_atom
     job.write_request();
     let trace = job.layout_trace();
     let pages = trace["pages"].as_array().unwrap();
+    for page in pages {
+        let painted_lines = page["paintOrder"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item["kind"] == "line")
+            .count();
+        assert!(
+            painted_lines == 0 || painted_lines == page["lines"].as_array().unwrap().len(),
+            "a fixed paint order must draw every line, including the note region"
+        );
+    }
     let reference_page = pages
         .iter()
         .position(|page| {
