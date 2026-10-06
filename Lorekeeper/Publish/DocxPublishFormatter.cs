@@ -725,8 +725,11 @@ public sealed class DocxPublishFormatter(ICompositionCanvasPreviewService previe
                     new W.RightBorder { Val = W.BorderValues.Single, Size = 4 },
                     new W.InsideHorizontalBorder { Val = W.BorderValues.Single, Size = 4 },
                     new W.InsideVerticalBorder { Val = W.BorderValues.Single, Size = 4 })));
+            // Grid widths are twips; weights are relative (Word imports keep their twip widths), so share the text width.
+            var textWidth = (document.Profile.PageWidthInches - 2 * document.Profile.PageMarginInches) * 1440;
+            var totalWeight = Math.Max(1, table.ColumnWidthWeights.Sum(weight => (double)Math.Max(1, weight)));
             result.Append(new W.TableGrid(table.ColumnWidthWeights.Select(weight =>
-                new W.GridColumn { Width = Math.Max(1, weight * 1_000).ToString() })));
+                new W.GridColumn { Width = Math.Max(1, (int)Math.Round(textWidth * Math.Max(1, weight) / totalWeight)).ToString() })));
             var verticalSpans = new Dictionary<int, VerticalSpan>();
             for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
             {
