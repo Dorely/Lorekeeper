@@ -200,29 +200,29 @@ else
                 <div class="ms-auto small index-status">
                     @SaveStatusText()
                 </div>
-            </div>
 
-            <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
-                <button type="button"
-                        class="@ModeButtonClass(EditorMode.Edit)"
-                        aria-pressed="@(_mode == EditorMode.Edit)"
-                        @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
-                <button type="button"
-                        class="@ModeButtonClass(EditorMode.Read)"
-                        aria-pressed="@(_mode == EditorMode.Read)"
-                        @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
-                <button type="button"
-                        class="@ModeButtonClass(EditorMode.Pages)"
-                        disabled="@(DesignedPagePlacements.Count == 0)"
-                        aria-pressed="@(_mode == EditorMode.Pages)"
-                        title="@(DesignedPagePlacements.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
-                        @onclick="() => SetModeAsync(EditorMode.Pages)">Pages</button>
-                <button type="button"
-                        class="@ModeButtonClass(EditorMode.Review)"
-                        aria-pressed="@(_mode == EditorMode.Review)"
-                        title="@ReviewModeTitle"
-                        @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
-                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_current is null || _pageLibraryOpening)" @onclick="OpenPageLibraryAsync">Insert Page</button>
+                <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
+                    <button type="button"
+                            class="@ModeButtonClass(EditorMode.Edit)"
+                            aria-pressed="@(_mode == EditorMode.Edit)"
+                            @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
+                    <button type="button"
+                            class="@ModeButtonClass(EditorMode.Read)"
+                            aria-pressed="@(_mode == EditorMode.Read)"
+                            @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
+                    <button type="button"
+                            class="@ModeButtonClass(EditorMode.Pages)"
+                            disabled="@(DesignedPagePlacements.Count == 0)"
+                            aria-pressed="@(_mode == EditorMode.Pages)"
+                            title="@(DesignedPagePlacements.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
+                            @onclick="() => SetModeAsync(EditorMode.Pages)">Pages</button>
+                    <button type="button"
+                            class="@ModeButtonClass(EditorMode.Review)"
+                            aria-pressed="@(_mode == EditorMode.Review)"
+                            title="@ReviewModeTitle"
+                            @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_current is null || _pageLibraryOpening)" @onclick="OpenPageLibraryAsync">Insert Page</button>
+                </div>
             </div>
 
             <div class="@ChapterEditorClass()">

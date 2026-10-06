@@ -231,7 +231,18 @@ the owning surface scrolls when content exceeds available space.
 
 The primary toolbar loads the project font catalog and provides direct font,
 size, line-spacing, emphasis, alignment, indentation, list, link, paragraph,
-and Figure controls. Project-image selection uses the shared visual library
+and Figure controls. It is one row: Undo/Redo, block style, bold/italic/
+underline, review Highlight/Note, Cite, then app-owned Format, Paragraph,
+Insert, Notes, and Styles menus, Find, and Outline. When the column is too
+narrow, the lowest-priority items move into a trailing More menu instead of
+wrapping. A second context row appears only while a table, Figure, or Designed
+Page is selected; it carries row/column/header/delete actions for regular
+tables (merged-cell tables allow only the header and delete actions), Figure
+image/alt/placement actions with the full Figure inspector behind a toggle,
+and Designed Page open/insert/remove actions. Controls keep stable titles,
+which the editor uses to synchronize pressed and selected state. The Edit,
+Read, Pages, and Review mode tabs and Insert Page share the chapter title row.
+Project-image selection uses the shared visual library
 modal; it must not regress to filename dropdowns or native prompts. Bundled and
 imported fonts load from project-owned URLs and are staged identically for Read
 preview and publication.

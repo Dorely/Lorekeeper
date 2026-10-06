@@ -812,6 +812,8 @@ function alignmentButton(alignment, title, action) {
     return element;
 }
 
+let toolbarMenuSequence = 0;
+
 function toolGroup(label, controls) {
     const group = document.createElement("div");
     group.className = "semantic-editor-tool-group";
@@ -849,6 +851,154 @@ function selectControl(label, options, onChange, resetAfterChange = true) {
     });
     wrapper.append(text, select);
     return wrapper;
+}
+
+// A labelled command row inside a toolbar menu; choosing it closes the menu.
+function menuItem(glyph, label, title, action) {
+    const element = button("", title, action);
+    element.classList.add("semantic-editor-menu-item");
+    const icon = document.createElement("span");
+    icon.className = "semantic-editor-menu-glyph";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = glyph;
+    const text = document.createElement("span");
+    text.textContent = label;
+    element.append(icon, text);
+    return element;
+}
+
+// A titled block of controls inside a toolbar menu.
+function menuSection(label, controls) {
+    const section = document.createElement("div");
+    section.className = "semantic-editor-menu-section";
+    section.setAttribute("role", "group");
+    section.setAttribute("aria-label", label);
+    const heading = document.createElement("span");
+    heading.className = "semantic-editor-menu-heading";
+    heading.setAttribute("aria-hidden", "true");
+    heading.textContent = label;
+    const row = document.createElement("div");
+    row.className = "semantic-editor-menu-controls";
+    for (const control of controls) {
+        if (control) row.append(control);
+    }
+    section.append(heading, row);
+    return section;
+}
+
+// The innermost table around the selection, with the cursor's row and column; null outside tables.
+function selectedTableCell(view) {
+    const {$from} = view.state.selection;
+    let cellDepth = $from.depth;
+    while (cellDepth > 0 && $from.node(cellDepth).type.name !== "table_cell") cellDepth--;
+    if (cellDepth === 0) return null;
+    const tableDepth = cellDepth - 2;
+    return {
+        table: $from.node(tableDepth),
+        position: $from.before(tableDepth),
+        row: $from.index(tableDepth),
+        column: $from.index(cellDepth - 1)
+    };
+}
+
+// Adds or removes a row or column, toggles the header row, or deletes the table at the cursor.
+// Row and column edits need a regular grid, so tables with merged cells only support the latter two.
+function editTableStructure(view, root, action) {
+    const selected = selectedTableCell(view);
+    if (!selected) {
+        showEditorNotice(root, "Place the cursor in a table cell first.");
+        return false;
+    }
+    const {table, position} = selected;
+    if (action === "delete-table") {
+        const transaction = view.state.doc.childCount === 1
+            ? view.state.tr.replaceWith(position, position + table.nodeSize,
+                schema.nodes.paragraph.create({id: newBlockId(), styleRole: "body"}))
+            : view.state.tr.delete(position, position + table.nodeSize);
+        view.dispatch(transaction.setSelection(Selection.near(transaction.doc.resolve(
+            Math.min(position, transaction.doc.content.size)))).scrollIntoView());
+        view.focus();
+        return true;
+    }
+    const rows = [];
+    table.forEach(row => {
+        const cells = [];
+        row.forEach(cell => cells.push(cell));
+        rows.push({id: row.attrs.id, cells});
+    });
+    const merged = rows.some(({cells}) => cells.some(cell => cell.attrs.rowSpan > 1 || cell.attrs.columnSpan > 1));
+    if (merged && action !== "toggle-header") {
+        showEditorNotice(root, "Rows and columns cannot be added or removed in a table with merged cells.");
+        return false;
+    }
+    const columnCount = rows[0]?.cells.length || 0;
+    let headerRowCount = Number(table.attrs.headerRowCount || 0);
+    let weights = [...(table.attrs.columnWidthWeights || [])];
+    let {row: targetRow, column: targetColumn} = selected;
+    const emptyCell = () => schema.nodes.table_cell.create(
+        {id: newBlockId(), rowSpan: 1, columnSpan: 1, header: false},
+        schema.nodes.paragraph.create({id: newBlockId(), styleRole: "body"}));
+    switch (action) {
+        case "row-above":
+        case "row-below": {
+            const index = action === "row-above" ? targetRow : targetRow + 1;
+            rows.splice(index, 0, {id: newBlockId(), cells: Array.from({length: columnCount}, emptyCell)});
+            if (index < headerRowCount) headerRowCount++;
+            targetRow = index;
+            break;
+        }
+        case "delete-row":
+            if (rows.length === 1) {
+                showEditorNotice(root, "A table needs at least one row. Use Delete table to remove it.");
+                return false;
+            }
+            rows.splice(targetRow, 1);
+            if (targetRow < headerRowCount) headerRowCount--;
+            targetRow = Math.min(targetRow, rows.length - 1);
+            break;
+        case "column-left":
+        case "column-right": {
+            const index = action === "column-left" ? targetColumn : targetColumn + 1;
+            for (const {cells} of rows) cells.splice(index, 0, emptyCell());
+            if (weights.length === columnCount)
+                weights.splice(index, 0, weights.reduce((sum, weight) => sum + weight, 0) / columnCount || 1);
+            targetColumn = index;
+            break;
+        }
+        case "delete-column":
+            if (columnCount === 1) {
+                showEditorNotice(root, "A table needs at least one column. Use Delete table to remove it.");
+                return false;
+            }
+            for (const {cells} of rows) cells.splice(targetColumn, 1);
+            if (weights.length === columnCount) weights.splice(targetColumn, 1);
+            targetColumn = Math.min(targetColumn, columnCount - 2);
+            break;
+        case "toggle-header":
+            headerRowCount = headerRowCount > 0 ? 0 : 1;
+            break;
+        default:
+            return false;
+    }
+    if (weights.length !== (rows[0]?.cells.length || 0)) weights = [];
+    const rebuilt = schema.nodes.table.create(
+        {...table.attrs, headerRowCount, columnWidthWeights: weights},
+        rows.map(({id, cells}, rowIndex) => {
+            const header = rowIndex < headerRowCount;
+            return schema.nodes.table_row.create(
+                {id, header},
+                cells.map(cell => cell.type.create({...cell.attrs, header}, cell.content, cell.marks)));
+        }));
+    const transaction = view.state.tr.replaceWith(position, position + table.nodeSize, rebuilt);
+    let cellPosition = position + 1;
+    for (let index = 0; index < targetRow; index++) cellPosition += rebuilt.child(index).nodeSize;
+    cellPosition += 1;
+    const row = rebuilt.child(targetRow);
+    for (let index = 0; index < targetColumn; index++) cellPosition += row.child(index).nodeSize;
+    transaction.setSelection(Selection.near(transaction.doc.resolve(cellPosition + 1)));
+    view.dispatch(transaction.scrollIntoView());
+    view.focus();
+    return true;
 }
 
 function showEditorNotice(root, message) {
@@ -1710,10 +1860,14 @@ function buildFigureInspector(view, projectImages) {
     };
     for (const input of fields.values()) input.addEventListener("change", apply);
     panel.append(heading, controls);
-    return {
+    // The selection context row opens the inspector; it stays closed until asked for.
+    let expanded = false;
+    const inspector = {
         panel,
+        get expanded() { return expanded; },
+        setExpanded(value) { expanded = value; inspector.update(); },
         update() {
-            const selected = selectedFigure(view); panel.hidden = !selected; if (!selected) return;
+            const selected = selectedFigure(view); panel.hidden = !selected || !expanded; if (!selected) return;
             const attrs = selected.node.attrs;
             const presentation = {...defaultFigurePresentation, ...(attrs.presentation || {})};
             for (const name of ["placement", "widthPercent", "alignment", "textWrap", "fit", "cropXPercent", "cropYPercent", "spacingBeforePoints", "spacingAfterPoints", "captionPlacement"])
@@ -1727,6 +1881,7 @@ function buildFigureInspector(view, projectImages) {
             fields.get("accessibilityRole").value = attrs.accessibilityRole || "figure";
         }
     };
+    return inspector;
 }
 
 async function setFigureImage(view, image, root) {
@@ -4170,11 +4325,6 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             void dotNetRef.invokeMethodAsync("OnOpenBookTextStyles"))
     );
 
-    const designedPageControls = allowDesignedPages
-        ? [iconButton("▣", "Insert a designed page at the current manuscript position", () =>
-            void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))]
-        : [];
-
     const createAnnotation = async kind => {
         if (!allowAnnotations) return;
         let range;
@@ -4209,78 +4359,186 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
     };
 
-    toolbar.append(
-        ...(allowAnnotations
-            ? [
-                button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
-                button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
-            ]
-            : []),
-        selectControl("Block style", [
-            ["", "Book text"],
-            ["paragraph|body|2", "Body text"],
-            ["heading|chapter-heading|1", "Chapter title"],
-            ["heading|heading|2", "Heading"],
-            ["heading|subheading|3", "Subheading"],
-            ["blockquote|block-quote|2", "Block quote"],
-            ["list_item|list-item|2", "List"],
-            ["paragraph|figure-caption|2", "Caption"],
-        ], value => {
-            if (!value) return;
-            const [node, role, level] = value.split("|");
-            applyBlock(view, node, role, Number(level));
-        }),
-        selectControl("Heading level", [
-            ["", "H"],
-            ["1", "Heading level 1"],
-            ["2", "Heading level 2"],
-            ["3", "Heading level 3"],
-            ["4", "Heading level 4"],
-            ["5", "Heading level 5"],
-            ["6", "Heading level 6"],
-        ], value => {
-            if (value) applyHeadingLevel(view, Number(value));
-        }),
-        typographyControls.group,
-        styleControls,
-        button("Images", "Choose a project image to insert or replace a Figure", () =>
+    // Toolbar menus are app-owned popovers so they share the editor's theme and keep the
+    // ProseMirror selection (their triggers never take focus on pointer down).
+    const openMenus = new Set();
+    const menuEvents = new AbortController();
+    let toolbarFitPending = false;
+    const closeMenu = menu => {
+        if (!openMenus.delete(menu)) return;
+        menu.panel.hidden = true;
+        menu.trigger.setAttribute("aria-expanded", "false");
+        menu.element.classList.remove("semantic-editor-menu--open");
+        for (const nested of [...openMenus]) if (menu.element.contains(nested.element)) closeMenu(nested);
+        if (!openMenus.size && toolbarFitPending) scheduleToolbarFit();
+    };
+    const closeMenusOutside = target => {
+        for (const menu of [...openMenus]) if (!menu.element.contains(target)) closeMenu(menu);
+    };
+    const toolbarMenu = (label, title, contents, {caret = true, panelClass = ""} = {}) => {
+        const element = document.createElement("div");
+        element.className = "semantic-editor-menu";
+        const panel = document.createElement("div");
+        const menu = {element, panel, trigger: null};
+        const open = () => {
+            closeMenusOutside(element);
+            panel.hidden = false;
+            panel.classList.remove("semantic-editor-menu-panel--end");
+            trigger.setAttribute("aria-expanded", "true");
+            element.classList.add("semantic-editor-menu--open");
+            openMenus.add(menu);
+            if (!element.parentElement?.closest(".semantic-editor-menu-panel")
+                && panel.getBoundingClientRect().right > root.getBoundingClientRect().right - 4)
+                panel.classList.add("semantic-editor-menu-panel--end");
+        };
+        const trigger = button("", title, () => {
+            if (openMenus.has(menu)) closeMenu(menu);
+            else open();
+        });
+        menu.trigger = trigger;
+        trigger.classList.add("semantic-editor-menu-trigger");
+        trigger.dataset.menuTrigger = "true";
+        trigger.setAttribute("aria-haspopup", "true");
+        trigger.setAttribute("aria-expanded", "false");
+        const text = document.createElement("span");
+        text.textContent = label;
+        trigger.append(text);
+        if (caret) {
+            const mark = document.createElement("span");
+            mark.className = "semantic-editor-menu-caret";
+            mark.setAttribute("aria-hidden", "true");
+            trigger.append(mark);
+        }
+        panel.className = `semantic-editor-menu-panel ${panelClass}`.trim();
+        panel.id = `semantic-editor-menu-${++toolbarMenuSequence}`;
+        panel.setAttribute("role", "group");
+        panel.setAttribute("aria-label", title);
+        panel.hidden = true;
+        trigger.setAttribute("aria-controls", panel.id);
+        for (const content of contents) {
+            if (content) panel.append(content);
+        }
+        trigger.addEventListener("keydown", event => {
+            if (event.key !== "ArrowDown" || readOnly) return;
+            event.preventDefault();
+            if (!openMenus.has(menu)) open();
+            panel.querySelector("button:not(:disabled), select:not(:disabled), input:not(:disabled)")?.focus();
+        });
+        panel.addEventListener("keydown", event => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeMenu(menu);
+            trigger.focus();
+        });
+        panel.addEventListener("click", event => {
+            if (!(event.target instanceof Element) || !event.target.closest(".semantic-editor-menu-item")) return;
+            for (const openMenu of [...openMenus]) closeMenu(openMenu);
+        });
+        element.append(trigger, panel);
+        return menu;
+    };
+    root.ownerDocument.addEventListener("pointerdown", event => closeMenusOutside(event.target),
+        {capture: true, signal: menuEvents.signal});
+    // Escape closes menus even while focus stays in the manuscript.
+    root.ownerDocument.addEventListener("keydown", event => {
+        if (event.key !== "Escape" || !openMenus.size) return;
+        event.preventDefault();
+        for (const menu of [...openMenus]) closeMenu(menu);
+    }, {signal: menuEvents.signal});
+
+    const markButton = (glyph, title, mark) => iconButton(glyph, title, () => applyMark(view, mark));
+    const linkButton = iconButton("", "Add or remove link", () => void editLink(view, root));
+    linkButton.classList.add("semantic-editor-link-button");
+
+    const formatMenu = toolbarMenu("Format", "Text formatting", [
+        menuSection("Font", [typographyControls.group]),
+        menuSection("Character", [
+            markButton("S", "Strikethrough", "strikethrough"),
+            button("</>", "Inline code", () => applyMark(view, "code")),
+            button("Aᴀ", "Small caps intent", () => applyMark(view, "small_caps")),
+            markButton("x²", "Superscript", "superscript"),
+            markButton("x₂", "Subscript", "subscript"),
+            linkButton,
+        ]),
+        menuSection("Character style", [
+            selectControl(
+                "Book Text character style",
+                [["", "Character"], ["__remove__", "Remove character style"]].concat(
+                    namedStyles
+                        .filter(style => style.kind === "character")
+                        .map(style => [style.semanticRole, style.name])),
+                value => applyMark(
+                    view,
+                    "character_style",
+                    value === "__remove__" ? null : value || null)),
+        ]),
+        menuItem("あ", "Language…", "Set or remove language", () => void editLanguage(view, root)),
+    ]);
+    const paragraphMenu = toolbarMenu("Paragraph", "Paragraph formatting", [
+        menuSection("Alignment", [
+            alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
+            alignmentButton("center", "Center paragraph", () => setParagraphAlignment(view, "center")),
+            alignmentButton("right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
+            alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
+        ]),
+        menuSection("Indent and lists", [
+            iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
+            iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
+            iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view)),
+            button("List…", "Set list numbering, nesting, or restart", () => void editListFormatting(view, root)),
+        ]),
+        menuSection("Heading level", [
+            selectControl("Heading level", [
+                ["", "Level"],
+                ["1", "Heading level 1"],
+                ["2", "Heading level 2"],
+                ["3", "Heading level 3"],
+                ["4", "Heading level 4"],
+                ["5", "Heading level 5"],
+                ["6", "Heading level 6"],
+            ], value => {
+                if (value) applyHeadingLevel(view, Number(value));
+            }),
+        ]),
+        menuItem("¶", "Indents, spacing and pagination…",
+            "Right, first-line, and hanging indents, spacing, and pagination controls",
+            () => void editParagraphPresentation(view, root)),
+        menuItem("⌫", "Clear paragraph formatting", "Clear direct paragraph formatting",
+            () => clearParagraphPresentation(view)),
+    ]);
+    const insertMenu = toolbarMenu("Insert", "Insert", [
+        menuItem("▨", "Image…", "Choose a project image to insert or replace a Figure", () =>
             void dotNetRef.invokeMethodAsync("OnOpenProjectImagePicker")),
-        button("Alt", "Edit selected figure alternative text", () => void editFigureAltText(view, root)),
-        iconButton("◩", "Edit selected figure placement, width, and crop behavior", () =>
-            void editFigurePresentation(view, root)),
-        ...designedPageControls,
-        iconButton("¶", "Convert selected figure to a paragraph", () =>
-            applyBlock(view, "paragraph", "body", 2)),
-        iconButton("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),
-        iconButton("I", "Italic (Ctrl+I)", () => applyMark(view, "em")),
-        iconButton("U", "Underline", () => applyMark(view, "underline")),
-        iconButton("S", "Strikethrough", () => applyMark(view, "strikethrough")),
-        button("</>", "Inline code", () => applyMark(view, "code")),
-        button("Aᴀ", "Small caps intent", () => applyMark(view, "small_caps")),
-        iconButton("x²", "Superscript", () => applyMark(view, "superscript")),
-        iconButton("x₂", "Subscript", () => applyMark(view, "subscript")),
-        (() => {
-            const control = iconButton("", "Add or remove link", () => void editLink(view, root));
-            control.classList.add("semantic-editor-link-button");
-            return control;
-        })(),
-        button("Lang", "Set or remove language", () => void editLanguage(view, root)),
-        selectControl(
-            "Book Text character style",
-            [["", "Character"], ["__remove__", "Remove character style"]].concat(
-                namedStyles
-                    .filter(style => style.kind === "character")
-                    .map(style => [style.semanticRole, style.name])),
-            value => applyMark(
-                view,
-                "character_style",
-                value === "__remove__" ? null : value || null)),
-        iconButton("⁂", "Insert scene break", () => insertSceneBreak(view)),
-        button("Table", "Insert semantic table", () => void insertRichTable(view, root)),
-        button("Import DOCX", "Insert Word content at the cursor", () => chooseWordFile()),
-        button("Fn", "Insert footnote", () => noteEditor.open(insertNote(view, root, "footnote"))),
-        button("En", "Insert endnote", () => noteEditor.open(insertNote(view, root, "endnote"))),
-        button("Notes", "Edit manuscript notes", async () => {
+        menuItem("▦", "Table…", "Insert semantic table", () => void insertRichTable(view, root)),
+        allowDesignedPages
+            ? menuItem("▣", "Designed page…", "Insert a designed page at the current manuscript position", () =>
+                void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))
+            : null,
+        menuItem("⁂", "Scene break", "Insert scene break", () => insertSceneBreak(view)),
+        menuItem("W", "Word document…", "Insert Word content at the cursor", () => chooseWordFile()),
+        menuSection("Special character", [
+            selectControl("Insert special character", [
+                ["", "Ω Character"],
+                ["—", "Em dash —"],
+                ["–", "En dash –"],
+                ["…", "Ellipsis …"],
+                ["“", "Opening quote “"],
+                ["”", "Closing quote ”"],
+                ["‘", "Opening apostrophe ‘"],
+                ["’", "Closing apostrophe ’"],
+                ["©", "Copyright ©"]
+            ], value => {
+                if (!value) return;
+                view.dispatch(view.state.tr.insertText(value).scrollIntoView());
+                view.focus();
+            }),
+        ]),
+    ]);
+    const notesMenu = toolbarMenu("Notes", "Footnotes and endnotes", [
+        menuItem("¹", "Footnote", "Insert footnote", () => noteEditor.open(insertNote(view, root, "footnote"))),
+        menuItem("ᵉ", "Endnote", "Insert endnote", () => noteEditor.open(insertNote(view, root, "endnote"))),
+        menuItem("✎", "Edit notes…", "Edit manuscript notes", async () => {
             const selected = view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "note_reference"
                 ? view.state.selection.node.attrs.noteId : null;
             if (selected) { noteEditor.open(selected); return; }
@@ -4291,106 +4549,158 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                     [note.id, `${index + 1}. ${note.kind === "endnote" ? "Endnote" : "Footnote"}: ${note.content.map(domainBlockText).join(" ").slice(0, 80)}`])}]});
             if (values) noteEditor.open(values.note);
         }),
-        button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
-            () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
-        selectControl("Insert special character", [
-            ["", "Ω"],
-            ["—", "Em dash —"],
-            ["–", "En dash –"],
-            ["…", "Ellipsis …"],
-            ["“", "Opening quote “"],
-            ["”", "Closing quote ”"],
-            ["‘", "Opening apostrophe ‘"],
-            ["’", "Closing apostrophe ’"],
-            ["©", "Copyright ©"]
-        ], value => {
-            if (!value) return;
-            view.dispatch(view.state.tr.insertText(value).scrollIntoView());
-            view.focus();
-        }),
-        iconButton("↶", "Undo (Ctrl+Z)", () => void performPersistentHistory(false)),
-        iconButton("↷", "Redo (Ctrl+Y)", () => void performPersistentHistory(true)),
-        iconButton("⌕", "Find and replace", () => findPanel.open()),
-        iconButton("☷", "Toggle document outline", () => outline.open())
-    );
-    toolbar.append(
-        alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
-        alignmentButton("center", "Center paragraph", () => setParagraphAlignment(view, "center")),
-        alignmentButton("right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
-        alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
-        iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
-        iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-        iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view)),
-        button("List…", "Set list numbering, nesting, or restart", () => void editListFormatting(view, root))
-    );
-    toolbar.append(
-        iconButton("¶…", "Right, first-line, and hanging indents, spacing, and pagination controls", () =>
-            void editParagraphPresentation(view, root)),
-        button("Tx×", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
-    );
-    const controlByTitle = title => [...toolbar.children].find(control => control.title === title);
-    const controlBySelect = label => [...toolbar.children].find(control =>
-        control.querySelector?.("select")?.getAttribute("aria-label") === label);
-    toolbar.replaceChildren(
-        toolGroup("History and navigation", [
-            controlByTitle("Undo (Ctrl+Z)"),
-            controlByTitle("Redo (Ctrl+Y)"),
-            controlByTitle("Find and replace"),
-            controlByTitle("Toggle document outline"),
+    ]);
+    const stylesMenu = toolbarMenu("Styles", "Book Text Styles", [styleControls],
+        {panelClass: "semantic-editor-menu-panel--styles"});
+    const findButton = iconButton("⌕", "Find and replace", () => findPanel.open());
+    const outlineButton = iconButton("☷", "Toggle document outline", () => outline.open());
+    const overflowList = document.createElement("div");
+    overflowList.className = "semantic-editor-overflow-list";
+    const overflowMenu = toolbarMenu("⋯", "More tools", [overflowList], {caret: false});
+    overflowMenu.trigger.classList.add("semantic-editor-icon-button");
+
+    const coreRow = document.createElement("div");
+    coreRow.className = "semantic-editor-toolbar-row";
+    const trailing = document.createElement("div");
+    trailing.className = "semantic-editor-toolbar-trailing";
+    trailing.append(findButton, outlineButton, overflowMenu.element);
+    coreRow.append(
+        toolGroup("History", [
+            iconButton("↶", "Undo (Ctrl+Z)", () => void performPersistentHistory(false)),
+            iconButton("↷", "Redo (Ctrl+Y)", () => void performPersistentHistory(true)),
+        ]),
+        toolGroup("Text style", [
+            selectControl("Block style", [
+                ["", "Book text"],
+                ["paragraph|body|2", "Body text"],
+                ["heading|chapter-heading|1", "Chapter title"],
+                ["heading|heading|2", "Heading"],
+                ["heading|subheading|3", "Subheading"],
+                ["blockquote|block-quote|2", "Block quote"],
+                ["list_item|list-item|2", "List"],
+                ["paragraph|figure-caption|2", "Caption"],
+            ], value => {
+                if (!value) return;
+                const [node, role, level] = value.split("|");
+                applyBlock(view, node, role, Number(level));
+            }),
+        ]),
+        toolGroup("Inline formatting", [
+            markButton("B", "Bold (Ctrl+B)", "strong"),
+            markButton("I", "Italic (Ctrl+I)", "em"),
+            markButton("U", "Underline", "underline"),
         ]),
         ...(allowAnnotations
             ? [toolGroup("Review", [
-                controlByTitle("Highlight the selected text for review"),
-                controlByTitle("Add a review note to the selected text"),
+                button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
+                button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
             ])]
             : []),
-        toolGroup("Text and typography", [
-            controlBySelect("Block style"),
-            controlBySelect("Heading level"),
-            typographyControls.group,
+        toolGroup("Citations", [
+            button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
+                () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
         ]),
-        toolGroup("Inline formatting", [
-            controlByTitle("Bold (Ctrl+B)"),
-            controlByTitle("Italic (Ctrl+I)"),
-            controlByTitle("Underline"),
-            controlByTitle("Strikethrough"),
-            controlByTitle("Inline code"),
-            controlByTitle("Small caps intent"),
-            controlByTitle("Superscript"),
-            controlByTitle("Subscript"),
-            controlByTitle("Add or remove link"),
-            controlByTitle("Set or remove language"),
-            controlBySelect("Book Text character style"),
+        toolGroup("Formatting menus", [
+            formatMenu.element, paragraphMenu.element, insertMenu.element, notesMenu.element, stylesMenu.element,
         ]),
-        toolGroup("Images and structure", [
-            controlByTitle("Choose a project image to insert or replace a Figure"),
-            controlByTitle("Edit selected figure alternative text"),
-            controlByTitle("Edit selected figure placement, width, and crop behavior"),
-            controlByTitle("Convert selected figure to a paragraph"),
-            controlByTitle("Insert a designed page at the current manuscript position"),
-            controlByTitle("Insert scene break"),
-            controlByTitle("Insert semantic table"),
-            controlByTitle("Insert Word content at the cursor"),
-            controlByTitle("Insert footnote"),
-            controlByTitle("Insert endnote"),
-            controlByTitle("Edit manuscript notes"),
-            controlByTitle("Insert or edit citation"),
-            controlBySelect("Insert special character"),
+        trailing);
+
+    // When the row is too narrow, its lowest-priority items move into the More menu.
+    const rowOrder = [formatMenu.element, paragraphMenu.element, insertMenu.element, notesMenu.element,
+        stylesMenu.element, findButton, outlineButton];
+    const collapseOrder = [stylesMenu.element, outlineButton, findButton, notesMenu.element,
+        insertMenu.element, paragraphMenu.element, formatMenu.element];
+    const rowHomes = new Map(rowOrder.map(item => {
+        const marker = document.createComment("");
+        item.parentNode.insertBefore(marker, item);
+        return [item, marker];
+    }));
+    let toolbarFitFrame = null;
+    const fitToolbar = () => {
+        toolbarFitFrame = null;
+        if (openMenus.size) { toolbarFitPending = true; return; }
+        toolbarFitPending = false;
+        for (const item of rowOrder) rowHomes.get(item).after(item);
+        overflowMenu.element.hidden = true;
+        if (coreRow.scrollWidth <= coreRow.clientWidth + 1) return;
+        overflowMenu.element.hidden = false;
+        for (let collapsed = 1; collapsed <= collapseOrder.length; collapsed++) {
+            const moved = new Set(collapseOrder.slice(0, collapsed));
+            overflowList.replaceChildren(...rowOrder.filter(item => moved.has(item)));
+            if (coreRow.scrollWidth <= coreRow.clientWidth + 1) break;
+        }
+    };
+    const scheduleToolbarFit = () => {
+        if (toolbarFitFrame === null) toolbarFitFrame = requestAnimationFrame(fitToolbar);
+    };
+    // A resize can strand an open panel past the column edge, so it closes menus before refitting.
+    const toolbarResizeObserver = new ResizeObserver(() => {
+        for (const menu of [...openMenus]) closeMenu(menu);
+        scheduleToolbarFit();
+    });
+    toolbarResizeObserver.observe(coreRow);
+
+    // The selection context row appears only for a table, Figure, or Designed Page.
+    const contextRow = document.createElement("div");
+    contextRow.className = "semantic-editor-context-row";
+    contextRow.setAttribute("role", "group");
+    contextRow.hidden = true;
+    const contextLabel = document.createElement("span");
+    contextLabel.className = "semantic-editor-context-label";
+    const contextGroup = (label, controls) => {
+        const group = document.createElement("div");
+        group.className = "semantic-editor-context-group";
+        group.dataset.label = label;
+        group.append(...controls);
+        return group;
+    };
+    const tableTool = (label, title, action) => button(label, title, () => editTableStructure(view, root, action));
+    const headerRowToggle = tableTool("Header row", "Use the first row as table headers", "toggle-header");
+    const figureSettingsToggle = button("All settings", "Show every Figure layout and accessibility setting", () => {
+        figureInspector.setExpanded(!figureInspector.expanded);
+        updateToolbarState();
+    });
+    const contextGroups = {
+        table: contextGroup("Table", [
+            tableTool("+ Row above", "Insert a table row above", "row-above"),
+            tableTool("+ Row below", "Insert a table row below", "row-below"),
+            tableTool("+ Column left", "Insert a table column to the left", "column-left"),
+            tableTool("+ Column right", "Insert a table column to the right", "column-right"),
+            tableTool("Delete row", "Delete the table row", "delete-row"),
+            tableTool("Delete column", "Delete the table column", "delete-column"),
+            headerRowToggle,
+            tableTool("Delete table", "Delete the table", "delete-table"),
         ]),
-        toolGroup("Paragraph formatting", [
-            controlByTitle("Align paragraph left"),
-            controlByTitle("Center paragraph"),
-            controlByTitle("Align paragraph right"),
-            controlByTitle("Justify paragraph"),
-            controlByTitle("Increase paragraph indent (Tab)"),
-            controlByTitle("Decrease paragraph indent (Shift+Tab)"),
-            controlByTitle("Toggle list formatting"),
-            controlByTitle("Set list numbering, nesting, or restart"),
-            controlByTitle("Right, first-line, and hanging indents, spacing, and pagination controls"),
-            controlByTitle("Clear direct paragraph formatting"),
+        figure: contextGroup("Figure", [
+            button("Replace image…", "Replace the selected Figure's project image", () =>
+                void dotNetRef.invokeMethodAsync("OnOpenProjectImagePicker")),
+            button("Alt text…", "Edit selected figure alternative text", () => void editFigureAltText(view, root)),
+            button("Placement…", "Edit selected figure placement, width, and crop behavior", () =>
+                void editFigurePresentation(view, root)),
+            figureSettingsToggle,
+            button("To paragraph", "Convert selected figure to a paragraph", () =>
+                applyBlock(view, "paragraph", "body", 2)),
         ]),
-        toolGroup("Reusable styles", [styleControls])
-    );
+        designedPage: contextGroup("Designed page", [
+            button("Open in Pages", "Open the selected Designed Page in Pages", () => {
+                const selection = view.state.selection;
+                const designedPageId = selection instanceof NodeSelection ? selection.node.attrs.designedPageId : null;
+                if (designedPageId) void dotNetRef.invokeMethodAsync("OnOpenDesignedPage", designedPageId);
+            }),
+            ...(allowDesignedPages
+                ? [button("Insert another…", "Insert a designed page at the current manuscript position", () =>
+                    void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))]
+                : []),
+            button("Remove", "Remove the selected Designed Page from this chapter", () => {
+                if (readOnly) return;
+                view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
+                view.focus();
+            }),
+        ]),
+    };
+    contextRow.append(contextLabel, ...Object.values(contextGroups));
+
+    toolbar.replaceChildren(coreRow, contextRow);
     const markControls = new Map([
         ["Bold (Ctrl+B)", "strong"],
         ["Italic (Ctrl+I)", "em"],
@@ -4411,6 +4721,21 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         if (!control) return;
         control.classList.toggle("semantic-editor-button--active", pressed);
         control.setAttribute("aria-pressed", String(pressed));
+    };
+    const updateContextRow = () => {
+        const selection = view.state.selection;
+        const table = selectedTableCell(view);
+        const kind = selection instanceof NodeSelection && selection.node.type.name === "designed_page"
+            ? "designedPage"
+            : selectedFigure(view) ? "figure" : table ? "table" : null;
+        contextRow.hidden = !kind;
+        for (const [name, group] of Object.entries(contextGroups)) group.hidden = name !== kind;
+        if (!kind) return;
+        contextLabel.textContent = contextGroups[kind].dataset.label;
+        contextRow.setAttribute("aria-label", `${contextGroups[kind].dataset.label} tools`);
+        setControlPressed(headerRowToggle, Number(table?.table.attrs.headerRowCount || 0) > 0);
+        setControlPressed(figureSettingsToggle, figureInspector.expanded);
+        figureSettingsToggle.setAttribute("aria-expanded", String(figureInspector.expanded));
     };
     const updateToolbarState = () => {
         const {from, to, empty, $from} = view.state.selection;
@@ -4447,6 +4772,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         if (headingSelect) headingSelect.value = paragraph?.type.name === "heading"
             ? String(paragraph.attrs.headingLevel || 2)
             : "";
+        updateContextRow();
         const undoControl = toolbar.querySelector('[data-history-direction="undo"]');
         const redoControl = toolbar.querySelector('[data-history-direction="redo"]');
         if (undoControl) {
@@ -4621,7 +4947,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     };
     toolbar.addEventListener("pointerdown", event => {
         const control = event.target instanceof Element ? event.target.closest("button, select, input") : null;
-        if (!control || control.dataset.historyDirection) return;
+        if (!control || control.dataset.historyDirection || control.dataset.menuTrigger) return;
         forceAuthoringBoundary = true;
         pendingActionLabel = "Format manuscript";
         void saveNow();
@@ -4882,6 +5208,9 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);
             caretResizeObserver.disconnect();
+            toolbarResizeObserver.disconnect();
+            if (toolbarFitFrame !== null) cancelAnimationFrame(toolbarFitFrame);
+            menuEvents.abort();
             noteEditor?.dispose();
             view.destroy();
             root.replaceChildren();
