@@ -734,7 +734,8 @@ function blockIdPlugin() {
                 } else {
                     seen.add(id);
                 }
-                return ["table", "table_row", "table_cell"].includes(node.type.name);
+                // Textblocks hold the note references and citations checked above.
+                return node.isTextblock || ["table", "table_row", "table_cell"].includes(node.type.name);
             });
             const notes = newState.doc.attrs.notes || [];
             const retainedNotes = notes.filter(note => referencedNotes.has(note.id));
