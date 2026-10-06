@@ -199,6 +199,22 @@ public sealed class ProjectArchiveTests
     }
 
     [Fact]
+    public async Task WritesACompleteArchiveToAnAsyncOnlyResponseStream()
+    {
+        // HTTP response bodies are forward-only and reject synchronous writes; a download must not stop after its first entry.
+        await using var capture = ProjectArchiveTemporaryCapture.Create();
+        await using var input = new MemoryStream(Encoding.UTF8.GetBytes("tide"));
+        var descriptor = await capture.CaptureAsync(input, "sources/source-0001/original/chunk-0000", "source-original-chunk", "text/plain", 1024);
+        var received = new MemoryStream();
+        await using (var response = new AsyncOnlyForwardStream(received))
+            await ProjectArchiveZip.WriteAsync(response, ProjectId, SchemaVersions, ProjectDependencyTraversalPolicy.FullArchive, [descriptor], []);
+
+        received.Position = 0;
+        var read = await ProjectArchiveZip.ReadAsync(received);
+        Assert.Equal("sources/source-0001/original/chunk-0000", read.Manifest.Entries.Single().Path);
+    }
+
+    [Fact]
     public void CanonicalManifestBindsProjectSchemaAndOrderedWarnings()
     {
         var entry = new ProjectArchiveManifestEntry("content.txt", "record", "text/plain", 4, Convert.ToHexStringLower(SHA256.HashData("tide"u8)));
@@ -208,6 +224,23 @@ public sealed class ProjectArchiveTests
         Assert.Equal(SchemaVersions, manifest.SchemaVersions);
         Assert.Equal(["SOURCE_EVIDENCE_OMITTED_NON_STRUCTURAL_EXPORT"], manifest.Warnings);
         Assert.Throws<ProjectArchiveException>(() => ProjectArchiveManifest.Create(ProjectId, SchemaVersions, ProjectDependencyTraversalPolicy.NonStructuralArchive, [entry], ["Z_WARNING", "A_WARNING", "A_WARNING"]));
+    }
+
+    private sealed class AsyncOnlyForwardStream(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new InvalidOperationException("Synchronous operations are disallowed.");
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new InvalidOperationException("Synchronous operations are disallowed.");
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => inner.WriteAsync(buffer, cancellationToken);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => inner.WriteAsync(buffer, offset, count, cancellationToken);
     }
 
     private static MemoryStream CreateRawZip(Action<ZipArchive> write)

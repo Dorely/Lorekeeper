@@ -71,6 +71,37 @@ public static class ProjectArchiveZip
             ProjectArchiveCanonicalJson.WriteManifest(manifestLimit, manifest);
         if (checked(files.Sum(file => file.Length) + manifestBytes.Length) > effectiveLimits.MaximumExpandedBytes)
             throw new ProjectArchiveException("Archive expanded content and manifest exceed the configured byte limit.");
+        if (destination.CanSeek)
+        {
+            await WriteEntriesAsync(destination, files, manifestBytes, effectiveLimits, cancellationToken);
+            return manifest;
+        }
+
+        // ZipArchive closes entries with synchronous writes, which HTTP response bodies reject, so a forward-only
+        // destination receives the archive from a temporary file copied asynchronously.
+        var stagingDirectory = Path.Combine(Path.GetTempPath(), "Lorekeeper", "project-archive");
+        Directory.CreateDirectory(stagingDirectory);
+        await using var staged = new FileStream(
+            Path.Combine(stagingDirectory, $"export-{Guid.NewGuid():N}.zip"),
+            FileMode.CreateNew,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            81_920,
+            FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+        await WriteEntriesAsync(staged, files, manifestBytes, effectiveLimits, cancellationToken);
+        staged.Position = 0;
+        await staged.CopyToAsync(destination, cancellationToken);
+        await destination.FlushAsync(cancellationToken);
+        return manifest;
+    }
+
+    private static async Task WriteEntriesAsync(
+        Stream destination,
+        ProjectArchiveFileDescriptor[] files,
+        MemoryStream manifestBytes,
+        ProjectArchiveLimits effectiveLimits,
+        CancellationToken cancellationToken)
+    {
         using var destinationLimit = new ProjectArchiveWriteLimitStream(destination, effectiveLimits.MaximumCompressedBytes);
         using (var archive = new ZipArchive(destinationLimit, ZipArchiveMode.Create, leaveOpen: true))
         {
@@ -90,8 +121,6 @@ public static class ProjectArchiveZip
             manifestBytes.Position = 0;
             await manifestBytes.CopyToAsync(manifestStream, cancellationToken);
         }
-
-        return manifest;
     }
 
     public static Task<ProjectArchiveReadResult> ReadAsync(
