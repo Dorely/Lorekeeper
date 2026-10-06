@@ -244,4 +244,62 @@ public sealed class SourceRetentionPersistenceTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task PendingExtractionPublishesContentOnceAndIsImmutableAfterward()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var sourceId = Guid.NewGuid();
+        var extraction = new SourceExtractionVersion
+        {
+            SourceId = sourceId,
+            Ordinal = 0,
+            Extractor = "inline-text",
+            ExtractorVersion = "m4.1",
+            OptionsJson = "{}",
+            ContentHash = SourceRetentionValidator.Sha256(string.Empty),
+            Status = SourceExtractionStatus.Extracting,
+            NormalizedText = string.Empty,
+        };
+        await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+        {
+            await db.Database.MigrateAsync();
+            var project = new Project { Name = "Pending extraction", Slug = $"pending-extraction-{Guid.NewGuid():N}" };
+            var blobs = new Dictionary<string, SourceOriginalBlob>(StringComparer.Ordinal);
+            var original = SourceRetentionValidator.BuildAvailableOriginal(
+                sourceId, "survey.txt", "text/plain", "Harbour survey"u8.ToArray(), blobs);
+            db.Projects.Add(project);
+            db.SourceOriginalBlobs.AddRange(blobs.Values);
+            db.IngestSources.Add(new IngestSource
+            {
+                Id = sourceId, Project = project, Title = "Survey", SourceKind = string.Empty,
+                UserInstructions = string.Empty, ContentType = "text/plain", Original = original,
+            });
+            db.SourceExtractionVersions.Add(extraction);
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+        {
+            db.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.TrackAll;
+            var pending = await db.SourceExtractionVersions.SingleAsync(item => item.Id == extraction.Id);
+            pending.OptionsJson = """{"extractionProfile":"Auto"}""";
+            pending.NormalizedText = "Harbour survey";
+            pending.ContentHash = SourceRetentionValidator.Sha256(pending.NormalizedText);
+            pending.Status = SourceExtractionStatus.Ready;
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+        {
+            db.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.TrackAll;
+            var ready = await db.SourceExtractionVersions.SingleAsync(item => item.Id == extraction.Id);
+            Assert.Equal("Harbour survey", ready.NormalizedText);
+            ready.NormalizedText = "Rewritten survey";
+            ready.ContentHash = SourceRetentionValidator.Sha256(ready.NormalizedText);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        }
+    }
 }

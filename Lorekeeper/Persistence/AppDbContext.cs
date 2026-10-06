@@ -220,6 +220,8 @@ public class AppDbContext(
             if (entry.State == EntityState.Modified)
                 throw new InvalidOperationException("Retained source chunk references are immutable.");
         }
+        // A pending extraction publishes its options and normalized content once when it
+        // completes or fails; afterwards the version is immutable.
         foreach (var entry in ChangeTracker.Entries<SourceExtractionVersion>())
         {
             if (entry.State != EntityState.Modified) continue;
@@ -227,12 +229,15 @@ public class AppDbContext(
                 || entry.Property(nameof(SourceExtractionVersion.SourceId)).IsModified
                 || entry.Property(nameof(SourceExtractionVersion.Ordinal)).IsModified
                 || entry.Property(nameof(SourceExtractionVersion.Extractor)).IsModified
-                || entry.Property(nameof(SourceExtractionVersion.ExtractorVersion)).IsModified
-                || entry.Property(nameof(SourceExtractionVersion.OptionsJson)).IsModified
-                || entry.Property(nameof(SourceExtractionVersion.ContentHash)).IsModified
-                || entry.Property(nameof(SourceExtractionVersion.NormalizedText)).IsModified)
+                || entry.Property(nameof(SourceExtractionVersion.ExtractorVersion)).IsModified)
             {
                 throw new InvalidOperationException("Completed source extraction versions are immutable; create a new extraction instead.");
+            }
+            var extraction = entry.Entity;
+            if (extraction.Status != SourceExtractionStatus.Extracting
+                && !string.Equals(extraction.ContentHash, SourceRetentionValidator.Sha256(extraction.NormalizedText), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("A published source extraction does not match its content hash.");
             }
         }
 
