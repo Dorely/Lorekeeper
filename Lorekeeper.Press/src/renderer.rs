@@ -7034,7 +7034,9 @@ fn append_semantic_table(
     let header_lines = rows
         .iter()
         .take(header_count)
-        .map(|row| table_row_estimated_lines(row, &weights, total_weight))
+        .map(|row| {
+            table_row_estimated_lines(row, document, &weights, total_weight, trim, &header_style)
+        })
         .sum::<usize>();
     if header_lines >= full_capacity && header_count > 0 {
         return Err(Diagnostic::error(
@@ -7078,7 +7080,15 @@ fn append_semantic_table(
         }
         let group_lines = rows[row_index..group_end]
             .iter()
-            .map(|row| table_row_estimated_lines(row, &weights, total_weight))
+            .enumerate()
+            .map(|(offset, row)| {
+                let style = if row_index + offset < header_count {
+                    &header_style
+                } else {
+                    &body_style
+                };
+                table_row_estimated_lines(row, document, &weights, total_weight, trim, style)
+            })
             .sum::<usize>();
         let required = group_lines
             + if row_index >= header_count {
@@ -7101,8 +7111,14 @@ fn append_semantic_table(
                 ));
             }
             for segment in segments {
-                let segment_lines =
-                    table_cell_texts_estimated_lines(&segment, &weights, total_weight);
+                let segment_lines = table_cell_texts_estimated_lines(
+                    &segment,
+                    document,
+                    &weights,
+                    total_weight,
+                    trim,
+                    &body_style,
+                );
                 let segment_required = segment_lines + header_lines;
                 if segment_required > full_capacity {
                     return Err(Diagnostic::error(
@@ -7225,32 +7241,93 @@ fn append_table_row(
     )
 }
 
-fn table_row_estimated_lines(row: &Value, weights: &[usize], total_weight: usize) -> usize {
-    table_cell_texts_estimated_lines(&table_row_cell_texts(row), weights, total_weight)
+fn table_row_estimated_lines(
+    row: &Value,
+    document: &Value,
+    weights: &[usize],
+    total_weight: usize,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+) -> usize {
+    table_cell_texts_estimated_lines(
+        &table_row_cell_texts(row),
+        document,
+        weights,
+        total_weight,
+        trim,
+        style,
+    )
 }
 
 fn table_cell_texts_estimated_lines(
     cells: &[(String, usize, Vec<Value>)],
+    document: &Value,
     weights: &[usize],
     total_weight: usize,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
 ) -> usize {
+    table_cell_layouts(cells, document, weights, total_weight, trim, style)
+        .iter()
+        .map(|(_, lines)| lines.len())
+        .max()
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// A cell's x offset from the content edge and its wrapped lines.
+type TableCellLayout = (f32, Vec<(String, Vec<LayoutRun>)>);
+
+/// Wraps each cell to its column's measured width.
+fn table_cell_layouts(
+    cells: &[(String, usize, Vec<Value>)],
+    document: &Value,
+    weights: &[usize],
+    total_weight: usize,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+) -> Vec<TableCellLayout> {
+    let content_width =
+        (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent - style.right_indent;
+    let gutter = style.size;
+    let gutters = weights.len().saturating_sub(1) as f32 * gutter;
+    let column_space = (content_width - gutters).max(weights.len().max(1) as f32);
+    let total_weight = total_weight.max(1) as f32;
     let mut column = 0usize;
     cells
         .iter()
-        .map(|(text, span, _)| {
+        .map(|(text, span, blocks)| {
+            let preceding = weights.iter().take(column).sum::<usize>() as f32;
             let weight = weights
                 .iter()
                 .skip(column)
                 .take(*span)
                 .sum::<usize>()
-                .max(1);
+                .max(1) as f32;
+            let x_offset = column_space * preceding / total_weight + gutter * column as f32;
+            let width =
+                column_space * weight / total_weight + gutter * span.saturating_sub(1) as f32;
             column = column.saturating_add(*span);
-            let characters = (72usize.saturating_mul(weight) / total_weight).max(4);
-            wrap(text, characters).len().max(1)
+            let mut source_runs = Vec::new();
+            for (index, block) in blocks.iter().enumerate() {
+                if index > 0 {
+                    source_runs.extend(single_run(" / ", style.face));
+                }
+                source_runs.extend(display_block_runs(
+                    document,
+                    block,
+                    style,
+                    &display_block_text(block),
+                ));
+            }
+            let lines = if text.is_empty() {
+                Vec::new()
+            } else {
+                wrap_layout_runs(text, &source_runs, style.size, width)
+            };
+            (x_offset, lines)
         })
-        .max()
-        .unwrap_or(1)
-        .max(1)
+        .collect()
 }
 
 fn table_row_cell_texts(row: &Value) -> Vec<(String, usize, Vec<Value>)> {
@@ -7278,74 +7355,57 @@ fn append_table_cell_texts(
     trim: &crate::model::Trim,
     style: &BlockStyle,
 ) -> usize {
-    let separator_width = cells.len().saturating_sub(1) * 3;
-    let available_characters = 80usize.saturating_sub(separator_width).max(cells.len() * 4);
-    let mut column = 0usize;
-    let mut wrapped = Vec::with_capacity(cells.len());
-    for (text, span, blocks) in cells {
-        let weight = weights
-            .iter()
-            .skip(column)
-            .take(*span)
-            .sum::<usize>()
-            .max(1);
-        column = column.saturating_add(*span);
-        let width = (available_characters.saturating_mul(weight) / total_weight).max(4);
-        let mut source_runs = Vec::new();
-        for (index, block) in blocks.iter().enumerate() {
-            if index > 0 {
-                source_runs.extend(single_run(" / ", style.face));
-            }
-            source_runs.extend(display_block_runs(
-                document,
-                block,
-                style,
-                &display_block_text(block),
-            ));
-        }
-        let mut offset = 0;
-        let lines = wrap(text, width)
-            .iter()
-            .map(|line| {
-                (
-                    line.clone(),
-                    runs_for_line(text, &source_runs, line, &mut offset),
-                )
-            })
-            .collect::<Vec<_>>();
-        wrapped.push((lines, width));
-    }
-    let line_count = wrapped
+    let layouts = table_cell_layouts(cells, document, weights, total_weight, trim, style);
+    let line_count = layouts
         .iter()
-        .map(|(lines, _)| lines.len())
+        .map(|(_, lines)| lines.len())
         .max()
         .unwrap_or(1)
         .max(1);
-    let mut runs = Vec::new();
-    for line_index in 0..line_count {
-        if line_index > 0 {
-            runs.extend(single_run("\n", style.face));
+    // Flow one placeholder per row line so spacing and page breaks follow the body flow, then
+    // replace each placeholder with the row's cell lines at their column positions.
+    let snapshot = pages
+        .iter()
+        .map(|page| page.lines.len())
+        .collect::<Vec<_>>();
+    let placeholder = vec!["x"; line_count].join(
+        "
+",
+    );
+    let first_page = append_styled_runs(
+        pages,
+        &placeholder,
+        &single_run(&placeholder, style.face),
+        trim,
+        style,
+        None,
+    );
+    let content_x = trim.margin_inches * 72.0 + style.indent;
+    let mut line_index = 0usize;
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        let start = snapshot.get(page_index).copied().unwrap_or_default();
+        if start >= page.lines.len() {
+            continue;
         }
-        for (cell_index, (lines, width)) in wrapped.iter().enumerate() {
-            if cell_index > 0 {
-                runs.extend(single_run(" | ", style.face));
+        for placeholder in page.lines.split_off(start) {
+            for (x_offset, lines) in &layouts {
+                if let Some((text, runs)) = lines.get(line_index) {
+                    page.lines.push(LayoutLine {
+                        text: text.clone(),
+                        runs: runs.clone(),
+                        x: content_x + x_offset,
+                        baseline_offset_points: line_baseline_offset_points(
+                            style.size, style.face, runs,
+                        ),
+                        word_spacing: 0.0,
+                        ..placeholder.clone()
+                    });
+                }
             }
-            let length = if let Some((text, cell_runs)) = lines.get(line_index) {
-                runs.extend(cell_runs.iter().cloned());
-                text.chars().count()
-            } else {
-                0
-            };
-            if cell_index + 1 < wrapped.len() {
-                runs.extend(single_run(
-                    &" ".repeat(width.saturating_sub(length)),
-                    style.face,
-                ));
-            }
+            line_index += 1;
         }
     }
-    let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
-    append_styled_runs(pages, &text, &runs, trim, style, None)
+    first_page
 }
 
 fn table_row_has_row_span(row: &Value) -> bool {
@@ -11211,6 +11271,46 @@ mod tests {
                 .filter(|page| page.lines.iter().any(|line| line.text == "Header"))
                 .count()
                 >= 2
+        );
+    }
+
+    #[test]
+    fn semantic_table_cells_align_to_their_columns() {
+        let cell = |id: &str, text: &str| {
+            serde_json::json!({"id": id, "rowSpan": 1, "columnSpan": 1,
+            "content": [{"type": "Paragraph", "content": [{"type": "Text", "text": text, "marks": []}]}]})
+        };
+        let block = serde_json::json!({
+            "id": "table-block",
+            "type": "Table",
+            "table": {"id": "table", "columnWidthWeights": [1, 3], "headerRowCount": 1, "rows": [
+                {"id": "header", "cells": [cell("h1", "Watch"), cell("h2", "Keeper")]},
+                {"id": "row", "cells": [cell("b1", "Middle"), cell("b2", "word ".repeat(40).trim())]}
+            ]}
+        });
+        let mut pages = FlowPages::from(vec![empty_body_page()]);
+
+        append_semantic_table(&mut pages, &block, &Value::Null, &standard_trim())
+            .expect("table layout");
+
+        let lines = &pages[0].lines;
+        let line = |text: &str| lines.iter().find(|line| line.text == text).expect(text);
+        let (watch, keeper, middle) = (line("Watch"), line("Keeper"), line("Middle"));
+        let words = lines
+            .iter()
+            .filter(|line| line.text.starts_with("word"))
+            .collect::<Vec<_>>();
+        assert_eq!(watch.y, keeper.y);
+        assert_eq!(watch.x, middle.x);
+        assert!(words.len() > 1, "the narrow column wraps");
+        assert!(words.iter().all(|line| line.x == keeper.x));
+        assert_eq!(words[0].y, middle.y);
+        let trim = standard_trim();
+        let right_edge = (trim.width_inches - trim.margin_inches) * 72.0;
+        assert!(
+            words
+                .iter()
+                .all(|line| line.x + measured_run_width(&line.runs, line.size) <= right_edge + 0.01)
         );
     }
 

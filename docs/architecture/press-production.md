@@ -113,7 +113,9 @@ and response validation, and packaging require the same current protocol.
 It repeats contiguous leading table headers after a break and does not split a
 normal row. A row taller than a page splits only at semantic block boundaries,
 never through a row-span group; an unplaceable atomic group reports
-`UnplaceableTableRowGroup`.
+`UnplaceableTableRowGroup`. Each cell wraps to its measured column width (the
+column weights share the body width less one body-size gutter between columns)
+and sits at its column on the row's shared baselines.
 
 Footnotes reserve space before body flow through a bounded pagination pass.
 The region occupies no more than 40% of the usable body area, retains at least
