@@ -488,6 +488,12 @@ database operation have released their write resources.
 The browser and server share the canonical request-hash golden vector at
 [`tools/semantic-editor/authoring-batch-hash-v1.json`](../../tools/semantic-editor/authoring-batch-hash-v1.json): it sorts object keys ordinally, preserves array order,
 omits null/request-hash fields, and prefixes the lowercase SHA-256 digest.
+Strings are escaped exactly as `JSON.stringify` does: only `"`, `\`, control
+characters, and lone surrogates are escaped, and everything else (apostrophes,
+HTML-sensitive characters, non-ASCII text, emoji) is hashed as literal UTF-8.
+`AuthoringBatchHashTests` checks editor-produced batches with punctuation,
+non-ASCII text, and control characters under
+[`Lorekeeper.Tests/Fixtures/AuthoringBatches/`](../../Lorekeeper.Tests/Fixtures/AuthoringBatches/).
 
 An unreachable dirty writer remains registered as a dependent-operation blocker.
 A remount may atomically reattach only when it proves the same target and

@@ -11,52 +11,99 @@ public static class AuthoringBatchHash
     {
         ArgumentNullException.ThrowIfNull(batch);
         using var document = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(batch, ManuscriptCodec.JsonOptions));
-        using var buffer = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = false }))
-            WriteCanonical(writer, document.RootElement, isRoot: true);
-        return "sha256:" + Convert.ToHexString(SHA256.HashData(buffer.ToArray())).ToLowerInvariant();
+        var canonical = new StringBuilder();
+        WriteCanonical(canonical, document.RootElement, isRoot: true);
+        return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()))).ToLowerInvariant();
     }
 
-    private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element, bool isRoot = false)
+    // Must stay byte-identical to the editor's canonicalJson, which escapes strings with JSON.stringify.
+    private static void WriteCanonical(StringBuilder output, JsonElement element, bool isRoot = false)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-                writer.WriteStartObject();
+                output.Append('{');
+                var first = true;
                 foreach (var property in element.EnumerateObject()
                              .Where(property => property.Value.ValueKind != JsonValueKind.Null
                                  && !(isRoot && property.NameEquals("requestHash")))
                              .OrderBy(property => property.Name, StringComparer.Ordinal))
                 {
-                    writer.WritePropertyName(property.Name);
-                    WriteCanonical(writer, property.Value);
+                    if (!first) output.Append(',');
+                    first = false;
+                    WriteString(output, property.Name);
+                    output.Append(':');
+                    WriteCanonical(output, property.Value);
                 }
-                writer.WriteEndObject();
+                output.Append('}');
                 break;
             case JsonValueKind.Array:
-                writer.WriteStartArray();
+                output.Append('[');
+                var firstItem = true;
                 foreach (var item in element.EnumerateArray())
-                    WriteCanonical(writer, item);
-                writer.WriteEndArray();
+                {
+                    if (!firstItem) output.Append(',');
+                    firstItem = false;
+                    WriteCanonical(output, item);
+                }
+                output.Append(']');
                 break;
             case JsonValueKind.String:
-                writer.WriteStringValue(element.GetString());
+                WriteString(output, element.GetString()!);
                 break;
             case JsonValueKind.Number:
-                writer.WriteRawValue(element.GetRawText());
+                output.Append(element.GetRawText());
                 break;
             case JsonValueKind.True:
-                writer.WriteBooleanValue(true);
+                output.Append("true");
                 break;
             case JsonValueKind.False:
-                writer.WriteBooleanValue(false);
+                output.Append("false");
                 break;
             case JsonValueKind.Null:
             case JsonValueKind.Undefined:
-                writer.WriteNullValue();
+                output.Append("null");
                 break;
             default:
                 throw new InvalidDataException("The authoring batch contains an unsupported JSON value.");
         }
+    }
+
+    private static void WriteString(StringBuilder output, string value)
+    {
+        output.Append('"');
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            switch (character)
+            {
+                case '"': output.Append("\\\""); break;
+                case '\\': output.Append("\\\\"); break;
+                case '\b': output.Append("\\b"); break;
+                case '\f': output.Append("\\f"); break;
+                case '\n': output.Append("\\n"); break;
+                case '\r': output.Append("\\r"); break;
+                case '\t': output.Append("\\t"); break;
+                default:
+                    if (character < ' ')
+                    {
+                        output.Append("\\u").Append(((int)character).ToString("x4"));
+                    }
+                    else if (char.IsHighSurrogate(character) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
+                    {
+                        output.Append(character).Append(value[++index]);
+                    }
+                    else if (char.IsSurrogate(character))
+                    {
+                        output.Append("\\u").Append(((int)character).ToString("x4"));
+                    }
+                    else
+                    {
+                        output.Append(character);
+                    }
+                    break;
+            }
+        }
+        output.Append('"');
     }
 }
