@@ -430,7 +430,9 @@
 .chat-msg-user { background: var(--lk-accent); }
 .chat-msg-asst { background: var(--lk-soft); border: 1px solid var(--lk-line); }
 .chat-tool-group { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
-.chat-reasoning { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.chat-reasoning { border-color: var(--lk-line); border-radius: var(--lk-radius-md); background: var(--lk-surface-subtle); }
+.chat-reasoning-label, .chat-reasoning-body { color: var(--lk-text-muted); }
+.chat-reasoning-body { border-top-color: var(--lk-line); }
 .chat-composer { background: var(--lk-surface); border-top-color: var(--lk-line); padding: 0.65rem; }
 .chat-composer textarea { border-color: var(--lk-line-strong); border-radius: var(--lk-radius-md); }
 .chat-error { background: var(--lk-danger-soft); color: var(--lk-danger); }
