@@ -1090,7 +1090,7 @@ else
     <DesignedPageLibraryModal @key="insertion" ProjectId="insertion.ProjectId" ChapterId="insertion.ChapterId"
                              ChapterTitle="@(_current?.Title ?? string.Empty)" Target="insertion.Target"
                              TargetLabel="@(insertion.Target.EditionId is { } edition ? _enabledEditions.FirstOrDefault(item => item.EditionId == edition)?.Name ?? "Release" : "Core Book")"
-                             IsReadOnly="EditorMutationLocked" InsertionLabel="insertion.Label"
+                             IsReadOnly="EditorMutationLocked" InsertionLabel="@insertion.Label"
                              Insert="InsertLibraryPageAsync" OpenPlacement="OpenLibraryPlacementAsync"
                              Changed="RefreshPageLibraryConsumersAsync" Closed="ClosePageLibraryAsync" />
 }

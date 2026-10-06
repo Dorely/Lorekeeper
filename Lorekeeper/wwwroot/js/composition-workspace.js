@@ -1,4 +1,7 @@
 const pointerTrackers = new WeakMap();
+// Text left behind when focus leaves a frame editor, kept for reads that arrive after the
+// editor has been removed (for example when a tab switch disposes the workspace).
+const leftTextEditors = new Map();
 
 export function connectPointerTracking(stage, dotNetReference) {
     if (!stage) {
@@ -208,6 +211,9 @@ function prepareTextEditor(editor) {
         return;
     }
     editor.dataset.plainTextPaste = "true";
+    editor.addEventListener("focusout", () => {
+        leftTextEditors.set(editor.dataset.compositionTextId, normalizeText(editor.innerText));
+    });
     editor.addEventListener("paste", event => {
         event.preventDefault();
         const text = event.clipboardData?.getData("text/plain") || "";
@@ -242,6 +248,7 @@ export function focusTextEditor(stage, objectId) {
         return;
     }
     prepareTextEditor(editor);
+    leftTextEditors.delete(editor.dataset.compositionTextId);
     editor.focus({ preventScroll: true });
     const selection = window.getSelection();
     if (!selection) {
@@ -260,6 +267,7 @@ export function focusTextEditorAt(stage, objectId, clientX, clientY) {
         return;
     }
     prepareTextEditor(editor);
+    leftTextEditors.delete(editor.dataset.compositionTextId);
     editor.focus({ preventScroll: true });
     const selection = window.getSelection();
     if (!selection) {
@@ -283,7 +291,8 @@ export function focusTextEditorAt(stage, objectId, clientX, clientY) {
 export function readTextEditor(stage, objectId) {
     const editor = textEditor(stage, objectId);
     if (!editor) {
-        return null;
+        const text = leftTextEditors.get(objectId);
+        return text === undefined ? null : { text, start: text.length, end: text.length };
     }
     const text = normalizeText(editor.innerText);
     const selection = window.getSelection();
@@ -325,6 +334,7 @@ export function restoreTextSelection(stage, objectId, start, end) {
         return;
     }
     prepareTextEditor(editor);
+    leftTextEditors.delete(editor.dataset.compositionTextId);
     editor.focus({ preventScroll: true });
     const selection = window.getSelection();
     if (!selection) {
