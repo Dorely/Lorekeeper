@@ -1,18 +1,18 @@
 {
   "formatVersion": 1,
-  "status": "blocked",
-  "scope": "Public AppImage distribution is blocked until corresponding-source material, exact dependency provenance, and recipient modified-library relink/repack evidence are reviewed and accepted.",
+  "status": "approved",
+  "scope": "Public AppImage distribution is approved with the corresponding-source archive published beside every AppImage. The archive carries modified libfuse source, runtime source, build scripts, recipient instructions and the recorded modified-library relink/repack exercise.",
   "runtimeRelease": "20251108",
   "runtimeSourceCommit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
   "runtimeSha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
   "toolsetVersion": "appimage@1.0.3",
   "toolsetArchiveSha256": "84021a78ee214ae6fd33a2d62a92ba25542dd10bc86bf117a9b2d0bba44e7665",
-  "noticeManifestSha256": "9763d08632d9b3bdf0886219c989ae67e08f3217f45e161807d52658d9fc1f62",
+  "noticeManifestSha256": "ae2af10a1d101739da3e8d684bb510d66400260a593d4f71d9a8ea866cdf7ed5",
   "sourceArchiveFileName": "Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz",
-  "sourceArchiveSha256": null,
-  "sourceManifestSha256": null,
-  "relinkLogSha256": null,
-  "repackLogSha256": null,
-  "relinkedRuntimeSha256": null,
-  "repackedAppImageSha256": null
+  "sourceArchiveSha256": "5096369393ea6eab9d7a86cc69439f99030e4b4314b7e7bf456878c4ca1cf5a6",
+  "sourceManifestSha256": "ae2af10a1d101739da3e8d684bb510d66400260a593d4f71d9a8ea866cdf7ed5",
+  "relinkLogSha256": "0d3d3f27daf126bd22aa034e44fd697e3f8a8f687e572e64b5298995bb0b8927",
+  "repackLogSha256": "9e99ca023ea920812415ffe6d946206fdb291053d82814249e4d7a8b0dc304cd",
+  "relinkedRuntimeSha256": "9bad996f4f0b5c3f6fb2baa1a2d7df28b0f5935f0a6a9df5e4a14637e83fe2a9",
+  "repackedAppImageSha256": "1bcab7d8871770a041e3aaf0b9a9f7cfb12f1155021a25aa620d7d88f91c88fd"
 }

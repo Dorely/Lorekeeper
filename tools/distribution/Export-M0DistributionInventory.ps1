@@ -492,18 +492,29 @@ foreach ($evidence in $appImageNoticeEvidence)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $evidence.sha256) { throw 'Retained AppImage notice/patch evidence is absent or changed.' }
 }
+$appImagePublication = Get-Content -LiteralPath (Join-Path $repoRoot 'eng/appimage-publication.json') -Raw | ConvertFrom-Json
+$appImageRuntimeExpression = 'MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib'
+$appImageRuntimeAdmission = if ($appImagePublication.status -ceq 'approved')
+{
+    [pscustomobject]@{ admissionStatus='admitted'; licenseExpression=$appImageRuntimeExpression; selectedLicenseExpression=$appImageRuntimeExpression; selectedOrBranches=@(); restrictionClasses=@('copyleft'); diagnostics=@('Admitted only for the unchanged type2-runtime 20251108 binary while its approved LGPL corresponding-source and relink archive is published beside every AppImage.') }
+}
+else
+{
+    [pscustomobject]@{ admissionStatus='unresolved'; licenseExpression=$appImageRuntimeExpression; selectedLicenseExpression=$null; selectedOrBranches=@(); restrictionClasses=@('copyleft'); diagnostics=@('Public static LGPL source/relink clearance is not approved in eng/appimage-publication.json.') }
+}
 $entries.Add((New-InventoryEntry -Kind 'third-party-notices' -Name 'AppImage runtime full component notices' -Version 'type2-runtime 20251108; toolset 1.0.3' `
     -DependencyCategory 'native-vendored' -Status 'satisfied' `
-    -LicenseEvidence 'Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date. This satisfies full notice retention only.' `
-    -AttributionAction 'Ship licenses/appimage-runtime with the root notice; source/relink and target artifact clearance remain separate unresolved obligations.' `
-    -Channels @('direct-linux') -Sources @('licenses/appimage-runtime/sources.json', 'THIRD-PARTY-NOTICES.txt') `
-    -Admission ([pscustomobject]@{ admissionStatus='unresolved'; licenseExpression='MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib'; selectedLicenseExpression=$null; selectedOrBranches=@(); restrictionClasses=@('copyleft'); diagnostics=@('Full notice retention is satisfied; no distribution-policy exception or public static LGPL source/relink clearance is inferred.') })))
+    -LicenseEvidence 'Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date.' `
+    -AttributionAction 'Ship licenses/appimage-runtime with the root notice and publish the approved corresponding-source archive beside every AppImage.' `
+    -Channels @('direct-linux') -Sources @('eng/appimage-publication.json', 'licenses/appimage-runtime/sources.json', 'THIRD-PARTY-NOTICES.txt') `
+    -Admission $appImageRuntimeAdmission))
 # Account and publication prerequisites intentionally contain no credentials.
 $entries.Add((New-InventoryEntry -Kind 'native-runtime' -Name 'AppImage embedded runtime and bundled native libraries' -Version 'type2-runtime 20251108; toolset 1.0.3' `
-    -DependencyCategory 'native-vendored' -Status 'unresolved-provenance' `
-    -LicenseEvidence 'Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. Exact Alpine patch/build provenance and successful recipient relink remain unconfirmed; full source material is prepared privately.' `
-    -AttributionAction 'Verify the extracted target runtime and absence of excluded libraries, establish exact source/relink closure, and deliver complete source material alongside any later authorized binary publication.' `
-    -Channels @('direct-linux') -Sources @('scripts/build-linux-release.ps1', 'licenses/appimage-runtime/sources.json', 'docs/evidence/public-sharing-audit.md')))
+    -DependencyCategory 'native-vendored' -Status $(if ($appImagePublication.status -ceq 'approved') { 'satisfied' } else { 'unresolved-provenance' }) `
+    -LicenseEvidence 'Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. The corresponding-source archive supplies modified libfuse and runtime sources, build scripts, and a recorded modified-libfuse relink and AppImage repack. Supplier Alpine package revisions are inferred from branch state because its build logs expired; those components are permissive.' `
+    -AttributionAction 'Verify the extracted target runtime and absence of excluded libraries, and publish the approved corresponding-source archive beside every AppImage.' `
+    -Channels @('direct-linux') -Sources @('eng/appimage-publication.json', 'scripts/build-linux-release.ps1', 'licenses/appimage-runtime/sources.json', 'docs/evidence/public-sharing-audit.md') `
+    -Admission $appImageRuntimeAdmission))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'GitHub public-repository clearance' -Version 'not started' `
     -DependencyCategory 'assets' `
     -Status 'unresolved-provenance' -LicenseEvidence 'The redacted all-ref and GitHub metadata audit is recorded separately; a final exact-ref recheck and owner visibility decision remain required.' `
@@ -606,7 +617,7 @@ foreach ($category in $categorySummary)
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('- Exact first-party terms, Bootstrap, managed/native package notices, and branding provenance are retained. The restrictive first-party owner decision does not relax the permissive third-party gate.')
 [void]$markdown.AppendLine('- libgit2 is admitted only as the unchanged compiled library linked into Lorekeeper under its exact retained unlimited linking exception; modifications or standalone redistribution require separate review.')
-[void]$markdown.AppendLine('- AppImage full component notice retention is satisfied. Its statically linked modified LGPL libfuse still requires complete source/relink and exact dependency provenance; the admission gate remains unresolved and no permissive exception is inferred.')
+[void]$markdown.AppendLine('- The AppImage runtime statically links modified LGPL libfuse. It is admitted only for the unchanged type2-runtime 20251108 binary while eng/appimage-publication.json is approved and its corresponding-source/relink archive is published beside every AppImage.')
 [void]$markdown.AppendLine('- Packaged platform closures, real Store identities/certification, and any Mac App Store work require their own recorded evidence. Absence is not silently treated as approval.')
 [void]$markdown.AppendLine()
 [void]$markdown.AppendLine('## Public-sharing audit')

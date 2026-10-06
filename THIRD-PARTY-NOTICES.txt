@@ -509,7 +509,7 @@ Other retained distribution notices:
   Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.12; source https://github.com/dotnet/dotnet 95017c711e6afc1085133d440e42b4bd78155701
   Retained full terms/notice: licenses/runtime-notices/Microsoft.WindowsDesktop.App.Runtime.win-x64/10.0.12/LICENSE (SHA-256 a89886665765362eb77e0f8e26602c924520041d1711b2eedc136434fe4d01ab)
 - ICC profile: Lorekeeper.Press/assets/profiles/SOURCE.md records the registry source, hash, and unchanged distribution requirement; Press notices repeat the terms.
-- AppImage type2 runtime 20251108: exact component full terms and modified-libfuse notice/patch metadata are retained under licenses/appimage-runtime/sources.json. Full notice inclusion is prepared; LGPL corresponding-source, dependency provenance and recipient relink clearance remain pending before public AppImage distribution.
+- AppImage type2 runtime 20251108: exact component full terms and modified-libfuse notice/patch metadata are retained under licenses/appimage-runtime/sources.json. LGPL corresponding source for the modified libfuse, the runtime source, and relink instructions are published beside every AppImage as Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz.
   AppImage type2 runtime 20251108; MIT
   Retained full terms/notice: licenses/appimage-runtime/appimage-type2-runtime/type2-runtime-dd6cebedcbddde9c82f89b011e8e1d40b6e43868/LICENSE (SHA-256 aa154fc9070614bbe7921f89db11efd1dba7a1f3a41685958110e2230f9c0ca1)
   libfuse 3.15.0; LGPL-2.1 library according to upstream LICENSE; utilities carry separate GPL-2.0 terms

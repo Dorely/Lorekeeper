@@ -338,9 +338,10 @@ Linux packaging uses electron-builder's supported AppImage toolset override with
 the SHA-pinned 1.0.3 archive and official 20251108 static runtime. The temporary
 toolset excludes the old optional `lib/x64` compatibility libraries; the final
 AppImage must have no such bundled compatibility closure, match the exact runtime
-prefix hash, and retain the source-owned launcher. Native desktop/AppArmor
-acceptance and the modified libfuse LGPL source/relink material remain separate
-unresolved evidence.
+prefix hash, and retain the source-owned launcher. The modified libfuse LGPL
+source/relink archive ships beside every AppImage under the approved
+`eng/appimage-publication.json`; native desktop/AppArmor acceptance remains
+separate evidence.
 
 Packaged application metadata declares `desktopName` as
 `com.lorekeeper.app.desktop`, and Linux `syncDesktopName` uses that identity for

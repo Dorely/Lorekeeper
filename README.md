@@ -617,13 +617,13 @@ isolated ext4 storage, so commit completed preparation first. It does not copy
 working databases, History, credentials, or uncommitted changes. Use
 `-CheckOnly` for toolchain prerequisites; this is not an artifact or desktop
 acceptance check. Linux builds use local compute. Native desktop startup,
-sandbox behavior, update discovery, and complete AppImage/FUSE notice closure
-remain separate release evidence.
+sandbox behavior, and update discovery remain separate release evidence.
 The Linux builder selects the pinned AppImage toolset 1.0.3 through its supported
 override, verifies the official archive and 20251108 static runtime hashes, and
 excludes the old optional compatibility libraries. The extracted runtime prefix
-and source-owned launcher are checked. Its modified LGPL libfuse still requires
-corresponding source and recipient relinking material before public distribution.
+and source-owned launcher are checked. The runtime statically links a modified
+LGPL libfuse, so every published AppImage is accompanied by its corresponding
+source archive (see below).
 
 The native Apple Silicon builder is `scripts/build-macos-release.ps1`, run on
 macOS arm64. The dispatch-only GitHub workflow supplies the Mac host; general CI
@@ -679,17 +679,16 @@ normal push, native packaging, checksum verification, and publication. Use
 `-LinuxDistribution <name>` for the configured WSL distribution, and
 `-WindowsOnly` to omit Linux and macOS. Do not use publication to test tooling.
 
-Public AppImage distribution is currently blocked by
-[`eng/appimage-publication.json`](eng/appimage-publication.json). Local Linux
-builds and release preview remain available. Publication requires reviewed
-corresponding-source material, exact dependency provenance and actual recipient
-modified-library relink/repack evidence. The approved archive belongs at
-`.artifacts/appimage-publication/Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz`;
-it must include the reviewed `sources.json` and
-`recipient-validation/relink.log` and `repack.log`. The publisher verifies the
-record, evidence and archive hashes, binds them to the packaged runtime, and
-includes that source archive in both v1 asset sets. Prepared source and notices
-alone do not satisfy this gate.
+Public AppImage distribution is approved in
+[`eng/appimage-publication.json`](eng/appimage-publication.json). Every Linux
+release publishes `Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz`
+beside the AppImage. It holds the modified libfuse and runtime sources, build
+scripts, recipient relink instructions, and a recorded modified-library
+relink/repack exercise. The release driver reads that archive from
+`.artifacts/appimage-publication/`, which Git ignores. Keep it there, or recreate it
+with the same SHA-256, before releasing. The publisher verifies the record,
+evidence and archive hashes, binds them to the packaged runtime, and includes
+the archive in both v1 asset sets.
 
 The lower-level publisher requires clean source whose HEAD equals fetched
 `origin/main`, a matching project version, and explicit

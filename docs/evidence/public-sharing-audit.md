@@ -1,6 +1,8 @@
 # Public-sharing preparation audit
 
-Date: 2026-10-05. Status: **Preparation evidence; public clearance remains open.**
+Date: 2026-10-05, updated 2026-10-06. Status: **Contribution rights and AppImage
+source/relink clearance are resolved; exact final refs need a recheck before
+visibility changes.**
 No visibility, settings, refs, history, release publication, or Store submission
 was changed by this audit. Detailed reports and downloaded material stay private
 under ignored `.artifacts/sharing-audit/`. Do not upload that directory.
@@ -130,12 +132,11 @@ metadata and historical documentation still contain author identities and local
 path/project references; this audit has not rewritten them or treated them as
 secrets.
 
-**Two unmerged remote hosting/speed-reading branches contain contributions from
-another author whose permission to offer that code under the selected dual
-terms has not been established.** That author's commits are not in `main`.
-Public visibility exposes those retained refs too, so owner review of those
-contribution rights remains a concrete clearance item. No branch was deleted,
-hidden, relicensed by assumption, or rewritten.
+Two unmerged remote hosting/speed-reading branches contain contributions from
+another author. That author's commits are not in `main`. On 2026-10-06 the owner
+confirmed having that contributor's permission to offer the code under the
+selected dual terms, so the retained branches may become public with the
+repository. No branch was deleted, hidden, or rewritten.
 
 First-party source/documentation/branding now have the owner's selected unchanged
 PolyForm Noncommercial or Internal Use 1.0.0 alternatives. Branding ownership
@@ -163,33 +164,31 @@ musl, squashfuse, zstd, zlib, and mimalloc components. Seven exact source/versio
 records and full component terms, including musl's per-file copyright/license
 blocks, are now retained under `licenses/appimage-runtime/`. The modified-libfuse
 notice records the original supplier change date and exact patch/hash. This
-satisfies full notice retention only. A reviewable approximately 24 MB source
-preparation bundle remains ignored and private: it includes original archives,
-patched preferred libfuse source, supplier build inputs, Alpine recipes/patches,
-all terms and corrected recipient relink instructions. The archive contains
-1,884 files, is 24,409,771 bytes, and has SHA-256
-`0cb245b2f9cb21253a2440eba5de2960c3b1599f6247b391354c442d32ef0693`.
-Binary/debug version evidence is distinguished from Alpine patch/build
-provenance inferred from the build date;
-the supplier build logs are unavailable. Debug line tables expose source paths
-and some compiler producer options, but no exact source-file checksum witness
-has been established. A changed-library rebuild/relink/repack has not been
-established for the currently selected supplier runtime. Full notices and
-prepared source alone do not close
-the LGPL source/relink and precise-provenance obligations or the permissive
-admission gate. Local packaging for validation does not establish public
-AppImage clearance. `eng/appimage-publication.json` binds the reviewed runtime,
-toolset and required source-preparation release asset while remaining explicitly
-blocked; it is a fail-closed publication boundary, not clearance.
+satisfies full notice retention.
 
-A separate ignored replacement-runtime experiment has now retained pinned
-source/patch/header/object evidence and demonstrated a changed-libfuse
-rebuild/relink/repack, including comparison of 1,133 payload entries. That is
-evidence for the experimental replacement and does not establish correspondence
-for the currently selected supplier binary. The replacement has not been selected
-or approved for production; its complete source/terms, prominent modification
-dates, admission decision and final packaging identity still require review.
-The current vendor selection and blocked publication manifest remain unchanged.
+LGPL 2.1 requires the modified libfuse source and enough material for a
+recipient to modify the library and relink the program that uses it. On
+2026-10-06 the owner approved publication with
+`Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz`
+(SHA-256 `5096369393ea6eab9d7a86cc69439f99030e4b4314b7e7bf456878c4ca1cf5a6`,
+1,900 files) as a release asset beside every AppImage. It contains the original
+archives, the complete patched preferred libfuse source with its dated
+modification notice, the MIT runtime source and supplier build scripts, all
+component terms, recipient instructions, and `recipient-validation/`. That
+directory records a real exercise run offline in an isolated Alpine 3.21 root
+from digest-locked signed packages. It changed libfuse `fuse_log.c`, relinked the
+type2 runtime from commit `dd6cebed` sources (runtime SHA-256 `9bad996f…`), and
+repacked a Lorekeeper AppImage with `appimagetool --runtime-file`. All 1,133
+payload entries matched. Local workspace paths in the published scripts and
+logs are replaced with placeholders.
+
+The supplier's own build logs have expired, so the exact Alpine package
+revisions behind the vendor binary are inferred from branch state at its build
+date. Those packages (musl, zstd, zlib, mimalloc, compiler startup objects) are
+permissively licensed and do not limit a recipient's ability to modify libfuse
+and relink, so bit-for-bit reproduction of the vendor binary is not required.
+`eng/appimage-publication.json` is now approved and binds the archive, its
+manifest, relink/repack logs and outputs to the selected runtime and toolset.
 
 ## Remaining clearance
 
@@ -198,9 +197,8 @@ release assets within the recorded bounds. Detailed evidence, prior failures and
 superseding successful checks remain private. Available Actions logs are reviewed
 as described above; the **32 expired archives cannot be cleared by run metadata**.
 
-Obtain the owner's decision on the two unmerged contribution branches, complete
-AppImage/native third-party evidence, and rerun secret/current-file checks against
-the final committed source and exact remote refs. Retain only sanitized results.
+Rerun secret/current-file checks against the final committed source and exact
+remote refs before the visibility change. Retain only sanitized results.
 Automatic history rewriting, branch deletion, visibility changes, publication,
 settings changes, and archival are outside preparation. Live UI/provider/platform,
 installed update handoff, Store certification, and trailer captures are recorded

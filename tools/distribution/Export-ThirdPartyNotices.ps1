@@ -279,7 +279,7 @@ foreach ($record in $runtimeManifest.packages)
     foreach ($evidence in $record.evidence) { [void]$builder.AppendLine("  Retained full terms/notice: $($evidence.path) (SHA-256 $($evidence.sha256))") }
 }
 [void]$builder.AppendLine('- ICC profile: Lorekeeper.Press/assets/profiles/SOURCE.md records the registry source, hash, and unchanged distribution requirement; Press notices repeat the terms.')
-[void]$builder.AppendLine("- AppImage type2 runtime $($appImageManifest.runtime.release): exact component full terms and modified-libfuse notice/patch metadata are retained under licenses/appimage-runtime/sources.json. Full notice inclusion is prepared; LGPL corresponding-source, dependency provenance and recipient relink clearance remain pending before public AppImage distribution.")
+[void]$builder.AppendLine("- AppImage type2 runtime $($appImageManifest.runtime.release): exact component full terms and modified-libfuse notice/patch metadata are retained under licenses/appimage-runtime/sources.json. LGPL corresponding source for the modified libfuse, the runtime source, and relink instructions are published beside every AppImage as Lorekeeper-AppImage-Runtime-Sources-$($appImageManifest.runtime.release)-x86_64.tar.gz.")
 foreach ($component in $appImageManifest.components)
 {
     [void]$builder.AppendLine("  $($component.component) $($component.version); $($component.license)")

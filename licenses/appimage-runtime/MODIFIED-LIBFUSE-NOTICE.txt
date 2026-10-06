@@ -16,8 +16,11 @@ libfuse/fuse-3.15.0/file-notices/. The kernel-interface header's separately
 offered BSD-2-Clause branch is selected, retaining its full original copyright,
 conditions and disclaimer. Lorekeeper's first-party terms do not replace them.
 
-This is notice evidence for local package preparation. Public AppImage
-redistribution clearance remains pending: corresponding modified-library
-source and complete runtime build/relink material must be supplied alongside
-the binary, with exact dependency provenance and practical recipient relink
-acceptance established. Full notices alone do not establish that clearance.
+Every Lorekeeper AppImage release publishes, at the same download location,
+Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz. It contains the
+complete modified libfuse source, the original archives and supplier patch,
+the MIT-licensed runtime source that links libfuse, the other static
+component sources and terms, build scripts, and instructions for modifying
+libfuse, relinking the runtime, and replacing it inside the AppImage. A
+recorded recipient exercise modified libfuse, relinked the runtime, and
+repacked a Lorekeeper AppImage with an unchanged application payload.

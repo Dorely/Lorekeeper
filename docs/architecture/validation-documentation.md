@@ -257,7 +257,7 @@ tolerates that module's load failure. Ubuntu's newer LTTng ABI is not aliased;
 provenance records optional LTTng tracing as unavailable rather than working.
 The pinned Linux launcher in `eng/linux/AppRun.sh` must retain its exact source
 hash and executable mode and never add `--no-sandbox`; native desktop/AppArmor
-acceptance and complete AppImage/FUSE license closure remain separate evidence.
+acceptance remains separate evidence.
 The supported toolset override selects SHA-pinned AppImage tools 1.0.3 and the
 official 20251108 static runtime, excludes old optional compatibility libraries,
 and checks the final runtime prefix and empty compatibility-library directory.
@@ -268,13 +268,14 @@ Seven exact AppImage component source/version records, full terms and per-file
 musl copyright/license blocks are retained under `licenses/appimage-runtime/`,
 with the original modified-libfuse patch/date notice. The notice generator checks
 their hashes and every package retains that evidence. The static runtime's
-modified LGPL libfuse still needs complete corresponding source, exact dependency
-provenance and practical recipient relinking evidence. Its reviewable source
-bundle remains ignored/private; notice retention and local packaging do not
-establish public distribution clearance or a permissive admission exception.
+modified LGPL libfuse is satisfied by publishing a corresponding-source archive
+beside every AppImage: modified libfuse and runtime sources, build scripts,
+recipient instructions, and a recorded modified-libfuse relink and AppImage
+repack. The distribution inventory admits the runtime only while that record is
+approved.
 
-`eng/appimage-publication.json` is the explicit, currently blocked public
-AppImage boundary. The shared release helper binds its runtime/source/toolset
+`eng/appimage-publication.json` is the explicit, approved public AppImage
+boundary. The shared release helper binds its runtime/source/toolset
 identity and notice-manifest hash to the selected evidence. An approved record
 requires reviewed archive, source-manifest, recipient relink/repack log and output
 hashes. The archive contains unique nonempty regular `sources.json`,
@@ -287,9 +288,10 @@ not proof created by the helper.
 The normal driver checks before a version commit/push; the publisher checks
 before builds/Actions and again against the staged archive and actual runtime
 provenance before draft creation. That source archive is mandatory in both v1
-Linux asset sets and their checksum/download verification. `-CheckOnly` reports
-blocked publication while validating local build readiness; local builders do
-not require public clearance. No bypass is provided.
+Linux asset sets and their checksum/download verification. If the record is
+set back to blocked, `-CheckOnly` reports blocked publication while validating
+local build readiness; local builders do not require public clearance. No bypass
+is provided.
 
 The dependency audit permits only the two exact known
 `image-size@1.2.1` advisories while Electron.NET's optional splash call is

@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "scope": "Full component notices for the selected AppImage runtime; source/relink and public-distribution clearance remain pending",
+  "scope": "Full component notices for the selected AppImage runtime; corresponding source and recipient relink material ship as a release asset beside every AppImage",
   "runtime": {
     "release": "20251108",
     "commit": "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
@@ -17,7 +17,7 @@
   "dependencyProvenance": {
     "alpineRecipeCommit": "590fd1489813473277cf110fd88b1c3888d19367",
     "confidence": "inferred from official branch state at actual supplier build time; supplier logs unavailableHTTP410; binary/debug version evidence agrees",
-    "recipientRelinkEvidence": "Not performed"
+    "recipientRelinkEvidence": "Performed 2026-10-05: modified libfuse fuse_log.c, relinked the type2 runtime from commit dd6cebed sources, repacked a Lorekeeper AppImage with appimagetool --runtime-file; all 1,133 payload entries matched"
   },
   "modifiedLibfuse": {
     "version": "3.15.0",
@@ -31,11 +31,11 @@
       "source": "https://raw.githubusercontent.com/AppImage/type2-runtime/dd6cebedcbddde9c82f89b011e8e1d40b6e43868/patches/libfuse/mount.c.diff"
     },
     "change": "FUSERMOUNT_PROG environment selection for fusermount",
-    "correspondingSourceAndRelinkStatus": "Ignored reviewable preparation bundle exists; public clearance and recipient relink acceptance remain pending",
+    "correspondingSourceAndRelinkStatus": "Published beside each AppImage as Lorekeeper-AppImage-Runtime-Sources-20251108-x86_64.tar.gz; approved in eng/appimage-publication.json",
     "notice": {
       "path": "licenses/appimage-runtime/MODIFIED-LIBFUSE-NOTICE.txt",
-      "bytes": 1540,
-      "sha256": "45a5b83dc69fe0cf3f15b7c1cb7ce29a5b568dace6e76548c644dde72d7990ca",
+      "bytes": 1753,
+      "sha256": "257e08773c0678abc7a96742afa1952271ce8f376ed6679f8a10e3ce04be14b6",
       "source": "Curated supplier modification/date notice; original upstream full terms and exact original supplier patch retained separately"
     }
   },

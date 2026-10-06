@@ -13,8 +13,8 @@
     ],
     "gateStatus": "unresolved",
     "admissionSummary": {
-      "admitted": 238,
-      "unresolved": 8,
+      "admitted": 240,
+      "unresolved": 6,
       "blocked": 0
     }
   },
@@ -26,10 +26,10 @@
     "mac-app-store"
   ],
   "summary": {
-    "satisfied": 239,
+    "satisfied": 240,
     "needs-inclusion": 0,
     "blocked": 0,
-    "unresolved-provenance": 7
+    "unresolved-provenance": 6
   },
   "categorySummary": [
     {
@@ -63,8 +63,8 @@
     {
       "dependencyCategory": "native-vendored",
       "entries": 17,
-      "admitted": 14,
-      "unresolved": 3,
+      "admitted": 16,
+      "unresolved": 1,
       "blocked": 0
     },
     {
@@ -4242,24 +4242,27 @@
       "name": "AppImage embedded runtime and bundled native libraries",
       "version": "type2-runtime 20251108; toolset 1.0.3",
       "dependencyCategory": "native-vendored",
-      "status": "unresolved-provenance",
-      "licenseEvidence": "Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. Exact Alpine patch/build provenance and successful recipient relink remain unconfirmed; full source material is prepared privately.",
-      "attributionAction": "Verify the extracted target runtime and absence of excluded libraries, establish exact source/relink closure, and deliver complete source material alongside any later authorized binary publication.",
+      "status": "satisfied",
+      "licenseEvidence": "Exact runtime/source/toolset hashes and full component terms are retained. The curated selected toolset excludes optional legacy lib/x64 libraries. The corresponding-source archive supplies modified libfuse and runtime sources, build scripts, and a recorded modified-libfuse relink and AppImage repack. Supplier Alpine package revisions are inferred from branch state because its build logs expired; those components are permissive.",
+      "attributionAction": "Verify the extracted target runtime and absence of excluded libraries, and publish the approved corresponding-source archive beside every AppImage.",
       "channels": [
         "direct-linux"
       ],
       "sources": [
         "docs/evidence/public-sharing-audit.md",
+        "eng/appimage-publication.json",
         "licenses/appimage-runtime/sources.json",
         "scripts/build-linux-release.ps1"
       ],
-      "admissionStatus": "unresolved",
-      "licenseExpression": null,
-      "selectedLicenseExpression": null,
+      "admissionStatus": "admitted",
+      "licenseExpression": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib",
+      "selectedLicenseExpression": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib",
       "selectedOrBranches": [],
-      "restrictionClasses": [],
+      "restrictionClasses": [
+        "copyleft"
+      ],
       "policyDiagnostics": [
-        "License metadata is missing or is not an SPDX expression; this is unresolved provenance, not an automatic policy rejection."
+        "Admitted only for the unchanged type2-runtime 20251108 binary while its approved LGPL corresponding-source and relink archive is published beside every AppImage."
       ]
     },
     {
@@ -7504,24 +7507,25 @@
       "version": "type2-runtime 20251108; toolset 1.0.3",
       "dependencyCategory": "native-vendored",
       "status": "satisfied",
-      "licenseEvidence": "Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date. This satisfies full notice retention only.",
-      "attributionAction": "Ship licenses/appimage-runtime with the root notice; source/relink and target artifact clearance remain separate unresolved obligations.",
+      "licenseEvidence": "Seven exact source/version records retain full original terms, musl component copyright/license blocks, SHA-256 notice hashes, and the modified-libfuse notice plus original supplier patch/date.",
+      "attributionAction": "Ship licenses/appimage-runtime with the root notice and publish the approved corresponding-source archive beside every AppImage.",
       "channels": [
         "direct-linux"
       ],
       "sources": [
+        "eng/appimage-publication.json",
         "licenses/appimage-runtime/sources.json",
         "THIRD-PARTY-NOTICES.txt"
       ],
-      "admissionStatus": "unresolved",
+      "admissionStatus": "admitted",
       "licenseExpression": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib",
-      "selectedLicenseExpression": null,
+      "selectedLicenseExpression": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND BSD-3-Clause AND Zlib",
       "selectedOrBranches": [],
       "restrictionClasses": [
         "copyleft"
       ],
       "policyDiagnostics": [
-        "Full notice retention is satisfied; no distribution-policy exception or public static LGPL source/relink clearance is inferred."
+        "Admitted only for the unchanged type2-runtime 20251108 binary while its approved LGPL corresponding-source and relink archive is published beside every AppImage."
       ]
     },
     {
