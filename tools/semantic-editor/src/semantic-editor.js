@@ -2668,8 +2668,9 @@ async function insertOrEditCitation(view, root, loadBibliography) {
         return;
     }
     const items = citationItemsFromForm(values, count, originalItems);
+    // Like notes, a new citation goes after the selection; replacing it would delete a selected note marker and its note.
     view.dispatch(view.state.tr
-        .setSelection(initialSelection)
+        .setSelection(existing ? initialSelection : TextSelection.create(initialDocument, initialSelection.to))
         .replaceSelectionWith(schema.nodes.citation.create({id: existing?.attrs.id || newBlockId(), items}))
         .scrollIntoView());
     view.focus();
