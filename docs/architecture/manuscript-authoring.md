@@ -235,10 +235,10 @@ and Figure controls. It is a ribbon: Home, Insert, Notes & Sources, Layout,
 and Review (when annotations are allowed) tabs over one panel of labelled
 control groups, with Find and Outline beside the tabs. Every panel stays in the
 toolbar while hidden, the chosen tab is remembered per browser, and tab buttons
-stay usable in read-only mode. The editor grid gives the manuscript column a
-minimum width that fits the widest ribbon panel on one line; the Editor Chat
-and Assistant Memory columns shrink first, and their splitters cannot take that
-room back. A second context row appears only while a table, Figure, or Designed
+stay usable in read-only mode. A panel keeps its groups on one line and scrolls
+sideways when the manuscript column is narrower than it, so the column
+splitters stay free and the toolbar height does not change between tabs. A
+second context row appears only while a table, Figure, or Designed
 Page is selected; it carries row/column/header/delete actions for regular
 tables (merged-cell tables allow only the header and delete actions), Figure
 image/alt/placement actions with the full Figure inspector behind a toggle,

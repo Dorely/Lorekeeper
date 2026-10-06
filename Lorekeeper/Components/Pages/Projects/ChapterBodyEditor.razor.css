@@ -37,7 +37,7 @@
     background: var(--bs-body-bg, #fff);
 }
 
-/* Ribbon: a tab strip over one panel of labelled groups; groups wrap when the column is narrow. */
+/* Ribbon: a tab strip over one panel of labelled groups; the panel scrolls sideways when the column is narrow. */
 .semantic-editor ::deep .semantic-editor-ribbon-header {
     display: flex;
     align-items: flex-end;
@@ -90,11 +90,12 @@
 
 .semantic-editor ::deep .semantic-editor-ribbon-panel {
     display: flex;
-    min-height: 3.7rem;
-    flex-wrap: wrap;
+    min-height: 4.4rem;
     align-items: stretch;
-    row-gap: .3rem;
     padding: .35rem .3rem .25rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
 }
 
 .semantic-editor ::deep .semantic-editor-ribbon-panel[hidden],
@@ -105,6 +106,7 @@
 
 .semantic-editor ::deep .semantic-editor-ribbon-group {
     display: flex;
+    flex: none;
     flex-direction: column;
     justify-content: space-between;
     gap: .2rem;
