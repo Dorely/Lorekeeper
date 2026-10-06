@@ -74,6 +74,7 @@
     private bool _initializing;
     private bool _disposed;
     private bool _disposing;
+    private AuthoringWriterFlushResult? _finalFlush;
     private string? _initializationError;
     private string? _pasteWarning;
     private CancellationTokenSource? _importCancellation;
@@ -200,7 +201,8 @@
                 if (_handle is not null)
                 {
                     await RegisterAuthoringWriterAsync();
-                    await _handle.InvokeVoidAsync("reportWriterState");
+                    if (_handle is not null && !_disposing && !_disposed)
+                        await _handle.InvokeVoidAsync("reportWriterState");
                 }
                 await ApplyPendingLocationAsync();
             }
@@ -483,11 +485,24 @@
         ValidateAuthoringBatch(batch);
         var result = await AuthoringBatches.ApplyBatchAsync(batch, payload);
         if (result.Status is AuthoringBatchStatusV1.Committed or AuthoringBatchStatusV1.Replayed)
+            _ = NotifyAuthoringSavedAsync(result, batch.ImportResources?.Styles.Count > 0);
+        return JsonSerializer.SerializeToElement(result, ManuscriptCodec.JsonOptions);
+    }
+
+    // Saved-state refreshes can read Review Edits state, which fences this writer and flushes through the
+    // editor's save chain; that chain is still awaiting this dispatch, so the refresh runs after the reply.
+    private async Task NotifyAuthoringSavedAsync(AuthoringBatchResultV1 result, bool stylesChanged)
+    {
+        await Task.Yield();
+        try
         {
             await AuthoringSaved.InvokeAsync(result);
-            if (batch.ImportResources?.Styles.Count > 0) await StyleCatalogChanged.InvokeAsync();
+            if (stylesChanged) await StyleCatalogChanged.InvokeAsync();
         }
-        return JsonSerializer.SerializeToElement(result, ManuscriptCodec.JsonOptions);
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Saved-state refresh failed after authoring batch {BatchId}.", result.BatchId);
+        }
     }
 
     [JSInvokable]
@@ -551,12 +566,19 @@
         if (_authoringWriterLease is not null || _authoringSessionId is not Guid sessionId)
             return;
 
-        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+        var lease = await AuthoringFence.RegisterWriterAsync(new(
             new AuthoringTargetReferenceV1(ProjectId, AuthoringTargetId()),
             sessionId,
             _authoringWriterId,
             FreezeAndFlushAuthoringAsync,
             ResumeAuthoringAsync));
+        // Registration waits out active fences; a component disposed meanwhile must not leave its writer behind.
+        if (_disposing || _disposed)
+        {
+            await lease.DisposeAsync();
+            return;
+        }
+        _authoringWriterLease = lease;
         // A same-session remount atomically reattaches an unreachable writer.
         // Do not overwrite its retained dirty state here: the JS handle reports
         // its recovered journal/queue state immediately after registration.
@@ -564,7 +586,13 @@
 
     private async Task<AuthoringWriterFlushResult> FreezeAndFlushAuthoringAsync(long sequence, CancellationToken cancellationToken)
     {
-        if (_handle is null || _disposed || _disposing)
+        // A disposing editor keeps its handle until its own final flush and save wait finish, and stays
+        // registered until then, so fences arriving meanwhile still flush it instead of failing.
+        // Fences that snapshotted it before its release can still arrive after teardown; a clean final
+        // flush answers them.
+        if (_handle is null && _finalFlush is not null)
+            return _finalFlush;
+        if (_handle is null || _disposed)
             return new(_lastAcknowledgedAuthoringSequence, _authoringDirty, _authoringRecoverable, false,
                 "AUTHORING_CLIENT_UNREACHABLE", "The editor is no longer reachable.");
         try
@@ -576,7 +604,7 @@
             UpdateAuthoringWriterState(isReachable: result.IsReachable);
             return result;
         }
-        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
         {
             UpdateAuthoringWriterState(isReachable: false);
             return new(_lastAcknowledgedAuthoringSequence, _authoringDirty, _authoringRecoverable, false,
@@ -883,11 +911,16 @@
         _disposing = true;
         if (_handle is not null)
         {
-            try { await FreezeAndFlushAuthoringAsync(_highestAuthoringSequence, CancellationToken.None); } catch { }
+            AuthoringWriterFlushResult? flushed = null;
+            try { flushed = await FreezeAndFlushAuthoringAsync(_highestAuthoringSequence, CancellationToken.None); } catch { }
             try { await _handle.InvokeAsync<bool>("waitForSaves"); } catch { }
-            try { await _handle.InvokeVoidAsync("dispose"); } catch { }
-            try { await _handle.DisposeAsync(); } catch { }
+            if (flushed is { IsReachable: true, IsDirty: false, IsRecoverable: true })
+                _finalFlush = flushed;
+            // Detach before teardown so concurrent fences never call into a disposed handle.
+            var handle = _handle;
             _handle = null;
+            try { await handle.InvokeVoidAsync("dispose"); } catch { }
+            try { await handle.DisposeAsync(); } catch { }
         }
         if (_authoringWriterLease is not null)
         {

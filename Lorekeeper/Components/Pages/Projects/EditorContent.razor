@@ -3568,6 +3568,7 @@ else
 
         _reviewBusy = true;
         _reviewError = null;
+        string? actionError = null;
         try
         {
             await action();
@@ -3582,7 +3583,8 @@ else
         }
         catch (Exception ex)
         {
-            _reviewError = ex.Message;
+            actionError = ex.Message;
+            _reviewError = actionError;
         }
         try
         {
@@ -3595,6 +3597,8 @@ else
             {
                 _reviewRefreshPending = false;
                 await RefreshReviewChangesAsync(showLoadingState: false);
+                // A successful refresh clears load errors; the failed action must stay visible.
+                _reviewError ??= actionError;
                 _reviewRefreshSignal++;
                 if (location is not null)
                     QueueManuscriptLocationRestore();
@@ -3617,6 +3621,7 @@ else
         {
             _reviewRefreshPending = false;
             await RefreshReviewChangesAsync(showLoadingState: false);
+            _reviewError ??= actionError;
             if (!_disposed)
                 StateHasChanged();
         }

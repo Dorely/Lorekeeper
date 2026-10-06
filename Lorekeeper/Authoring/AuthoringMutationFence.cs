@@ -71,6 +71,7 @@ internal sealed class AuthoringMutationFence(
     IProjectMutationCoordinator projectMutations,
     IAuthoringDeltaHistoryRuntime history) : IAuthoringMutationFence
 {
+    private static readonly TimeSpan RegistrationFenceWait = TimeSpan.FromSeconds(30);
     private static readonly AsyncLocal<FenceScope?> Ambient = new();
     private readonly object _gate = new();
     private readonly Dictionary<string, RegisteredWriter> _writers = new(StringComparer.Ordinal);
@@ -78,7 +79,7 @@ internal sealed class AuthoringMutationFence(
 
     public Guid ProcessIncarnationId { get; } = Guid.NewGuid();
 
-    public ValueTask<IAsyncDisposable> RegisterWriterAsync(
+    public async ValueTask<IAsyncDisposable> RegisterWriterAsync(
         AuthoringWriterRegistration registration,
         CancellationToken cancellationToken = default)
     {
@@ -86,33 +87,62 @@ internal sealed class AuthoringMutationFence(
         ArgumentNullException.ThrowIfNull(registration.FreezeAndFlushAsync);
         ArgumentNullException.ThrowIfNull(registration.ResumeAsync);
         var key = Key(registration.Target);
-        lock (_gate)
+        // Dependent operations such as background Review Edits reads fence the project briefly and often, so an
+        // opening editor waits for them to end; only one it cannot outlast (or is running inside) fails it.
+        using var fenceWait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        fenceWait.CancelAfter(RegistrationFenceWait);
+        while (true)
         {
-            if (_activeFences.Any(item => item.ProjectId == registration.Target.ProjectId
-                    && (item.TargetIds.Count == 0 || item.TargetIds.Contains(registration.Target.TargetId))))
+            Task fenceEnded;
+            lock (_gate)
             {
-                throw new AuthoringMutationFenceException(
-                    "AUTHORING_FENCE_ACTIVE",
-                    "This authoring target cannot become writable while a dependent operation is consuming its state.");
-            }
-            if (_writers.TryGetValue(key, out var existing))
-            {
-                if (existing.Registration.SessionId == registration.SessionId
-                    && !existing.State.IsReachable
-                    && existing.FenceCount == 0)
-                {
-                    var replacement = new RegisteredWriter(registration) { State = existing.State };
-                    _writers[key] = replacement;
-                    return ValueTask.FromResult<IAsyncDisposable>(new WriterLease(this, key, replacement));
-                }
-                throw new AuthoringMutationFenceException("AUTHORING_WRITER_ACTIVE", "This authoring target is already writable in another window.");
+                var blocking = _activeFences.FirstOrDefault(item => item.ProjectId == registration.Target.ProjectId
+                    && (item.TargetIds.Count == 0 || item.TargetIds.Contains(registration.Target.TargetId)));
+                if (blocking is null)
+                    return RegisterUnfencedWriterLocked(registration, key);
+                fenceEnded = blocking.Ended.Task;
             }
 
-            var writer = new RegisteredWriter(registration);
-            _writers.Add(key, writer);
-            history.SetActive(registration.Target.TargetId, active: true);
-            return ValueTask.FromResult<IAsyncDisposable>(new WriterLease(this, key, writer));
+            if (Ambient.Value?.ProjectId == registration.Target.ProjectId)
+                throw FenceActiveException();
+            try
+            {
+                await fenceEnded.WaitAsync(fenceWait.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw FenceActiveException();
+            }
         }
+    }
+
+    private static AuthoringMutationFenceException FenceActiveException() => new(
+        "AUTHORING_FENCE_ACTIVE",
+        "This authoring target cannot become writable while a dependent operation is consuming its state.");
+
+    private WriterLease RegisterUnfencedWriterLocked(AuthoringWriterRegistration registration, string key)
+    {
+        if (_writers.TryGetValue(key, out var existing))
+        {
+            if (existing.Registration.SessionId == registration.SessionId
+                && !existing.State.IsReachable
+                && existing.FenceCount == 0)
+            {
+                var replacement = new RegisteredWriter(registration)
+                {
+                    State = existing.State,
+                    FencedWriteGeneration = existing.FencedWriteGeneration,
+                };
+                _writers[key] = replacement;
+                return new WriterLease(this, key, replacement);
+            }
+            throw new AuthoringMutationFenceException("AUTHORING_WRITER_ACTIVE", "This authoring target is already writable in another window.");
+        }
+
+        var writer = new RegisteredWriter(registration);
+        _writers.Add(key, writer);
+        history.SetActive(registration.Target.TargetId, active: true);
+        return new WriterLease(this, key, writer);
     }
 
     public void UpdateWriterState(AuthoringWriterState state)
@@ -199,7 +229,9 @@ internal sealed class AuthoringMutationFence(
                 request.TargetIds.ToHashSet(StringComparer.Ordinal));
             try
             {
-                return await consume(new AuthoringFenceContext(ProcessIncarnationId, states), cancellationToken);
+                var result = await consume(new AuthoringFenceContext(ProcessIncarnationId, states), cancellationToken);
+                await RecordFencedWritesAsync(request, writers, states);
+                return result;
             }
             finally
             {
@@ -276,7 +308,11 @@ internal sealed class AuthoringMutationFence(
             var actualGeneration = generations.GetValueOrDefault(targetId);
             var expectedGeneration = request.ExpectedGenerations?.GetValueOrDefault(targetId)
                 ?? writer?.State.Generation;
-            if (expectedGeneration is long expected && expected != actualGeneration)
+            // A writer has not adopted a generation this fence's own consumers wrote while it was frozen.
+            if (expectedGeneration is long expected
+                && expected != actualGeneration
+                && (request.ExpectedGenerations?.ContainsKey(targetId) == true
+                    || writer?.FencedWriteGeneration != actualGeneration))
             {
                 throw new AuthoringMutationFenceException(
                     "AUTHORING_GENERATION_CHANGED",
@@ -288,6 +324,37 @@ internal sealed class AuthoringMutationFence(
                 writer?.State.HighestLocalSequence ?? 0,
                 actualGeneration);
         }).ToList();
+    }
+
+    private async Task RecordFencedWritesAsync(
+        AuthoringFenceRequest request,
+        IReadOnlyList<RegisteredWriter> writers,
+        IReadOnlyList<AuthoringFenceTargetState> states)
+    {
+        if (writers.Count == 0)
+            return;
+        // The consumer has committed; record its write even if the caller has since cancelled.
+        var targetIds = writers.Select(item => item.Registration.Target.TargetId).Distinct(StringComparer.Ordinal).ToList();
+        Dictionary<string, long> generations;
+        await using (var operation = await database.OpenReadAsync(CancellationToken.None))
+        {
+            generations = await AuthoringPersistence.ReadGenerationsAsync(
+                operation.Db,
+                request.ProjectId,
+                targetIds,
+                CancellationToken.None);
+        }
+        lock (_gate)
+        {
+            foreach (var writer in writers)
+            {
+                var targetId = writer.Registration.Target.TargetId;
+                var before = states.FirstOrDefault(item => string.Equals(item.TargetId, targetId, StringComparison.Ordinal));
+                var after = generations.GetValueOrDefault(targetId);
+                if (before is not null && before.Generation != after)
+                    writer.FencedWriteGeneration = after;
+            }
+        }
     }
 
     private List<RegisteredWriter> SnapshotWriters(AuthoringFenceRequest request)
@@ -326,6 +393,7 @@ internal sealed class AuthoringMutationFence(
         {
             var resume = new List<ResumeTransition>();
             _activeFences.Remove(fence);
+            fence.Ended.TrySetResult();
             foreach (var writer in writers)
             {
                 writer.FenceCount = Math.Max(0, writer.FenceCount - 1);
@@ -379,7 +447,10 @@ internal sealed class AuthoringMutationFence(
     private static string Key(AuthoringTargetReferenceV1 target) => $"{target.ProjectId:D}|{target.TargetId}";
 
     private sealed record FenceScope(Guid ProjectId, IReadOnlySet<string> TargetIds);
-    private sealed record ActiveFence(Guid ProjectId, IReadOnlySet<string> TargetIds);
+    private sealed record ActiveFence(Guid ProjectId, IReadOnlySet<string> TargetIds)
+    {
+        public TaskCompletionSource Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
     private sealed record ResumeTransition(
         RegisteredWriter Writer,
         TaskCompletionSource Completion);
@@ -399,6 +470,8 @@ internal sealed class AuthoringMutationFence(
             IsRecoverable: true);
         public int FenceCount { get; set; }
         public bool PendingRelease { get; set; }
+        // The generation this fence's consumers wrote while the writer was frozen; the writer adopts it on reload.
+        public long? FencedWriteGeneration { get; set; }
         public SemaphoreSlim FreezeGate { get; } = new(1, 1);
         public TaskCompletionSource? ResumeCompletion { get; set; }
     }

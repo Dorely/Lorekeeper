@@ -643,6 +643,22 @@ public sealed class ProjectVersionHistoryService(
         if (requestKey?.Length > 200)
             throw new ArgumentException("A review request key is too long.", nameof(requestKey));
 
+        // Fenced so an open editor flushes before the token check and adopts the replacement as this fence's write.
+        return await ExecuteFenceAsync(
+            projectId,
+            "restore a chapter to a historical checkpoint",
+            token => RestoreHistoricalChapterCoreAsync(projectId, chapterId, contentTarget, historicalCommitSha, expectedToken, token),
+            cancellationToken);
+    }
+
+    private async Task<ProjectVersionHistoricalRestoreResult> RestoreHistoricalChapterCoreAsync(
+        Guid projectId,
+        Guid chapterId,
+        EditorContentTarget contentTarget,
+        string historicalCommitSha,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken)
+    {
         ManuscriptDocument historicalDocument;
         long expectedRevision;
         await using (var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
@@ -691,7 +707,8 @@ public sealed class ProjectVersionHistoryService(
             expectedRevision,
             historicalDocument,
             cancellationToken);
-        var restoredStatus = await GetStatusAsync(
+        // Already inside the fence, whose generation check still expects the editor's pre-replacement generation.
+        var restoredStatus = await GetStatusCoreAsync(
             projectId,
             includeCurrentSnapshotHash: true,
             cancellationToken);
@@ -1111,12 +1128,35 @@ public sealed class ProjectVersionHistoryService(
         if (ManuscriptCodec.ContentEquals(approvedDocument, synthesized))
             throw new InvalidOperationException("The selected manuscript blocks are already approved.");
 
+        return await WriteChapterReviewApprovalUnderLeaseAsync(
+            projectId,
+            status,
+            approved.Payload,
+            current.Payload,
+            target,
+            synthesized,
+            semanticMessage,
+            requestKey,
+            cancellationToken);
+    }
+
+    private async Task<ProjectVersionCheckpointView> WriteChapterReviewApprovalUnderLeaseAsync(
+        Guid projectId,
+        ProjectVersionStatusView status,
+        VersionHistorySnapshotPayload approved,
+        VersionHistorySnapshotPayload current,
+        ProjectVersionReviewTarget target,
+        ManuscriptDocument synthesized,
+        string semanticMessage,
+        string? requestKey,
+        CancellationToken cancellationToken)
+    {
         var generatedRoot = CreateTemporaryDirectory();
         try
         {
             git.MaterializeTree(status.Repository.RepositoryId, generatedRoot, status.Repository.HeadCommitSha, cancellationToken);
             var changes = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
-            UpdateSynthesizedReviewTree(changes, approved.Payload, current.Payload, target, synthesized);
+            UpdateSynthesizedReviewTree(changes, approved, current, target, synthesized);
             WriteSnapshotJsonFiles(generatedRoot, changes);
             await RebuildSnapshotManifestAsync(generatedRoot, status.Repository.RepositoryId, projectId, cancellationToken);
             EnsureNoReparsePointsRecursively(generatedRoot);
@@ -1249,6 +1289,22 @@ public sealed class ProjectVersionHistoryService(
         if (selectedBlockIds.Count == 0)
             throw new ArgumentException("At least one manuscript block must be selected.", nameof(blockIds));
 
+        // Fenced for the same reasons as the historical restore.
+        return await ExecuteFenceAsync(
+            projectId,
+            "reject selected review changes",
+            token => RestoreReviewBlocksCoreAsync(projectId, target, selectedBlockIds, expectedToken, semanticMessage, token),
+            cancellationToken);
+    }
+
+    private async Task<ProjectVersionReviewBlockMutationResult> RestoreReviewBlocksCoreAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        IReadOnlySet<string> selectedBlockIds,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string semanticMessage,
+        CancellationToken cancellationToken)
+    {
         ManuscriptDocument currentDocument;
         ManuscriptDocument approvedDocument;
         await using (var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
@@ -1298,7 +1354,10 @@ public sealed class ProjectVersionHistoryService(
             currentDocument.Revision,
             restoredDocument,
             cancellationToken);
-        var restoredStatus = await GetStatusAsync(
+        if (ManuscriptCodec.ContentEquals(restoredDocument, approvedDocument))
+            await ApproveRestoredChapterRevisionAsync(projectId, target, semanticMessage, cancellationToken);
+        // Already inside the fence; see the historical restore.
+        var restoredStatus = await GetStatusCoreAsync(
             projectId,
             includeCurrentSnapshotHash: true,
             cancellationToken);
@@ -1313,6 +1372,57 @@ public sealed class ProjectVersionHistoryService(
         return new ProjectVersionReviewBlockMutationResult(
             selectedBlockIds.Order(StringComparer.Ordinal).ToList(),
             restoredToken);
+    }
+
+    // Rejecting every change returns a chapter to its approved content under a newer manuscript revision, which
+    // would leave it pending with nothing to review; approving that revision makes the baseline match again.
+    private async Task ApproveRestoredChapterRevisionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        string semanticMessage,
+        CancellationToken cancellationToken)
+    {
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var status = await GetStatusUnderLeaseAsync(projectId, includeCurrentSnapshotHash: true, cancellationToken);
+        if (status is null || string.IsNullOrWhiteSpace(status.Repository.HeadCommitSha))
+            return;
+
+        var approved = LoadGitCheckpoint(
+            status.Repository.RepositoryId,
+            status.Repository.HeadCommitSha,
+            recordedCheckpoint: null,
+            projectId,
+            cancellationToken);
+        var current = await CaptureCurrentSnapshotUnderLeaseAsync(
+            status.Repository.RepositoryId,
+            projectId,
+            cancellationToken);
+        if (FindEffectiveChapter(approved.Payload, target) is not { } approvedChapter
+            || FindEffectiveChapter(current.Payload, target) is not { } currentChapter
+            || approvedChapter.ManuscriptRevision == currentChapter.ManuscriptRevision)
+            return;
+
+        var approvedDocument = ManuscriptCodec.Deserialize(
+            approvedChapter.ManuscriptJson,
+            target.ChapterId,
+            approvedChapter.ManuscriptRevision);
+        var currentDocument = ManuscriptCodec.Deserialize(
+            currentChapter.ManuscriptJson,
+            target.ChapterId,
+            currentChapter.ManuscriptRevision);
+        if (!ManuscriptCodec.ContentEquals(approvedDocument, currentDocument))
+            return;
+
+        _ = await WriteChapterReviewApprovalUnderLeaseAsync(
+            projectId,
+            status,
+            approved.Payload,
+            current.Payload,
+            target,
+            approvedDocument with { Revision = currentDocument.Revision },
+            semanticMessage,
+            requestKey: null,
+            cancellationToken);
     }
 
     public async Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockAsync(
@@ -1335,6 +1445,22 @@ public sealed class ProjectVersionHistoryService(
         if (normalizedText.Contains('\n'))
             throw new InvalidOperationException("Inline review edits must stay within one manuscript block.");
 
+        // Fenced for the same reasons as the historical restore.
+        return await ExecuteFenceAsync(
+            projectId,
+            "edit a pending review block",
+            token => EditReviewBlockCoreAsync(projectId, target, blockId, normalizedText, expectedToken, token),
+            cancellationToken);
+    }
+
+    private async Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockCoreAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        string blockId,
+        string normalizedText,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken)
+    {
         await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var status = await GetStatusUnderLeaseAsync(projectId, includeCurrentSnapshotHash: true, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");

@@ -333,6 +333,7 @@
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
     private IAsyncDisposable? _authoringWriterLease;
+    private bool _disposeStarted;
     private Guid _authoringSessionId;
     private readonly Guid _authoringWriterId = Guid.NewGuid();
     private long _authoringGeneration;
@@ -1115,6 +1116,7 @@
     }
     public async ValueTask DisposeAsync()
     {
+        _disposeStarted = true;
         _autosaveCancellation?.Cancel();
         _autosaveCancellation?.Dispose();
         var flushed = false;
@@ -1180,7 +1182,7 @@
             ? Guid.NewGuid()
             : await _journalModule.InvokeAsync<Guid>("sessionId", ProjectId.ToString("D"), targetId);
         _authoringGeneration = (await AuthoringGenerations.ReadAsync(ProjectId, [targetId]))[targetId];
-        _authoringWriterLease = await AuthoringFence.RegisterWriterAsync(new(
+        var lease = await AuthoringFence.RegisterWriterAsync(new(
             new(ProjectId, targetId), _authoringSessionId, _authoringWriterId,
             FreezeAndFlushAuthoringAsync,
             async _ => await InvokeAsync(() =>
@@ -1188,6 +1190,13 @@
                 _authoringFrozen = false;
                 StateHasChanged();
             })));
+        // Registration waits out active fences; a workspace disposed meanwhile must not leave its writer behind.
+        if (_disposeStarted)
+        {
+            await lease.DisposeAsync();
+            return;
+        }
+        _authoringWriterLease = lease;
         UpdateAuthoringWriterState();
     }
 
