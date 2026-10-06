@@ -69,9 +69,14 @@ public interface IAuthoringMutationFence
 internal sealed class AuthoringMutationFence(
     IAppDatabaseOperationFactory database,
     IProjectMutationCoordinator projectMutations,
-    IAuthoringDeltaHistoryRuntime history) : IAuthoringMutationFence
+    IAuthoringDeltaHistoryRuntime history,
+    TimeSpan? writerResponseTimeout = null) : IAuthoringMutationFence
 {
     private static readonly TimeSpan RegistrationFenceWait = TimeSpan.FromSeconds(30);
+    // A writer's client can vanish mid-fence (a closed or reloaded window leaves its circuit unable to answer
+    // JS interop), so every flush/resume callback is bounded; otherwise one lost answer wedges every later
+    // fence and writer registration for the project until restart.
+    private readonly TimeSpan _writerResponseTimeout = writerResponseTimeout ?? TimeSpan.FromSeconds(30);
     private static readonly AsyncLocal<FenceScope?> Ambient = new();
     private readonly object _gate = new();
     private readonly Dictionary<string, RegisteredWriter> _writers = new(StringComparer.Ordinal);
@@ -246,7 +251,14 @@ internal sealed class AuthoringMutationFence(
                 Exception? failure = null;
                 try
                 {
-                    await resume[index].Writer.Registration.ResumeAsync(CancellationToken.None);
+                    var registration = resume[index].Writer.Registration;
+                    await CallWriterAsync(
+                        async token =>
+                        {
+                            await registration.ResumeAsync(token);
+                            return true;
+                        },
+                        CancellationToken.None);
                 }
                 catch (Exception exception)
                 {
@@ -268,11 +280,37 @@ internal sealed class AuthoringMutationFence(
         await writer.FreezeGate.WaitAsync(cancellationToken);
         try
         {
-            return await writer.Registration.FreezeAndFlushAsync(capturedSequence, cancellationToken);
+            return await CallWriterAsync(
+                token => writer.Registration.FreezeAndFlushAsync(capturedSequence, token),
+                cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            // Later fences fail fast on an unreachable writer instead of each waiting out the timeout.
+            lock (_gate)
+                writer.State = writer.State with { IsReachable = false };
+            throw;
         }
         finally
         {
             writer.FreezeGate.Release();
+        }
+    }
+
+    private async Task<T> CallWriterAsync<T>(
+        Func<CancellationToken, Task<T>> call,
+        CancellationToken cancellationToken)
+    {
+        using var response = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        response.CancelAfter(_writerResponseTimeout);
+        try
+        {
+            // WaitAsync also bounds callbacks that ignore their token.
+            return await call(response.Token).WaitAsync(response.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The authoring client did not respond.");
         }
     }
 
