@@ -11,13 +11,15 @@
     <script>
         (function () {
             var THEME_KEY = "Lorekeeper.ui.theme";
-            var theme = null;
-            try {
-                theme = window.localStorage.getItem(THEME_KEY);
-            } catch (_) { }
-            if (theme !== "light" && theme !== "dark") {
-                theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            function effectiveTheme() {
+                var stored = null;
+                try {
+                    stored = window.localStorage.getItem(THEME_KEY);
+                } catch (_) { }
+                if (stored === "light" || stored === "dark") return stored;
+                return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
             }
+            var theme = effectiveTheme();
             var root = document.documentElement;
             root.setAttribute("data-lk-theme", theme);
             root.setAttribute("data-bs-theme", theme);
@@ -26,19 +28,15 @@
 
             // Blazor enhanced navigation re-renders the <html> element from
             // server HTML, which drops the theme attributes. Watch the root
-            // element and re-apply the stored theme whenever the attribute is
-            // removed, so the choice survives page-to-page navigation.
+            // element and re-apply the effective theme whenever the attribute is
+            // removed, so the stored or system theme survives page-to-page navigation.
             if (window.MutationObserver) {
                 new MutationObserver(function () {
-                    var stored = null;
-                    try {
-                        stored = window.localStorage.getItem(THEME_KEY);
-                    } catch (_) { }
-                    if (stored !== "light" && stored !== "dark") return;
-                    if (root.getAttribute("data-lk-theme") === stored) return;
-                    root.setAttribute("data-lk-theme", stored);
-                    root.setAttribute("data-bs-theme", stored);
-                    if (meta) meta.setAttribute("content", stored === "dark" ? "#14181f" : "#425fce");
+                    var current = effectiveTheme();
+                    if (root.getAttribute("data-lk-theme") === current) return;
+                    root.setAttribute("data-lk-theme", current);
+                    root.setAttribute("data-bs-theme", current);
+                    if (meta) meta.setAttribute("content", current === "dark" ? "#14181f" : "#425fce");
                 }).observe(root, { attributes: true, attributeFilter: ["data-lk-theme"] });
             }
         })();
