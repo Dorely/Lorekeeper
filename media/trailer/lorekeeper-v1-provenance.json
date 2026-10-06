@@ -1,0 +1,65 @@
+{
+    "sourceCommit":  "d092bd696e46086e6cefd7cb9bfe50e6ef295f03",
+    "exportCommit":  "f27d4f4dcb2a763e850a2b1b0e73a855faf475a6",
+    "syntheticProject":  "QA v1 Trailer — The Lantern Atlas",
+    "qaEvidence":  "docs/evidence/v1-qa.md",
+    "qaEvidenceSha256":  "de663d18330e1127744cc3a708e8fb864656c4b528f3d1025244a5964aa71cfb",
+    "title":  "Lorekeeper — Bring your book together",
+    "captures":  [
+                     {
+                         "file":  "intro.mp4",
+                         "sha256":  "f239b29e449285e88fcbaa65eeb5609514d5e4ea6996b8c9db5af585f056fe0f"
+                     },
+                     {
+                         "file":  "outline.mp4",
+                         "sha256":  "53fdec70398127d5a05785c1c32acef10ed591048013dac8b393ad61ca5ec0d3"
+                     },
+                     {
+                         "file":  "writing.mp4",
+                         "sha256":  "3ba27c15c3b7722d21817b985fd0c4ba2d10d5043159220c706bf36ebb5ea1a7"
+                     },
+                     {
+                         "file":  "sources.mp4",
+                         "sha256":  "0a7f0528902af05ec699cd8ac2a2e815c14c53b238877f4e9c4ba9afc9983cd3"
+                     },
+                     {
+                         "file":  "design.mp4",
+                         "sha256":  "ea04f857f738ccd253af48e39e96e096f5c28af3d1fc53b462874d8ebb215217"
+                     },
+                     {
+                         "file":  "export.mp4",
+                         "sha256":  "80c92fc8abf0d6dab37147e777ab93dbaba1cb65c50d665149eeed46fac4b9b1"
+                     },
+                     {
+                         "file":  "outro.mp4",
+                         "sha256":  "0b00d7206a709cbcf6d5a95591a4ac1151092f5a19a0cab241200c2959fc69e3"
+                     }
+                 ],
+    "durationSeconds":  60,
+    "audio":  "Original mathematical sine score; A minor/F major/C major/G major; no samples",
+    "captionsSha256":  "0f797224960575cdaac8f746054b15edabfab7e9cd4b3e6542df9bc4de61e4e3",
+    "ffmpeg":  "ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "recipe":  "scripts/export-feature-trailer.ps1",
+    "outputs":  [
+                    {
+                        "file":  "lorekeeper-v1-store.mp4",
+                        "bytes":  56680237,
+                        "sha256":  "bd684fe0631e2836dcff34cd99b5d97eaa782ed587fb1875de1da0f4a9a793ad"
+                    },
+                    {
+                        "file":  "lorekeeper-v1-github.mp4",
+                        "bytes":  9226801,
+                        "sha256":  "8940709b93b3472a041f312ea008d5f822ec3dad18241a5873638c64bf75c4c5"
+                    },
+                    {
+                        "file":  "lorekeeper-v1-poster.png",
+                        "bytes":  880458,
+                        "sha256":  "a0a75deb88edf32066343f8c2459cae2b143ff51e201acbe685829e2c6650a8c"
+                    },
+                    {
+                        "file":  "lorekeeper-v1.en.vtt",
+                        "bytes":  727,
+                        "sha256":  "0f797224960575cdaac8f746054b15edabfab7e9cd4b3e6542df9bc4de61e4e3"
+                    }
+                ]
+}

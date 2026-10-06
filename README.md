@@ -738,9 +738,9 @@ performed checks. Package output is git-ignored. No repository visibility,
 publication, Store submission, or historical-feed archival is implied by a
 successful build.
 
-The [feature trailer materials](media/trailer/README.md) contain the planned
-60-second sequence, captions, and export recipe. Real accepted-build footage,
-the finished video, and its poster remain pending functional QA.
+The [feature trailer](media/trailer/README.md) is a 60-second captioned video
+of the QA-tested build in a synthetic project, with its poster, captions,
+provenance and reproducible export recipe.
 
 ## Local Data
 

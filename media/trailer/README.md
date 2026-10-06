@@ -1,9 +1,13 @@
 # Lorekeeper v1 feature trailer
 
-The final trailer requires real footage of an accepted build in an isolated,
-synthetic project. Captions and the reproducible export recipe are prepared;
-footage, poster, and final MP4s remain pending functional QA. Do not upload or
-describe the trailer as finished until the acceptance record is complete.
+The trailer is finished: real footage of the QA-tested build
+(`d092bd696e46086e6cefd7cb9bfe50e6ef295f03`) in the synthetic project
+"QA v1 Trailer — The Lantern Atlas", recorded under the
+[v1 QA evidence](../../docs/evidence/v1-qa.md). This directory holds the
+720p GitHub version (`lorekeeper-v1-github.mp4`), the 1920×1080 poster
+(`lorekeeper-v1-poster.png`), the English captions and the export provenance
+(`lorekeeper-v1-provenance.json`). The 1080p Store master stays outside Git.
+Uploading or publishing the trailer is a later launch action.
 
 ## Capture
 
@@ -61,6 +65,8 @@ Example manifest shape (replace with actual accepted evidence):
 ```powershell
 pwsh -NoProfile -File scripts/export-feature-trailer.ps1
 ```
+
+Windows PowerShell 5.1 (`powershell -NoProfile -File ...`) also works.
 
 The recipe trims and joins seven real clips into a 60-second edit, burns in
 the matching captions, and synthesizes a quiet original instrumental bed from
