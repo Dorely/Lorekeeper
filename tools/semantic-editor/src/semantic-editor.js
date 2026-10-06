@@ -1,5 +1,5 @@
 import {DOMParser as ProseMirrorDOMParser, Fragment, Schema, Slice} from "prosemirror-model";
-import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "prosemirror-state";
+import {EditorState, NodeSelection, Plugin, PluginKey, Selection, TextSelection} from "prosemirror-state";
 import {Decoration, DecorationSet, EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
 import {GapCursor, gapCursor} from "prosemirror-gapcursor";
@@ -416,7 +416,7 @@ const schema = new Schema({
                 "data-table-id": node.attrs.tableId,
                 "data-column-widths": JSON.stringify(node.attrs.columnWidthWeights || []),
                 "data-header-rows": String(node.attrs.headerRowCount || 0)
-            }, ["tbody", 0]]
+            }, tableColumnGroup(node.attrs.columnWidthWeights), ["tbody", 0]]
         },
         table_row: {
             content: "table_cell+",
@@ -2522,8 +2522,44 @@ async function insertRichTable(view, root) {
         columnWidthWeights: Array(columnCount).fill(1),
         headerRowCount: values.header ? 1 : 0
     }, rows);
-    view.dispatch(view.state.tr.replaceSelectionWith(table).scrollIntoView());
+    const transaction = view.state.tr.replaceSelectionWith(table);
+    let tablePosition = null;
+    transaction.doc.descendants((node, position) => {
+        if (tablePosition !== null) return false;
+        if (node.type.name === "table" && node.attrs.id === table.attrs.id) tablePosition = position;
+        return tablePosition === null;
+    });
+    if (tablePosition !== null)
+        transaction.setSelection(Selection.near(transaction.doc.resolve(tablePosition + 1)));
+    view.dispatch(transaction.scrollIntoView());
     view.focus();
+}
+
+// Column weights become percentage widths so empty cells keep their share under fixed table layout.
+function tableColumnGroup(weights) {
+    const valid = (weights || []).filter(weight => Number.isFinite(weight) && weight > 0);
+    const total = valid.reduce((sum, weight) => sum + weight, 0);
+    return ["colgroup", {}, ...valid.map(weight => ["col", {style: `width: ${(weight / total * 100).toFixed(3)}%`}])];
+}
+
+// Moves the cursor to the next or previous cell of the innermost table; false outside tables.
+function moveToAdjacentTableCell(view, direction) {
+    const {$from} = view.state.selection;
+    let cellDepth = $from.depth;
+    while (cellDepth > 0 && $from.node(cellDepth).type.name !== "table_cell") cellDepth--;
+    if (cellDepth === 0) return false;
+    const tableDepth = cellDepth - 2;
+    const tableStart = $from.start(tableDepth);
+    const cellPositions = [];
+    $from.node(tableDepth).descendants((node, position) => {
+        if (node.type.name !== "table_cell") return true;
+        cellPositions.push(tableStart + position);
+        return false;
+    });
+    const target = cellPositions[cellPositions.indexOf($from.before(cellDepth)) + direction];
+    if (target !== undefined)
+        view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(target + 1))).scrollIntoView());
+    return true;
 }
 
 function insertNote(view, root, kind) {
@@ -3786,8 +3822,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 "Mod-y": () => { void performPersistentHistory(true); return true; },
                 "Mod-b": toggleMark(schema.marks.strong),
                 "Mod-i": toggleMark(schema.marks.em),
-                "Tab": (_state, _dispatch, editorView) => { if (!changeListLevel(editorView, 1)) changeParagraphIndent(editorView, 1.5); return true; },
-                "Shift-Tab": (_state, _dispatch, editorView) => { if (!changeListLevel(editorView, -1)) changeParagraphIndent(editorView, -1.5); return true; },
+                "Tab": (_state, _dispatch, editorView) => { if (!moveToAdjacentTableCell(editorView, 1) && !changeListLevel(editorView, 1)) changeParagraphIndent(editorView, 1.5); return true; },
+                "Shift-Tab": (_state, _dispatch, editorView) => { if (!moveToAdjacentTableCell(editorView, -1) && !changeListLevel(editorView, -1)) changeParagraphIndent(editorView, -1.5); return true; },
                 "Shift-Enter": insertHardBreak,
                 "Enter": chainCommands(newlineInCode, createParagraphNear, liftEmptyBlock, baseKeymap.Enter)
             }),

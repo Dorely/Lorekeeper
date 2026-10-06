@@ -403,7 +403,7 @@
     cursor: pointer;
 }
 
-.chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-prosemirror p:first-child:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
+.chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-prosemirror > p:first-child:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
     content: "Start writing\2026";
     position: absolute;
     color: var(--bs-secondary-color, #6c757d);
@@ -442,6 +442,26 @@
 
 .semantic-editor ::deep .semantic-prosemirror pre {
     white-space: pre-wrap;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-rich-table {
+    width: 100%;
+    margin: .75rem 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-rich-table th,
+.semantic-editor ::deep .semantic-prosemirror .semantic-rich-table td {
+    padding: .3rem .5rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .semantic-rich-table th {
+    font-weight: 650;
+    text-align: start;
 }
 
 .semantic-editor ::deep .semantic-prosemirror .ProseMirror-separator,
