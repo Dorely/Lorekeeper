@@ -812,7 +812,7 @@ function alignmentButton(alignment, title, action) {
     return element;
 }
 
-let toolbarMenuSequence = 0;
+let ribbonSequence = 0;
 
 function toolGroup(label, controls) {
     const group = document.createElement("div");
@@ -853,37 +853,18 @@ function selectControl(label, options, onChange, resetAfterChange = true) {
     return wrapper;
 }
 
-// A labelled command row inside a toolbar menu; choosing it closes the menu.
-function menuItem(glyph, label, title, action) {
+// A ribbon command with a glyph above its visible label.
+function commandButton(glyph, label, title, action) {
     const element = button("", title, action);
-    element.classList.add("semantic-editor-menu-item");
+    element.classList.add("semantic-editor-command");
     const icon = document.createElement("span");
-    icon.className = "semantic-editor-menu-glyph";
+    icon.className = "semantic-editor-command-glyph";
     icon.setAttribute("aria-hidden", "true");
     icon.textContent = glyph;
     const text = document.createElement("span");
     text.textContent = label;
     element.append(icon, text);
     return element;
-}
-
-// A titled block of controls inside a toolbar menu.
-function menuSection(label, controls) {
-    const section = document.createElement("div");
-    section.className = "semantic-editor-menu-section";
-    section.setAttribute("role", "group");
-    section.setAttribute("aria-label", label);
-    const heading = document.createElement("span");
-    heading.className = "semantic-editor-menu-heading";
-    heading.setAttribute("aria-hidden", "true");
-    heading.textContent = label;
-    const row = document.createElement("div");
-    row.className = "semantic-editor-menu-controls";
-    for (const control of controls) {
-        if (control) row.append(control);
-    }
-    section.append(heading, row);
-    return section;
 }
 
 // The innermost table around the selection, with the cursor's row and column; null outside tables.
@@ -3494,7 +3475,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         if (!view) return;
         view.setProps({editable: () => !readOnly});
         for (const control of root.querySelectorAll("button, select, input"))
-            control.disabled = readOnly;
+            control.disabled = readOnly && !control.dataset.ribbonTab;
         root.classList.toggle("semantic-editor--readonly", readOnly);
         noteEditor?.update();
     };
@@ -4359,286 +4340,231 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         }
     };
 
-    // Toolbar menus are app-owned popovers so they share the editor's theme and keep the
-    // ProseMirror selection (their triggers never take focus on pointer down).
-    const openMenus = new Set();
-    const menuEvents = new AbortController();
-    let toolbarFitPending = false;
-    const closeMenu = menu => {
-        if (!openMenus.delete(menu)) return;
-        menu.panel.hidden = true;
-        menu.trigger.setAttribute("aria-expanded", "false");
-        menu.element.classList.remove("semantic-editor-menu--open");
-        for (const nested of [...openMenus]) if (menu.element.contains(nested.element)) closeMenu(nested);
-        if (!openMenus.size && toolbarFitPending) scheduleToolbarFit();
-    };
-    const closeMenusOutside = target => {
-        for (const menu of [...openMenus]) if (!menu.element.contains(target)) closeMenu(menu);
-    };
-    const toolbarMenu = (label, title, contents, {caret = true, panelClass = ""} = {}) => {
-        const element = document.createElement("div");
-        element.className = "semantic-editor-menu";
-        const panel = document.createElement("div");
-        const menu = {element, panel, trigger: null};
-        const open = () => {
-            closeMenusOutside(element);
-            panel.hidden = false;
-            panel.classList.remove("semantic-editor-menu-panel--end");
-            trigger.setAttribute("aria-expanded", "true");
-            element.classList.add("semantic-editor-menu--open");
-            openMenus.add(menu);
-            if (!element.parentElement?.closest(".semantic-editor-menu-panel")
-                && panel.getBoundingClientRect().right > root.getBoundingClientRect().right - 4)
-                panel.classList.add("semantic-editor-menu-panel--end");
-        };
-        const trigger = button("", title, () => {
-            if (openMenus.has(menu)) closeMenu(menu);
-            else open();
-        });
-        menu.trigger = trigger;
-        trigger.classList.add("semantic-editor-menu-trigger");
-        trigger.dataset.menuTrigger = "true";
-        trigger.setAttribute("aria-haspopup", "true");
-        trigger.setAttribute("aria-expanded", "false");
-        const text = document.createElement("span");
-        text.textContent = label;
-        trigger.append(text);
-        if (caret) {
-            const mark = document.createElement("span");
-            mark.className = "semantic-editor-menu-caret";
-            mark.setAttribute("aria-hidden", "true");
-            trigger.append(mark);
+    // The ribbon: one tab strip, and for the chosen tab a row of labelled control groups.
+    // Every panel stays in the toolbar while hidden so state sync can find its controls.
+    const ribbonGroup = (label, controls) => {
+        const group = document.createElement("div");
+        group.className = "semantic-editor-ribbon-group";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", label);
+        const row = document.createElement("div");
+        row.className = "semantic-editor-ribbon-controls";
+        for (const control of controls) {
+            if (control) row.append(control);
         }
-        panel.className = `semantic-editor-menu-panel ${panelClass}`.trim();
-        panel.id = `semantic-editor-menu-${++toolbarMenuSequence}`;
-        panel.setAttribute("role", "group");
-        panel.setAttribute("aria-label", title);
-        panel.hidden = true;
-        trigger.setAttribute("aria-controls", panel.id);
-        for (const content of contents) {
-            if (content) panel.append(content);
-        }
-        trigger.addEventListener("keydown", event => {
-            if (event.key !== "ArrowDown" || readOnly) return;
-            event.preventDefault();
-            if (!openMenus.has(menu)) open();
-            panel.querySelector("button:not(:disabled), select:not(:disabled), input:not(:disabled)")?.focus();
-        });
-        panel.addEventListener("keydown", event => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            event.stopPropagation();
-            closeMenu(menu);
-            trigger.focus();
-        });
-        panel.addEventListener("click", event => {
-            if (!(event.target instanceof Element) || !event.target.closest(".semantic-editor-menu-item")) return;
-            for (const openMenu of [...openMenus]) closeMenu(openMenu);
-        });
-        element.append(trigger, panel);
-        return menu;
+        const caption = document.createElement("span");
+        caption.className = "semantic-editor-ribbon-label";
+        caption.setAttribute("aria-hidden", "true");
+        caption.textContent = label;
+        group.append(row, caption);
+        return group;
     };
-    root.ownerDocument.addEventListener("pointerdown", event => closeMenusOutside(event.target),
-        {capture: true, signal: menuEvents.signal});
-    // Escape closes menus even while focus stays in the manuscript.
-    root.ownerDocument.addEventListener("keydown", event => {
-        if (event.key !== "Escape" || !openMenus.size) return;
-        event.preventDefault();
-        for (const menu of [...openMenus]) closeMenu(menu);
-    }, {signal: menuEvents.signal});
-
+    // The font, size, and line-spacing controls are placed in separate ribbon groups.
+    const [fontFamilyControl, fontSizeControl, lineSpacingControl] = [...typographyControls.group.children];
     const markButton = (glyph, title, mark) => iconButton(glyph, title, () => applyMark(view, mark));
     const linkButton = iconButton("", "Add or remove link", () => void editLink(view, root));
     linkButton.classList.add("semantic-editor-link-button");
 
-    const formatMenu = toolbarMenu("Format", "Text formatting", [
-        menuSection("Font", [typographyControls.group]),
-        menuSection("Character", [
-            markButton("S", "Strikethrough", "strikethrough"),
-            button("</>", "Inline code", () => applyMark(view, "code")),
-            button("Aᴀ", "Small caps intent", () => applyMark(view, "small_caps")),
-            markButton("x²", "Superscript", "superscript"),
-            markButton("x₂", "Subscript", "subscript"),
-            linkButton,
-        ]),
-        menuSection("Character style", [
-            selectControl(
-                "Book Text character style",
-                [["", "Character"], ["__remove__", "Remove character style"]].concat(
-                    namedStyles
-                        .filter(style => style.kind === "character")
-                        .map(style => [style.semanticRole, style.name])),
-                value => applyMark(
-                    view,
-                    "character_style",
-                    value === "__remove__" ? null : value || null)),
-        ]),
-        menuItem("あ", "Language…", "Set or remove language", () => void editLanguage(view, root)),
-    ]);
-    const paragraphMenu = toolbarMenu("Paragraph", "Paragraph formatting", [
-        menuSection("Alignment", [
-            alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
-            alignmentButton("center", "Center paragraph", () => setParagraphAlignment(view, "center")),
-            alignmentButton("right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
-            alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
-        ]),
-        menuSection("Indent and lists", [
-            iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-            iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
-            iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view)),
-            button("List…", "Set list numbering, nesting, or restart", () => void editListFormatting(view, root)),
-        ]),
-        menuSection("Heading level", [
-            selectControl("Heading level", [
-                ["", "Level"],
-                ["1", "Heading level 1"],
-                ["2", "Heading level 2"],
-                ["3", "Heading level 3"],
-                ["4", "Heading level 4"],
-                ["5", "Heading level 5"],
-                ["6", "Heading level 6"],
-            ], value => {
-                if (value) applyHeadingLevel(view, Number(value));
-            }),
-        ]),
-        menuItem("¶", "Indents, spacing and pagination…",
-            "Right, first-line, and hanging indents, spacing, and pagination controls",
-            () => void editParagraphPresentation(view, root)),
-        menuItem("⌫", "Clear paragraph formatting", "Clear direct paragraph formatting",
-            () => clearParagraphPresentation(view)),
-    ]);
-    const insertMenu = toolbarMenu("Insert", "Insert", [
-        menuItem("▨", "Image…", "Choose a project image to insert or replace a Figure", () =>
-            void dotNetRef.invokeMethodAsync("OnOpenProjectImagePicker")),
-        menuItem("▦", "Table…", "Insert semantic table", () => void insertRichTable(view, root)),
-        allowDesignedPages
-            ? menuItem("▣", "Designed page…", "Insert a designed page at the current manuscript position", () =>
-                void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))
-            : null,
-        menuItem("⁂", "Scene break", "Insert scene break", () => insertSceneBreak(view)),
-        menuItem("W", "Word document…", "Insert Word content at the cursor", () => chooseWordFile()),
-        menuSection("Special character", [
-            selectControl("Insert special character", [
-                ["", "Ω Character"],
-                ["—", "Em dash —"],
-                ["–", "En dash –"],
-                ["…", "Ellipsis …"],
-                ["“", "Opening quote “"],
-                ["”", "Closing quote ”"],
-                ["‘", "Opening apostrophe ‘"],
-                ["’", "Closing apostrophe ’"],
-                ["©", "Copyright ©"]
-            ], value => {
-                if (!value) return;
-                view.dispatch(view.state.tr.insertText(value).scrollIntoView());
-                view.focus();
-            }),
-        ]),
-    ]);
-    const notesMenu = toolbarMenu("Notes", "Footnotes and endnotes", [
-        menuItem("¹", "Footnote", "Insert footnote", () => noteEditor.open(insertNote(view, root, "footnote"))),
-        menuItem("ᵉ", "Endnote", "Insert endnote", () => noteEditor.open(insertNote(view, root, "endnote"))),
-        menuItem("✎", "Edit notes…", "Edit manuscript notes", async () => {
-            const selected = view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "note_reference"
-                ? view.state.selection.node.attrs.noteId : null;
-            if (selected) { noteEditor.open(selected); return; }
-            const notes = view.state.doc.attrs.notes || [];
-            if (!notes.length) { showEditorNotice(root, "Insert a footnote or endnote at its manuscript reference first."); return; }
-            const values = await showEditorForm(root, {title: "Edit manuscript note", submitLabel: "Edit",
-                fields: [{name: "note", label: "Note", type: "select", options: notes.map((note, index) =>
-                    [note.id, `${index + 1}. ${note.kind === "endnote" ? "Endnote" : "Footnote"}: ${note.content.map(domainBlockText).join(" ").slice(0, 80)}`])}]});
-            if (values) noteEditor.open(values.note);
-        }),
-    ]);
-    const stylesMenu = toolbarMenu("Styles", "Book Text Styles", [styleControls],
-        {panelClass: "semantic-editor-menu-panel--styles"});
-    const findButton = iconButton("⌕", "Find and replace", () => findPanel.open());
-    const outlineButton = iconButton("☷", "Toggle document outline", () => outline.open());
-    const overflowList = document.createElement("div");
-    overflowList.className = "semantic-editor-overflow-list";
-    const overflowMenu = toolbarMenu("⋯", "More tools", [overflowList], {caret: false});
-    overflowMenu.trigger.classList.add("semantic-editor-icon-button");
-
-    const coreRow = document.createElement("div");
-    coreRow.className = "semantic-editor-toolbar-row";
-    const trailing = document.createElement("div");
-    trailing.className = "semantic-editor-toolbar-trailing";
-    trailing.append(findButton, outlineButton, overflowMenu.element);
-    coreRow.append(
-        toolGroup("History", [
-            iconButton("↶", "Undo (Ctrl+Z)", () => void performPersistentHistory(false)),
-            iconButton("↷", "Redo (Ctrl+Y)", () => void performPersistentHistory(true)),
-        ]),
-        toolGroup("Text style", [
-            selectControl("Block style", [
-                ["", "Book text"],
-                ["paragraph|body|2", "Body text"],
-                ["heading|chapter-heading|1", "Chapter title"],
-                ["heading|heading|2", "Heading"],
-                ["heading|subheading|3", "Subheading"],
-                ["blockquote|block-quote|2", "Block quote"],
-                ["list_item|list-item|2", "List"],
-                ["paragraph|figure-caption|2", "Caption"],
-            ], value => {
-                if (!value) return;
-                const [node, role, level] = value.split("|");
-                applyBlock(view, node, role, Number(level));
-            }),
-        ]),
-        toolGroup("Inline formatting", [
-            markButton("B", "Bold (Ctrl+B)", "strong"),
-            markButton("I", "Italic (Ctrl+I)", "em"),
-            markButton("U", "Underline", "underline"),
-        ]),
+    const ribbonTabs = [
+        {id: "home", label: "Home", groups: [
+            ribbonGroup("History", [
+                iconButton("↶", "Undo (Ctrl+Z)", () => void performPersistentHistory(false)),
+                iconButton("↷", "Redo (Ctrl+Y)", () => void performPersistentHistory(true)),
+            ]),
+            ribbonGroup("Style", [
+                selectControl("Block style", [
+                    ["", "Book text"],
+                    ["paragraph|body|2", "Body text"],
+                    ["heading|chapter-heading|1", "Chapter title"],
+                    ["heading|heading|2", "Heading"],
+                    ["heading|subheading|3", "Subheading"],
+                    ["blockquote|block-quote|2", "Block quote"],
+                    ["list_item|list-item|2", "List"],
+                    ["paragraph|figure-caption|2", "Caption"],
+                ], value => {
+                    if (!value) return;
+                    const [node, role, level] = value.split("|");
+                    applyBlock(view, node, role, Number(level));
+                }),
+                selectControl("Heading level", [
+                    ["", "Level"],
+                    ["1", "Heading level 1"],
+                    ["2", "Heading level 2"],
+                    ["3", "Heading level 3"],
+                    ["4", "Heading level 4"],
+                    ["5", "Heading level 5"],
+                    ["6", "Heading level 6"],
+                ], value => {
+                    if (value) applyHeadingLevel(view, Number(value));
+                }),
+            ]),
+            ribbonGroup("Font", [fontFamilyControl, fontSizeControl]),
+            ribbonGroup("Character", [
+                markButton("B", "Bold (Ctrl+B)", "strong"),
+                markButton("I", "Italic (Ctrl+I)", "em"),
+                markButton("U", "Underline", "underline"),
+                markButton("S", "Strikethrough", "strikethrough"),
+                markButton("x²", "Superscript", "superscript"),
+                markButton("x₂", "Subscript", "subscript"),
+                linkButton,
+            ]),
+            ribbonGroup("Paragraph", [
+                alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
+                alignmentButton("center", "Center paragraph", () => setParagraphAlignment(view, "center")),
+                alignmentButton("right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
+                alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
+                iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view)),
+                iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
+                iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
+            ]),
+        ]},
+        {id: "insert", label: "Insert", groups: [
+            ribbonGroup("Media", [
+                commandButton("▨", "Image", "Choose a project image to insert or replace a Figure", () =>
+                    void dotNetRef.invokeMethodAsync("OnOpenProjectImagePicker")),
+                commandButton("▦", "Table", "Insert semantic table", () => void insertRichTable(view, root)),
+            ]),
+            ribbonGroup("Pages", [
+                allowDesignedPages
+                    ? commandButton("▣", "Designed page", "Insert a designed page at the current manuscript position", () =>
+                        void dotNetRef.invokeMethodAsync("OnOpenPageLibrary"))
+                    : null,
+                commandButton("⁂", "Scene break", "Insert scene break", () => insertSceneBreak(view)),
+            ]),
+            ribbonGroup("Symbols", [
+                selectControl("Insert special character", [
+                    ["", "Ω Character"],
+                    ["—", "Em dash —"],
+                    ["–", "En dash –"],
+                    ["…", "Ellipsis …"],
+                    ["“", "Opening quote “"],
+                    ["”", "Closing quote ”"],
+                    ["‘", "Opening apostrophe ‘"],
+                    ["’", "Closing apostrophe ’"],
+                    ["©", "Copyright ©"]
+                ], value => {
+                    if (!value) return;
+                    view.dispatch(view.state.tr.insertText(value).scrollIntoView());
+                    view.focus();
+                }),
+            ]),
+            ribbonGroup("Import", [
+                commandButton("W", "Word document", "Insert Word content at the cursor", () => chooseWordFile()),
+            ]),
+        ]},
+        {id: "notes", label: "Notes & Sources", groups: [
+            ribbonGroup("Notes", [
+                commandButton("¹", "Footnote", "Insert footnote", () => noteEditor.open(insertNote(view, root, "footnote"))),
+                commandButton("ᵉ", "Endnote", "Insert endnote", () => noteEditor.open(insertNote(view, root, "endnote"))),
+                commandButton("✎", "Edit notes", "Edit manuscript notes", async () => {
+                    const selected = view.state.selection instanceof NodeSelection && view.state.selection.node.type.name === "note_reference"
+                        ? view.state.selection.node.attrs.noteId : null;
+                    if (selected) { noteEditor.open(selected); return; }
+                    const notes = view.state.doc.attrs.notes || [];
+                    if (!notes.length) { showEditorNotice(root, "Insert a footnote or endnote at its manuscript reference first."); return; }
+                    const values = await showEditorForm(root, {title: "Edit manuscript note", submitLabel: "Edit",
+                        fields: [{name: "note", label: "Note", type: "select", options: notes.map((note, index) =>
+                            [note.id, `${index + 1}. ${note.kind === "endnote" ? "Endnote" : "Footnote"}: ${note.content.map(domainBlockText).join(" ").slice(0, 80)}`])}]});
+                    if (values) noteEditor.open(values.note);
+                }),
+            ]),
+            ribbonGroup("Citations", [
+                commandButton("❝", "Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
+                    () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
+            ]),
+        ]},
+        {id: "layout", label: "Layout", groups: [
+            ribbonGroup("Spacing", [
+                lineSpacingControl,
+                commandButton("¶", "Indents",
+                    "Right, first-line, and hanging indents, spacing, and pagination controls",
+                    () => void editParagraphPresentation(view, root)),
+                button("List…", "Set list numbering, nesting, or restart", () => void editListFormatting(view, root)),
+                commandButton("⌫", "Clear", "Clear direct paragraph formatting", () => clearParagraphPresentation(view)),
+            ]),
+            ribbonGroup("Book Text Styles", [styleControls]),
+            ribbonGroup("Character style", [
+                selectControl(
+                    "Book Text character style",
+                    [["", "Character"], ["__remove__", "Remove character style"]].concat(
+                        namedStyles
+                            .filter(style => style.kind === "character")
+                            .map(style => [style.semanticRole, style.name])),
+                    value => applyMark(
+                        view,
+                        "character_style",
+                        value === "__remove__" ? null : value || null)),
+                button("</>", "Inline code", () => applyMark(view, "code")),
+                button("Aᴀ", "Small caps intent", () => applyMark(view, "small_caps")),
+                button("Lang", "Set or remove language", () => void editLanguage(view, root)),
+            ]),
+        ]},
         ...(allowAnnotations
-            ? [toolGroup("Review", [
-                button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
-                button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
-            ])]
+            ? [{id: "review", label: "Review", groups: [
+                ribbonGroup("Annotations", [
+                    commandButton("▍", "Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
+                    commandButton("✎", "Note", "Add a review note to the selected text", () => void createAnnotation("note")),
+                ]),
+            ]}]
             : []),
-        toolGroup("Citations", [
-            button("Cite", "Insert or edit citation", () => void insertOrEditCitation(view, root,
-                () => dotNetRef.invokeMethodAsync("ListCitationBibliography"))),
-        ]),
-        toolGroup("Formatting menus", [
-            formatMenu.element, paragraphMenu.element, insertMenu.element, notesMenu.element, stylesMenu.element,
-        ]),
-        trailing);
+    ];
 
-    // When the row is too narrow, its lowest-priority items move into the More menu.
-    const rowOrder = [formatMenu.element, paragraphMenu.element, insertMenu.element, notesMenu.element,
-        stylesMenu.element, findButton, outlineButton];
-    const collapseOrder = [stylesMenu.element, outlineButton, findButton, notesMenu.element,
-        insertMenu.element, paragraphMenu.element, formatMenu.element];
-    const rowHomes = new Map(rowOrder.map(item => {
-        const marker = document.createComment("");
-        item.parentNode.insertBefore(marker, item);
-        return [item, marker];
-    }));
-    let toolbarFitFrame = null;
-    const fitToolbar = () => {
-        toolbarFitFrame = null;
-        if (openMenus.size) { toolbarFitPending = true; return; }
-        toolbarFitPending = false;
-        for (const item of rowOrder) rowHomes.get(item).after(item);
-        overflowMenu.element.hidden = true;
-        if (coreRow.scrollWidth <= coreRow.clientWidth + 1) return;
-        overflowMenu.element.hidden = false;
-        for (let collapsed = 1; collapsed <= collapseOrder.length; collapsed++) {
-            const moved = new Set(collapseOrder.slice(0, collapsed));
-            overflowList.replaceChildren(...rowOrder.filter(item => moved.has(item)));
-            if (coreRow.scrollWidth <= coreRow.clientWidth + 1) break;
-        }
+    const ribbonHeader = document.createElement("div");
+    ribbonHeader.className = "semantic-editor-ribbon-header";
+    const tabStrip = document.createElement("div");
+    tabStrip.className = "semantic-editor-ribbon-tabs";
+    const ribbonTools = document.createElement("div");
+    ribbonTools.className = "semantic-editor-ribbon-tools";
+    ribbonTools.append(
+        iconButton("⌕", "Find and replace", () => findPanel.open()),
+        iconButton("☷", "Toggle document outline", () => outline.open()));
+    ribbonHeader.append(tabStrip, ribbonTools);
+    tabStrip.setAttribute("role", "tablist");
+    tabStrip.setAttribute("aria-label", "Formatting tabs");
+    const ribbonPanels = [];
+    const tabButtons = [];
+    const ribbonTabKey = "lorekeeper.editor.ribbonTab";
+    const selectRibbonTab = (id, focus = false) => {
+        tabButtons.forEach((tab, index) => {
+            const selected = ribbonTabs[index].id === id;
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            ribbonPanels[index].hidden = !selected;
+            if (selected && focus) tab.focus();
+        });
+        try { localStorage.setItem(ribbonTabKey, id); } catch {}
     };
-    const scheduleToolbarFit = () => {
-        if (toolbarFitFrame === null) toolbarFitFrame = requestAnimationFrame(fitToolbar);
-    };
-    // A resize can strand an open panel past the column edge, so it closes menus before refitting.
-    const toolbarResizeObserver = new ResizeObserver(() => {
-        for (const menu of [...openMenus]) closeMenu(menu);
-        scheduleToolbarFit();
-    });
-    toolbarResizeObserver.observe(coreRow);
+    for (const tab of ribbonTabs) {
+        const panelId = `semantic-editor-ribbon-${++ribbonSequence}`;
+        const tabButton = document.createElement("button");
+        tabButton.type = "button";
+        tabButton.className = "semantic-editor-ribbon-tab";
+        tabButton.textContent = tab.label;
+        tabButton.dataset.ribbonTab = tab.id;
+        tabButton.setAttribute("role", "tab");
+        tabButton.setAttribute("aria-controls", panelId);
+        tabButton.addEventListener("mousedown", event => event.preventDefault());
+        tabButton.addEventListener("click", () => selectRibbonTab(tab.id));
+        tabButton.addEventListener("keydown", event => {
+            const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+            if (!step) return;
+            event.preventDefault();
+            const index = (ribbonTabs.indexOf(tab) + step + ribbonTabs.length) % ribbonTabs.length;
+            selectRibbonTab(ribbonTabs[index].id, true);
+        });
+        const panel = document.createElement("div");
+        panel.id = panelId;
+        panel.className = "semantic-editor-ribbon-panel";
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-label", tab.label);
+        panel.append(...tab.groups);
+        tabStrip.append(tabButton);
+        tabButtons.push(tabButton);
+        ribbonPanels.push(panel);
+    }
+    let initialRibbonTab = "home";
+    try { initialRibbonTab = localStorage.getItem(ribbonTabKey) || "home"; } catch {}
+    selectRibbonTab(ribbonTabs.some(tab => tab.id === initialRibbonTab) ? initialRibbonTab : "home");
 
     // The selection context row appears only for a table, Figure, or Designed Page.
     const contextRow = document.createElement("div");
@@ -4700,7 +4626,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     };
     contextRow.append(contextLabel, ...Object.values(contextGroups));
 
-    toolbar.replaceChildren(coreRow, contextRow);
+    toolbar.replaceChildren(ribbonHeader, ...ribbonPanels, contextRow);
     const markControls = new Map([
         ["Bold (Ctrl+B)", "strong"],
         ["Italic (Ctrl+I)", "em"],
@@ -4947,7 +4873,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     };
     toolbar.addEventListener("pointerdown", event => {
         const control = event.target instanceof Element ? event.target.closest("button, select, input") : null;
-        if (!control || control.dataset.historyDirection || control.dataset.menuTrigger) return;
+        if (!control || control.dataset.historyDirection || control.dataset.ribbonTab) return;
         forceAuthoringBoundary = true;
         pendingActionLabel = "Format manuscript";
         void saveNow();
@@ -5208,9 +5134,6 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);
             caretResizeObserver.disconnect();
-            toolbarResizeObserver.disconnect();
-            if (toolbarFitFrame !== null) cancelAnimationFrame(toolbarFitFrame);
-            menuEvents.abort();
             noteEditor?.dispose();
             view.destroy();
             root.replaceChildren();

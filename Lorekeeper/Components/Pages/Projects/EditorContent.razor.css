@@ -1,11 +1,13 @@
+/* The manuscript column keeps room for the full editor ribbon; the side panes give way first. */
 .editor-grid {
+    --editor-manuscript-min: 62rem;
     display: grid;
     grid-template-columns:
-        var(--editor-chat-column, minmax(17rem, 1.05fr))
+        var(--editor-chat-column, minmax(11rem, 1.05fr))
         0.5rem
-        minmax(28rem, 2fr)
+        minmax(var(--editor-manuscript-min), 2fr)
         0.5rem
-        var(--editor-memory-column, minmax(18rem, 1.1fr));
+        var(--editor-memory-column, minmax(12rem, 1.1fr));
     grid-template-rows: minmax(0, 1fr);
     gap: 0;
     flex: 1;
@@ -21,22 +23,22 @@
     grid-template-columns:
         2.25rem
         0.5rem
-        minmax(28rem, 1fr)
+        minmax(var(--editor-manuscript-min), 1fr)
         0.5rem
-        var(--editor-memory-column, minmax(18rem, 1.1fr));
+        var(--editor-memory-column, minmax(12rem, 1.1fr));
 }
 
 .editor-grid--right-collapsed {
     grid-template-columns:
-        var(--editor-chat-column, minmax(17rem, 1.05fr))
+        var(--editor-chat-column, minmax(11rem, 1.05fr))
         0.5rem
-        minmax(28rem, 1fr)
+        minmax(var(--editor-manuscript-min), 1fr)
         0.5rem
         2.25rem;
 }
 
 .editor-grid--chat-collapsed.editor-grid--right-collapsed {
-    grid-template-columns: 2.25rem 0.5rem minmax(28rem, 1fr) 0.5rem 2.25rem;
+    grid-template-columns: 2.25rem 0.5rem minmax(var(--editor-manuscript-min), 1fr) 0.5rem 2.25rem;
 }
 
 .editor-grid > * {

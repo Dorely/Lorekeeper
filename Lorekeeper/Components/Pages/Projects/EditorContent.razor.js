@@ -205,8 +205,8 @@ export function attachColumnLayout(elements, projectId) {
         const usableWidth = Math.max(0, grid.clientWidth - rootFontSize);
         const fractionTotal = 1.05 + 2 + 1.1;
         return {
-            chat: Math.max(17 * rootFontSize, usableWidth * 1.05 / fractionTotal),
-            memory: Math.max(18 * rootFontSize, usableWidth * 1.1 / fractionTotal)
+            chat: Math.max(minimums.chat, usableWidth * 1.05 / fractionTotal),
+            memory: Math.max(minimums.memory, usableWidth * 1.1 / fractionTotal)
         };
     };
 
