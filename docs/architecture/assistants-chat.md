@@ -112,6 +112,9 @@ them without another repository read or another visual delivery. Because
 cross-turn replay omits images and providers do not retain Lorekeeper's
 binary context, a later turn must resolve and resubmit its persistent attachment
 bytes once; this is distinct from redundant tool-driven rereads within a turn.
+The one exception is `read_project_image` with `fullResolution=true`, which
+rereads an attached image so its original bytes bypass the provider image
+compaction described in [Providers and background work](providers-background.md).
 
 ### Model selection, tokens, and compaction
 

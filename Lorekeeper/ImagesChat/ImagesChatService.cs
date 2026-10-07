@@ -550,7 +550,7 @@ public sealed class ImagesChatService(
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0 || modelOnlyImagePayloadsForNextRound.Count > 0)
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
-                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound, modelOnlyImagePayloadsForNextRound)));
+                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound, modelOnlyImagePayloadsForNextRound, toolContext.FullResolutionImageIds)));
 
 
             if (iteration == maxIterations - 1)
@@ -699,7 +699,11 @@ public sealed class ImagesChatService(
         return new ChatMessage(ChatRole.User, contents);
     }
 
-    private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(Guid projectId, IReadOnlyList<ProjectImageView> images, IReadOnlyList<ImagesChatModelOnlyImage> payloads)
+    private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(
+        Guid projectId,
+        IReadOnlyList<ProjectImageView> images,
+        IReadOnlyList<ImagesChatModelOnlyImage> payloads,
+        IReadOnlySet<Guid> fullResolutionImageIds)
     {
         var contents = new List<AIContent>
         {
@@ -712,10 +716,11 @@ public sealed class ImagesChatService(
             if (data is null) continue;
 
             contents.Add(new TextContent($"\nImage {image.Id:N}: {image.FileName}"));
-            contents.Add(new DataContent(data.Data, data.ContentType)
+            var content = new DataContent(data.Data, data.ContentType)
             {
                 Name = data.FileName,
-            });
+            };
+            contents.Add(fullResolutionImageIds.Contains(image.Id) ? ModelImagePayload.MarkFullResolution(content) : content);
         }
 
         foreach (var payload in payloads.DistinctBy(item => item.Image.Id))

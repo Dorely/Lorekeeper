@@ -1,4 +1,5 @@
 using Lorekeeper.Images;
+using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -17,7 +18,8 @@ public sealed record EntityVisualContextReference(
     string Prompt,
     bool IsExplicitImage = false,
     EntityVisualExampleOrigin? AssociationOrigin = null,
-    PublishAssetSource ImageSource = PublishAssetSource.Uploaded);
+    PublishAssetSource ImageSource = PublishAssetSource.Uploaded,
+    bool FullResolution = false);
 
 public interface IEntityVisualContextService
 {
@@ -80,14 +82,20 @@ public sealed class EntityVisualContextService(
         };
         foreach (var reference in selected)
         {
-            var data = await images.GetDataAsync(projectId, reference.ImageId, Math.Max(64, options.Value.MaxImageEdge), cancellationToken);
-            if (data is null) continue;
             var mappings = references.Where(item => item.ImageId == reference.ImageId).ToList();
+            var fullResolution = mappings.Any(item => item.FullResolution);
+            var data = await images.GetDataAsync(
+                projectId,
+                reference.ImageId,
+                fullResolution ? null : Math.Max(64, options.Value.MaxImageEdge),
+                cancellationToken);
+            if (data is null) continue;
             var mappingText = string.Join("; ", mappings.Select(item => item.EntityId is null
                 ? $"explicit project image ({item.Label}); imageSource={item.ImageSource}"
                 : $"canonical reference for {item.EntityType} {item.EntityName} [entityId={item.EntityId:N}] ({item.Label}); associationOrigin={item.AssociationOrigin?.ToString() ?? "unknown"}; imageSource={item.ImageSource}"));
             contents.Add(new TextContent($"\nReferences: {mappingText}; imageId={reference.ImageId:N}; file={reference.FileName}; alt={reference.AltText}; prompt={reference.Prompt}"));
-            contents.Add(new DataContent(data.Data, data.ContentType) { Name = data.FileName });
+            var content = new DataContent(data.Data, data.ContentType) { Name = data.FileName };
+            contents.Add(fullResolution ? ModelImagePayload.MarkFullResolution(content) : content);
         }
 
         var omitted = references.Select(reference => reference.ImageId).Distinct().Count() - selected.Count;

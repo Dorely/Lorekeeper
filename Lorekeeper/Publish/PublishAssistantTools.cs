@@ -304,9 +304,9 @@ public sealed class PublishAssistantTools(
                 name: "list_project_images",
                 description: "List a bounded page of reusable project images with stable asset IDs, file metadata, alt text, source, preview URL, and continuation metadata. Image bytes are omitted."),
             AIFunctionFactory.Create(
-                method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
+                method: (Guid imageId, bool fullResolution = false) => ReadProjectImageAsync(context, imageId, fullResolution),
                 name: "read_project_image",
-                description: "Read one project image and supply its bytes as visual context on the next model round when vision is available."),
+                description: "Read one project image and supply it as visual context on the next model round when vision is available, downscaled and compressed by default. Pass fullResolution=true only when fine detail (small lettering, exact edges, print-resolution checks) must be inspected; the original bytes are then sent unchanged and cost much more context."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 40) => ListManuscriptVisualsAsync(context, offset, limit),
                 name: "list_publication_manuscript_visuals",
@@ -645,7 +645,7 @@ public sealed class PublishAssistantTools(
         return ProjectSearchAgentPayload.SerializeResults(query.Trim(), result);
     }
 
-    private async Task<string> ReadProjectImageAsync(PublishAssistantContext context, Guid imageId)
+    private async Task<string> ReadProjectImageAsync(PublishAssistantContext context, Guid imageId, bool fullResolution)
     {
         var image = await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken);
         if (image is null)
@@ -661,7 +661,8 @@ public sealed class PublishAssistantTools(
             image.AltText,
             image.Prompt,
             IsExplicitImage: true,
-            ImageSource: image.Source));
+            ImageSource: image.Source,
+            FullResolution: fullResolution));
         return Serialize(new
         {
             ok = true,

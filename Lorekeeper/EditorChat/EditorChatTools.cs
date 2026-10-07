@@ -284,9 +284,9 @@ IActService acts,
                 description: "Read the project-owned authoring page geometry and revision used by chapter preview, Figures, Designed Pages, and target-bound image generation. Publication releases do not govern authoring geometry."),
 
             AIFunctionFactory.Create(
-                method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
+                method: (Guid imageId, bool fullResolution = false) => ReadProjectImageAsync(context, imageId, fullResolution),
                 name: "read_project_image",
-                description: "Read one project image's metadata and expose it as explicit visual context. If the active provider is vision-ready, the image bytes are supplied to the model on the next iteration."),
+                description: "Read one project image's metadata and expose it as explicit visual context. If the active provider is vision-ready, the image is supplied to the model on the next iteration, downscaled and compressed by default. Pass fullResolution=true only when fine detail (small lettering, exact edges, print-resolution checks) must be inspected; the original bytes are then sent unchanged and cost much more context."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int start = 0, int count = 30) =>
@@ -1851,7 +1851,7 @@ IActService acts,
         }));
     }
 
-    private async Task<string> ReadProjectImageAsync(EditorChatContext ctx, Guid imageId)
+    private async Task<string> ReadProjectImageAsync(EditorChatContext ctx, Guid imageId, bool fullResolution)
     {
         var image = await projectImages.GetAsync(ctx.ProjectId, imageId);
         if (image is null)
@@ -1862,7 +1862,7 @@ IActService acts,
             image,
             title: image.FileName,
             caption: "Image read into Editor Chat context."));
-        ctx.AddModelOnlyImage(image);
+        ctx.AddModelOnlyImage(image, fullResolution);
 
         return JsonSerializer.Serialize(new
         {

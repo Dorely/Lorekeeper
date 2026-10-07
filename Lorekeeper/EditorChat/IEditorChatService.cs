@@ -113,7 +113,7 @@ public sealed class EditorChatContext(
         return matched;
     }
 
-    public void AddModelOnlyImage(ProjectImageView image)
+    public void AddModelOnlyImage(ProjectImageView image, bool fullResolution = false)
     {
         if (VisionReady)
         {
@@ -122,7 +122,8 @@ public sealed class EditorChatContext(
                 image.Id,
                 image.FileName,
                 image.ContentType,
-                Data: null));
+                Data: null,
+                fullResolution));
         }
     }
 
@@ -168,4 +169,5 @@ public sealed record EditorChatModelImageAttachment(
     Guid? ProjectImageId,
     string FileName,
     string ContentType,
-    byte[]? Data);
+    byte[]? Data,
+    bool FullResolution = false);

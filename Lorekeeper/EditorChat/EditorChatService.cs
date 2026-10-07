@@ -854,10 +854,11 @@ public sealed class EditorChatService(
             }
 
             contents.Add(new TextContent($"\nImage {image.Id:N}: {image.FileName}"));
-            contents.Add(new DataContent(data, contentType)
+            var content = new DataContent(data, contentType)
             {
                 Name = fileName,
-            });
+            };
+            contents.Add(image.FullResolution ? ModelImagePayload.MarkFullResolution(content) : content);
         }
 
         return new ChatMessage(ChatRole.User, contents);

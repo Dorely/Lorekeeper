@@ -74,13 +74,13 @@ public class ChatClientFactory(
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            return new CodexChatClient(
+            return new ModelImagePayloadChatClient(new CodexChatClient(
                 httpClient,
                 access.ApiKey,
                 access.ExternalAccountId,
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
-                loggerFactory.CreateLogger<CodexChatClient>());
+                loggerFactory.CreateLogger<CodexChatClient>()));
         }
 
         if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)
@@ -119,8 +119,8 @@ public class ChatClientFactory(
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(access.ApiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
-        IChatClient chatClient = new OpenAIChatProtocolClient(
-            client.GetChatClient(provider.ModelId).AsIChatClient(), provider);
+        IChatClient chatClient = new ModelImagePayloadChatClient(new OpenAIChatProtocolClient(
+            client.GetChatClient(provider.ModelId).AsIChatClient(), provider));
 
         var pipeline = chatClient.AsBuilder();
         if (provider.MaxOutputTokens is > 0 and var budget)

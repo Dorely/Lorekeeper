@@ -151,6 +151,19 @@ OpenAI-compatible chat requests share a pooled transport with
 `Agents:ChatRequestTimeoutSeconds` (600 seconds by default). Codex requests use
 the configured Codex timeout.
 
+Both chat client kinds are wrapped in `ModelImagePayloadChatClient`, which
+compacts image payloads on every request without mutating the caller's
+transcript. Assistant tool loops resend their whole history each round, so a few
+multi-megabyte PNG references would otherwise repeat in every request. An image
+above 768 KB is downscaled to a 2048-pixel long edge and re-encoded as JPEG
+(quality 90), or as PNG when any pixel is transparent. The compacted copy is used
+only when it is smaller; undecodable images pass through. Results are cached by
+content hash, so later rounds don't re-encode. An image whose `DataContent`
+carries `ModelImagePayload.FullResolutionProperty` is sent byte for byte. The
+Editor, Images, and Publish `read_project_image` tools set it when the model passes
+`fullResolution=true`; that read then also skips the
+`EntityVisualContext:MaxImageEdge` downscale.
+
 Codex strict tool-schema preparation hoists local subschema references into
 root-level `$defs`, including repeated contributor types in bibliography tools.
 Recursive references remain references; definitions receive the same required-field
@@ -476,7 +489,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, persisted connection/model ownership, working-default resolution, and shared credential lookup. Account-backed discovery is rejected. |
-| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), verification probes, timeouts, and normalized failures. |
+| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
 | [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
 | [`Lorekeeper/Llm/EmbeddingClient.cs`](../../Lorekeeper/Llm/EmbeddingClient.cs), [`EmbeddingConfigurationService.cs`](../../Lorekeeper/Llm/EmbeddingConfigurationService.cs), and [`ProviderEmbeddingService.cs`](../../Lorekeeper/Llm/ProviderEmbeddingService.cs) | Embedding transport, test-before-save configuration, active-provider resolution, batching, truncation, and dimension validation. |

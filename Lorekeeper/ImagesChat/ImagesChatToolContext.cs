@@ -14,6 +14,7 @@ public sealed class ImagesChatToolContext(
     private readonly List<ImagesChatVisualAttachment> _visuals = [];
     private readonly List<ProjectImageView> _modelOnlyImages = [];
     private readonly List<ImagesChatModelOnlyImage> _modelOnlyImagePayloads = [];
+    private readonly HashSet<Guid> _fullResolutionImageIds = [];
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
     private readonly IReadOnlyDictionary<Guid, ProjectImageView> _attachedImages = attachedImages
         .DistinctBy(image => image.Id)
@@ -66,6 +67,10 @@ public sealed class ImagesChatToolContext(
 
     public ProjectImageView? FindAttachedImage(Guid imageId) =>
         _attachedImages.GetValueOrDefault(imageId);
+
+    public void RequestFullResolution(Guid imageId) => _fullResolutionImageIds.Add(imageId);
+
+    public IReadOnlySet<Guid> FullResolutionImageIds => _fullResolutionImageIds;
 
     public void AddModelOnlyImage(ProjectImageView image, byte[] data)
     {

@@ -85,9 +85,9 @@ public sealed class ImagesChatTools(
                 description: "Discover project-library images that are not already attached to the current turn. Current-turn attachments already include complete library metadata and, for a vision-ready provider, pixels; they are excluded from this tool."),
 
             AIFunctionFactory.Create(
-                method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
+                method: (Guid imageId, bool fullResolution = false) => ReadProjectImageAsync(context, imageId, fullResolution),
                 name: "read_project_image",
-                description: "Read one project image that is not already attached to the current turn, returning complete metadata and loading its pixels as visual context when supported. Attached image IDs already have complete metadata and, for a vision-ready provider, pixels; they must not be reread."),
+                description: "Read one project image that is not already attached to the current turn, returning complete metadata and loading its pixels as visual context when supported. Pixels are downscaled and compressed by default. Pass fullResolution=true only when fine detail (small lettering, exact edges, print-resolution checks) must be inspected; the original bytes are then sent unchanged and cost much more context. Attached image IDs already have complete metadata and, for a vision-ready provider, pixels; reread one only with fullResolution=true."),
 
             AIFunctionFactory.Create(
                 method: () => ReadProjectVisualDirectionAsync(context),
@@ -403,9 +403,9 @@ public sealed class ImagesChatTools(
         return JsonSerializer.Serialize(images.Select(ImagesChatImagePayload.From), JsonOptions);
     }
 
-    private async Task<string> ReadProjectImageAsync(ImagesChatToolContext ctx, Guid imageId)
+    private async Task<string> ReadProjectImageAsync(ImagesChatToolContext ctx, Guid imageId, bool fullResolution)
     {
-        if (ctx.FindAttachedImage(imageId) is { } attachedImage)
+        if (!fullResolution && ctx.FindAttachedImage(imageId) is { } attachedImage)
         {
             return JsonSerializer.Serialize(new
             {
@@ -425,6 +425,8 @@ public sealed class ImagesChatTools(
             image,
             title: image.FileName,
             caption: "Model-only image returned by read_project_image."));
+        if (fullResolution)
+            ctx.RequestFullResolution(image.Id);
         ctx.AddModelOnlyImage(image);
 
         return JsonSerializer.Serialize(new
