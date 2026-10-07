@@ -305,6 +305,17 @@ before PDF serialization; only an image without eligible lower artwork is
 flattened against the page or cover substrate. This keeps transparent PNG
 icons and overlays from acquiring a white matte.
 
+Image XObjects are encoded after that flattening, so the encoding choice never
+depends on source alpha (generated art can carry incidental near-opaque alpha).
+Each RGB or gray raster is serialized at its placed resolution as a baseline
+JPEG at quality 95 with 4:4:4 sampling when that stream is smaller than the
+lossless Flate stream, and as Flate otherwise; photographic page art therefore
+stays visually lossless (about 48 dB PSNR on generated 5100x3300 spreads) at
+roughly one seventh of the Flate size, while flat graphics stay exact. CMYK
+rasters always stay Flate so PDF/X-1a total-ink inspection reads the exact
+rendered separations. This keeps full-bleed illustrated books inside the
+256 MB artifact envelope that `PublicationRenderService` accepts.
+
 Composition rotation remains clockwise-positive in the editor, Skia previews,
 layout traces, and persisted scenes. The PDF writer negates that angle only
 when crossing into PDF's bottom-up page coordinate system, so the final visual

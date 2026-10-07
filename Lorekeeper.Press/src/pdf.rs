@@ -42,6 +42,7 @@ const ICC_PROFILE: &[u8] = include_bytes!("../assets/profiles/CGATS21_CRPC1.icc"
 const PAGE_TAG_OBJECT_BASE: i32 = 100_000;
 const PAGE_TAG_OBJECT_STRIDE: i32 = 4_000;
 const PAGE_TAG_ITEM_LIMIT: usize = 1_000;
+const IMAGE_JPEG_QUALITY: u8 = 95;
 const LIST_PARENT_OFFSET: i32 = 1_000;
 const TOC_PARENT_OFFSET: i32 = 2_000;
 const ANNOTATION_OFFSET: i32 = 3_000;
@@ -1171,9 +1172,9 @@ where
             ));
         }
         let image_ref = image_references[&image.id];
-        let compressed = compress_image(&image.samples)?;
-        let mut object = pdf.image_xobject(image_ref, &compressed);
-        object.filter(Filter::FlateDecode);
+        let (encoded, filter) = encode_image(image)?;
+        let mut object = pdf.image_xobject(image_ref, &encoded);
+        object.filter(filter);
         object.width(image.width as i32);
         object.height(image.height as i32);
         if image.cmyk {
@@ -2686,6 +2687,39 @@ fn compress(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {
     encoder
         .finish()
         .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))
+}
+
+/// Encodes one raster for its image XObject. Alpha is already flattened into
+/// the samples, so the choice never depends on source transparency. RGB and
+/// gray rasters use a high-quality 4:4:4 baseline JPEG when that is smaller
+/// than the lossless stream, which keeps full-page art at its target DPI
+/// without hundreds of megabytes of Flate data; flat graphics stay lossless.
+/// CMYK rasters always stay lossless so PDF/X-1a total-ink inspection reads
+/// the exact separations that were rendered.
+fn encode_image(image: &EmbeddedImage) -> Result<(Vec<u8>, Filter), Diagnostic> {
+    let lossless = compress_image(&image.samples)?;
+    if image.cmyk {
+        return Ok((lossless, Filter::FlateDecode));
+    }
+    let color_type = if image.grayscale {
+        jpeg_encoder::ColorType::Luma
+    } else {
+        jpeg_encoder::ColorType::Rgb
+    };
+    let (Ok(width), Ok(height)) = (u16::try_from(image.width), u16::try_from(image.height)) else {
+        return Ok((lossless, Filter::FlateDecode));
+    };
+    let mut jpeg = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut jpeg, IMAGE_JPEG_QUALITY);
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
+    encoder
+        .encode(&image.samples, width, height, color_type)
+        .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))?;
+    Ok(if jpeg.len() < lossless.len() {
+        (jpeg, Filter::DctDecode)
+    } else {
+        (lossless, Filter::FlateDecode)
+    })
 }
 
 fn compress_image(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {

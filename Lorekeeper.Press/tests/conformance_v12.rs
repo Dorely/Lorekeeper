@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 15);
-    assert_eq!(value["rendererVersion"], "2.1.11");
+    assert_eq!(value["rendererVersion"], "2.1.12");
     assert_eq!(
         value["profiles"],
         json!([
@@ -536,7 +536,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 15);
-    assert_eq!(response["rendererVersion"], "2.1.11");
+    assert_eq!(response["rendererVersion"], "2.1.12");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1021,6 +1021,129 @@ fn kdp_flattens_translucent_text_background_into_lower_page_art() {
         "the translucent white text background must be baked into the red page artwork"
     );
     assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
+}
+
+#[test]
+fn print_pdfs_embed_photographic_rgb_art_as_high_quality_jpeg_and_keep_cmyk_lossless() {
+    const WIDTH: u32 = 640;
+    const HEIGHT: u32 = 480;
+    let mut seed = 0x2545_f491_u32;
+    let mut samples = Vec::with_capacity((WIDTH * HEIGHT * 3) as usize);
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            for channel in 0..3 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let base = match channel {
+                    0 => 40 + x * 160 / WIDTH,
+                    1 => 60 + y * 140 / HEIGHT,
+                    _ => 90 + (x + y) * 100 / (WIDTH + HEIGHT),
+                } as i32;
+                let grain = (seed >> 24) as i32 % 7 - 3;
+                samples.push((base + grain).clamp(0, 255) as u8);
+            }
+        }
+    }
+    let artwork = rgb_png(WIDTH, HEIGHT, &samples);
+    let prepare = |profile: &str| {
+        let mut job = PreparedJob::new(profile);
+        job.request["ink"] = json!("Color");
+        fs::write(job.root.path().join("input/assets/pixel.png"), &artwork).expect("page artwork");
+        job.request["assets"][0]["byteLength"] = json!(artwork.len());
+        job.request["assets"][0]["sha256"] = json!(hex_hash(&artwork));
+        job.request["assets"][0]["widthPixels"] = json!(WIDTH);
+        job.request["assets"][0]["heightPixels"] = json!(HEIGHT);
+        job.write_request();
+        job
+    };
+    let image_streams = |document: &Document| {
+        document
+            .objects
+            .values()
+            .filter_map(|object| {
+                let stream = object.as_stream().ok()?;
+                matches!(stream.dict.get(b"Subtype"), Ok(Object::Name(name)) if name == b"Image")
+                    .then(|| stream.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    let name = |stream: &lopdf::Stream, key: &[u8]| {
+        stream
+            .dict
+            .get(key)
+            .ok()
+            .and_then(|value| value.as_name().ok())
+            .map(<[u8]>::to_vec)
+    };
+
+    let kdp = prepare("kdp-paperback-v1");
+    let rendered = response(&kdp.render());
+    assert_eq!(rendered["status"], "completed");
+    let pdf = Document::load(kdp.artifact(&rendered, "interior-pdf")).expect("KDP PDF");
+    let photo = image_streams(&pdf)
+        .into_iter()
+        .find(|stream| {
+            stream
+                .dict
+                .get(b"Width")
+                .ok()
+                .and_then(|value| value.as_i64().ok())
+                == Some(WIDTH as i64)
+        })
+        .expect("photographic page art");
+    assert_eq!(name(&photo, b"Filter").as_deref(), Some(&b"DCTDecode"[..]));
+    assert_eq!(
+        name(&photo, b"ColorSpace").as_deref(),
+        Some(&b"DeviceRGB"[..])
+    );
+    assert!(
+        photo.content.len() * 4 < samples.len(),
+        "JPEG page art must be far smaller than its raw samples"
+    );
+    let mut decoder =
+        zune_jpeg::JpegDecoder::new(zune_core::bytestream::ZCursor::new(&photo.content[..]));
+    let decoded = decoder.decode().expect("embedded JPEG decodes");
+    assert_eq!(
+        decoder.dimensions(),
+        Some((WIDTH as usize, HEIGHT as usize))
+    );
+    assert_eq!(decoded.len(), samples.len());
+    let squared_error = decoded
+        .iter()
+        .zip(&samples)
+        .map(|(left, right)| (i64::from(*left) - i64::from(*right)).pow(2))
+        .sum::<i64>() as f64
+        / samples.len() as f64;
+    let psnr = 10.0 * (255.0_f64 * 255.0 / squared_error.max(f64::EPSILON)).log10();
+    assert!(
+        psnr >= 42.0,
+        "JPEG page art must keep its look; PSNR was {psnr:.1} dB"
+    );
+    assert!(inspect(&kdp.artifact(&rendered, "interior-pdf")).device_rgb);
+
+    let ingram = prepare("ingram-paperback-pdfx1a-v1");
+    let output = ingram.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    let pdf = Document::load(ingram.artifact(&rendered, "interior-pdf")).expect("Ingram PDF");
+    let cmyk = image_streams(&pdf)
+        .into_iter()
+        .filter(|stream| name(stream, b"ColorSpace").as_deref() == Some(&b"DeviceCMYK"[..]))
+        .collect::<Vec<_>>();
+    assert!(
+        !cmyk.is_empty(),
+        "the Ingram interior must embed CMYK page art"
+    );
+    assert!(
+        cmyk.iter()
+            .all(|stream| name(stream, b"Filter").as_deref() == Some(&b"FlateDecode"[..])),
+        "PDF/X-1a CMYK rasters stay lossless so total ink can be verified exactly"
+    );
 }
 
 #[test]

@@ -1382,8 +1382,11 @@ public sealed class PublicationRenderProcessor(
             var setupManifest = resultArtifact.Kind == "print-setup-manifest";
             var expectedMediaType = setupManifest ? "application/json" : "application/pdf";
             if (!string.Equals(resultArtifact.MediaType, expectedMediaType, StringComparison.Ordinal)
-                || resultArtifact.ByteLength is < 2 or > 256L * 1024 * 1024)
+                || resultArtifact.ByteLength < 2)
                 throw new InvalidOperationException("The renderer returned an invalid artifact envelope.");
+            if (resultArtifact.ByteLength > 256L * 1024 * 1024)
+                throw new InvalidOperationException(
+                    $"The {resultArtifact.Kind} artifact is {resultArtifact.ByteLength / (1024d * 1024):0.0} MiB, above the 256 MiB artifact limit.");
             var fullPath = Path.GetFullPath(Path.Combine(outputRoot, resultArtifact.RelativePath));
             var relative = Path.GetRelativePath(outputRoot, fullPath);
             if (Path.IsPathRooted(relative)

@@ -1,6 +1,6 @@
 [package]
 name = "lorekeeper-press"
-version = "2.1.11"
+version = "2.1.12"
 edition = "2024"
 publish = false
 
@@ -19,6 +19,7 @@ skrifa = "=0.42.1"
 subsetter = "=0.2.6"
 unicode-linebreak = "=0.1.5"
 unicode-segmentation = "=1.13.3"
+jpeg-encoder = { version = "=0.7.1", default-features = false, features = ["std"] }
 zune-jpeg = { version = "=0.5.15", default-features = false, features = ["std"] }
 zune-core = { version = "=0.5.1", default-features = false, features = ["std"] }
 
