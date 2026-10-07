@@ -732,10 +732,9 @@ uses the installed SDK's current 10.0.0 graph. Both active configurations' exact
 runtime notice sets are retained. Builders restore with the same Release profile
 and self-contained properties used for publication.
 
-The [dependency inventory](docs/research/m0.4-distribution-inventory.md),
-[public-sharing audit](docs/evidence/public-sharing-audit.md), and
-[v1 QA evidence](docs/evidence/v1-qa.md) record unresolved prerequisites and
-performed checks. Package output is git-ignored. No repository visibility,
+The [dependency inventory](docs/research/m0.4-distribution-inventory.md) and
+[public-sharing audit](docs/evidence/public-sharing-audit.md) record unresolved
+prerequisites and performed checks. Package output is git-ignored. No repository visibility,
 publication, Store submission, or historical-feed archival is implied by a
 successful build.
 

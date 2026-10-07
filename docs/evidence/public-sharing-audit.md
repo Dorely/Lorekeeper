@@ -201,5 +201,5 @@ Rerun secret/current-file checks against the final committed source and exact
 remote refs before the visibility change. Retain only sanitized results.
 Automatic history rewriting, branch deletion, visibility changes, publication,
 settings changes, and archival are outside preparation. Live UI/provider/platform,
-installed update handoff, Store certification, and trailer captures are recorded
-separately in [v1 QA evidence](v1-qa.md); none follows from this audit.
+installed update handoff, Store certification, and trailer captures are separate
+release checks; none follows from this audit.

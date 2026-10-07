@@ -65,7 +65,7 @@ Documentation is authoritative by responsibility:
 5. [`docs/research/`](../research/) keeps sourced requirements that still
    govern current behavior. [`docs/decisions/`](../decisions/) keeps decisions
    that still shape the current runtime, and [`docs/evidence/`](../evidence/)
-   keeps the latest release QA and sharing audit. None of them is proof of
+   keeps the trailer QA and sharing audit. None of them is proof of
    current implementation.
 
 The repository does not keep roadmaps, plans, handoffs, superseded decisions, or
@@ -370,8 +370,7 @@ scope, fingerprints, decisions, counts, and limits belong in
 `docs/evidence/public-sharing-audit.md`. Recheck final exact refs before public
 visibility and resolve contribution rights or content findings. A successful
 build never substitutes for historical artifact, platform, UI, provider,
-Store, or update evidence. Record performed and unperformed checks in
-`docs/evidence/v1-qa.md`.
+Store, or update evidence.
 
 Static managed acceptance inspection covers flowing Figures, Designed Pages,
 publication sections, selected covers, and structured physical cover scenes;
@@ -392,7 +391,7 @@ and update behavior requires target-specific, user-authorized evidence.
 | [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
-| [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/evidence/`](../evidence/) | Current sourced requirements, the owned-renderer decision, and the latest release QA and sharing audit; none supersedes current code. |
+| [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/evidence/`](../evidence/) | Current sourced requirements, the owned-renderer decision, and the trailer QA and sharing audit; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
 | [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary: the data-safety core for migration, import/export/archive/history preservation and fail-closed behavior, and recovery. |
 | [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs) | Account/token migration rollback and obsolete discovery-column removal without external OAuth/provider simulation. |
