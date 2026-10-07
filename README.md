@@ -10,11 +10,9 @@ optional and use your own provider account or local model server.
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-dorely-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dorely)
 
-[![Lorekeeper trailer: from premise to published book](media/trailer/lorekeeper-v2-poster.png)](media/trailer/lorekeeper-v2-github.mp4)
+https://github.com/user-attachments/assets/64498034-7feb-4a12-a66c-748eeffa59f9
 
-<p align="center"><a href="media/trailer/lorekeeper-v2-github.mp4"><b>&#9654; Watch the 90-second trailer</b></a></p>
-
-The [trailer](media/trailer/README.md) is one live end-to-end run in a
+The 90-second [trailer](media/trailer/README.md) is one live end-to-end run in a
 synthetic project, from premise to prepared book files, with captions,
 provenance, and a reproducible export recipe.
 
