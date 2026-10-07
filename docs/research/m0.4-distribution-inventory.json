@@ -4151,7 +4151,7 @@
         "mac-app-store"
       ],
       "sources": [
-        "docs/v1-roadmap.md"
+        "README.md"
       ],
       "admissionStatus": "unresolved",
       "licenseExpression": null,
@@ -4202,7 +4202,7 @@
         "mac-app-store"
       ],
       "sources": [
-        "docs/v1-roadmap.md",
+        "README.md",
         "scripts/build-macos-release.ps1"
       ],
       "admissionStatus": "unresolved",
@@ -4226,7 +4226,7 @@
         "store-windows"
       ],
       "sources": [
-        "docs/v1-roadmap.md"
+        "tools/msix/README.md"
       ],
       "admissionStatus": "unresolved",
       "licenseExpression": null,

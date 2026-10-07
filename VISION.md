@@ -107,10 +107,6 @@ Lorekeeper will grow through deliberate publication milestones:
 4. additional Generic and Specific publication products;
 5. advanced design, language, accessibility, and reference-book support.
 
-The detailed scope and verification gates live in
-[`docs/publishing-roadmap.md`](docs/publishing-roadmap.md). That roadmap
-distinguishes research and plans from implemented or verified behavior.
-
 ## Success criteria
 
 Lorekeeper succeeds when:

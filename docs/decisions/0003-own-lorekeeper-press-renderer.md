@@ -2,7 +2,7 @@
 
 Date: 2026-07-31
 
-Status: Accepted; supersedes ADR 0002 for the current runtime
+Status: Accepted
 
 ## Context
 

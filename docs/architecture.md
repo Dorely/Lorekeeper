@@ -17,10 +17,10 @@ task before planning or changing that area. If the discovered impact expands,
 read the additional chapter before continuing.
 
 Product direction lives in [`../VISION.md`](../VISION.md). User-facing
-capabilities and setup live in [`../README.md`](../README.md). Roadmaps describe
-intended delivery rather than proof of current implementation. Research and
-accepted decisions explain evidence and history; the routed chapters describe
-the current runtime. Source inspection remains the proof of what is implemented.
+capabilities and setup live in [`../README.md`](../README.md). Research and
+decisions explain the evidence behind current requirements; the routed chapters
+describe the current runtime. Source inspection remains the proof of what is
+implemented.
 
 ## Global invariants
 
@@ -64,8 +64,8 @@ the current runtime. Source inspection remains the proof of what is implemented.
   file selection at explicit import/upload boundaries and the explicit final
   printer handoff from the application-owned print preview.
 - Superseded runtime paths and current-state documentation are removed in the
-  same change. Applied EF migrations and historical decision records remain
-  immutable evidence rather than active compatibility paths.
+  same change. Applied EF migrations remain immutable evidence rather than
+  active compatibility paths.
 
 ## Routing table
 
@@ -84,7 +84,7 @@ hints; concepts and downstream consumers determine the final impact area.
 | Product registry, physical geometry, covers, renderer protocol, PDF/EPUB validation, artifacts, packages, previews, `Lorekeeper.Press/` | [`press-production.md`](architecture/press-production.md) | Publishing for effective inputs; composition for scenes; validation for release evidence |
 | EF model, repositories, write coordination, migrations, recovery, import/export, local data and credential storage, `Persistence/`, `ImportExport/` | [`persistence-migrations-import.md`](architecture/persistence-migrations-import.md) | Every domain whose stored contract changes |
 | Deterministic snapshots, local Git history, checkpoints, compare/restore, remote sync, clone import, GitHub version-control connections, `VersionHistory/`, History and Version control surfaces | [`version-history-sync.md`](architecture/version-history-sync.md) | Persistence for SQLite/identity; narrative, manuscript, composition, publishing, assistants, providers, and runtime for captured or excluded state |
-| Build, tests, startup smoke checks, native validation, documentation hierarchy, release scripts, research, decisions | [`validation-documentation.md`](architecture/validation-documentation.md) | Every changed implementation chapter |
+| Build, tests, startup smoke checks, native validation, documentation hierarchy, release scripts, research, decisions, evidence | [`validation-documentation.md`](architecture/validation-documentation.md) | Every changed implementation chapter |
 
 Representative cross-layer routes are intentional: a manuscript persistence
 change requires manuscript plus persistence; an assistant manuscript tool

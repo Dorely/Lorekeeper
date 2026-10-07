@@ -62,18 +62,14 @@ Documentation is authoritative by responsibility:
    checkpoint/restore, clone import, and explicit remote synchronization.
 4. [`README.md`](../../README.md) describes user-facing capabilities, setup, run,
    packaging, release/update behavior, and local-data expectations.
-5. [`docs/publishing-roadmap.md`](../publishing-roadmap.md) sequences researched
-   delivery and verification gates. Roadmap status does not override current-code
-   or architecture claims. [`docs/v1-roadmap.md`](../v1-roadmap.md) owns the
-   approved application-v1 scope, milestone/evidence ledger, release decisions,
-   and maintained session handoff. Planned policy changes there become current
-   repository guidance through their explicit implementation steps.
-6. [`docs/research/`](../research/) records sourced evidence and proposals.
-   [`docs/decisions/`](../decisions/) records architectural decisions, including
-   superseded historical choices. Neither is proof of current implementation.
-7. [`docs/plans/`](../plans/) contains deferred or decision-complete plans. A plan
-   becomes current behavior only after code, current architecture, and validation
-   are updated.
+5. [`docs/research/`](../research/) keeps sourced requirements that still
+   govern current behavior. [`docs/decisions/`](../decisions/) keeps decisions
+   that still shape the current runtime, and [`docs/evidence/`](../evidence/)
+   keeps the latest release QA and sharing audit. None of them is proof of
+   current implementation.
+
+The repository does not keep roadmaps, plans, handoffs, superseded decisions, or
+retired spike evidence; Git history retains them.
 
 At session start, read `VISION.md` and the architecture index completely. Inspect
 the repository to establish the actual impact area, then read every routed chapter
@@ -93,10 +89,10 @@ This prevents duplicate descriptions from drifting.
 
 Update README for user-facing capability, requirement, setup, run, package,
 release, update, or local-data changes. Update `VISION.md` only for an intentional
-product-direction or scope change. Preserve historical research, accepted or
-superseded decisions, and applied EF migration files except for link repairs or
-clearly stale statements presented as current. Remove stale examples, comments,
-settings, and instructions in the same change that makes them obsolete.
+product-direction or scope change. Applied EF migration files are immutable.
+Delete research, decisions, and evidence once they no longer describe the
+current product rather than keeping them as history. Remove stale examples,
+comments, settings, and instructions in the same change that makes them obsolete.
 
 Documentation-only work must validate every referenced local path, configuration
 key, launch profile, and command. The repository intentionally has no separate
@@ -387,14 +383,6 @@ cover-description adaptation, and snapshot-schema-v7 restore preservation. Ordin
 service or UI tests remain outside the automated-test boundary; actual package
 and update behavior requires target-specific, user-authorized evidence.
 
-### Milestone contract evidence
-
-Earlier milestone contract evidence (M2-M5) is recorded in the
-[`docs/v1-roadmap.md`](../v1-roadmap.md) milestone ledger. Those entries are
-historical records of what was implemented and verified at the time. The current
-automated-test boundary is the data-safety core plus the Press conformance
-suite.
-
 ## Key files and file families
 
 | File or family | Architectural role |
@@ -402,7 +390,7 @@ suite.
 | [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
-| [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
+| [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/evidence/`](../evidence/) | Current sourced requirements, the owned-renderer decision, and the latest release QA and sharing audit; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
 | [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized application test-project boundary: the data-safety core for migration, import/export/archive/history preservation and fail-closed behavior, and recovery. |
 | [`Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs`](../../Lorekeeper.Tests/OpenAiAccountOwnershipMigrationTests.cs) | Account/token migration rollback and obsolete discovery-column removal without external OAuth/provider simulation. |
@@ -412,7 +400,7 @@ suite.
 | [`scripts/build-linux-release.ps1`](../../scripts/build-linux-release.ps1), [`scripts/build-linux-release-wsl.ps1`](../../scripts/build-linux-release-wsl.ps1), and [`eng/linux/AppRun.sh`](../../eng/linux/AppRun.sh) | Local native/WSL exact-source Linux package and provenance checks; source-owned launcher sandbox behavior is owned by runtime-host.md. |
 | [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, and pending installed/certification boundary. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
-| [`tools/performance/`](../../tools/performance/) and [M0.3 local evidence](../evidence/m0.3-local-performance-baseline.md) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`; the committed evidence report states the reference machine and unsupported workloads. |
+| [`tools/performance/`](../../tools/performance/) | Deterministic, sanitized local fixture generator plus opt-in Release-Electron memory/timing sampler. Generated data, traces, isolated databases, and package manifests remain under ignored `.artifacts/performance/`. |
 | [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), [`licenses/appimage-runtime/sources.json`](../../licenses/appimage-runtime/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/runtime source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. AppImage source/relink clearance is separate from notice inclusion. |
 | [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1), [inventory](../research/m0.4-distribution-inventory.md), and [public-sharing audit](../evidence/public-sharing-audit.md) | Local dependency/notice and platform-prerequisite inventory plus sanitized all-ref/GitHub clearance; detailed findings stay ignored/private and no publication is performed. |
 | [`.codex/config.toml`](../../.codex/config.toml) | Project-only optional Roslynk configuration with a read-only tool allowlist; not an application dependency or final-verification substitute. |

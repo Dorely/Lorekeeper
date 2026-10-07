@@ -524,17 +524,17 @@ $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'Micros
     -DependencyCategory 'assets' `
     -Status 'unresolved-provenance' -LicenseEvidence 'Free price is selected. Real Partner Center package identity and display name remain owner inputs; unsigned Store MSIX preparation does not require a personal production certificate.' `
     -AttributionAction 'Use tools/msix/store-identity.example.json and Build-WindowsMsix.ps1; submit only after separately authorized Partner Center access and real certification.' `
-    -Channels @('store-windows') -Sources @('docs/v1-roadmap.md')))
+    -Channels @('store-windows') -Sources @('tools/msix/README.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'Apple Developer identity, MAS profile, and real-device evidence' -Version 'owner input required' `
     -DependencyCategory 'assets' `
     -Status 'unresolved-provenance' -LicenseEvidence 'M0.6 remains account-gated; no Apple credentials, profile, or signed-device result exists.' `
     -AttributionAction 'Owner selects the signing host and supplies account/test-device access before M0.6 execution.' `
-    -Channels @('direct-mac', 'mac-app-store') -Sources @('docs/v1-roadmap.md')))
+    -Channels @('direct-mac', 'mac-app-store') -Sources @('README.md')))
 $entries.Add((New-InventoryEntry -Kind 'distribution-prerequisite' -Name 'macOS dependency and artifact closure' -Version 'not measured' `
     -DependencyCategory 'assets' `
     -Status 'unresolved-provenance' -LicenseEvidence 'This inventory examines the Windows staged closure only; native macOS closure belongs to M0.6.' `
     -AttributionAction 'Generate and review the signed native macOS closure only after M0.6 is unblocked.' `
-    -Channels @('direct-mac', 'mac-app-store') -Sources @('scripts/build-macos-release.ps1', 'docs/v1-roadmap.md')))
+    -Channels @('direct-mac', 'mac-app-store') -Sources @('scripts/build-macos-release.ps1', 'README.md')))
 
 $orderedEntries = @($entries | Sort-Object kind, name, version)
 $summary = [ordered]@{}
