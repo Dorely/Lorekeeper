@@ -496,7 +496,11 @@ physical project lease explicitly with nested same-project operations; nested
 cross-project acquisition fails closed. Per-writer freeze/resume transitions
 are serialized: a fence that starts while an earlier resume is pending cannot
 freeze until that resume finishes, so an older resume can never unfreeze a
-newer consumer. Derived chapter, search, link, page,
+newer consumer. Out-of-band saves invalidate a target's generation only when
+its authored manuscript changes; a publication section's settings (title, kind,
+anchor, inclusion, start side) are not authored content, so saving them leaves
+the open section editor's session and undo history valid instead of failing
+the next fence. Derived chapter, search, link, page,
 and Review Edits projections refresh only after the batch transaction and its
 database operation have released their write resources.
 The browser and server share the canonical request-hash golden vector at

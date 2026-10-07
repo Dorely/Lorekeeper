@@ -7,6 +7,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
+using Lorekeeper.VersionHistory.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -311,6 +312,86 @@ public sealed class LorekeeperPressMigrationTests
             {
                 Assert.False(await db.DesignedPages.AsNoTracking().AnyAsync(item => item.Id == deletable.Page.Id));
             }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PublicationSectionSettingsSaveKeepsTheOpenEditorGeneration()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={Path.Combine(directory, "section-generation.db")}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
+            Guid projectId;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project { Name = "Section settings", Slug = $"section-settings-{Guid.NewGuid():N}" };
+                db.AddRange(project, new ProjectPageSetup { ProjectId = project.Id, Project = project });
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+            }
+
+            var deltaHistory = new AuthoringDeltaHistoryRuntime();
+            var generations = new AuthoringGenerationService(database, deltaHistory);
+            var service = new PublicationSectionService(
+                database,
+                new PublicationBookService(database),
+                new PublicationEffectiveConfigurationResolver(database),
+                new ManuscriptStyleService(database, new TestContestMutationGuard(false)),
+                null!,
+                deltaHistory,
+                new AuthoringMutationContextAccessor(),
+                generations,
+                new ProjectVersionHistoryUiEvents());
+            var target = new PublicationSectionTarget(projectId);
+            static string Manuscript(string text, Guid manuscriptId = default, long revision = 0) => ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = manuscriptId,
+                Revision = revision,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = "note-body",
+                        Type = ManuscriptBlockType.Paragraph,
+                        StyleRole = ManuscriptStyleRoles.Body,
+                        Content = [new ManuscriptInline { Text = text }],
+                    },
+                ],
+            });
+            PublicationSectionInput Input(Guid? id, string title, PublicationSectionStartSide startSide, string manuscriptJson, long? revision) =>
+                new(id, title, PublicationSectionKind.Custom, PublicationSectionAnchor.Back, null, null,
+                    PublicationSectionInclusionMode.Included, startSide, manuscriptJson, revision);
+
+            var created = await service.UpsertAsync(target, Input(null, "Section", PublicationSectionStartSide.Next, Manuscript("Made by hand."), null));
+            var targetId = $"publication-section:{created.Id:D}";
+            var opened = (await generations.ReadAsync(projectId, [targetId]))[targetId];
+
+            var renamed = await service.UpsertAsync(target, Input(
+                created.Id, "A Note on the Making of This Book", PublicationSectionStartSide.Recto,
+                ManuscriptCodec.Serialize(created.Manuscript), created.Revision));
+            Assert.Equal("A Note on the Making of This Book", renamed.Title);
+            Assert.Equal(opened, (await generations.ReadAsync(projectId, [targetId]))[targetId]);
+
+            _ = await service.UpsertAsync(target, Input(
+                created.Id, renamed.Title, renamed.StartSide,
+                Manuscript("Made by hand, then revised.", created.Id, renamed.Revision), renamed.Revision));
+            Assert.Equal(opened + 1, (await generations.ReadAsync(projectId, [targetId]))[targetId]);
         }
         finally
         {

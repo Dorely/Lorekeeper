@@ -263,7 +263,11 @@ public sealed class PublicationSectionService(
                 return await GetStoredAsync(target, row.Id, cancellationToken);
             }
         }
-        var invalidateTargets = beforeHistory is null || authoringMutationContext.IsHistorySuppressed
+        // Settings such as title, kind, or start side are not part of the authored manuscript, so an open
+        // section editor's session and undo history stay valid; only a manuscript change invalidates them.
+        var invalidateTargets = beforeHistory is null
+            || authoringMutationContext.IsHistorySuppressed
+            || string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal)
             ? []
             : new[]
             {
