@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 use flate2::Compression;
@@ -9,6 +9,7 @@ use pdf_writer::types::{
 };
 use pdf_writer::writers::StructTreeRoot;
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
+use sha2::{Digest, Sha256};
 
 use crate::font::{EmbeddedFont, OutlineEdge};
 use crate::image::EmbeddedImage;
@@ -42,7 +43,7 @@ const ICC_PROFILE: &[u8] = include_bytes!("../assets/profiles/CGATS21_CRPC1.icc"
 const PAGE_TAG_OBJECT_BASE: i32 = 100_000;
 const PAGE_TAG_OBJECT_STRIDE: i32 = 4_000;
 const PAGE_TAG_ITEM_LIMIT: usize = 1_000;
-const IMAGE_JPEG_QUALITY: u8 = 95;
+const IMAGE_JPEG_QUALITY: u8 = 90;
 const LIST_PARENT_OFFSET: i32 = 1_000;
 const TOC_PARENT_OFFSET: i32 = 2_000;
 const ANNOTATION_OFFSET: i32 = 3_000;
@@ -236,11 +237,31 @@ where
         ));
     }
     let mut pages = pages.to_vec();
-    let mut images = images.clone();
     extend_edge_art_into_print_bleed(&mut pages, options);
+    // The caller's map spans every artifact in the job (interior, front cover, each cover
+    // surface), and flattening adds a full raster for every item it bakes into lower art.
+    // Each PDF embeds only the rasters its own pages paint.
+    let placed = pages
+        .iter()
+        .flat_map(|page| page.images.iter().map(|image| image.asset_id.as_str()))
+        .collect::<BTreeSet<_>>();
+    let mut images = images
+        .iter()
+        .filter(|(id, _)| placed.contains(id.as_str()))
+        .map(|(id, image)| (id.clone(), image.clone()))
+        .collect::<BTreeMap<_, _>>();
     if options.flatten_transparency {
         flatten_pdfx_opacity(&mut pages, fonts, &mut images, options, options.pdf_x)?;
     }
+    let painted = pages
+        .iter()
+        .flat_map(|page| {
+            painted_image_indices(page)
+                .into_iter()
+                .map(|index| page.images[index].asset_id.clone())
+        })
+        .collect::<BTreeSet<_>>();
+    images.retain(|id, _| painted.contains(id));
     let pages = pages.as_slice();
     let images = &images;
     if options.tagged
@@ -354,11 +375,21 @@ where
         }
     }
 
-    let image_references = images
-        .keys()
-        .enumerate()
-        .map(|(index, id)| (id.clone(), Ref::new(200 + index as i32)))
-        .collect::<BTreeMap<_, _>>();
+    // Identical rasters under different asset ids (a spread placed on facing pages, a
+    // release copy of a Core image) are written once and shared.
+    let mut image_references = BTreeMap::new();
+    let mut unique_images = Vec::new();
+    let mut references_by_content = BTreeMap::new();
+    for (id, image) in images {
+        let reference = *references_by_content
+            .entry(image_content_key(image))
+            .or_insert_with(|| {
+                let reference = Ref::new(200 + unique_images.len() as i32);
+                unique_images.push((reference, image));
+                reference
+            });
+        image_references.insert(id.clone(), reference);
+    }
     let font_references = fonts
         .keys()
         .enumerate()
@@ -538,7 +569,7 @@ where
     pdf.pages(pages_id)
         .kids(page_ids.iter().copied())
         .count(pages.len() as i32);
-    let progress_total = pages.len().saturating_add(images.len());
+    let progress_total = pages.len().saturating_add(unique_images.len());
     let mut progress_completed = 0usize;
     for (index, page_model) in pages.iter().enumerate() {
         if cancelled() {
@@ -617,16 +648,21 @@ where
                 font_resources.pair(Name(name.as_bytes()), *font_ref);
             }
             font_resources.finish();
-            let mut x_objects = resources.x_objects();
-            for image in &page_model.images {
+            let mut page_image_refs = BTreeSet::new();
+            for index in painted_image_indices(page_model) {
+                let image = &page_model.images[index];
                 let image_ref = image_references.get(&image.asset_id).ok_or_else(|| {
                     Diagnostic::error(
                         "PRESS_ASSET_REFERENCE_MISSING",
                         format!("Layout references undeclared asset '{}'.", image.asset_id),
                     )
                 })?;
+                page_image_refs.insert(*image_ref);
+            }
+            let mut x_objects = resources.x_objects();
+            for image_ref in page_image_refs {
                 let name = format!("Im{}", image_ref.get());
-                x_objects.pair(Name(name.as_bytes()), *image_ref);
+                x_objects.pair(Name(name.as_bytes()), image_ref);
             }
             x_objects.finish();
             let page_opacities = page_model
@@ -1159,19 +1195,20 @@ where
         if content_offset_x != 0.0 || content_offset_y != 0.0 {
             content.restore_state();
         }
-        pdf.stream(content_id, &content.finish());
+        let compressed_content = compress(&content.finish())?;
+        pdf.stream(content_id, &compressed_content)
+            .filter(Filter::FlateDecode);
         progress_completed += 1;
         progress(progress_completed, progress_total);
     }
 
-    for image in images.values() {
+    for (image_ref, image) in unique_images {
         if cancelled() {
             return Err(Diagnostic::error(
                 "PRESS_RENDER_CANCELLED",
                 "Rendering was cancelled during image serialization.",
             ));
         }
-        let image_ref = image_references[&image.id];
         let (encoded, filter) = encode_image(image)?;
         let mut object = pdf.image_xobject(image_ref, &encoded);
         object.filter(filter);
@@ -2687,6 +2724,33 @@ fn compress(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {
     encoder
         .finish()
         .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))
+}
+
+/// The image placements a page actually paints. Flattening bakes translucent
+/// placements into the art beneath them and drops them from the paint order,
+/// so they must not be referenced or embedded.
+fn painted_image_indices(page: &LayoutPage) -> Vec<usize> {
+    if page.paint_order.is_empty() {
+        return (0..page.images.len()).collect();
+    }
+    page.paint_order
+        .iter()
+        .filter_map(|paint| match *paint {
+            LayoutPaint::Image(index) => Some(index),
+            _ => None,
+        })
+        .collect()
+}
+
+fn image_content_key(image: &EmbeddedImage) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update(image.width.to_le_bytes());
+    hash.update(image.height.to_le_bytes());
+    hash.update([u8::from(image.cmyk), u8::from(image.grayscale)]);
+    hash.update(&image.samples);
+    let mut key = [0; 32];
+    key.copy_from_slice(&hash.finalize());
+    key
 }
 
 /// Encodes one raster for its image XObject. Alpha is already flattened into

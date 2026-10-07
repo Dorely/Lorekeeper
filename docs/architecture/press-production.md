@@ -312,14 +312,19 @@ icons and overlays from acquiring a white matte.
 
 Image XObjects are encoded after that flattening, so the encoding choice never
 depends on source alpha (generated art can carry incidental near-opaque alpha).
-Each RGB or gray raster is serialized at its placed resolution as a baseline
-JPEG at quality 95 with 4:4:4 sampling when that stream is smaller than the
-lossless Flate stream, and as Flate otherwise; photographic page art therefore
-stays visually lossless (about 48 dB PSNR on generated 5100x3300 spreads) at
-roughly one seventh of the Flate size, while flat graphics stay exact. CMYK
-rasters always stay Flate so PDF/X-1a total-ink inspection reads the exact
-rendered separations. This keeps full-bleed illustrated books inside the
-256 MB artifact envelope that `PublicationRenderService` accepts.
+Each PDF embeds only the rasters its own pages paint: the job-wide image map
+also holds other artifacts' images, and every flattening step leaves its lower
+artwork and baked overlay behind, so serializing the whole map would ship each
+cover-art intermediate and the interior's art inside the cover. Painted rasters
+with identical samples share one XObject, and page content streams are Flate
+compressed. Each RGB or gray raster is serialized at its placed resolution as
+a baseline JPEG at quality 90 with 4:4:4 sampling when that stream is smaller
+than the lossless Flate stream, and as Flate otherwise; photographic page art
+therefore stays visually lossless (about 47 dB PSNR on generated 5100x3300
+spreads) at roughly one ninth of the Flate size, while flat graphics stay
+exact. CMYK rasters always stay Flate so PDF/X-1a total-ink inspection reads
+the exact rendered separations. This keeps full-bleed illustrated books inside
+the 256 MB artifact envelope that `PublicationRenderService` accepts.
 
 Composition rotation remains clockwise-positive in the editor, Skia previews,
 layout traces, and persisted scenes. The PDF writer negates that angle only

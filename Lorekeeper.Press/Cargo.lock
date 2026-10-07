@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "lorekeeper-press"
-version = "2.1.14"
+version = "2.1.15"
 dependencies = [
  "flate2",
  "harfrust",
