@@ -330,8 +330,8 @@ at 1.5 device scale, dark theme) were upscaled to 1920x1080 at 30 fps. Frames
 show only the app's own pages for that project. No settings, connections,
 credentials, desktop chrome, notifications or file paths appear. The audio is
 the export recipe's original sine score. Clip hashes and the export provenance
-are kept in ignored `.artifacts/trailer/v1/`. The committed deliverables are
-in `media/trailer/`.
+are kept in ignored `.artifacts/trailer/v1/`. The v2 trailer in `media/trailer/`
+has since replaced it.
 
 ### Candidate package checks
 

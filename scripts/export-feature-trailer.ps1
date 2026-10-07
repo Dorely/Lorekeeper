@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^v[0-9]+$')]
-    [string]$Version = 'v1',
+    [string]$Version = 'v2',
     [string]$CaptureDirectory = ".artifacts/trailer/$Version/raw",
     [string]$OutputDirectory = ".artifacts/trailer/$Version/export"
 )
@@ -106,22 +106,15 @@ if (-not $qaSource.Success -or $qaSource.Groups[1].Value -cne $sourceCommit -or
 {
     throw 'The reviewed QA evidence must name the accepted application source commit and match its manifest SHA-256.'
 }
-# v1 predates per-clip lengths in the manifest; later versions list each clip's whole seconds in edit order.
+# The manifest lists each clip's whole seconds in edit order.
 $sequence = [ordered]@{}
-if ($Version -ceq 'v1')
+foreach ($clip in @($manifest.clips))
 {
-    $sequence = [ordered]@{ 'intro.mp4'=5; 'outline.mp4'=8; 'writing.mp4'=12; 'sources.mp4'=9; 'design.mp4'=11; 'export.mp4'=10; 'outro.mp4'=5 }
-}
-else
-{
-    foreach ($clip in @($manifest.clips))
+    if ($clip.file -cnotmatch '^[a-z0-9-]+\.mp4$' -or $sequence.Contains($clip.file) -or -not ($clip.seconds -is [int] -or $clip.seconds -is [long]) -or $clip.seconds -lt 1)
     {
-        if ($clip.file -cnotmatch '^[a-z0-9-]+\.mp4$' -or $sequence.Contains($clip.file) -or -not ($clip.seconds -is [int] -or $clip.seconds -is [long]) -or $clip.seconds -lt 1)
-        {
-            throw "Each clip needs a unique file name and whole seconds: $($clip.file)"
-        }
-        $sequence[$clip.file] = [int]$clip.seconds
+        throw "Each clip needs a unique file name and whole seconds: $($clip.file)"
     }
+    $sequence[$clip.file] = [int]$clip.seconds
 }
 $durationSeconds = [int](($sequence.Values | Measure-Object -Sum).Sum)
 if ($sequence.Count -lt 2 -or $durationSeconds -gt 90) { throw 'A trailer needs at least two clips and at most 90 seconds.' }
@@ -158,7 +151,6 @@ if ((Get-Item -LiteralPath $captionSource).Length -ge 50000000 -or
     throw 'The caption source must be a WebVTT file below 50 MB.'
 }
 $titlePath = Join-Path $repositoryRoot "media/trailer/$prefix.title.txt"
-if (-not (Test-Path -LiteralPath $titlePath -PathType Leaf)) { $titlePath = Join-Path $repositoryRoot 'media/trailer/title.txt' }
 $title = [System.IO.File]::ReadAllText($titlePath).Trim()
 if ([string]::IsNullOrWhiteSpace($title) -or $title.Length -gt 255 -or $title -match '[\r\n]')
 {
