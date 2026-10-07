@@ -132,6 +132,11 @@ cross-references while stable IDs remain the only mutation identities. Named
 styles arrive separately as versioned definitions; direct formatting overrides
 named styles, which override built-in defaults. Ordinary active-chapter editing
 therefore should not begin with a redundant manuscript read.
+The source hash is always the manuscript snapshot's hash of the expanded plain
+text, which includes Designed Page text, so automatic context, read, inspect, and
+edit results report comparable values. Inspection reports `empty-text-block` only
+for flowing text blocks; Figures, Designed Page placements, scene breaks, and
+tables legitimately carry no inline text.
 
 Entity context uses a separate compact projection that preserves meaningful
 properties, knowledge, and canonical visual metadata while omitting empty

@@ -1763,7 +1763,7 @@ IActService acts,
             blockCount,
             chapter.Id,
             chapter.Title,
-            ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)));
+            snapshot.SourceHash);
     }
 
     private async Task<string> InspectManuscriptAsync(
@@ -1789,7 +1789,7 @@ IActService acts,
             inspection,
             chapter.Id,
             chapter.Title,
-            ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)));
+            snapshot.SourceHash);
     }
 
     private async Task<string> ReadManuscriptMigrationStateAsync(EditorChatContext ctx)

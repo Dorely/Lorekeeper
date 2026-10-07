@@ -58,7 +58,10 @@ public static class ManuscriptInspection
 
         foreach (var block in document.Content)
         {
-            if (block.Type != ManuscriptBlockType.SceneBreak
+            // Scene breaks, figures, Designed Page placements and tables carry no
+            // flowing inline text, so an empty Content is their valid state.
+            if (block.Type is ManuscriptBlockType.Paragraph or ManuscriptBlockType.Heading
+                    or ManuscriptBlockType.BlockQuote or ManuscriptBlockType.ListItem
                 && string.IsNullOrEmpty(ManuscriptCodec.Text(block)))
             {
                 diagnostics.Add(new ManuscriptDiagnostic(

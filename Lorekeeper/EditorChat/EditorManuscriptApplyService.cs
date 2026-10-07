@@ -78,7 +78,6 @@ public sealed class EditorManuscriptApplyService(
                 ? BuildReadbackRanges(chapterId, source, document, changedBlockIds)
                 : [];
             var diagnostics = BuildDiagnostics(source, converted);
-            var sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document));
             var styleCatalog = await manuscriptStyles.ListAsync(
                 context.ProjectId,
                 cancellationToken);
