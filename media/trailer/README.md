@@ -1,4 +1,42 @@
-# Lorekeeper v1 feature trailer
+# Lorekeeper feature trailers
+
+## v2: from premise to published book
+
+The 90-second v2 trailer shows one live, end-to-end agentic run in the
+synthetic project "QA v2 Trailer — The Unquiet Oath": a premise becomes a Book
+Brief and outline, web research becomes a cited World Brief, Editor Chat drafts
+a chapter, a review note is revised and kept, and the Publish Assistant
+generates cover art, creates paperback, EPUB and PDF releases and prepares
+their files. Every agent turn used a real provider; nothing is simulated. The
+accepted application is `71dfa6394f982fa700db59f3f243d7e64dd9357d`, recorded
+under the [v2 trailer evidence](../../docs/evidence/v2-trailer-qa.md), which
+also lists each clip and the defects the run found.
+
+This directory holds the 720p GitHub version (`lorekeeper-v2-github.mp4`), the
+1920×1080 poster (`lorekeeper-v2-poster.png`), the English captions
+(`lorekeeper-v2.en.vtt`), the Store title (`lorekeeper-v2.title.txt`) and the
+export provenance (`lorekeeper-v2-provenance.json`). The Store master stays in
+`.artifacts/trailer/v2/export/`. Uploading or publishing the trailer is a later
+launch action.
+
+The footage was captured from the app's page in headless Chromium at
+1920×1080, so no desktop chrome, notifications or filesystem paths appear.
+Long agent turns were sped up in the edit; every sped-up stretch carries an
+on-screen label giving the speed, and every cut or follow-up turn carries an
+on-screen note.
+
+Unlike v1, the v2 capture manifest (`.artifacts/trailer/v2/raw/captures.json`)
+lists each clip's whole `seconds` in edit order; the clip lengths must total at
+most 90 seconds. Export with:
+
+```powershell
+pwsh -NoProfile -File scripts/export-feature-trailer.ps1 -Version v2
+```
+
+The GitHub video bitrate is derived from the duration so the file stays under
+the 9,500,000-byte limit. Everything else follows the v1 export below.
+
+## v1 feature trailer
 
 The trailer is finished: real footage of the QA-tested build
 (`d092bd696e46086e6cefd7cb9bfe50e6ef295f03`) in the synthetic project
@@ -9,7 +47,7 @@ The trailer is finished: real footage of the QA-tested build
 (`lorekeeper-v1-provenance.json`). The 1080p Store master stays outside Git.
 Uploading or publishing the trailer is a later launch action.
 
-## Capture
+### Capture
 
 Use a 1920×1080, 30 fps application-only capture. Keep private projects,
 credentials, connections/settings screens, desktop chrome, notifications, and
@@ -60,7 +98,7 @@ Example manifest shape (replace with actual accepted evidence):
 }
 ```
 
-## Export
+### Export
 
 ```powershell
 pwsh -NoProfile -File scripts/export-feature-trailer.ps1

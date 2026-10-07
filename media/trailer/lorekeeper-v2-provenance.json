@@ -1,0 +1,82 @@
+{
+    "sourceCommit":  "71dfa6394f982fa700db59f3f243d7e64dd9357d",
+    "exportCommit":  "6d3d30f79b26541e7ca744dab2a304773022a79b",
+    "syntheticProject":  "QA v2 Trailer — The Unquiet Oath",
+    "qaEvidence":  "docs/evidence/v2-trailer-qa.md",
+    "qaEvidenceSha256":  "8db488119d4ef73fcda09648b2a95f8909e6cfaa3783d966998e279f85e6679a",
+    "title":  "Lorekeeper — From premise to published book",
+    "captures":  [
+                     {
+                         "file":  "intro.mp4",
+                         "seconds":  4,
+                         "sha256":  "b339e0f997a7ab412222d2f404189bfc000c6690c10837803788a3c53bc484e2"
+                     },
+                     {
+                         "file":  "plan.mp4",
+                         "seconds":  13,
+                         "sha256":  "3b0c78368d3e1c4644612c6cc079e21c72e095b13f3aede87e1b6858033ac3e6"
+                     },
+                     {
+                         "file":  "world.mp4",
+                         "seconds":  10,
+                         "sha256":  "a4295360066bea7070644290f84ea40e3f156c9f0ee9a77a526a1fc9da82b5eb"
+                     },
+                     {
+                         "file":  "graph.mp4",
+                         "seconds":  4,
+                         "sha256":  "6b3d1892d658eceb847c4d0afd14e2964cc757845570f311e33bd39fb7499f0a"
+                     },
+                     {
+                         "file":  "draft.mp4",
+                         "seconds":  10,
+                         "sha256":  "a60dc74fc49f06558402d6e7d1ad7cf43e1e0c18481da1a0f88d335769595381"
+                     },
+                     {
+                         "file":  "note.mp4",
+                         "seconds":  14,
+                         "sha256":  "832faa11a8f533097cb25045dc4b62b3a64509da7ed691c50344ad1ddb278151"
+                     },
+                     {
+                         "file":  "publish.mp4",
+                         "seconds":  24,
+                         "sha256":  "84dfda31b96fc3cccd0dfe67ae58d3d0b547a0d1436a5cab4a7a9ebb9435195d"
+                     },
+                     {
+                         "file":  "more.mp4",
+                         "seconds":  6,
+                         "sha256":  "c77c288cb2cda52a7b277c5d3ab6c61802b3c44ca55f20b02c8832a82b10b9fb"
+                     },
+                     {
+                         "file":  "outro.mp4",
+                         "seconds":  5,
+                         "sha256":  "4db670a4768a7ac8d2031bd08e07fc43f45c61ca96861f97f2b47796d2b66f7f"
+                     }
+                 ],
+    "durationSeconds":  90,
+    "audio":  "Original mathematical sine score; A minor/F major/C major/G major; no samples",
+    "captionsSha256":  "37c06b5008367e6c53cafe78280425ea65aefa4765919e043cf0546108725230",
+    "ffmpeg":  "ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "recipe":  "scripts/export-feature-trailer.ps1",
+    "outputs":  [
+                    {
+                        "file":  "lorekeeper-v2-store.mp4",
+                        "bytes":  169863418,
+                        "sha256":  "d37728ca94a9f5b5772c084e86a51d0fa7e343ed9daa4b7425e19b318a1d1aba"
+                    },
+                    {
+                        "file":  "lorekeeper-v2-github.mp4",
+                        "bytes":  8085385,
+                        "sha256":  "e1b1c5a24d38a07cb86d91da100d8484c62837319dee4dcff6f937ee9549296e"
+                    },
+                    {
+                        "file":  "lorekeeper-v2-poster.png",
+                        "bytes":  909817,
+                        "sha256":  "7eaf95bf1984de4c4b403096ca3fe2a5981dc6b161dd051beab0b12962a3b966"
+                    },
+                    {
+                        "file":  "lorekeeper-v2.en.vtt",
+                        "bytes":  875,
+                        "sha256":  "37c06b5008367e6c53cafe78280425ea65aefa4765919e043cf0546108725230"
+                    }
+                ]
+}
