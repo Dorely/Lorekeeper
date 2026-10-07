@@ -2148,9 +2148,13 @@ else
         while (!_dispose.IsCancellationRequested && generation == _pollGeneration)
         {
             await ReloadPreparationsAsync(kind, editionId);
-            var job = _preparations.First(item => item.Id == jobId);
+            // Starting a new preparation removes the target's finished jobs, so the followed job can
+            // disappear when another client (such as the Publish Assistant) prepares the target again.
+            var job = _preparations.FirstOrDefault(item => item.Id == jobId)
+                ?? _preparations.FirstOrDefault(item => item.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing);
             await InvokeAsync(StateHasChanged);
-            if (job.Status is not (PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)) break;
+            if (job is null || job.Status is not (PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)) break;
+            jobId = job.Id;
             await Task.Delay(350, _dispose.Token);
         }
         if (generation != _pollGeneration) return;
