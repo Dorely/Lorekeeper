@@ -134,13 +134,13 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
                     GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "generate_project_image",
-                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect effectiveDpi and minimumDpiMet before attaching the image." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect the image before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "edit_project_image",
-                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Use the latest accepted source image; same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail, without zooming out, cropping, or inventing surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect effectiveDpi and minimumDpiMet before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Use the latest accepted source image; same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail, without zooming out, cropping, or inventing surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect it before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false, cancellationToken),
@@ -1239,30 +1239,23 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             background = result.Background,
             requestedRaster = result.RequestedRaster,
             requestedMinimumDpi = result.RequestedMinimumDpi,
-            minimumDpiMet = result.MinimumDpiMet,
             warningCodes = result.WarningCodes ?? [],
             outputImageIds = result.Images.Select(image => image.Id),
             printImageIds = result.Outputs.Where(output => output.PrintImageId is not null).Select(output => output.PrintImageId!.Value),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], printImageId = output.PrintImageId, printRaster = output.PrintRaster, printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null, output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, warningCodes = output.WarningCodes ?? [], printImageId = output.PrintImageId, printRaster = output.PrintRaster, printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null, output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched) },
             diagnostics = result.Diagnostics.Take(3),
-            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
             {
-                code = output.MinimumDpiMet == false
-                    ? "MINIMUM_DPI_NOT_MET"
-                    : !output.RasterMatched && !output.AspectMatched
-                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
-                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
-                message = output.MinimumDpiMet == false
-                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not describe it as publication-compliant."
-                    : $"Provider output {output.ActualRaster} did not satisfy the requested raster or target aspect. Inspect before reporting it as achieved.",
+                code = !output.RasterMatched && !output.AspectMatched
+                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
+                message = $"Provider output {output.ActualRaster} did not satisfy the requested raster or target aspect. Inspect before reporting it as achieved.",
             }),
             summary = result.Summary,
-            nextAction = result.MinimumDpiMet == false
-                ? "Inspect the returned project image, but keep it unattached and do not describe it as publication-compliant."
-                : result.Succeeded
-                    ? "Inspect the returned project image, then attach its ID as the intended entity's canonical reference before completing the request."
+            nextAction = result.Succeeded
+                ? "Inspect the returned project image, then attach its ID as the intended entity's canonical reference before completing the request."
                 : null,
         });
     }

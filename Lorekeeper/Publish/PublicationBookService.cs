@@ -535,7 +535,7 @@ public sealed class PublicationBookService(
             await InvalidateCoverHistoryAsync(projectId);
         }
 
-        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
+        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
     }
 
     public async Task<PublicationCoverDesignView> SaveCoverAsync(
@@ -605,12 +605,12 @@ public sealed class PublicationBookService(
         {
             db.ChangeTracker.Clear();
             design.Revision = update.ExpectedRevision;
-            return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
+            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         await InvalidateCoverHistoryAsync(projectId);
-        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
+        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
     }
 
     private static string CaptureCoreCover(PublicationBook book, PublicationBookCoverDesign design) =>
@@ -707,12 +707,12 @@ public sealed class PublicationBookService(
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             cover.Revision = expectedCoverRevision;
-            return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover, cancellationToken);
+            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         await InvalidateCoverHistoryAsync(projectId);
-        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover, cancellationToken);
+        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
     }
 
     private Task InvalidateCoverHistoryAsync(Guid projectId) =>
@@ -749,10 +749,9 @@ public sealed class PublicationBookService(
 
     private sealed record CoreCoverStagePayload(long ExpectedBookRevision, CompositionScene Scene);
 
-    private async Task<PublicationCoverDesignView> CoreCoverView(
+    private static PublicationCoverDesignView CoreCoverView(
         PublicationBookView book,
-        PublicationBookCoverDesign design,
-        CancellationToken cancellationToken)
+        PublicationBookCoverDesign design)
     {
         var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
@@ -771,13 +770,6 @@ public sealed class PublicationBookService(
             CoverCompositionFactory.Geometry(edition, 0),
             scene,
             diagnosticDetails);
-        await PublicationCoverService.AddImageDpiDiagnosticsAsync(
-            database,
-            book.ProjectId,
-            edition,
-            scene,
-            diagnosticDetails,
-            cancellationToken);
         var diagnostics = diagnosticDetails.Select(item => item.Message).ToList();
         return new PublicationCoverDesignView(
             design.Id,

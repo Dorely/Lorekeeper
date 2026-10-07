@@ -358,10 +358,10 @@ inline tokens to the effective title, subtitle, author, spine, and Description
 before Press, hiding a frame whose binding resolves to empty; Press likewise
 omits a canonical binding or valid semantic content reference that resolves to
 empty without creating a text frame, while a visible frame with neither text
-nor reference remains a hard layout error. Application-side cover validation
-also decodes placed image assets before rendering and reports effective-DPI
-warnings using the selected profile threshold; final Press evidence remains
-authoritative.
+nor reference remains a hard layout error. Effective DPI is never a cover,
+Designed Page, or Press diagnostic: publication preparation upscales placed
+rasters to the edition DPI before rendering, and Press reports per-image and
+minimum effective DPI only as artifact evidence.
 
 Press owns immutable artifact evidence. `PublicationRenderService` persists
 edition/Core target, status, bytes, length, SHA-256, source fingerprint,

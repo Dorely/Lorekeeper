@@ -66,7 +66,6 @@ public sealed record AgentProjectImageResult(
     IReadOnlyList<ProjectImageOutputErrorView> Diagnostics,
     string Summary,
     double? RequestedMinimumDpi = null,
-    bool? MinimumDpiMet = null,
     IReadOnlyList<string>? WarningCodes = null,
     string? ImageModel = null,
     string? Quality = null,
@@ -86,7 +85,6 @@ public sealed record AgentProjectImageOutput(
     bool AspectMatched,
     double? EffectiveDpi,
     double? RequestedMinimumDpi = null,
-    bool? MinimumDpiMet = null,
     IReadOnlyList<string>? WarningCodes = null,
     Guid? PrintImageId = null,
     string? PrintRaster = null,
@@ -301,18 +299,11 @@ public sealed class AgentProjectImageWorkflow(
                 if (string.Equals(job.Background, "transparent", StringComparison.OrdinalIgnoreCase)
                     && !ProjectImageBinary.ContainsTransparentPixel(data.Data))
                     outputWarnings.Add("TRANSPARENCY_NOT_MET");
-                var outputMinimumDpiMet = geometry?.MinimumDpi is not { } minimumDpi
-                    ? (bool?)null
-                    : printUpscale is not null || applicationFillUpscale
-                        ? true
-                        : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
                 if (printUpscale is not null
                     || applicationFillUpscale
                         && effectiveDpi is { } fillDpi
                         && fillDpi + 1e-9 < geometry!.MinimumDpi)
                     outputWarnings.Add("PRINT_DPI_UPSCALED");
-                else if (outputMinimumDpiMet == false)
-                    outputWarnings.Add("MINIMUM_DPI_NOT_MET");
                 foreach (var warningCode in outputWarnings)
                     warningCodes.Add(warningCode);
                 outputImages.Add(new AgentProjectImageOutput(
@@ -324,7 +315,6 @@ public sealed class AgentProjectImageWorkflow(
                     aspectMatched,
                     effectiveDpi,
                     geometry?.MinimumDpi,
-                    outputMinimumDpiMet,
                     outputWarnings));
             }
         }
@@ -366,10 +356,9 @@ public sealed class AgentProjectImageWorkflow(
             }
         }
 
-        var minimumDpiMet = geometry?.MinimumDpi is null || outputImages.Count == 0
-            ? (bool?)null
-            : outputImages.All(output => output.MinimumDpiMet == true);
-        var succeeded = providerSucceeded && minimumDpiMet != false;
+        // Publication preparation upscales every placed raster to the edition
+        // DPI, so a native output below a requested minimum is still usable.
+        var succeeded = providerSucceeded;
         var transparencyFailed = outputImages.Any(output => (output.WarningCodes ?? []).Contains("TRANSPARENCY_NOT_MET", StringComparer.Ordinal));
         if (transparencyFailed)
             succeeded = false;
@@ -377,13 +366,9 @@ public sealed class AgentProjectImageWorkflow(
             ? "timed_out"
             : transparencyFailed
                 ? "transparency_not_met"
-            : providerSucceeded && minimumDpiMet == false
-                ? "minimum_dpi_not_met"
                 : StatusName(job.Status);
         var summary = timedOut
             ? "Image generation exceeded the configured lifetime and was cancelled; no image was placed."
-            : providerSucceeded && minimumDpiMet == false
-                ? "The provider output was retained as an unattached image, but it did not meet the requested minimum DPI and is not publication-compliant."
             : transparencyFailed
                 ? "The provider output was retained as an unattached image, but it did not meet the requested transparent-background requirement. It was not print-prepared or suggested for placement."
             : succeeded && printUpscale is { } appliedPlan
@@ -412,7 +397,6 @@ public sealed class AgentProjectImageWorkflow(
             job.OutputErrors,
             summary,
             geometry?.MinimumDpi,
-            minimumDpiMet,
             warningCodes.ToList(),
             job.ImageModel,
             job.Quality,

@@ -226,8 +226,6 @@ public sealed class ProjectImageJobService(
             warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
         if (!aspectMatched)
             warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
-        if (minimumDpiMet == false)
-            warningCodes.Add("MINIMUM_DPI_NOT_MET");
         if (transparencyMet == false)
             warningCodes.Add("TRANSPARENCY_NOT_MET");
         var asset = new PublishAsset
@@ -722,8 +720,6 @@ public sealed class ProjectImageJobService(
             warningCodes.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
         if (!aspectMatched)
             warningCodes.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
-        if (minimumDpiMet == false)
-            warningCodes.Add("MINIMUM_DPI_NOT_MET");
         if (transparencyMet == false)
             warningCodes.Add("TRANSPARENCY_NOT_MET");
         var now = DateTime.UtcNow;
@@ -834,7 +830,7 @@ public sealed class ProjectImageJobService(
         job.UpdatedAt = now;
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
-        if (minimumDpiMet != false && transparencyMet != false)
+        if (transparencyMet != false)
         {
             foreach (var target in DeserializeTargets(job.EntityVisualTargetsJson))
                 await entityVisualExamples.AttachAsync(projectId, target.EntityId, asset.Id, target.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);

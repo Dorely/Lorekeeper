@@ -7,7 +7,6 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
-using SkiaSharp;
 
 namespace Lorekeeper.Publish;
 
@@ -784,7 +783,6 @@ public sealed class PublicationCoverService(
         }
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         AddSceneDiagnostics(edition, expectedGeometry, scene, diagnosticDetails);
-        await AddImageDpiDiagnosticsAsync(database, edition.ProjectId, edition, scene, diagnosticDetails, cancellationToken);
         var diagnostics = diagnosticDetails.Select(item => item.Message).ToList();
         return new(
             design.Id,
@@ -884,55 +882,6 @@ public sealed class PublicationCoverService(
         targetKind.StartsWith(CoverSceneStagePrefix, StringComparison.Ordinal)
             ? targetKind[CoverSceneStagePrefix.Length..]
             : null;
-
-    internal static async Task AddImageDpiDiagnosticsAsync(
-        IAppDatabaseOperationFactory database,
-        Guid projectId,
-        PublicationEdition edition,
-        CompositionScene scene,
-        ICollection<PublicationCoverDiagnostic> diagnostics,
-        CancellationToken cancellationToken)
-    {
-        var imageObjects = CompositionSceneResolver.Flatten(scene)
-            .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
-            .ToList();
-        if (imageObjects.Count == 0)
-            return;
-
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var imageIds = imageObjects.Select(item => item.ImageId!.Value).Distinct().ToList();
-        var assets = await db.PublishAssets.AsNoTracking()
-            .Where(item => item.ProjectId == projectId
-                && imageIds.Contains(item.Id)
-                && (item.ContentType == "image/png" || item.ContentType == "image/jpeg"))
-            .ToDictionaryAsync(item => item.Id, cancellationToken);
-        var requiredDpi = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
-            ? 300d
-            : 180d;
-        foreach (var item in imageObjects)
-        {
-            if (!assets.TryGetValue(item.ImageId!.Value, out var asset))
-                continue;
-            using var bitmap = SKBitmap.Decode(asset.Data);
-            if (bitmap is null)
-                continue;
-            var widthInches = scene.Surface.WidthPoints / 72 * item.Bounds.WidthPercent / 100;
-            var heightInches = scene.Surface.HeightPoints / 72 * item.Bounds.HeightPercent / 100;
-            var effectiveDpi = Math.Min(
-                bitmap.Width / Math.Max(.01, widthInches),
-                bitmap.Height / Math.Max(.01, heightInches));
-            if (effectiveDpi < requiredDpi)
-            {
-                AddDiagnostic(
-                    diagnostics,
-                    "warning",
-                    "IMAGE_DPI_LOW",
-                    $"Image resolves to approximately {effectiveDpi:0} DPI; this edition expects {requiredDpi:0} DPI.",
-                    item.Id);
-            }
-        }
-    }
 
     internal static void AddSceneDiagnostics(
         PublicationEdition edition,

@@ -422,14 +422,14 @@ IActService acts,
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "generate_project_image",
             description:
-                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes before placement. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster and warningCodes before placement; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
 
         tools.Add(AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
                 EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes; keep undersized output unattached and do not place it as publication-compliant. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
+                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster and warningCodes; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
@@ -2549,7 +2549,6 @@ IActService acts,
                 targetRaster = $"{width}x{height}",
                 actualRaster = $"{width}x{height}",
                 requestedMinimumDpi = (double?)null,
-                minimumDpiMet = (bool?)null,
                 warningCodes = Array.Empty<string>(),
                 sourceLinked = true,
                 attached = false,
@@ -2613,7 +2612,6 @@ IActService acts,
                 aspectMatched = output.AspectMatched,
                 effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
                 requestedMinimumDpi = output.RequestedMinimumDpi,
-                minimumDpiMet = output.MinimumDpiMet,
                 warningCodes = output.WarningCodes ?? [],
                 printImageId = output.PrintImageId,
                 printRaster = output.PrintRaster,
@@ -2628,7 +2626,6 @@ IActService acts,
             jobId = result.JobId,
             status = result.Status,
             requestedMinimumDpi = result.RequestedMinimumDpi,
-            minimumDpiMet = result.MinimumDpiMet,
             warningCodes = result.WarningCodes ?? [],
             outputImageIds = result.Images.Select(image => image.Id),
             printImageIds = result.Outputs.Where(output => output.PrintImageId is not null).Select(output => output.PrintImageId!.Value),
@@ -2637,25 +2634,19 @@ IActService acts,
             diagnosticCounts = new
             {
                 errors = result.Diagnostics.Count,
-                warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false),
+                warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched),
             },
             diagnostics = result.Diagnostics.Take(3),
-            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
             {
-                code = output.MinimumDpiMet == false
-                    ? "MINIMUM_DPI_NOT_MET"
-                    : !output.RasterMatched && !output.AspectMatched
-                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
-                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
-                message = output.MinimumDpiMet == false
-                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not place or describe it as publication-compliant."
-                    : $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+                code = !output.RasterMatched && !output.AspectMatched
+                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
+                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
             }),
             summary = result.Summary,
-            nextAction = result.MinimumDpiMet == false
-                ? "Inspect the returned image, but keep it unattached and do not place it as publication-compliant; use the suggested panel bounds or a deliberate collage/panel treatment."
-                : result.Succeeded
-                    ? "Inspect a returned image, then place its project-image ID with a separate Figure or Designed Page tool before completing an authoring request."
+            nextAction = result.Succeeded
+                ? "Inspect a returned image, then place its project-image ID with a separate Figure or Designed Page tool before completing an authoring request."
                 : null,
         });
     }

@@ -694,28 +694,14 @@ public sealed class PublicationImagePreparationService(
             }
         }
 
-        foreach (var placement in evidence.Placements)
+        foreach (var placement in evidence.Placements.Where(item => item.NeedsUpscale))
         {
-            if (placement.EffectiveDpi + .01 >= placement.RequiredDpi)
-                continue;
-            if (placement.NeedsUpscale)
-            {
-                try { ValidateRaster(placement.RequiredWidthPixels, placement.RequiredHeightPixels, placement.AssetId); }
-                catch (InvalidOperationException exception)
-                {
-                    failures.Add(new(
-                        "IMAGE_UPSCALE_RASTER_TOO_LARGE",
-                        $"{exception.Message} Placement: {placement.Surface}{(placement.PageNumber is int page ? $" page {page}" : string.Empty)}.",
-                        placement.AssetId,
-                        placement.Surface,
-                        placement.PageNumber));
-                }
-            }
-            else
+            try { ValidateRaster(placement.RequiredWidthPixels, placement.RequiredHeightPixels, placement.AssetId); }
+            catch (InvalidOperationException exception)
             {
                 failures.Add(new(
-                    "IMAGE_LOW_DPI",
-                    $"Image placement on {placement.Surface}{(placement.PageNumber is int page ? $" page {page}" : string.Empty)} is below {placement.RequiredDpi:0.##} DPI.",
+                    "IMAGE_UPSCALE_RASTER_TOO_LARGE",
+                    $"{exception.Message} Placement: {placement.Surface}{(placement.PageNumber is int page ? $" page {page}" : string.Empty)}.",
                     placement.AssetId,
                     placement.Surface,
                     placement.PageNumber));

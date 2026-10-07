@@ -221,13 +221,13 @@ reports `rasterMatched` separately from `aspectMatched`; any explicit
 requested raster is compared with actual decoded pixels even for a
 free-standing request, and mismatches are surfaced as warnings. When a minimum
 was requested, provenance and assistant results also carry the physical basis,
-requested minimum, `effectiveDpi`, `minimumDpiMet`, and every warning code. An
-unexpected undersized provider result remains an unattached asset with
-`MINIMUM_DPI_NOT_MET`; it is not publication-compliant and must not be placed as
-though it were. Under a print-upscale plan this warning describes the native
-asset only; the derived print-upscaled asset is the publication candidate, and
-its provenance records the native source DPI honestly.
-Placement validation remains the final DPI diagnostic owner.
+requested minimum, `effectiveDpi`, and every warning code. A provider result
+below the requested minimum is a normal successful output, not a warning:
+publication preparation upscales every placed raster to the edition DPI before
+Press renders, so effective DPI is never a generation, Designed Page, cover, or
+Press warning. Under a print-upscale plan the derived print-upscaled asset is
+the placement candidate, and its provenance records the native source DPI
+honestly.
 The provider-output byte boundary is separately configurable and defaults to
 64 MiB.
 

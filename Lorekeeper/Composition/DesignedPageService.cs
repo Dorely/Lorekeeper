@@ -8,7 +8,6 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
-using SkiaSharp;
 
 namespace Lorekeeper.Composition;
 
@@ -2118,27 +2117,6 @@ public sealed class DesignedPageService(
                 "Text exceeds its frame at the current typography.",
                 item.ObjectId)));
 
-        var imageIds = flattened.Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
-            .Select(item => item.ImageId!.Value).Distinct().ToList();
-        var assets = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId && imageIds.Contains(item.Id))
-            .ToDictionaryAsync(item => item.Id, cancellationToken);
-        var requiredDpi = edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
-            ? 300d
-            : 180d;
-        foreach (var item in flattened.Where(item => edition is not null
-            && item.Kind == CompositionObjectKind.Image
-            && item.ImageId is not null
-            && IsOutputVisible(scene, item)))
-        {
-            if (!assets.TryGetValue(item.ImageId!.Value, out var asset)) continue;
-            using var bitmap = SKBitmap.Decode(asset.Data);
-            if (bitmap is null) continue;
-            var widthInches = scene.Surface.WidthPoints / 72 * item.Bounds.WidthPercent / 100;
-            var heightInches = scene.Surface.HeightPoints / 72 * item.Bounds.HeightPercent / 100;
-            var dpi = Math.Min(bitmap.Width / Math.Max(.01, widthInches), bitmap.Height / Math.Max(.01, heightInches));
-            if (dpi < requiredDpi)
-                diagnostics.Add(new("warning", "IMAGE_DPI_LOW", $"Image resolves to approximately {dpi:0} DPI; this edition expects {requiredDpi:0} DPI.", item.Id));
-        }
         var projectFontIds = scene.Objects.Select(item => ParseProjectFontId(item.FontFamilyKey))
             .Concat(scene.Styles.Select(style => ParseProjectFontId(style.FontFamilyKey)))
             .Where(id => id is not null).Select(id => id!.Value).Distinct().ToList();

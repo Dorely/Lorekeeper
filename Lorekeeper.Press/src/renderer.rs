@@ -1366,26 +1366,13 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             })
         })
         .collect::<Vec<_>>();
-    let lowest_resolution_image = image_evidence
+    // Publication preparation upscales placed rasters to the edition DPI before
+    // rendering, so effective DPI is evidence only and never a diagnostic.
+    let minimum_effective_dpi = image_evidence
         .iter()
-        .min_by(|left, right| left.effective_dpi.total_cmp(&right.effective_dpi));
-    let minimum_effective_dpi = lowest_resolution_image.map(|item| item.effective_dpi);
-    let mut diagnostics = layout.diagnostics.clone();
-    let required_dpi = required_effective_dpi(&request.profile);
-    if minimum_effective_dpi.is_some_and(|dpi| dpi < required_dpi) {
-        let evidence = lowest_resolution_image.expect("minimum DPI came from image evidence");
-        diagnostics.push(
-            Diagnostic::warning(
-                "PRESS_IMAGE_DPI_LOW",
-                format!(
-                    "The lowest effective image resolution is {:.1} DPI; this profile expects {:.0} DPI. Inspect the affected page at full size.",
-                    evidence.effective_dpi, required_dpi
-                ),
-            )
-            .with_source("asset", evidence.asset_id.clone())
-            .with_page(evidence.page_number),
-        );
-    }
+        .map(|item| item.effective_dpi)
+        .min_by(f32::total_cmp);
+    let diagnostics = layout.diagnostics.clone();
 
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
@@ -1594,14 +1581,6 @@ fn validate_inside_spine_no_ink(
         ));
     }
     Ok(())
-}
-
-fn required_effective_dpi(profile: &str) -> f32 {
-    if profile == "generic-digital-pdf-v1" {
-        180.0
-    } else {
-        300.0
-    }
 }
 
 pub fn trace(job_root: &Path) -> RenderResult<()> {
@@ -9982,13 +9961,6 @@ mod tests {
 
         let front = cover_region("Front", 20.888_89 * 72.0, 9.5 * 72.0, &geometry, false);
         assert!((front.0 - (20.888_89 - 3.375 - 6.694_444_7) * 72.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn digital_and_print_profiles_apply_their_declared_dpi_thresholds() {
-        assert_eq!(required_effective_dpi("generic-digital-pdf-v1"), 180.0);
-        assert_eq!(required_effective_dpi("kdp-paperback-v2"), 300.0);
-        assert_eq!(required_effective_dpi("ingram-print-pdfx1a-v2"), 300.0);
     }
 
     #[test]

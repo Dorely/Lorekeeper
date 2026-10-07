@@ -519,7 +519,7 @@ fn cover_preview_returns_pdf_warnings_without_production_evidence() {
     assert!(output.status.success(), "stderr={}", stderr(&output));
     let response = response(&output);
     assert_eq!(response["evidence"], Value::Null);
-    assert!(has_diagnostic(&response, "PRESS_IMAGE_DPI_LOW"));
+    assert!(!has_diagnostic(&response, "PRESS_IMAGE_DPI_LOW"));
     assert!(has_diagnostic(&response, "PRESS_EAN13_INVALID"));
     assert_eq!(response["artifacts"][0]["kind"], "perfect-bound-cover-pdf");
 }
@@ -558,7 +558,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
             .as_f64()
             .is_some_and(|dpi| dpi > 0.0)
     );
-    assert!(has_diagnostic(&response, "PRESS_IMAGE_DPI_LOW"));
+    assert!(!has_diagnostic(&response, "PRESS_IMAGE_DPI_LOW"));
 
     let page_map = response["pageMap"].as_array().expect("page map");
     for block in 1..=8 {

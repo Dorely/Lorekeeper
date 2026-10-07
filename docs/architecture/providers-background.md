@@ -347,9 +347,9 @@ Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. Explicit requested
 rasters are compared with decoded output dimensions even for free-standing jobs,
 and mismatches remain visible in persisted provenance and assistant results;
-aspect compatibility does not make a raster mismatch exact. For a requested
-minimum DPI, an undersized provider result is retained unattached with
-`MINIMUM_DPI_NOT_MET` and is not a compliant publication candidate.
+aspect compatibility does not make a raster mismatch exact. A provider result
+below a requested minimum DPI completes normally without a warning, because
+publication preparation upscales placed rasters to the edition DPI.
 Free-standing generation
 and unmasked edit callers send a concrete provider-valid raster derived from the
 configured Core Book page by default; layout-bound callers replace it with their
