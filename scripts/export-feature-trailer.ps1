@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$CaptureDirectory = '.artifacts/trailer/v1/raw',
-    [string]$OutputDirectory = '.artifacts/trailer/v1/export'
+    [ValidatePattern('^v[0-9]+$')]
+    [string]$Version = 'v1',
+    [string]$CaptureDirectory = ".artifacts/trailer/$Version/raw",
+    [string]$OutputDirectory = ".artifacts/trailer/$Version/export"
 )
 
 Set-StrictMode -Version Latest
@@ -33,7 +35,7 @@ function Get-TrailerMediaMetadata([string]$Path)
     return ($probeText -join "`n") | ConvertFrom-Json
 }
 
-function Assert-TrailerVideo([string]$Path, [int]$Width, [int]$Height, [long]$MaximumBytes)
+function Assert-TrailerVideo([string]$Path, [int]$Width, [int]$Height, [long]$MaximumBytes, [int]$Seconds)
 {
     $metadata = Get-TrailerMediaMetadata $Path
     $video = @($metadata.streams | Where-Object { $_.codec_type -ceq 'video' })
@@ -44,10 +46,10 @@ function Assert-TrailerVideo([string]$Path, [int]$Width, [int]$Height, [long]$Ma
         $video[0].profile -cne 'High' -or $video[0].pix_fmt -cne 'yuv420p' -or
         $video[0].width -ne $Width -or $video[0].height -ne $Height -or
         $video[0].field_order -cne 'progressive' -or $video[0].r_frame_rate -cne '30/1' -or
-        $video[0].avg_frame_rate -cne '30/1' -or [int]$video[0].nb_frames -ne 1800 -or
+        $video[0].avg_frame_rate -cne '30/1' -or [int]$video[0].nb_frames -ne ($Seconds * 30) -or
         $audio[0].codec_name -cne 'aac' -or $audio[0].profile -cne 'LC' -or
         [int]$audio[0].sample_rate -ne 48000 -or $audio[0].channels -ne 2 -or
-        $duration -lt 60 -or $duration -gt 60.1 -or
+        $duration -lt $Seconds -or $duration -gt ($Seconds + 0.1) -or
         (Get-Item -LiteralPath $Path).Length -gt $MaximumBytes)
     {
         throw "Exported trailer metadata or size does not match its delivery contract: $Path"
@@ -70,7 +72,7 @@ if ($manifest.sourceCommit -cnotmatch '^[0-9a-f]{40}$' -or
 {
     throw 'Footage must identify an accepted commit and completed QA/privacy review.'
 }
-if ([string]::IsNullOrWhiteSpace($manifest.syntheticProject) -or $manifest.qaEvidence -cne 'docs/evidence/v1-qa.md')
+if ([string]::IsNullOrWhiteSpace($manifest.syntheticProject) -or $manifest.qaEvidence -cnotmatch '^docs/evidence/[A-Za-z0-9._-]+\.md$')
 {
     throw 'The synthetic project and committed QA evidence must be identified.'
 }
@@ -104,8 +106,26 @@ if (-not $qaSource.Success -or $qaSource.Groups[1].Value -cne $sourceCommit -or
 {
     throw 'The reviewed QA evidence must name the accepted application source commit and match its manifest SHA-256.'
 }
-$sequence = [ordered]@{ 'intro.mp4'=5; 'outline.mp4'=8; 'writing.mp4'=12; 'sources.mp4'=9; 'design.mp4'=11; 'export.mp4'=10; 'outro.mp4'=5 }
-if (@($manifest.clips).Count -ne $sequence.Count) { throw 'Exactly seven reviewed clips are required.' }
+# v1 predates per-clip lengths in the manifest; later versions list each clip's whole seconds in edit order.
+$sequence = [ordered]@{}
+if ($Version -ceq 'v1')
+{
+    $sequence = [ordered]@{ 'intro.mp4'=5; 'outline.mp4'=8; 'writing.mp4'=12; 'sources.mp4'=9; 'design.mp4'=11; 'export.mp4'=10; 'outro.mp4'=5 }
+}
+else
+{
+    foreach ($clip in @($manifest.clips))
+    {
+        if ($clip.file -cnotmatch '^[a-z0-9-]+\.mp4$' -or $sequence.Contains($clip.file) -or $clip.seconds -isnot [long] -or $clip.seconds -lt 1)
+        {
+            throw "Each clip needs a unique file name and whole seconds: $($clip.file)"
+        }
+        $sequence[$clip.file] = [int]$clip.seconds
+    }
+}
+$durationSeconds = [int](($sequence.Values | Measure-Object -Sum).Sum)
+if ($sequence.Count -lt 2 -or $durationSeconds -gt 90) { throw 'A trailer needs at least two clips and at most 90 seconds.' }
+if (@($manifest.clips).Count -ne $sequence.Count) { throw "Exactly $($sequence.Count) reviewed clips are required." }
 foreach ($entry in $sequence.GetEnumerator())
 {
     $records = @($manifest.clips | Where-Object { $_.file -ceq $entry.Key })
@@ -129,18 +149,22 @@ foreach ($entry in $sequence.GetEnumerator())
 }
 
 New-Item -ItemType Directory -Path $exportRoot -Force | Out-Null
-$captionSource = Join-Path $repositoryRoot 'media/trailer/lorekeeper-v1.en.vtt'
+$prefix = "lorekeeper-$Version"
+$captionName = "$prefix.en.vtt"
+$captionSource = Join-Path $repositoryRoot "media/trailer/$captionName"
 if ((Get-Item -LiteralPath $captionSource).Length -ge 50000000 -or
     -not ([System.IO.File]::ReadAllText($captionSource)).StartsWith('WEBVTT', [StringComparison]::Ordinal))
 {
     throw 'The caption source must be a WebVTT file below 50 MB.'
 }
-$title = [System.IO.File]::ReadAllText((Join-Path $repositoryRoot 'media/trailer/title.txt')).Trim()
+$titlePath = Join-Path $repositoryRoot "media/trailer/$prefix.title.txt"
+if (-not (Test-Path -LiteralPath $titlePath -PathType Leaf)) { $titlePath = Join-Path $repositoryRoot 'media/trailer/title.txt' }
+$title = [System.IO.File]::ReadAllText($titlePath).Trim()
 if ([string]::IsNullOrWhiteSpace($title) -or $title.Length -gt 255 -or $title -match '[\r\n]')
 {
     throw 'The Store trailer needs a single-line title of at most 255 characters.'
 }
-Copy-Item -LiteralPath $captionSource -Destination (Join-Path $exportRoot 'lorekeeper-v1.en.vtt') -Force
+Copy-Item -LiteralPath $captionSource -Destination (Join-Path $exportRoot $captionName) -Force
 $concatLines = [System.Collections.Generic.List[string]]::new()
 $index = 0
 foreach ($entry in $sequence.GetEnumerator())
@@ -159,27 +183,29 @@ $concatPath = Join-Path $exportRoot 'segments.txt'
 $rootFrequency = 'if(lt(mod(t,20),5),220,if(lt(mod(t,20),10),174.614,if(lt(mod(t,20),15),130.813,195.998)))'
 $thirdRatio = 'if(lt(mod(t,20),5),1.189207,1.259921)'
 $score = "0.025*(sin(2*PI*($rootFrequency)*t)+0.65*sin(2*PI*($rootFrequency)*($thirdRatio)*t)+0.45*sin(2*PI*($rootFrequency)*1.498307*t))*(0.75+0.25*sin(2*PI*0.1*t))*min(1,min(mod(t,5)/0.05,(5-mod(t,5))/0.05))"
-$audioSource = "aevalsrc=exprs='$score|$score':s=48000:d=60"
-$masterPath = Join-Path $exportRoot 'lorekeeper-v1-store.mp4'
+$audioSource = "aevalsrc=exprs='$score|$score':s=48000:d=$durationSeconds"
+$masterPath = Join-Path $exportRoot "$prefix-store.mp4"
 Push-Location $exportRoot
 try
 {
     Invoke-TrailerCommand ffmpeg @('-hide_banner','-loglevel','warning','-y','-f','concat','-safe','1','-i','segments.txt','-f','lavfi','-i',$audioSource,
-        '-map','0:v:0','-map','1:a:0','-t','60','-vf',"setfield=prog,fps=30,subtitles=lorekeeper-v1.en.vtt:force_style='Fontname=Segoe UI,Fontsize=25,Outline=2,Shadow=0,Alignment=2,MarginV=40'",
-        '-af','afade=t=in:d=2,afade=t=out:st=57:d=3','-c:v','libx264','-preset','veryfast','-profile:v','high','-pix_fmt','yuv420p','-tag:v','avc1',
+        '-map','0:v:0','-map','1:a:0','-t',[string]$durationSeconds,'-vf',"setfield=prog,fps=30,subtitles=$($captionName):force_style='Fontname=Segoe UI,Fontsize=25,Outline=2,Shadow=0,Alignment=2,MarginV=40'",
+        '-af',"afade=t=in:d=2,afade=t=out:st=$($durationSeconds - 3):d=3",'-c:v','libx264','-preset','veryfast','-profile:v','high','-pix_fmt','yuv420p','-tag:v','avc1',
         '-b:v','50M','-maxrate','50M','-bufsize','100M','-g','15','-keyint_min','15','-sc_threshold','0','-bf','2','-x264-params','open-gop=0:cabac=1:b-adapt=0:nal-hrd=vbr',
         '-c:a','aac','-profile:a','aac_low','-ar','48000','-ac','2','-b:a','384k','-movflags','+faststart','-use_editlist','0',$masterPath)
-    $githubPath = Join-Path $exportRoot 'lorekeeper-v1-github.mp4'
-    # Without edit lists the master's video starts after its B-frame delay, so a 60-second cut drops its last
-    # frames. Take all 1800 frames and restamp both streams from zero to keep a constant 30/1 rate.
-    $videoArguments = @('-hide_banner','-loglevel','warning','-y','-i',$masterPath,'-t','60.1','-frames:v','1800','-vf','setpts=N/30/TB,scale=1280:720','-af','asetpts=N/SR/TB','-c:v','libx264','-preset','slow',
-        '-profile:v','high','-pix_fmt','yuv420p','-b:v','1000k','-passlogfile','github-pass')
+    $githubPath = Join-Path $exportRoot "$prefix-github.mp4"
+    # Without edit lists the master's video starts after its B-frame delay, so a fixed-length cut drops its last
+    # frames. Take every frame and restamp both streams from zero to keep a constant 30/1 rate.
+    # The GitHub copy must stay under 9.5 MB, so a longer trailer gets a lower video bitrate.
+    $githubVideoKbps = [Math]::Min(1000, [int][Math]::Floor(9000000 * 8 / 1000 / $durationSeconds) - 160)
+    $videoArguments = @('-hide_banner','-loglevel','warning','-y','-i',$masterPath,'-t',[string]($durationSeconds + 0.1),'-frames:v',[string]($durationSeconds * 30),'-vf','setpts=N/30/TB,scale=1280:720','-af','asetpts=N/SR/TB','-c:v','libx264','-preset','slow',
+        '-profile:v','high','-pix_fmt','yuv420p','-b:v',"$($githubVideoKbps)k",'-passlogfile','github-pass')
     $nullTarget = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { 'NUL' } else { '/dev/null' }
     Invoke-TrailerCommand ffmpeg ($videoArguments + @('-pass','1','-an','-f','null',$nullTarget))
     Invoke-TrailerCommand ffmpeg ($videoArguments + @('-pass','2','-c:a','aac','-profile:a','aac_low','-b:a','128k','-ar','48000','-ac','2','-movflags','+faststart','-use_editlist','0',$githubPath))
-    Assert-TrailerVideo -Path $masterPath -Width 1920 -Height 1080 -MaximumBytes 2000000000
-    Assert-TrailerVideo -Path $githubPath -Width 1280 -Height 720 -MaximumBytes 9500000
-    $posterPath = Join-Path $exportRoot 'lorekeeper-v1-poster.png'
+    Assert-TrailerVideo -Path $masterPath -Width 1920 -Height 1080 -MaximumBytes 2000000000 -Seconds $durationSeconds
+    Assert-TrailerVideo -Path $githubPath -Width 1280 -Height 720 -MaximumBytes 9500000 -Seconds $durationSeconds
+    $posterPath = Join-Path $exportRoot "$prefix-poster.png"
     Invoke-TrailerCommand ffmpeg @('-hide_banner','-loglevel','warning','-y','-ss','2','-i',$masterPath,'-frames:v','1','-update','1',$posterPath)
     $poster = Get-TrailerMediaMetadata $posterPath
     if (@($poster.streams).Count -ne 1 -or $poster.streams[0].codec_name -cne 'png' -or
@@ -187,18 +213,18 @@ try
     {
         throw 'The Store thumbnail must be a 1920x1080 PNG.'
     }
-    $outputs = @('lorekeeper-v1-store.mp4','lorekeeper-v1-github.mp4','lorekeeper-v1-poster.png','lorekeeper-v1.en.vtt') | ForEach-Object {
+    $outputs = @("$prefix-store.mp4","$prefix-github.mp4","$prefix-poster.png",$captionName) | ForEach-Object {
         $outputPath = Join-Path $exportRoot $_
         [ordered]@{ file=$_; bytes=(Get-Item -LiteralPath $outputPath).Length; sha256=(Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant() }
     }
     $provenance = [ordered]@{
         sourceCommit=$sourceCommit; exportCommit=(& git -C $repositoryRoot rev-parse HEAD).Trim(); syntheticProject=$manifest.syntheticProject
         qaEvidence=$manifest.qaEvidence; qaEvidenceSha256=$manifest.qaEvidenceSha256; title=$title
-        captures=$manifest.clips; durationSeconds=60; audio='Original mathematical sine score; A minor/F major/C major/G major; no samples'
+        captures=$manifest.clips; durationSeconds=$durationSeconds; audio='Original mathematical sine score; A minor/F major/C major/G major; no samples'
         captionsSha256=(Get-FileHash -LiteralPath $captionSource -Algorithm SHA256).Hash.ToLowerInvariant()
         ffmpeg=(& ffmpeg -version | Select-Object -First 1); recipe='scripts/export-feature-trailer.ps1'; outputs=$outputs
     }
-    [System.IO.File]::WriteAllText((Join-Path $exportRoot 'lorekeeper-v1-provenance.json'), ($provenance | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $exportRoot "$prefix-provenance.json"), ($provenance | ConvertTo-Json -Depth 8) + "`n", [System.Text.UTF8Encoding]::new($false))
 }
 finally { Pop-Location }
 Write-Host "Exported trailer materials to $exportRoot. Review both videos and the poster before copying compact deliverables into Git."
