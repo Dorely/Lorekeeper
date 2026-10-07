@@ -890,6 +890,7 @@ public sealed class DesignedPageService(
             .SingleAsync(cancellationToken), selectionJson: "", cancellationToken);
         var variant = await db.DesignedPageVariants.AsTracking()
             .Include(item => item.Content).ThenInclude(item => item.Variants)
+            .Include(item => item.Content).ThenInclude(item => item.Page)
             .SingleOrDefaultAsync(item => item.Id == variantId
                 && item.Content.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
@@ -1476,7 +1477,9 @@ public sealed class DesignedPageService(
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
         var variant = await db.DesignedPageVariants.AsTracking().Include(item => item.Content)
-            .ThenInclude(item => item.Variants).SingleAsync(
+            .ThenInclude(item => item.Variants)
+            .Include(item => item.Content).ThenInclude(item => item.Page)
+            .SingleAsync(
             item => item.Id == stage.TargetId
                 && item.Content.ProjectId == projectId,
             cancellationToken);
@@ -1611,6 +1614,7 @@ public sealed class DesignedPageService(
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
         var composition = await db.DesignedPageContents.AsTracking()
             .Include(item => item.Variants)
+            .Include(item => item.Page)
             .SingleAsync(item => item.Id == stage.TargetId && item.ProjectId == projectId
                , cancellationToken);
         var beforeHistory = AuthoringSnapshotCodec.CaptureDesignedPage(composition);
@@ -1760,6 +1764,7 @@ public sealed class DesignedPageService(
             ?? throw new InvalidDataException("The staged composition workspace payload is empty.");
         var variant = await db.DesignedPageVariants.AsTracking().Include(item => item.Content)
             .ThenInclude(item => item.Variants)
+            .Include(item => item.Content).ThenInclude(item => item.Page)
             .SingleOrDefaultAsync(item => item.Id == payload.VariantId && item.ContentId == stage.TargetId
                 && item.Content.ProjectId == projectId
                , cancellationToken)

@@ -321,6 +321,82 @@ public sealed class LorekeeperPressMigrationTests
     }
 
     [Fact]
+    public async Task AssistantDesignedPageStagesApplyToANewlyLoadedPage()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "designed-page-stages.db");
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+                .Options;
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
+            Guid projectId;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var project = new Project
+                {
+                    Name = "Designed Page stages",
+                    Slug = $"designed-page-stages-{Guid.NewGuid():N}",
+                };
+                db.AddRange(project, new ProjectPageSetup { ProjectId = project.Id, Project = project });
+                await db.SaveChangesAsync();
+                projectId = project.Id;
+            }
+
+            var history = new AuthoringDeltaHistoryRuntime();
+            var service = new DesignedPageService(
+                database,
+                new TestManuscriptService(database),
+                null!,
+                new PublicationEffectiveConfigurationResolver(database),
+                history,
+                new AuthoringMutationContextAccessor(),
+                new AuthoringGenerationService(database, history),
+                null!,
+                new TestContestMutationGuard(false));
+            var created = await service.CreateAsync(projectId, EditorContentTarget.Core, "Verse spread");
+            var conversationId = Guid.NewGuid();
+
+            // Each apply loads the page in a fresh context, so its history snapshot must not
+            // depend on navigation state left behind by the staging call.
+            var semanticStage = await service.StageSemanticOperationsAsync(
+                EditorContentTarget.Core, projectId, conversationId, created.Content.Id, created.Content.Revision,
+                [new ManuscriptOperationInput("InsertBlock", BlockId: "verse", Index: 0, BlockType: "Paragraph", Text: "First verse.", StyleRole: "body")]);
+            var semantic = await service.ApplySemanticStageAsync(
+                EditorContentTarget.Core, projectId, conversationId, semanticStage.Id, created.Content.Revision);
+            Assert.Contains("verse", semantic.ChangedBlockIds);
+
+            var variant = await service.ReadVariantAsync(projectId, created.Content.ActiveVariantId!.Value);
+            var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)!;
+            var workspaceStage = await service.StageWorkspaceAsync(
+                EditorContentTarget.Core, projectId, conversationId, created.Content.Id, semantic.Content.Revision,
+                variant.Id, variant.Revision,
+                [new ManuscriptOperationInput("InsertBlock", BlockId: "second-verse", Index: 1, BlockType: "Paragraph", Text: "Second verse.", StyleRole: "body")],
+                scene);
+            var workspace = await service.ApplyWorkspaceStageAsync(
+                EditorContentTarget.Core, projectId, conversationId, workspaceStage.Id, semantic.Content.Revision);
+            Assert.Contains("second-verse", workspace.ChangedBlockIds);
+            Assert.Equal(
+                ["verse", "second-verse"],
+                ManuscriptCodec.Deserialize(workspace.Content.SemanticManuscriptJson, workspace.Content.Id, workspace.Content.Revision)
+                    .Content.Select(block => block.Id));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DesignedPagePlacementIdentityIsScopedToItsTargetAndContainer()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
