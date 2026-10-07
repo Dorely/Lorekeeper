@@ -5125,7 +5125,7 @@
     {
       "kind": "npm-package",
       "name": "prosemirror-model",
-      "version": "1.25.11",
+      "version": "1.25.12",
       "dependencyCategory": "npm",
       "status": "satisfied",
       "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
@@ -5203,7 +5203,7 @@
     {
       "kind": "npm-package",
       "name": "prosemirror-view",
-      "version": "1.42.2",
+      "version": "1.42.6",
       "dependencyCategory": "npm",
       "status": "satisfied",
       "licenseEvidence": "MIT license in installed package metadata; runtime notice is shipped in tools/semantic-editor/THIRD_PARTY_NOTICES.md.",
@@ -7560,7 +7560,7 @@
       "version": "current local Release stage",
       "dependencyCategory": "assets",
       "status": "unresolved-provenance",
-      "licenseEvidence": "Deterministic aggregate SHA-256 9d7f0d8ae4d0c05d0af498ff7c94ca6abbb63301f39dbc6200a38cb85dd0189f over 1037 staged files; retained evidence files: resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/press-runtime/sbom.json, resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt, resources/bin/THIRD-PARTY-NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.br, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.gz.",
+      "licenseEvidence": "Deterministic aggregate SHA-256 6f9af0be37397a3e971c0b603f6806b8c53c4958f4b797b2b88d357ec6bf4832 over 1037 staged files; retained evidence files: resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.AspNetCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.linux-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.osx-arm64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.0/THIRD-PARTY-NOTICES.TXT, resources/bin/licenses/runtime-notices/Microsoft.NETCore.App.Runtime.win-x64/10.0.12/THIRD-PARTY-NOTICES.TXT, resources/bin/press-runtime/sbom.json, resources/bin/press-runtime/THIRD-PARTY-NOTICES.txt, resources/bin/THIRD-PARTY-NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.br, resources/bin/wwwroot/js/semantic-editor.NOTICES.txt.gz.",
       "attributionAction": "Compare the final Windows closure with the approved source license and third-party notice set before publishing.",
       "channels": [
         "free-windows",
