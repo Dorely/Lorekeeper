@@ -80,7 +80,11 @@ minimum-page placeholder geometry during production validation.
 
 `PublicationPressRuntime` owns packaged executable discovery, exact manifest
 validation, platform/architecture checks, file hashes, environment isolation,
-dynamic `describe`, and renderer readiness. `PublicationRenderService` owns
+dynamic `describe`, and renderer readiness. Readiness and `describe` reads sit
+on interactive paths such as every print-cover save, so they reuse the last
+verified manifest while no runtime file has changed name, size, timestamp, or
+attributes; any change or unreadable folder falls back to full hashing, and
+starting a render always re-verifies the full inventory. `PublicationRenderService` owns
 render queue state, request assembly, image/font staging, native progress,
 immutable artifact bytes/hashes, renderer/profile provenance, and block/page
 maps. `PublicationRenderWorker` owns recovery/cancellation and

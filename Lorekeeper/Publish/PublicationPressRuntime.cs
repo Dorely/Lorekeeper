@@ -49,12 +49,14 @@ public sealed class PublicationPressRuntime(
     IPublicationPressInstallationRoot installationRoot) : IPublicationPressRuntime
 {
     private const string ManifestFileName = "lorekeeper-press-runtime.json";
+    private readonly object _verifiedGate = new();
+    private (string Stamp, ResolvedRuntime Runtime)? _verified;
 
     public PublicationPressRuntimeReadiness GetReadiness()
     {
         try
         {
-            var runtime = Resolve();
+            var runtime = ResolveVerified();
             return new(
                 true,
                 $"Lorekeeper Press {runtime.Description.RendererVersion} is ready for internally validated PDF generation.");
@@ -73,10 +75,11 @@ public sealed class PublicationPressRuntime(
         }
     }
 
-    public PublicationPressDescription GetDescription() => Resolve().Description;
+    public PublicationPressDescription GetDescription() => ResolveVerified().Description;
 
     public ProcessStartInfo CreateStartInfo(Guid jobId, string jobRoot)
     {
+        // Executing the renderer always re-hashes the full inventory.
         var runtime = Resolve();
         var boundedJobRoot = Path.GetFullPath(jobRoot);
         var start = new ProcessStartInfo
@@ -96,6 +99,68 @@ public sealed class PublicationPressRuntime(
         start.ArgumentList.Add(boundedJobRoot);
         start.Environment.Clear();
         return start;
+    }
+
+    // Readiness and capability reads happen on interactive paths (every print-cover save), and hashing the
+    // whole runtime there blocks the editor. A verified manifest is reused while no runtime file has changed
+    // name, size, timestamp or attributes; any change, or an unreadable folder, falls back to full verification.
+    private ResolvedRuntime ResolveVerified()
+    {
+        var stamp = RuntimeStamp();
+        lock (_verifiedGate)
+        {
+            if (stamp is not null
+                && _verified is { } verified
+                && string.Equals(verified.Stamp, stamp, StringComparison.Ordinal))
+            {
+                return verified.Runtime;
+            }
+        }
+
+        var runtime = Resolve();
+        if (stamp is not null && string.Equals(stamp, RuntimeStamp(), StringComparison.Ordinal))
+        {
+            lock (_verifiedGate)
+                _verified = (stamp, runtime);
+        }
+
+        return runtime;
+    }
+
+    private string? RuntimeStamp()
+    {
+        try
+        {
+            var runtimeRoot = Path.GetFullPath(Path.Combine(
+                Path.GetFullPath(installationRoot.RootPath),
+                options.Value.RuntimeDirectory.Trim()));
+            var root = new DirectoryInfo(runtimeRoot);
+            if (!root.Exists)
+                return null;
+
+            var stamp = new StringBuilder(runtimeRoot).Append('|').Append((int)root.Attributes);
+            foreach (var entry in root
+                .EnumerateFileSystemInfos("*", SearchOption.AllDirectories)
+                .OrderBy(item => item.FullName, StringComparer.Ordinal))
+            {
+                stamp.Append('\n')
+                    .Append(entry.FullName).Append('|')
+                    .Append((int)entry.Attributes).Append('|')
+                    .Append(entry.LastWriteTimeUtc.Ticks).Append('|')
+                    .Append(entry is FileInfo file ? file.Length : -1);
+            }
+
+            return stamp.ToString();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException
+                or System.Security.SecurityException)
+        {
+            return null;
+        }
     }
 
     private ResolvedRuntime Resolve()
