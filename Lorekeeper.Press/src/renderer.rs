@@ -4094,7 +4094,10 @@ fn designed_page(
                     red * 0.2126 + green * 0.7152 + blue * 0.0722 >= 0.6
                 });
                 let text_height = wrapped.len() as f32 * line_height;
-                let text_overflows_vertically = text_height > height * scene_height + 0.01;
+                // The leading after the last line is not content: a frame fits its text when the
+                // last line's em box fits, which is what the author sees on the canvas.
+                let required_height = text_height - (line_height - size).max(0.0);
+                let text_overflows_vertically = required_height > height * scene_height + 0.01;
                 let mut overflow_reported = false;
                 if text_overflows_vertically {
                     let message =
@@ -4176,8 +4179,8 @@ fn designed_page(
                     0.0
                 } else {
                     match vertical_alignment.as_str() {
-                        "center" => (height * scene_height - text_height) / 2.0,
-                        "bottom" => height * scene_height - text_height,
+                        "center" => ((height * scene_height - text_height) / 2.0).max(0.0),
+                        "bottom" => (height * scene_height - text_height).max(0.0),
                         _ => 0.0,
                     }
                 };
@@ -4191,9 +4194,9 @@ fn designed_page(
                         - vertical_offset
                         - size
                         - line_index as f32 * line_height;
-                    if tolerance.clip_composition_text_overflow
-                        && line_y - size * 0.3 < frame_bottom - 0.01
-                    {
+                    // Hide exactly the lines the fit rule above rejects: those whose em box ends
+                    // below the frame.
+                    if tolerance.clip_composition_text_overflow && line_y < frame_bottom - 0.01 {
                         continue;
                     }
                     let mut measured_width = measured_run_width(&runs, size)

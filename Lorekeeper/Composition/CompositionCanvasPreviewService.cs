@@ -487,12 +487,14 @@ public sealed partial class CompositionCanvasPreviewService(
         var lines = LayoutLines(item, inlines, typefaces, frame.Width);
         var lineHeight = Math.Max(1, item.FontSizePoints * item.LineHeight);
         var totalHeight = lines.Count * lineHeight;
-        if (totalHeight > frame.Height + .01)
+        // Matches Press: the leading after the last line is not content, so only its em box must fit.
+        var requiredHeight = totalHeight - Math.Max(0, lineHeight - item.FontSizePoints);
+        if (requiredHeight > frame.Height + .01)
             diagnostics.Add(new("warning", "TEXT_OVERFLOW", "Text exceeds its frame and is clipped in the canvas preview.", item.Id));
         var top = item.VerticalAlignment switch
         {
-            CompositionVerticalAlignment.Center => frame.Top + (frame.Height - totalHeight) / 2,
-            CompositionVerticalAlignment.Bottom => frame.Bottom - totalHeight,
+            CompositionVerticalAlignment.Center => frame.Top + Math.Max(0, (frame.Height - totalHeight) / 2),
+            CompositionVerticalAlignment.Bottom => frame.Top + Math.Max(0, frame.Height - totalHeight),
             _ => frame.Top,
         };
         canvas.Save();

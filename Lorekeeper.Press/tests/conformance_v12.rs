@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 15);
-    assert_eq!(value["rendererVersion"], "2.1.13");
+    assert_eq!(value["rendererVersion"], "2.1.14");
     assert_eq!(
         value["profiles"],
         json!([
@@ -536,7 +536,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 15);
-    assert_eq!(response["rendererVersion"], "2.1.13");
+    assert_eq!(response["rendererVersion"], "2.1.14");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -3614,6 +3614,41 @@ fn browser_preview_clips_overflowing_composition_text_without_weakening_render_v
     let rendered = response(&render);
     assert!(has_diagnostic(&rendered, "PRESS_COMPOSITION_TEXT_OVERFLOW"));
     assert_eq!(rendered["diagnostics"][0]["severity"], "error");
+}
+
+#[test]
+fn composition_text_fits_when_the_last_line_em_box_fits_without_its_trailing_leading() {
+    // Three 20 pt lines at 1.5 line height: the em boxes need 2 * 30 + 20 = 80 pt, while the
+    // full line boxes need 90 pt. The trailing leading below the last line is not content.
+    let render_with_frame_height = |height_points: f64| {
+        let mut job = PreparedJob::new("kdp-paperback-v1");
+        let composition =
+            &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0];
+        composition["semanticBlocks"] = json!([]);
+        let text = &mut composition["variants"][0]["scene"]["objects"][1];
+        text["textBinding"] = json!("One\nTwo\nThree");
+        text["contentReferences"] = json!([]);
+        text["fontSizePoints"] = json!(20);
+        text["lineHeight"] = json!(1.5);
+        text["bounds"]["heightPercent"] = json!(height_points / 648.0 * 100.0);
+        job.write_request();
+        let output = job.render();
+        (output.status.success(), response(&output))
+    };
+
+    let (fits, rendered) = render_with_frame_height(85.0);
+    assert!(fits, "{rendered}");
+    assert!(!has_diagnostic(
+        &rendered,
+        "PRESS_COMPOSITION_TEXT_OVERFLOW"
+    ));
+
+    let (fits, rejected) = render_with_frame_height(75.0);
+    assert!(
+        !fits,
+        "a frame shorter than the last em box must still overflow"
+    );
+    assert!(has_diagnostic(&rejected, "PRESS_COMPOSITION_TEXT_OVERFLOW"));
 }
 
 #[test]

@@ -350,7 +350,10 @@ coverless final interior page count required before print-cover authoring; that
 response omits the page-paint array and is not an artifact. The browser trace
 retains paint order and typographic runs but omits unused glyph arrays. Authoring traces may render unresolved
 image accessibility as warnings and clip text at an authored frame; Core
-reading-copy and publication renders retain strict overflow validation.
+reading-copy and publication renders retain strict overflow validation. A
+composition text frame overflows when its line boxes, less the leading after the
+last line, exceed the frame height; preview clipping hides exactly those lines,
+and the application's canvas preview applies the same rule.
 Publication renders reject meaningful images until alternative text or an
 explicit decorative decision is present. Core reading copies may retain an
 unresolved image as a warning-bearing private artifact so tagged reading order
