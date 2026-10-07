@@ -1,33 +1,64 @@
 # Lorekeeper
 
-Lorekeeper is a local, desktop-first AI-assisted bookmaking workbench for
-long-form story planning, drafting, research, ingest, and publishing.
+**A local-first desktop studio for writing books, from first premise to
+print-ready files.**
+
+Plan your story, research your world, write and revise chapters, design pages
+and covers, and prepare EPUB, PDF ebook, and print-ready paperback and
+hardcover files, all in one project on your own computer. AI assistants are
+optional and use your own provider account or local model server.
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-dorely-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dorely)
 
-Lorekeeper is free to install and source available under the unchanged
-[PolyForm Noncommercial or Internal Use 1.0.0 alternatives](LICENSE).
-You can use and modify it for personal work or internal business, including
-commercial bookmaking, and sell your own books. Noncommercial software forks
-and redistribution are permitted; selling or commercially distributing
-Lorekeeper or a derivative, or offering it as a paid hosted app to external
-customers, is outside these grants. Third-party components retain their own
-licenses. Your creative work is not licensed by Lorekeeper merely because you
-create or process it here.
+[![Lorekeeper trailer: from premise to published book](media/trailer/lorekeeper-v2-poster.png)](media/trailer/lorekeeper-v2-github.mp4)
 
-AI, search, embedding, and image services use your own accounts and may charge
-separately. See [privacy](PRIVACY.md), [support](SUPPORT.md),
-[security reporting](SECURITY.md), and [contributing](CONTRIBUTING.md).
-Use GitHub issues for support; the package maintainer's GitHub noreply address
-is not monitored for support.
+<p align="center"><a href="media/trailer/lorekeeper-v2-github.mp4"><b>&#9654; Watch the 90-second trailer</b></a></p>
+
+The [trailer](media/trailer/README.md) is one live end-to-end run in a
+synthetic project, from premise to prepared book files, with captions,
+provenance, and a reproducible export recipe.
+
+## Highlights
+
+- **Plan:** outline, Book Brief, a story graph of characters, places, and
+  events, project facts, and read-only links to earlier books in a series.
+- **Research:** import PDF, EPUB, Word, image, and saved-webpage sources with
+  stable citations, and build a living World Brief with web research.
+- **Write:** a structured chapter editor with Book Text Styles, Figures,
+  tables, footnotes, citations, DOCX import, and a true paginated Read preview.
+- **Assistants:** six AI assistants (Outline, Editor, Voice, World, Images, and
+  Publish) work directly in your project. Turn on Review Edits to approve or
+  undo each change they make.
+- **Images and design:** generate and edit artwork, keep canonical character
+  and location references, and compose Designed Pages and covers on a canvas.
+- **Publish:** one Core Book plus paperback, hardcover, EPUB, and PDF ebook
+  releases, with print profiles for Amazon KDP, IngramSpark, Barnes & Noble
+  Press, and Lulu, or your own printer's measurements. Lorekeeper's built-in
+  renderer produces and validates the PDFs.
+- **History:** local checkpoints with readable comparisons and restore, plus
+  optional sync to your own GitHub repository.
+- **Your data stays local:** projects live in local SQLite, move between
+  machines as `.lorekeeper` archives, and need no Lorekeeper account.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Outline assistant and Book Brief](media/screenshots/01-plan.jpg) | ![World research with cited sources](media/screenshots/02-research.jpg) |
+| Plan with an outline assistant and a living Book Brief. | Research your world with cited sources. |
+| ![Chapter editor with Editor Chat](media/screenshots/03-write.jpg) | ![Story graph](media/screenshots/04-story-graph.jpg) |
+| Write and revise with an assistant that works in your manuscript. | See characters, places, and chapters in a story graph. |
+| ![Cover design canvas](media/screenshots/05-cover-design.jpg) | ![Print-ready full-wrap cover PDF](media/screenshots/06-print-cover-pdf.jpg) |
+| Design covers on a canvas with your own art and type. | Prepare print-ready full-wrap covers. |
+| ![Typeset print interior](media/screenshots/07-print-interior-pdf.jpg) | ![EPUB preview](media/screenshots/08-epub-preview.jpg) |
+| Preview the typeset print interior in facing pages. | Preview the EPUB before you publish. |
 
 ## Installation
 
-Application downloads and future release notes belong to
+Application downloads and release notes belong to
 [Dorely/Lorekeeper releases](https://github.com/Dorely/Lorekeeper/releases).
-The v1 release is being prepared; publication, public repository visibility,
-and a Microsoft Store listing have not been performed by this preparation.
-Existing published packages remain available from the
+The v1 release and the free Microsoft Store listing are being prepared; until
+they are published, existing packages remain available from the
 [historical download repository](https://github.com/Dorely/Lorekeeper-Releases/releases).
 
 - **Windows x64:** per-user installer or portable executable; no .NET or Node.js
@@ -44,26 +75,49 @@ Existing published packages remain available from the
   and may require **Open Anyway** in System Settings > Privacy & Security.
   Developer ID notarization and Mac App Store distribution are not established.
 
-See [VISION.md](VISION.md) for the product direction and
-[docs/architecture.md](docs/architecture.md) for the compact technical map and
-task-routed architecture chapters covering current boundaries, ownership, and
-validation guidance.
+AI, search, embedding, and image services use your own accounts and may charge
+separately. See [privacy](PRIVACY.md), [support](SUPPORT.md), and
+[security reporting](SECURITY.md). Use GitHub issues for support; the package
+maintainer's GitHub noreply address is not monitored for support.
 
-## Current Capabilities
+## Feature reference
 
-- Print Designed Pages, selected cover surfaces, images, and individual or ranged
-  pages from PDF previews. Lorekeeper previews the complete artwork on Letter/A4
-  paper by default, oriented to match the source and fitted without cropping.
-  Paper size, margins, orientation, fitting, and PDF page selection can be changed
-  before opening the system printer dialog for printer, copies, and duplex
-  settings. Spreads and full wraps fit on one sheet. Printing is raster-based;
-  download the original publication PDF to retain its text and vectors.
+Expand an area for the exact current behavior. See [VISION.md](VISION.md) for
+the product direction and [docs/architecture.md](docs/architecture.md) for the
+technical map.
+
+<details>
+<summary><b>Planning and story context</b></summary>
+
 - Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
   and chapter workspaces.
 - Projects can directly reference other projects for read-only continuity evidence,
   such as a sequel reading its predecessor. References are one-hop and live: the
   active project's canon and user direction win conflicts, while referenced projects
   remain intact and independently editable.
+- Outline treats chapters as format-neutral containers and derives concise,
+  non-prescriptive genre-format guidance from the Book Brief. Editor owns
+  chapter Figure and Designed Page work; Publish owns publication sections and
+  covers. Images is a concept-art workspace for style discovery, free-standing
+  library generation, user-approved Visual Direction, and canonical character,
+  location, prop, creature, and custom-entity references. All assistants retain
+  compact grounded reads, while mutation tools stay within their owning surface.
+- Outline automatically receives the complete current outline, chapter-level
+  entity associations, category inventories, and a compact ingested-source
+  inventory. The Book Brief lets the author select canonical sources; other
+  sources remain searchable evidence. Chapter `RelevantTo` links are preferred
+  over beat-only links because they feed Editor's automatic entity context.
+  Automatic entity summaries omit graph relationships to conserve context;
+  assistants retrieve complete paginated relationship data through direct
+  entity/link reads when needed.
+  Reworked outline fields are written as standalone current canon without
+  language that compares them with an earlier draft.
+
+</details>
+
+<details>
+<summary><b>Assistants and AI providers</b></summary>
+
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, project images, and publishing, including streaming tools and expandable model-reasoning transcripts,
   direct owning-service mutations, Git-backed Review Edits, visual context,
@@ -79,19 +133,26 @@ validation guidance.
   the surface's initial greeting, and retains the exact conversation choice,
   including an unavailable provider ID. These chat transcripts and model choices
   remain local rather than entering project import/export.
-- Editor chapter selection loads the next manuscript in place, updates the address
-  bar without remounting or flashing the project-level Editor Chat, and refreshes
-  the chat token estimate for the newly assembled chapter context.
 - Each chapter's Assistant Memory can be reset from its panel header, clearing
   manual additions and exclusions so the current default context is rebuilt,
   including default-on Writing Samples.
-- **Voice** manages writing samples and free-form character dialogue/POV profiles
-  through manual editing and an assistant with revision-checked editing tools.
 - Long-running interactive chat turns protect the active model context at 90% of its
   input limit by tombstoning completed tool results oldest-first while preserving the
   full audit transcript and call metadata. The live token counter reflects the
   tombstone; if all eligible results are exhausted, the turn fails closed with reset
   or larger-context-model guidance.
+- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper never fetches an account model list dynamically. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
+
+</details>
+
+<details>
+<summary><b>Writing and editing</b></summary>
+
+- Editor chapter selection loads the next manuscript in place, updates the address
+  bar without remounting or flashing the project-level Editor Chat, and refreshes
+  the chat token estimate for the newly assembled chapter context.
+- **Voice** manages writing samples and free-form character dialogue/POV profiles
+  through manual editing and an assistant with revision-checked editing tools.
 - Versioned structured chapter manuscripts with stable block anchors,
   revision-aware manual and assistant operations, plain-text reading projections,
   and semantic Markdown/EPUB publication projections. Editor Chat validates and
@@ -122,70 +183,6 @@ validation guidance.
   project exports. Review Edits is Git-backed: live changes remain local and
   dirty until approved, while the latest approved state is Git HEAD; the
   workflow preference itself is not part of snapshots.
-- Outline treats chapters as format-neutral containers and derives concise,
-  non-prescriptive genre-format guidance from the Book Brief. Editor owns
-  chapter Figure and Designed Page work; Publish owns publication sections and
-  covers. Images is a concept-art workspace for style discovery, free-standing
-  library generation, user-approved Visual Direction, and canonical character,
-  location, prop, creature, and custom-entity references. All assistants retain
-  compact grounded reads, while mutation tools stay within their owning surface.
-- Outline automatically receives the complete current outline, chapter-level
-  entity associations, category inventories, and a compact ingested-source
-  inventory. The Book Brief lets the author select canonical sources; other
-  sources remain searchable evidence. Chapter `RelevantTo` links are preferred
-  over beat-only links because they feed Editor's automatic entity context.
-  Automatic entity summaries omit graph relationships to conserve context;
-  assistants retrieve complete paginated relationship data through direct
-  entity/link reads when needed.
-  Reworked outline fields are written as standalone current canon without
-  language that compares them with an earlier draft.
-- A project Sources workspace for PDF, EPUB, DOCX, text/Markdown, image, and
-  saved-webpage material. It retains immutable originals when available,
-  preserves versioned extraction and stable evidence, supports contents and
-  lexical navigation, bounded PDF-page viewing, original download, and explicit
-  re-extraction without silently moving citations. File ingest accepts up to 50
-  files together and keeps per-file progress visible. Choose **Index only** to
-  retain locally readable text and queue lexical/vector indexing without entity
-  or relationship extraction; vector indexing uses the configured embedding
-  provider. Missing embeddings leave a resumable job, without requiring a chat
-  model. Index-only mode hides entity-extraction options but retains model
-  selection and vision settings for PDFs and images that need image reading.
-  PDFs read all pages by default, including when re-extracting a retained source;
-  set the optional page limit only for a partial import.
-  PDF vision is opt-in: leaving it unchecked reads embedded text only, including
-  PDFs with blank or short pages. Pending/failed extractions show their status
-  and diagnostics in Sources; after an interrupted import, restart and choose
-  **Re-extract** to recover embedded text and queue indexing from the retained file.
-  **Convert legacy source** builds a new retained extraction from saved
-  legacy text, preserving source identity and existing evidence. It cannot recover
-  an unavailable original file. Monitor, stop, or resume either operation in
-  **Sources → Manage jobs**.
-- **World** combines world development and research in one conversation, with a
-  free-form **World Brief** editor and a separate Research Activity view. Local
-  world building works without a search provider. OpenAI account models search the
-  web with their built-in search; other models need a SerpApi or Brave provider.
-  The brief becomes persistent project context for all six assistants and revision
-  work, and is preserved in full/non-structural archives and version history.
-  Fiction and nonfiction use the same brief name with content suited to the book.
-- Streamed `.lorekeeper` project archives preserve the complete retained-source
-  closure for full exports and use a separate non-structural dependency policy
-  with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
-  Imports validate the staged file and archive closure before one creative-state
-  transaction, then rebuild derived indexes as retryable post-commit work.
-  The `ProjectArchive` settings bound archive input to 8 GiB and expanded content
-  to 16 GiB by default, retaining separate per-entry and manifest limits.
-  Source extraction/evidence rows and image/font bytes are imported one source
-  or asset at a time, with complete rollback if a later import step fails.
-- Local version history schema v11 captures deterministic checkpoints of the creative
-  project in an app-managed Git repository. History includes canonical project,
-  narrative, graph, source, asset, manuscript, composition, and publication
-  state, including per-source manifests and reusable content-addressed original
-  chunks; it excludes chats, credentials, jobs, search/vector projections,
-  render artifacts, and other operational state. Images and fonts are ordinary
-  Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
-  History reviews retain bounded source summaries and load full selected-source
-  comparisons on demand. Restoration validates and applies sources, images, and
-  font faces individually inside one rollback-safe transaction.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination and
   line breaks while preserving the editor's Book Text Styles, heading levels,
@@ -201,6 +198,30 @@ validation guidance.
 - Switching between Edit, Read, and Review carries the current chapter position;
   Edit restores a semantic caret or node, while Read and Review restore the
   corresponding manuscript viewport without changing Review expansion state.
+- Semantic tables and document-owned footnotes/endnotes in the canonical editor
+  model, with stable row/cell/note identities, proportional column widths,
+  validated merged cells, reversible note ownership, and matching Read, plain
+  text, Markdown, EPUB, DOCX, and PDF projections. PDF pagination repeats leading
+  table headers, protects row-span groups, reserves footnote space beside references,
+  labels continuation, retains fitting note artwork, and emits
+  explicit diagnostics for content it cannot place safely.
+  Notes have a rich editor for paragraphs, lists, Figures, formatting, and
+  citations, using the manuscript's autosave and Undo/Redo. Open a reference with
+  a double-click or Ctrl+Enter, or use Notes in the toolbar.
+- Import DOCX or paste Word HTML at an explicit manuscript cursor, preserving
+  supported formatting, lists, merged tables, embedded images, links, notes, and
+  available citation metadata. Import reports discarded review/layout information
+  and unresolved citations. One revision-checked, recoverable authoring action
+  inserts the content and its resources; Undo removes the insertion. Import does
+  not split chapters or create a Sources entry. DOCX input is bounded to 32 MiB
+  and the converted recoverable fragment to 24 MiB; use smaller selections for
+  larger documents. Word desktop compatibility remains pending manual acceptance.
+
+</details>
+
+<details>
+<summary><b>Review Edits, contests, and review notes</b></summary>
+
 - Review compares Git HEAD with live SQLite and is the full manuscript review
   surface. Pending Review lists affected `(chapter, Core|edition)` targets plus
   Other changes, supports stable-block grouping, inline text edits, Approve, and
@@ -229,24 +250,46 @@ validation guidance.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.
-- Semantic tables and document-owned footnotes/endnotes in the canonical editor
-  model, with stable row/cell/note identities, proportional column widths,
-  validated merged cells, reversible note ownership, and matching Read, plain
-  text, Markdown, EPUB, DOCX, and PDF projections. PDF pagination repeats leading
-  table headers, protects row-span groups, reserves footnote space beside references,
-  labels continuation, retains fitting note artwork, and emits
-  explicit diagnostics for content it cannot place safely.
-  Notes have a rich editor for paragraphs, lists, Figures, formatting, and
-  citations, using the manuscript's autosave and Undo/Redo. Open a reference with
-  a double-click or Ctrl+Enter, or use Notes in the toolbar.
-- Import DOCX or paste Word HTML at an explicit manuscript cursor, preserving
-  supported formatting, lists, merged tables, embedded images, links, notes, and
-  available citation metadata. Import reports discarded review/layout information
-  and unresolved citations. One revision-checked, recoverable authoring action
-  inserts the content and its resources; Undo removes the insertion. Import does
-  not split chapters or create a Sources entry. DOCX input is bounded to 32 MiB
-  and the converted recoverable fragment to 24 MiB; use smaller selections for
-  larger documents. Word desktop compatibility remains pending manual acceptance.
+
+</details>
+
+<details>
+<summary><b>Sources and world research</b></summary>
+
+- A project Sources workspace for PDF, EPUB, DOCX, text/Markdown, image, and
+  saved-webpage material. It retains immutable originals when available,
+  preserves versioned extraction and stable evidence, supports contents and
+  lexical navigation, bounded PDF-page viewing, original download, and explicit
+  re-extraction without silently moving citations. File ingest accepts up to 50
+  files together and keeps per-file progress visible. Choose **Index only** to
+  retain locally readable text and queue lexical/vector indexing without entity
+  or relationship extraction; vector indexing uses the configured embedding
+  provider. Missing embeddings leave a resumable job, without requiring a chat
+  model. Index-only mode hides entity-extraction options but retains model
+  selection and vision settings for PDFs and images that need image reading.
+  PDFs read all pages by default, including when re-extracting a retained source;
+  set the optional page limit only for a partial import.
+  PDF vision is opt-in: leaving it unchecked reads embedded text only, including
+  PDFs with blank or short pages. Pending/failed extractions show their status
+  and diagnostics in Sources; after an interrupted import, restart and choose
+  **Re-extract** to recover embedded text and queue indexing from the retained file.
+  **Convert legacy source** builds a new retained extraction from saved
+  legacy text, preserving source identity and existing evidence. It cannot recover
+  an unavailable original file. Monitor, stop, or resume either operation in
+  **Sources → Manage jobs**.
+- **World** combines world development and research in one conversation, with a
+  free-form **World Brief** editor and a separate Research Activity view. Local
+  world building works without a search provider. OpenAI account models search the
+  web with their built-in search; other models need a SerpApi or Brave provider.
+  The brief becomes persistent project context for all six assistants and revision
+  work, and is preserved in full/non-structural archives and version history.
+  Fiction and nonfiction use the same brief name with content suited to the book.
+
+</details>
+
+<details>
+<summary><b>Images, Designed Pages, and covers</b></summary>
+
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
   Designed Page/spread composition, project font management, and format-aware
@@ -311,6 +354,47 @@ validation guidance.
   Designed Page reference has been removed or replaced. An original is also
   protected while linked upscales exist; the image service
   enforces the same rule against stale UI state.
+- Core/release-aware structured cover design with shared image/text/shape/layer/style
+  tools, canvas-aligned resize handles for rotated objects, justified text
+  alignment, per-surface center and safe-area guides, one-action full-width fit,
+  full/safe-width fitting, horizontal surface/safe-area centering, quarter-turn
+  rotation and rotation reset, and
+  reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
+  `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
+  print surfaces until explicitly customized. Print releases select exact
+  paper weight/thickness, color process, construction, and cover mode. Paper
+  color and finish stay outside the artifact workflow. The final interior page
+  count resolves profile-specific spine geometry and the required
+  outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
+  ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
+  then inside cover pages with the required no-ink spine region.
+  Attempting to edit a print cover automatically runs the compact interior
+  layout needed to obtain that current page count; the editor opens only after
+  the calculated spine is available, without requiring a full prepared interior
+  PDF first.
+  The cover editor's **Preview** button flushes current edits and opens a quick
+  in-process raster of the selected cover surface using the same composition
+  preview path as Designed Pages. It does not paginate the manuscript, invoke
+  Press, write a PDF, or create a durable render job, artifact, package, image
+  replacement, or database row.
+  Images and shapes may extend through cover safe-area guides; only text outside
+  the safe area blocks production, while physical bounds, barcode/no-ink, and
+  accessibility checks remain enforced.
+  Lulu cover profiles use the provider template's 0.5-inch text safety inset
+  and lower-right 3.622-by-1.26-inch barcode reserve rather than generic cover
+  defaults. Editor typography waits for the exact project font face, avoiding
+  temporary fallback spacing that differs from the generated cover.
+  B&N covers remain one connected Back/Spine/Front composition; choosing a
+  region is confined to the Fill selected region dialog while ordinary editing,
+  crop, generation guidance, and spine direction stay whole-canvas. They can prepare
+  either one measured full-wrap PDF or derived front/back PDFs when B&N supplies
+  the spine in its wizard.
+
+</details>
+
+<details>
+<summary><b>Publishing, print, and validation</b></summary>
+
 - An always-present Core Book for shared title/author/language metadata, fixed
   outline order, presentation, publication sections, project typography, and
   reusable front-cover design. A publication section is either prose with
@@ -398,41 +482,6 @@ validation guidance.
   Physical **Prepare files** reuses Interior and Cover scopes independently in a
   fixed interior-first order: a cover-only edit regenerates only the cover, while
   an interior change establishes its validated page count before cover work.
-- Core/release-aware structured cover design with shared image/text/shape/layer/style
-  tools, canvas-aligned resize handles for rotated objects, justified text
-  alignment, per-surface center and safe-area guides, one-action full-width fit,
-  full/safe-width fitting, horizontal surface/safe-area centering, quarter-turn
-  rotation and rotation reset, and
-  reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
-  `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
-  print surfaces until explicitly customized. Print releases select exact
-  paper weight/thickness, color process, construction, and cover mode. Paper
-  color and finish stay outside the artifact workflow. The final interior page
-  count resolves profile-specific spine geometry and the required
-  outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
-  ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
-  then inside cover pages with the required no-ink spine region.
-  Attempting to edit a print cover automatically runs the compact interior
-  layout needed to obtain that current page count; the editor opens only after
-  the calculated spine is available, without requiring a full prepared interior
-  PDF first.
-  The cover editor's **Preview** button flushes current edits and opens a quick
-  in-process raster of the selected cover surface using the same composition
-  preview path as Designed Pages. It does not paginate the manuscript, invoke
-  Press, write a PDF, or create a durable render job, artifact, package, image
-  replacement, or database row.
-  Images and shapes may extend through cover safe-area guides; only text outside
-  the safe area blocks production, while physical bounds, barcode/no-ink, and
-  accessibility checks remain enforced.
-  Lulu cover profiles use the provider template's 0.5-inch text safety inset
-  and lower-right 3.622-by-1.26-inch barcode reserve rather than generic cover
-  defaults. Editor typography waits for the exact project font face, avoiding
-  temporary fallback spacing that differs from the generated cover.
-  B&N covers remain one connected Back/Spine/Front composition; choosing a
-  region is confined to the Fill selected region dialog while ordinary editing,
-  crop, generation guidance, and spine direction stay whole-canvas. They can prepare
-  either one measured full-wrap PDF or derived front/back PDFs when B&N supplies
-  the spine in its wizard.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   and matching assistant preflight/package controls. The owned KDP
@@ -444,6 +493,28 @@ validation guidance.
   The owned B&N profile emits inspected PDF 1.4 with PDF/A-1b identification,
   embedded fonts, output intent, flattened transparency, and exact imported
   template geometry.
+- Print Designed Pages, selected cover surfaces, images, and individual or ranged
+  pages from PDF previews. Lorekeeper previews the complete artwork on Letter/A4
+  paper by default, oriented to match the source and fitted without cropping.
+  Paper size, margins, orientation, fitting, and PDF page selection can be changed
+  before opening the system printer dialog for printer, copies, and duplex
+  settings. Spreads and full wraps fit on one sheet. Printing is raster-based;
+  download the original publication PDF to retain its text and vectors.
+
+</details>
+
+<details>
+<summary><b>Project archives and import/export</b></summary>
+
+- Streamed `.lorekeeper` project archives preserve the complete retained-source
+  closure for full exports and use a separate non-structural dependency policy
+  with explicit omission warnings. Legacy JSON formats v1-v31 are import-only.
+  Imports validate the staged file and archive closure before one creative-state
+  transaction, then rebuild derived indexes as retryable post-commit work.
+  The `ProjectArchive` settings bound archive input to 8 GiB and expanded content
+  to 16 GiB by default, retaining separate per-entry and manifest limits.
+  Source extraction/evidence rows and image/font bytes are imported one source
+  or asset at a time, with complete rollback if a later import step fails.
 - Streamed `.lorekeeper` project import/export (archive-envelope v1,
   archive-record v3, manuscript-v7/page-setup/Designed Page model, Core Book,
   sparse release overlays, edition chapter snapshots/page overrides,
@@ -452,9 +523,22 @@ validation guidance.
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
-- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper never fetches an account model list dynamically. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
 
-## Version history and optional synchronization
+</details>
+
+<details>
+<summary><b>Version history and optional GitHub synchronization</b></summary>
+
+- Local version history schema v11 captures deterministic checkpoints of the creative
+  project in an app-managed Git repository. History includes canonical project,
+  narrative, graph, source, asset, manuscript, composition, and publication
+  state, including per-source manifests and reusable content-addressed original
+  chunks; it excludes chats, credentials, jobs, search/vector projections,
+  render artifacts, and other operational state. Images and fonts are ordinary
+  Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
+  History reviews retain bounded source summaries and load full selected-source
+  comparisons on demand. Restoration validates and applies sources, images, and
+  font faces individually inside one rollback-safe transaction.
 
 Lorekeeper keeps the live project in SQLite and records explicit creative
 checkpoints in one local bare Git repository per project repository identity.
@@ -534,7 +618,98 @@ manuscript files in GitHub. Remote checkout and clone remain unvalidated; local
 builds and versioned-transformation checks do not establish those provider
 operations.
 
-## Requirements
+</details>
+
+## Local Data
+
+SQLite databases, API keys, OAuth tokens, temporary verification databases, and
+publish output are local state and are ignored by git.
+
+Development builds (the host environment must be Development) write diagnostic
+logs to bounded daily files under
+`%LOCALAPPDATA%\Lorekeeper\dev-logs`, retained for 14 days or 50 MB. These
+files carry redacted provider request/response and tool-argument detail used to
+diagnose render and image-job failures; production and packaged Electron builds
+never write them.
+
+<details>
+<summary><b>Startup, recovery backups, and browser-stored drafts</b></summary>
+
+Every launch begins with Lorekeeper's application-owned startup screen. It
+shows ordinary workspace initialization and names each database compatibility
+stage when migrations are being checked or applied. Project, ingest, import,
+image, embedding, and publication workers remain paused until database startup
+finishes. A successful start opens the requested workspace; a protected
+migration failure opens **Settings > Data Recovery**, while an unexpected
+bootstrap failure remains on the startup screen with a safe close action so the
+application can be restarted after the cause is addressed.
+On a recovery start, Lorekeeper applies an explicitly scheduled restore first;
+otherwise it honors the existing recovery marker before opening the projectless
+database or running any normal migration service.
+Recovery also handles backups containing temporary upgrade columns, preserving
+the original migration error and protected project backup instead of failing
+with a duplicate-column error while opening Data Recovery.
+Deferred composition upgrades also handle databases whose schema is already
+current, preserving release overrides and covers while repairing page geometry.
+Deferred Core Book upgrades likewise use the surviving project typography and
+release records when older release-only columns have already been removed.
+
+The Projects hub provides a References action for each project. It manages direct
+read-only continuity links with in-surface validation and keeps current-project-only
+behavior when no links exist. Deleting a project uses an application-owned
+confirmation; if other projects depend on it, the confirmation lists them and makes
+clear that confirmation detaches those links without deleting the dependent projects.
+
+When an older database first adopts structured manuscripts, Lorekeeper creates a
+WAL-consistent backup in `.migration-backups/manuscripts`, validates the
+conversion, and records a migration journal. **Settings > Data Recovery** shows
+the available backups and requires an explicit two-step confirmation before
+scheduling a restore. The selected backup is applied during the next startup,
+before normal app workers begin. Keep those backups with your other local-data
+backups; they are not included in project exports.
+Legacy illustrated-prose images retain the paragraph position the old runtime
+actually displayed even when a later chapter edit left their advisory paragraph
+hash stale. The migration records those stale hashes while continuing to reject
+malformed anchors or ambiguous paragraph mappings.
+
+If a semantic-editor save collides with a newer chapter revision, Lorekeeper
+places the unsaved manuscript JSON in browser/Electron local storage under a
+chapter-specific conflict key and locks that editor. This recovery copy is
+unencrypted local manuscript content outside SQLite. It survives a page/circuit
+reload, can be downloaded from the conflict banner, and is removed only when
+the user explicitly loads the current saved version. Clearing browser/site data
+removes it; it is not included in database backups or project exports.
+
+Unsent text in each of the six assistant composers is also stored in
+browser/Electron local storage, keyed by project and assistant surface. It is
+unencrypted local text outside SQLite, survives navigation and page/circuit
+reloads, and is removed when that message is sent. Clearing browser/site data
+removes these drafts; they are not included in database backups or project
+exports. Attached composer images remain project-library assets, but the
+temporary attachment selection itself is not restored with the text draft.
+
+The guarded manuscript/composition, authoring-page, and Review Edits migrations
+create a protected SQLite backup before transforming Figure presentation,
+page-layout chapters, cover scenes, page setup, authoring variants, and legacy
+review/contest state. They verify semantic text and stable IDs, scene/image
+ownership and geometry, candidate draft hashes, active authoring layouts, protected row
+counts, foreign keys, artifacts, hashes, packages, and audits before
+removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
+inch leaf geometry (including 17 × 11 facing spreads) until the authoring
+migration materializes it as the active Designed Page layout, independently of
+publication releases. A legacy text frame that contains several paragraphs
+retains those same-role semantic blocks in its original frame; directly editing
+that frame materializes its body text into one editable block. A failure
+opens Lorekeeper's projectless recovery shell and leaves the original database
+available under **Settings > Data Recovery**. Existing generated artifacts keep
+their exact bytes and hashes but are labeled Legacy until regenerated through
+the current renderer.
+
+</details>
+
+## Building from source
+
+### Requirements
 
 - .NET 10 SDK
 - Node.js 22.12 or later for Electron.NET desktop builds
@@ -549,7 +724,7 @@ manifest. At runtime, a missing, modified, linked, or unexpected file disables
 PDF generation before a job can be queued. Browser and Electron hosts never
 invoke Cargo, Python, uv, Typst, WeasyPrint, Chromium, or machine PDF tools.
 
-## Web Development
+### Run
 
 Run the normal browser-hosted app:
 
@@ -563,8 +738,6 @@ callback origin is served by the active host; a port mismatch is shown inline
 and no second listener is started. Use this explicit profile for browser-driven
 UI validation; the Electron profile intentionally remains the default
 development target.
-
-## Desktop Development
 
 Run the Electron.NET desktop shell:
 
@@ -585,13 +758,8 @@ OpenAI OAuth uses `Auth:Codex:RedirectUri`, which defaults to
 until the redirect configuration, active Lorekeeper host, and provider-accepted
 callback agree.
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), and the
-[validation chapter](docs/architecture/validation-documentation.md) for scope,
-verification, and contribution terms.
-
-## Desktop Packaging
+<details>
+<summary><b>Desktop packaging</b></summary>
 
 Build packages without publishing:
 
@@ -634,7 +802,10 @@ are ad-hoc signed; notarization and Mac App Store acceptance remain unperformed.
 The project version in `Lorekeeper/Lorekeeper.csproj` is the single version
 source. Build-only version overrides are for deliberate packaging validation.
 
-### Free Microsoft Store package
+</details>
+
+<details>
+<summary><b>Free Microsoft Store package</b></summary>
 
 Build the Store closure, then prepare an unsigned submission package with the
 exact Partner Center identity:
@@ -662,7 +833,10 @@ offset, preserving monotonic upgrades from the prior feasibility series.
 Install, upgrade, uninstall/data retention, Windows 11, and Store certification
 remain target-specific acceptance checks.
 
-### Maintainer release
+</details>
+
+<details>
+<summary><b>Maintainer release</b></summary>
 
 Install and authenticate [GitHub CLI](https://cli.github.com/), commit verified
 preparation, and preview on clean `main`:
@@ -738,88 +912,23 @@ prerequisites and performed checks. Package output is git-ignored. No repository
 publication, Store submission, or historical-feed archival is implied by a
 successful build.
 
-The [feature trailer](media/trailer/README.md) is a 90-second captioned video
-of one live end-to-end run in a synthetic project, from premise to prepared
-book files, with its poster, captions, provenance and reproducible export recipe.
+</details>
 
-## Local Data
+## Contributing
 
-SQLite databases, API keys, OAuth tokens, temporary verification databases, and
-publish output are local state and are ignored by git.
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md),
+[AGENTS.md](AGENTS.md), and the
+[validation chapter](docs/architecture/validation-documentation.md) for scope,
+verification, and contribution terms.
 
-Development builds (the host environment must be Development) write diagnostic
-logs to bounded daily files under
-`%LOCALAPPDATA%\Lorekeeper\dev-logs`, retained for 14 days or 50 MB. These
-files carry redacted provider request/response and tool-argument detail used to
-diagnose render and image-job failures; production and packaged Electron builds
-never write them.
+## License
 
-Every launch begins with Lorekeeper's application-owned startup screen. It
-shows ordinary workspace initialization and names each database compatibility
-stage when migrations are being checked or applied. Project, ingest, import,
-image, embedding, and publication workers remain paused until database startup
-finishes. A successful start opens the requested workspace; a protected
-migration failure opens **Settings > Data Recovery**, while an unexpected
-bootstrap failure remains on the startup screen with a safe close action so the
-application can be restarted after the cause is addressed.
-On a recovery start, Lorekeeper applies an explicitly scheduled restore first;
-otherwise it honors the existing recovery marker before opening the projectless
-database or running any normal migration service.
-Recovery also handles backups containing temporary upgrade columns, preserving
-the original migration error and protected project backup instead of failing
-with a duplicate-column error while opening Data Recovery.
-Deferred composition upgrades also handle databases whose schema is already
-current, preserving release overrides and covers while repairing page geometry.
-Deferred Core Book upgrades likewise use the surviving project typography and
-release records when older release-only columns have already been removed.
-
-The Projects hub provides a References action for each project. It manages direct
-read-only continuity links with in-surface validation and keeps current-project-only
-behavior when no links exist. Deleting a project uses an application-owned
-confirmation; if other projects depend on it, the confirmation lists them and makes
-clear that confirmation detaches those links without deleting the dependent projects.
-
-When an older database first adopts structured manuscripts, Lorekeeper creates a
-WAL-consistent backup in `.migration-backups/manuscripts`, validates the
-conversion, and records a migration journal. **Settings > Data Recovery** shows
-the available backups and requires an explicit two-step confirmation before
-scheduling a restore. The selected backup is applied during the next startup,
-before normal app workers begin. Keep those backups with your other local-data
-backups; they are not included in project exports.
-Legacy illustrated-prose images retain the paragraph position the old runtime
-actually displayed even when a later chapter edit left their advisory paragraph
-hash stale. The migration records those stale hashes while continuing to reject
-malformed anchors or ambiguous paragraph mappings.
-
-If a semantic-editor save collides with a newer chapter revision, Lorekeeper
-places the unsaved manuscript JSON in browser/Electron local storage under a
-chapter-specific conflict key and locks that editor. This recovery copy is
-unencrypted local manuscript content outside SQLite. It survives a page/circuit
-reload, can be downloaded from the conflict banner, and is removed only when
-the user explicitly loads the current saved version. Clearing browser/site data
-removes it; it is not included in database backups or project exports.
-
-Unsent text in each of the six assistant composers is also stored in
-browser/Electron local storage, keyed by project and assistant surface. It is
-unencrypted local text outside SQLite, survives navigation and page/circuit
-reloads, and is removed when that message is sent. Clearing browser/site data
-removes these drafts; they are not included in database backups or project
-exports. Attached composer images remain project-library assets, but the
-temporary attachment selection itself is not restored with the text draft.
-
-The guarded manuscript/composition, authoring-page, and Review Edits migrations
-create a protected SQLite backup before transforming Figure presentation,
-page-layout chapters, cover scenes, page setup, authoring variants, and legacy
-review/contest state. They verify semantic text and stable IDs, scene/image
-ownership and geometry, candidate draft hashes, active authoring layouts, protected row
-counts, foreign keys, artifacts, hashes, packages, and audits before
-removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
-inch leaf geometry (including 17 × 11 facing spreads) until the authoring
-migration materializes it as the active Designed Page layout, independently of
-publication releases. A legacy text frame that contains several paragraphs
-retains those same-role semantic blocks in its original frame; directly editing
-that frame materializes its body text into one editable block. A failure
-opens Lorekeeper's projectless recovery shell and leaves the original database
-available under **Settings > Data Recovery**. Existing generated artifacts keep
-their exact bytes and hashes but are labeled Legacy until regenerated through
-the current renderer.
+Lorekeeper is free to install and source available under the unchanged
+[PolyForm Noncommercial or Internal Use 1.0.0 alternatives](LICENSE).
+You can use and modify it for personal work or internal business, including
+commercial bookmaking, and sell your own books. Noncommercial software forks
+and redistribution are permitted; selling or commercially distributing
+Lorekeeper or a derivative, or offering it as a paid hosted app to external
+customers, is outside these grants. Third-party components retain their own
+licenses. Your creative work is not licensed by Lorekeeper merely because you
+create or process it here.
