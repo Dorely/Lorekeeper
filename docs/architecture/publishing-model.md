@@ -552,7 +552,7 @@ unchanged. Artifact image previews also expose the shared image-print action.
 | `Lorekeeper/Publish/PublishAssistantTools.cs` | Compact revision-safe Publish reads/mutations, section/canvas/cover stages, readiness, preparation, and artifact metadata. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishContent.razor` | Progressive Core/release workspace, Front/Main/Back flow, readiness, inclusion/order controls, and downloads. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishChatPanel.razor` | Refresh-safe Publish chat adapter, flush-before-turn context, streaming, attachments, and workspace callbacks. |
-| `Lorekeeper/Components/Pages/Projects/Publish/PublicationPdfPreview.razor` | Lorekeeper-owned immutable PDF page/facing preview surface. |
+| `Lorekeeper/Components/Pages/Projects/Publish/PublicationPdfPreview.razor` | Lorekeeper-owned immutable PDF page/facing preview surface; the print-selection ring sits outside the page and is omitted for single-page PDFs so it never reads as cover bleed. |
 | `Lorekeeper/Components/Pages/Projects/CoverCompositionWorkspace.razor` / `Publish/PublishContent.razor` | Flush the selected saved cover surface and present its in-process clean composition raster; no pagination, Press, PDF, endpoint cache, or durable publishing ownership. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublicationEpubPreview.razor` | Artifact-backed sandboxed EPUB reader and spine/navigation inspection. |
 | `Lorekeeper/Publish/PublicationPreparationService.cs` | Persisted one-action Core/release preparation, progress, blockers, cancellation, and retained Core warnings. |

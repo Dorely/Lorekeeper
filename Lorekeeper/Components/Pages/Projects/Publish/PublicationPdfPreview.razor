@@ -140,7 +140,8 @@
             yield return [page, page + 1 <= pageCount ? page + 1 : null];
     }
 
-    private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page @(pageNumber == _currentPage ? "print-current" : null)" data-page-number="@pageNumber" aria-label="PDF page @pageNumber" tabindex="0" role="button" aria-pressed="@(pageNumber == _currentPage)">
+    // A single-page PDF has no page to choose, so it shows no print-selection ring over its artwork.
+    private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page @(PageCount > 1 && pageNumber == _currentPage ? "print-current" : null)" data-page-number="@pageNumber" aria-label="PDF page @pageNumber" tabindex="0" role="button" aria-pressed="@(pageNumber == _currentPage)">
         <img src="@PageUrl(pageNumber)"
              alt="PDF page @pageNumber"
              loading="@(pageNumber <= 3 ? "eager" : "lazy")"
