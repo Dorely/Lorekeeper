@@ -322,7 +322,6 @@
     [Parameter] public long RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter] public bool InteractionLocked { get; set; }
-    [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Back { get; set; }
     [Parameter] public EventCallback<PublicationCoverCanvasPreviewRequest> PreviewRequested { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
@@ -770,7 +769,6 @@
                 throw new InvalidOperationException(_error ?? "The canvas history move was not saved.");
             DeltaHistory.ConfirmMove(move.ReservationId);
             _error = null;
-            await Saved.InvokeAsync();
         }
         catch (Exception exception)
         {
@@ -879,7 +877,6 @@
                 _recoveredCoreBookRevision = null;
             }
             UpdateAuthoringWriterState();
-            await Saved.InvokeAsync();
             await InvokeAsync(StateHasChanged);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)

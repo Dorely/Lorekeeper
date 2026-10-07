@@ -83,7 +83,6 @@ else
                                                    RefreshSignal="_coverRefreshSignal"
                                                    RequestedSelectionId="_coverSelectionId"
                                                    InteractionLocked="_assistantRunning"
-                                                   Saved="HandleCoverSavedAsync"
                                                    PreviewRequested="OpenCoverPreviewAsync"
                                                    Back="CloseCoverEditorAsync" />
                     }
@@ -2287,22 +2286,6 @@ else
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _busy = false; }
-    }
-
-    private async Task HandleCoverSavedAsync()
-    {
-        if (Project is null)
-            return;
-        if (_selectedReleaseId is null)
-        {
-            _core = await Books.GetOrCreateAsync(Project.Id);
-            _coreDraft = CoreDraft.From(_core);
-        }
-        else
-        {
-            _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, _selectedReleaseId.Value, _dispose.Token);
-            _releases = await Releases.ListAsync(Project.Id);
-        }
     }
 
     private async Task OpenCoverPreviewAsync(PublicationCoverCanvasPreviewRequest request)

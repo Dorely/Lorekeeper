@@ -78,7 +78,10 @@ identity, so switching between occurrences of one shared page retains its writer
 while refreshing placement-specific context.
 Their normal serial save path is the fence flush path: a fence pauses gesture
 input, waits through the captured local sequence, then resumes only after the
-dependent operation releases its project lease. Canvas history is process-wide
+dependent operation releases its project lease. A canvas save therefore never
+calls back into a host that runs a fenced read: the fence would freeze and
+flush the saving writer from inside its own save. The Publish host reloads Core
+and release state when the cover editor closes, not after each autosave. Canvas history is process-wide
 delta history, not scene snapshots. The adapter stores only object insertion,
 removal, ordering, and changed-property deltas; it derives the inverse from the
 persisted pre-mutation object and validates its fingerprint when replaying.
