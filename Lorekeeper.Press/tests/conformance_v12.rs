@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 15);
-    assert_eq!(value["rendererVersion"], "2.1.12");
+    assert_eq!(value["rendererVersion"], "2.1.13");
     assert_eq!(
         value["profiles"],
         json!([
@@ -536,7 +536,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 15);
-    assert_eq!(response["rendererVersion"], "2.1.12");
+    assert_eq!(response["rendererVersion"], "2.1.13");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -951,6 +951,18 @@ fn print_copyright_can_fill_recto_before_a_title_spread() {
     assert_eq!(
         title_spread, 2,
         "the following title spread begins on a verso leaf"
+    );
+    let title_side_warning = rendered["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .any(|item| {
+            item["code"] == "PRESS_FRONT_MATTER_SIDE_RECOMMENDATION"
+                && item["sourceId"] == "21000000-0000-0000-0000-000000000021"
+        });
+    assert!(
+        !title_side_warning,
+        "a title spread already covers the recto and must not get a side recommendation"
     );
 }
 

@@ -541,10 +541,6 @@ public sealed class PublicationPreparationWorker(
                 candidate.ProgressPercent = 12;
             }, cancellationToken);
             preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 12, 36, cancellationToken));
-            preparationDiagnostics.Add(new(
-                "info",
-                "PREPARATION_INTERIOR_RENDERED",
-                "The interior PDF was regenerated and validated."));
             interiorRender = await renders.GetAsync(job.ProjectId, editionId, render.Id, cancellationToken);
             interior = interiorRender.Artifacts.FirstOrDefault(artifact =>
                 artifact.Kind == PublicationArtifactKind.InteriorPdf
@@ -557,10 +553,6 @@ public sealed class PublicationPreparationWorker(
         else
         {
             job.InteriorRenderJobId = interiorRender!.Id;
-            preparationDiagnostics.Add(new(
-                "info",
-                "PREPARATION_INTERIOR_REUSED",
-                "The existing validated interior PDF is still current and was reused."));
             await UpdateJobAsync(job.Id, candidate =>
             {
                 candidate.InteriorRenderJobId = interiorRender.Id;
@@ -617,18 +609,10 @@ public sealed class PublicationPreparationWorker(
                 candidate.ProgressPercent = 52;
             }, cancellationToken);
             preparationDiagnostics.AddRange(await WaitForRenderAsync(job, render.Id, 52, 33, cancellationToken));
-            preparationDiagnostics.Add(new(
-                "info",
-                "PREPARATION_COVER_RENDERED",
-                "The cover files were regenerated and validated."));
         }
         else
         {
             job.CoverRenderJobId = coverRender.Id;
-            preparationDiagnostics.Add(new(
-                "info",
-                "PREPARATION_COVER_REUSED",
-                "The existing validated cover files are still current and were reused."));
             await UpdateJobAsync(job.Id, candidate =>
             {
                 candidate.CoverRenderJobId = coverRender.Id;

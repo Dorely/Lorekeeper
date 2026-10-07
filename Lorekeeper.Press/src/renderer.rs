@@ -5258,7 +5258,9 @@ fn append_publication_sections(
                     .map(|page| (page.lines.len(), page.images.len()))
                     .collect::<Vec<_>>();
                 let first_page = pages.len() + 1;
-                if !is_digital_pdf && block_index == 0 {
+                // A two-leaf facing spread occupies both the verso and the
+                // recto, so it already satisfies either side convention.
+                if !is_digital_pdf && block_index == 0 && rendered.len() != 2 {
                     warn_front_matter_side(document, section, first_page, diagnostics);
                 }
                 pages.extend(rendered);

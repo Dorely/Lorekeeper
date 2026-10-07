@@ -88,7 +88,8 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 owns final format-specific preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
 Physical preparation is an ordered Interior-then-Cover pipeline. It reuses each
-scope independently, reports the reused/regenerated phase, and packages one
+scope independently, reports the reused/regenerated phase as job progress
+rather than as production notes, and packages one
 validated Interior job with a complete cover set from one validated Cover job.
 Production cover requests fail closed when that current Interior evidence and
 trusted page count are absent; a cover fingerprint depends on page count rather

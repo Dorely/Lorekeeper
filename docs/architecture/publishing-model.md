@@ -125,7 +125,9 @@ specific parity exception that must begin on a verso leaf so its two leaves
 form one physical opening. A blank leaf deliberately inserted to satisfy either
 parity rule remains part of the interior folio sequence and displays its page
 number. KDP/common front-matter guidance is surfaced as a non-blocking
-recommendation; it does not rewrite the author’s section order.
+recommendation; it does not rewrite the author’s section order. A side
+recommendation is never raised for a section that opens with a two-leaf spread,
+because the spread already occupies both the verso and the recto.
 
 Releases inherit Core sections live. They may replace, omit, add, reset, or
 reorder sections through sparse overlays. A release order overlay does not
