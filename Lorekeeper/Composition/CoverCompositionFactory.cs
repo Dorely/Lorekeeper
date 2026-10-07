@@ -330,7 +330,7 @@ public static class CoverCompositionFactory
             return new CoverGeometry(trimWidth, trimHeight, trimWidth, trimHeight, 0, 0);
         var registry = new PrintArtifactProfileRegistry();
         var product = registry.GetRequired(edition.PrintArtifactProfileKey);
-        var effectivePages = Math.Max(pageCount, product.MinimumPages);
+        var effectivePages = PrintGeometryService.DesignPageCount(product, pageCount);
         var physical = new PrintGeometryService(registry).Calculate(edition, effectivePages, surfaceRole);
         return new CoverGeometry(
             (double)physical.SurfaceWidthInches * 72,

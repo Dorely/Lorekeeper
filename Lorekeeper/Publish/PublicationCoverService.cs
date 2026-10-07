@@ -741,6 +741,15 @@ public sealed class PublicationCoverService(
         var diagnosticDetails = new List<PublicationCoverDiagnostic>();
         if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover && template.PageCount <= 0)
             AddDiagnostic(diagnosticDetails, "warning", "COVER_GEOMETRY_PENDING", "The full-wrap spine geometry will be finalized from the interior page count during preparation.");
+        if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+            && template.PageCount > 0
+            && printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey) is var pageProfile
+            && !PrintGeometryService.SupportsSubmittedPageCount(pageProfile, template.PageCount))
+        {
+            var designPages = PrintGeometryService.DesignPageCount(pageProfile, template.PageCount);
+            AddDiagnostic(diagnosticDetails, "error", "COVER_PAGE_COUNT_OUT_OF_RANGE",
+                $"The interior has {template.PageCount} pages, but this print product accepts {pageProfile.MinimumSubmittedPages ?? pageProfile.MinimumPages}-{pageProfile.MaximumSubmittedPages ?? pageProfile.MaximumPages}. The cover shows {designPages}-page spine geometry until the interior is in range; preparation will fail until then.");
+        }
         if (design.BarcodeMode == PublicationBarcodeMode.LorekeeperBarcode
             && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             AddDiagnostic(diagnosticDetails, "error", "COVER_BARCODE_ISBN_REQUIRED", "Lorekeeper barcode output requires a valid ISBN-13.");
@@ -1061,10 +1070,8 @@ public sealed class PublicationCoverService(
         {
             pages = snapshot.PageCount;
         }
-        var geometryPages = pages > 0
-            ? pages
-            : printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).MinimumPages;
         var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
+        var geometryPages = PrintGeometryService.DesignPageCount(product, pages);
         var geometry = printGeometry.Calculate(edition, geometryPages, surfaceRole);
         return new(pages, edition.PageWidthInches, edition.PageHeightInches, (double)geometry.BleedInches,
             (double)geometry.SpineWidthInches, (double)geometry.SurfaceWidthInches, (double)geometry.SurfaceHeightInches,

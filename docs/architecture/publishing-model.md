@@ -162,7 +162,11 @@ cover, and never invokes interior validation or rendering when the interior scop
 is already current. An interior regeneration whose validated page count is
 unchanged does not by itself stale an otherwise-current cover. The release cover,
 its assistant tools, and preparation therefore use calculated spine geometry
-rather than a minimum-page placeholder. While the cover is open, Publish compares
+rather than a minimum-page placeholder. When the interior page count is outside
+the print product's accepted range, the cover stays editable: its design geometry
+uses the nearest accepted count (`PrintGeometryService.DesignPageCount`) and the
+cover reports a `COVER_PAGE_COUNT_OUT_OF_RANGE` error, while preparation still
+fails closed on the real count. While the cover is open, Publish compares
 the pagination fingerprint after an assistant mutation and closes the editor only
 when the interior layout identity actually changed; reopening then refreshes
 pagination before further cover work.

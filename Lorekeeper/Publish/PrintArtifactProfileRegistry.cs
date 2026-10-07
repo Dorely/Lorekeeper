@@ -266,12 +266,29 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
             : $"Enter your printer's {string.Join(" and ", missing)} in Release setup before preparing this other-printer release.";
     }
 
+    public static bool SupportsSubmittedPageCount(PrintArtifactProfile product, int submittedPageCount) =>
+        submittedPageCount >= (product.MinimumSubmittedPages ?? product.MinimumPages)
+        && submittedPageCount <= (product.MaximumSubmittedPages ?? product.MaximumPages);
+
+    /// <summary>
+    /// The page count cover design geometry is drawn at. An unknown or out-of-range
+    /// interior falls back to the nearest count the profile accepts, so the cover
+    /// stays editable; preparation still validates the real interior count.
+    /// </summary>
+    public static int DesignPageCount(PrintArtifactProfile product, int interiorPageCount)
+    {
+        var minimum = Math.Max(product.MinimumPages, product.MinimumSubmittedPages ?? product.MinimumPages);
+        var maximum = Math.Min(product.MaximumPages, product.MaximumSubmittedPages ?? product.MaximumPages);
+        var pages = interiorPageCount <= 0 ? minimum : Math.Clamp(interiorPageCount, minimum, maximum);
+        // Odd counts are normalized up by one, which must stay within the profile.
+        return pages % 2 == 1 && pages + 1 > product.MaximumPages ? pages - 1 : pages;
+    }
+
     public PrintCoverGeometry Calculate(PublicationEdition edition, int submittedPageCount, string? surfaceRole = null)
     {
         var product = registry.GetRequired(edition.PrintArtifactProfileKey);
         var normalizedPages = submittedPageCount + (submittedPageCount % 2);
-        if (submittedPageCount < (product.MinimumSubmittedPages ?? product.MinimumPages)
-            || submittedPageCount > (product.MaximumSubmittedPages ?? product.MaximumPages))
+        if (!SupportsSubmittedPageCount(product, submittedPageCount))
             throw new InvalidOperationException($"The selected artifact settings support {product.MinimumSubmittedPages ?? product.MinimumPages}-{product.MaximumSubmittedPages ?? product.MaximumPages} submitted pages; this interior has {submittedPageCount}.");
         if (normalizedPages < product.MinimumPages || normalizedPages > product.MaximumPages)
             throw new InvalidOperationException($"The selected artifact settings support {product.MinimumPages}–{product.MaximumPages} pages; this interior has {normalizedPages}.");
