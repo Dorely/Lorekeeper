@@ -7,10 +7,10 @@ The checked-in browser bundle is built from the exact versions in
 - `prosemirror-gapcursor` 1.4.1
 - `prosemirror-history` 1.5.0
 - `prosemirror-keymap` 1.2.3
-- `prosemirror-model` 1.25.11
+- `prosemirror-model` 1.25.12
 - `prosemirror-state` 1.4.4
 - `prosemirror-transform` 1.12.0
-- `prosemirror-view` 1.42.2
+- `prosemirror-view` 1.42.6
 - `orderedmap` 2.1.1
 - `rope-sequence` 1.3.4
 - `w3c-keyname` 2.2.8
