@@ -87,4 +87,4 @@ The edit is nine clips totalling 90 s:
 | note | 14 | Review note → agent revision → Keep All |
 | publish | 24 | The publish turn, the two follow-up turns, and the prepared files |
 | more | 6 | Images, History, Import / Export |
-| outro | 5 | Interior spread from the prepared paperback |
+| outro | 5 | The EPUB ebook's cover in the app's preview |

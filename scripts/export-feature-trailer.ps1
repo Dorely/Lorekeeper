@@ -116,7 +116,7 @@ else
 {
     foreach ($clip in @($manifest.clips))
     {
-        if ($clip.file -cnotmatch '^[a-z0-9-]+\.mp4$' -or $sequence.Contains($clip.file) -or $clip.seconds -isnot [long] -or $clip.seconds -lt 1)
+        if ($clip.file -cnotmatch '^[a-z0-9-]+\.mp4$' -or $sequence.Contains($clip.file) -or -not ($clip.seconds -is [int] -or $clip.seconds -is [long]) -or $clip.seconds -lt 1)
         {
             throw "Each clip needs a unique file name and whole seconds: $($clip.file)"
         }
