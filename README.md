@@ -539,6 +539,8 @@ operations.
 - .NET 10 SDK
 - Node.js 22.12 or later for Electron.NET desktop builds
 - Rust 1.97.1 for source builds; the packaged app has no Rust or Cargo runtime requirement
+- PowerShell 7 (`pwsh`) for the release, packaging, MSIX, and distribution
+  scripts; Windows PowerShell 5.1 cannot run them
 
 Every Debug and Release build produces the app-owned `press-runtime` bundle
 automatically from `Cargo.lock`. It contains only the native executable, approved

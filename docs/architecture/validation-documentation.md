@@ -212,6 +212,8 @@ See [Press production](press-production.md) for artifact-level claims.
 Windows uses `scripts/build-windows-release.ps1`; Linux uses
 `scripts/build-linux-release-wsl.ps1` on Windows or
 `scripts/build-linux-release.ps1` natively on Ubuntu 24.04 x64.
+The release, packaging, MSIX, and distribution scripts require PowerShell 7;
+they use .NET APIs and operators that Windows PowerShell 5.1 lacks.
 The builders use exact dependency/editor/Press inputs, check immutable channel
 metadata and notice hashes, probe the packaged renderer contract, and verify
 artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
