@@ -25,7 +25,9 @@ editing, research, images, and publishing. Review changes while keeping your
 manuscript and project history under your control.
 
 Design reusable pages and covers, manage book styles and figures, and produce
-EPUB and PDF files from the same project. Keep local checkpoints, export a
+EPUB, PDF ebook, and print-ready paperback and hardcover files from the same
+project, with built-in profiles for Amazon KDP, IngramSpark, Barnes & Noble
+Press, and Lulu, or your own printer's measurements. Keep local checkpoints, export a
 portable project archive, and optionally connect your own GitHub repository for
 version-history synchronization.
 
@@ -43,7 +45,7 @@ rights; the application license does not prevent you from selling your books.
 - Write and revise a structured manuscript with styles, figures, notes, and citations.
 - Retain research sources and manage their references.
 - Review assistant changes and preserve local project checkpoints.
-- Design pages and covers and export EPUB/PDF publication files.
+- Design pages and covers and prepare EPUB, PDF, and print-ready paperback and hardcover files.
 - Carry projects through portable archives and optional GitHub history sync.
 
 **Category:** Productivity. **Price:** Free. **Language:** English (United States).
@@ -111,15 +113,18 @@ submission; the manifest alone is not that evidence.
 
 - Store MP4: 1920x1080, 30 fps, H.264/AVC1 High progressive, 4:2:0, CABAC,
   two B frames, closed GOP of 15 frames, 50 Mbps; AAC-LC stereo, 48 kHz,
-  384 kbps. Keep the MP4 fast-start and omit edit lists. The prepared recipe uses
-  a 60-second edit; 60 seconds or less is Microsoft's recommendation, and the
-  file cap is 2 GB.
-- Matching 1920x1080 PNG thumbnail and a title no longer than 255 characters.
-- English WebVTT captions below 50 MB; optional MP3 audio description below 500 MB.
+  384 kbps. Keep the MP4 fast-start and omit edit lists. The prepared v2 master
+  (`.artifacts/trailer/v2/export/lorekeeper-v2-store.mp4`) runs 90 seconds, longer
+  than Microsoft's recommended 60 seconds but well under the 2 GB file cap.
+- Matching 1920x1080 PNG thumbnail (`media/trailer/lorekeeper-v2-poster.png`)
+  and a title no longer than 255 characters (`media/trailer/lorekeeper-v2.title.txt`).
+- English WebVTT captions below 50 MB (`media/trailer/lorekeeper-v2.en.vtt`);
+  optional MP3 audio description below 500 MB.
 - A separate 1920x1080 hero PNG, without text or app UI, for Store presentation.
+  None is prepared yet.
 - A compact H.264 README export of at most 9,500,000 bytes, below GitHub's free-plan
-  10 MB attachment cap; use GitHub's native video attachment mechanism after upload
-  is authorized.
+  10 MB attachment cap (`media/trailer/lorekeeper-v2-github.mp4`); use GitHub's
+  native video attachment mechanism after upload is authorized.
 
 Do not put embedded age-rating graphics in the Store trailer. If a separate
 public trailer requires rating information under the assigned authority's rules,
