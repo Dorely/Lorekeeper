@@ -20,7 +20,6 @@ public static class IngestSourceAssertions
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly IReadOnlyDictionary<string, string?> EmptyObservedProperties =
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-    private static readonly IReadOnlyList<string> EmptyAliases = [];
 
     private static readonly HashSet<string> ProtectedProperties =
     [
@@ -41,20 +40,6 @@ public static class IngestSourceAssertions
         "ingestReportNotes",
         "summary",
         "notes",
-    ];
-
-    private static readonly string[] FactSheetFieldOrder =
-    [
-        "summary",
-        "description",
-        "role",
-        "status",
-        "affiliation",
-        "history",
-        "motivation",
-        "significance",
-        "relationship",
-        "details",
     ];
 
     public static bool IsProtectedProperty(string key) =>
@@ -100,117 +85,16 @@ public static class IngestSourceAssertions
         IDictionary<string, object?> properties,
         Guid sourceId) =>
         RemoveSource(properties, RelationshipAssertionsProperty, sourceId);
-
-    public static IngestAssertionRemovalResult RemoveEntityChunk(
-        IDictionary<string, object?> properties,
-        Guid sourceId,
-        Guid sourceChunkId) =>
-        RemoveChunk(properties, EntityAssertionsProperty, sourceId, sourceChunkId);
-
-    public static IngestAssertionRemovalResult RemoveRelationshipChunk(
-        IDictionary<string, object?> properties,
-        Guid sourceId,
-        Guid sourceChunkId) =>
-        RemoveChunk(properties, RelationshipAssertionsProperty, sourceId, sourceChunkId);
-
     public static int CountEntitySources(IReadOnlyDictionary<string, object?> properties) =>
         CountSources(properties, EntityAssertionsProperty);
 
     public static int CountRelationshipSources(IReadOnlyDictionary<string, object?> properties) =>
         CountSources(properties, RelationshipAssertionsProperty);
-
-    public static int CountEntitySourceChunks(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
-        CountSourceChunks(properties, EntityAssertionsProperty, sourceId);
-
-    public static int CountRelationshipSourceChunks(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
-        CountSourceChunks(properties, RelationshipAssertionsProperty, sourceId);
-
     public static bool ContainsEntitySource(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
         ContainsSource(properties, EntityAssertionsProperty, sourceId);
 
     public static bool ContainsRelationshipSource(IReadOnlyDictionary<string, object?> properties, Guid sourceId) =>
         ContainsSource(properties, RelationshipAssertionsProperty, sourceId);
-
-    public static int CountEntityObservations(IReadOnlyDictionary<string, object?> properties) =>
-        CountObservations(properties, EntityAssertionsProperty);
-
-    public static int CountRelationshipObservations(IReadOnlyDictionary<string, object?> properties) =>
-        CountObservations(properties, RelationshipAssertionsProperty);
-
-    public static IReadOnlyList<IngestSourceAssertionSummary> SummarizeEntityAssertions(
-        IReadOnlyDictionary<string, object?> properties,
-        int maxSources = 5) =>
-        SummarizeAssertions(properties, EntityAssertionsProperty, maxSources);
-
-    public static IReadOnlyList<IngestSourceAssertionSummary> SummarizeRelationshipAssertions(
-        IReadOnlyDictionary<string, object?> properties,
-        int maxSources = 5) =>
-        SummarizeAssertions(properties, RelationshipAssertionsProperty, maxSources);
-
-    public static IReadOnlyList<IngestSourceObservation> ListEntityObservations(
-        IReadOnlyDictionary<string, object?> properties,
-        int maxObservations = 20) =>
-        ListObservations(properties, EntityAssertionsProperty, maxObservations);
-
-    public static IReadOnlyList<IngestSourceObservation> ListRelationshipObservations(
-        IReadOnlyDictionary<string, object?> properties,
-        int maxObservations = 20) =>
-        ListObservations(properties, RelationshipAssertionsProperty, maxObservations);
-
-    public static IngestEntityFactSheet BuildEntityFactSheet(
-        IReadOnlyDictionary<string, object?> properties,
-        int maxObservations = 20) =>
-        BuildFactSheet(ListEntityObservations(properties, maxObservations));
-
-    public static IngestEntityFactSheet BuildFactSheet(IReadOnlyList<IngestSourceObservation> observations)
-    {
-        var fieldBuilders = new Dictionary<string, FactSheetFieldBuilder>(StringComparer.OrdinalIgnoreCase);
-        var safeObservations = observations.Where(observation => observation is not null).ToList();
-        foreach (var observation in safeObservations
-            .OrderBy(observation => observation.SourceTitle ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(observation => observation.SourceChunkIndex))
-        {
-            AddFactSheetField(fieldBuilders, "summary", observation.Summary, observation);
-            foreach (var property in observation.ObservedProperties ?? EmptyObservedProperties)
-                AddFactSheetField(fieldBuilders, property.Key, property.Value, observation);
-        }
-
-        var fields = fieldBuilders.Values
-            .OrderBy(builder => FactSheetFieldRank(builder.Key))
-            .ThenBy(builder => builder.Label, StringComparer.OrdinalIgnoreCase)
-            .Select(builder => new IngestFactSheetField(
-                builder.Key,
-                builder.Label,
-                string.Join("\n", builder.Values),
-                builder.References
-                    .OrderBy(reference => reference.SourceTitle, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(reference => reference.SourceChunkIndex)
-                    .ThenByDescending(reference => reference.UpdatedAt)
-                    .ToArray()))
-            .ToArray();
-
-        var aliases = safeObservations
-            .SelectMany(observation => observation.Aliases ?? EmptyAliases)
-            .Select(NormalizeFactText)
-            .Where(alias => alias.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        var sources = safeObservations
-            .GroupBy(observation => observation.SourceId, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new IngestFactSheetSource(
-                group.Key,
-                group.Select(observation => observation.SourceTitle).FirstOrDefault(title => !string.IsNullOrWhiteSpace(title)) ?? string.Empty,
-                group.Select(observation => observation.SourceKind).FirstOrDefault(kind => !string.IsNullOrWhiteSpace(kind)) ?? string.Empty,
-                group.Count(),
-                group.Max(observation => observation.UpdatedAt)))
-            .OrderBy(source => source.SourceTitle, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        return new IngestEntityFactSheet(fields, aliases, sources);
-    }
-
     public static bool TryReadPayloadString(string payloadJson, string propertyName, out string? value)
     {
         value = null;
@@ -367,119 +251,16 @@ public static class IngestSourceAssertions
         return new IngestAssertionRemovalResult(removed, document.Sources.Count);
     }
 
-    private static IngestAssertionRemovalResult RemoveChunk(
-        IDictionary<string, object?> properties,
-        string propertyKey,
-        Guid sourceId,
-        Guid sourceChunkId)
-    {
-        var document = ReadDocument(ReadRaw(properties, propertyKey));
-        var sourceKey = SourceKey(sourceId);
-        if (!document.Sources.TryGetValue(sourceKey, out var source))
-            return new IngestAssertionRemovalResult(false, document.Sources.Count);
-
-        var removed = source.Chunks.Remove(ChunkKey(sourceChunkId));
-        if (!removed)
-            return new IngestAssertionRemovalResult(false, document.Sources.Count);
-
-        if (source.Chunks.Count == 0)
-            document.Sources.Remove(sourceKey);
-        else
-            source.UpdatedAt = DateTime.UtcNow;
-
-        if (document.Sources.Count == 0)
-            properties.Remove(propertyKey);
-        else
-            properties[propertyKey] = Serialize(document);
-
-        return new IngestAssertionRemovalResult(true, document.Sources.Count);
-    }
-
     private static int CountSources(IReadOnlyDictionary<string, object?> properties, string propertyKey)
     {
         var document = ReadDocument(ReadRaw(properties, propertyKey));
         return document.Sources.Count;
     }
 
-    private static int CountSourceChunks(IReadOnlyDictionary<string, object?> properties, string propertyKey, Guid sourceId)
-    {
-        var document = ReadDocument(ReadRaw(properties, propertyKey));
-        return document.Sources.TryGetValue(SourceKey(sourceId), out var source)
-            ? source.Chunks.Count
-            : 0;
-    }
-
     private static bool ContainsSource(IReadOnlyDictionary<string, object?> properties, string propertyKey, Guid sourceId)
     {
         var document = ReadDocument(ReadRaw(properties, propertyKey));
         return document.Sources.ContainsKey(SourceKey(sourceId));
-    }
-
-    private static int CountObservations(IReadOnlyDictionary<string, object?> properties, string propertyKey)
-    {
-        var document = ReadDocument(ReadRaw(properties, propertyKey));
-        return document.Sources.Values.Sum(source => source.Chunks.Count);
-    }
-
-    private static IReadOnlyList<IngestSourceAssertionSummary> SummarizeAssertions(
-        IReadOnlyDictionary<string, object?> properties,
-        string propertyKey,
-        int maxSources)
-    {
-        var document = ReadDocument(ReadRaw(properties, propertyKey));
-        return document.Sources.Values
-            .OrderBy(source => source.SourceTitle, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Max(0, maxSources))
-            .Select(source => new IngestSourceAssertionSummary(
-                source.SourceId,
-                source.SourceTitle,
-                source.SourceKind,
-                source.Chunks.Count,
-                source.Chunks.Values
-                    .SelectMany(chunk => chunk.Aliases)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
-                    .Take(12)
-                    .ToArray(),
-                source.Chunks.Values
-                    .Select(chunk => chunk.Summary)
-                    .FirstOrDefault(summary => !string.IsNullOrWhiteSpace(summary)) ?? string.Empty,
-                source.UpdatedAt))
-            .ToList();
-    }
-
-    private static IReadOnlyList<IngestSourceObservation> ListObservations(
-        IReadOnlyDictionary<string, object?> properties,
-        string propertyKey,
-        int maxObservations)
-    {
-        var document = ReadDocument(ReadRaw(properties, propertyKey));
-        return document.Sources.Values
-            .OrderBy(source => source.SourceTitle ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .SelectMany(source => source.Chunks.Values
-                .OrderBy(chunk => chunk.SourceChunkIndex)
-                .Select(chunk => new IngestSourceObservation(
-                    source.SourceId ?? string.Empty,
-                    source.SourceTitle ?? string.Empty,
-                    source.SourceKind ?? string.Empty,
-                    chunk.JobId ?? string.Empty,
-                    chunk.SourceChunkId ?? string.Empty,
-                    chunk.SourceChunkIndex,
-                    chunk.Summary ?? string.Empty,
-                    new Dictionary<string, string?>(chunk.ObservedProperties ?? EmptyObservedProperties, StringComparer.OrdinalIgnoreCase),
-                    (chunk.Aliases ?? EmptyAliases)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
-                        .ToArray(),
-                    (chunk.WikiSections ?? [])
-                        .Select(NormalizeObservationSection)
-                        .Where(section => !string.IsNullOrWhiteSpace(section.Title) || !string.IsNullOrWhiteSpace(section.Body))
-                        .ToArray(),
-                    chunk.Notes ?? string.Empty,
-                    chunk.RecordedAt,
-                    chunk.UpdatedAt)))
-            .Take(Math.Max(0, maxObservations))
-            .ToList();
     }
 
     private static IngestSourceAssertionDocument ReadDocument(string? rawJson)
@@ -672,24 +453,10 @@ public static class IngestSourceAssertions
     private static string CitationKey(IngestWikiCitation citation) =>
         $"{citation.SourceId}|{citation.SourceChunkId}|{citation.SourceBlockId}|{citation.PageNumber}|{citation.Locator}";
 
-    private static string NormalizeSourceId(string? value, Guid fallback)
-    {
-        if (Guid.TryParse(value, out var guid))
-            return guid.ToString("N");
-        return fallback.ToString("N");
-    }
-
     private static string? NormalizeNullable(string? value)
     {
         var normalized = NormalizeFactText(value);
         return normalized.Length == 0 ? null : normalized;
-    }
-
-    private static string? Truncate(string? value, int max)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        var trimmed = value.Trim();
-        return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
 
     private static string MergeText(string target, string? next, bool replaceExisting)
@@ -710,75 +477,8 @@ public static class IngestSourceAssertions
             values.Add(value);
     }
 
-    private static void AddFactSheetField(
-        IDictionary<string, FactSheetFieldBuilder> builders,
-        string key,
-        string? value,
-        IngestSourceObservation observation)
-    {
-        var normalizedKey = NormalizeFactKey(key);
-        var normalizedValue = NormalizeFactText(value);
-        if (normalizedKey.Length == 0 || normalizedValue.Length == 0) return;
-        if (IsProtectedProperty(normalizedKey)) return;
-
-        if (!builders.TryGetValue(normalizedKey, out var builder))
-        {
-            builder = new FactSheetFieldBuilder(normalizedKey, HumanizeFactKey(normalizedKey));
-            builders[normalizedKey] = builder;
-        }
-
-        if (!builder.Values.Contains(normalizedValue, StringComparer.OrdinalIgnoreCase))
-            builder.Values.Add(normalizedValue);
-
-        var summaryText = NormalizeFactText(observation.Summary);
-        var referenceKey = $"{observation.SourceId}:{observation.SourceChunkId}:{normalizedKey}:{summaryText}";
-        if (builder.ReferenceKeys.Add(referenceKey))
-        {
-            builder.References.Add(new IngestFactSheetReference(
-                observation.SourceId,
-                observation.SourceTitle,
-                observation.SourceKind,
-                observation.SourceChunkId,
-                observation.SourceChunkIndex,
-                summaryText,
-                observation.UpdatedAt));
-        }
-    }
-
-    private static int FactSheetFieldRank(string key)
-    {
-        var index = Array.FindIndex(FactSheetFieldOrder, ordered => string.Equals(ordered, key, StringComparison.OrdinalIgnoreCase));
-        return index < 0 ? FactSheetFieldOrder.Length : index;
-    }
-
-    private static string NormalizeFactKey(string key) =>
-        (key ?? string.Empty).Trim();
-
     private static string NormalizeFactText(string? value) =>
         string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-    private static string HumanizeFactKey(string key)
-    {
-        var normalized = key.Trim();
-        if (normalized.Length == 0) return string.Empty;
-        var chars = new List<char> { char.ToUpperInvariant(normalized[0]) };
-        for (var index = 1; index < normalized.Length; index++)
-        {
-            var current = normalized[index];
-            var previous = normalized[index - 1];
-            if ((current == '_' || current == '-') && chars[^1] != ' ')
-            {
-                chars.Add(' ');
-                continue;
-            }
-
-            if (char.IsUpper(current) && char.IsLower(previous) && chars[^1] != ' ')
-                chars.Add(' ');
-            chars.Add(current);
-        }
-
-        return new string(chars.ToArray());
-    }
 
     private static bool LooksLikeJsonRoot(string json, char rootChar)
     {
@@ -820,15 +520,6 @@ public static class IngestSourceAssertions
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
-
-    private sealed class FactSheetFieldBuilder(string key, string label)
-    {
-        public string Key { get; } = key;
-        public string Label { get; } = label;
-        public List<string> Values { get; } = [];
-        public List<IngestFactSheetReference> References { get; } = [];
-        public HashSet<string> ReferenceKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
 }
 
 public sealed record IngestAssertionInput(
@@ -855,59 +546,8 @@ public sealed record IngestAssertionRemovalResult(
     bool Removed,
     int RemainingSourceCount);
 
-public sealed record IngestSourceAssertionSummary(
-    string SourceId,
-    string SourceTitle,
-    string SourceKind,
-    int ChunkCount,
-    IReadOnlyList<string> Aliases,
-    string Summary,
-    DateTime UpdatedAt);
-
-public sealed record IngestSourceObservation(
-    string SourceId,
-    string SourceTitle,
-    string SourceKind,
-    string JobId,
-    string SourceChunkId,
-    int SourceChunkIndex,
-    string Summary,
-    IReadOnlyDictionary<string, string?> ObservedProperties,
-    IReadOnlyList<string> Aliases,
-    IReadOnlyList<IngestSourceObservationSection> WikiSections,
-    string Notes,
-    DateTime RecordedAt,
-    DateTime UpdatedAt);
-
 public sealed record IngestSourceObservationSection(
     string Id,
     string Title,
     string Body,
     IReadOnlyList<IngestWikiCitation> Citations);
-
-public sealed record IngestEntityFactSheet(
-    IReadOnlyList<IngestFactSheetField> Fields,
-    IReadOnlyList<string> Aliases,
-    IReadOnlyList<IngestFactSheetSource> Sources);
-
-public sealed record IngestFactSheetField(
-    string Key,
-    string Label,
-    string Value,
-    IReadOnlyList<IngestFactSheetReference> References);
-
-public sealed record IngestFactSheetReference(
-    string SourceId,
-    string SourceTitle,
-    string SourceKind,
-    string SourceChunkId,
-    int SourceChunkIndex,
-    string Summary,
-    DateTime UpdatedAt);
-
-public sealed record IngestFactSheetSource(
-    string SourceId,
-    string SourceTitle,
-    string SourceKind,
-    int ObservationCount,
-    DateTime UpdatedAt);

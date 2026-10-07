@@ -93,45 +93,6 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         }
     }
 
-    private static void AppendCenteredTitle(StringBuilder sb, PublishDocument document)
-    {
-        AppendHeading(sb, document.DisplayTitle, '=');
-        if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
-            sb.AppendLine(document.Profile.Subtitle.Trim());
-        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
-            sb.AppendLine().Append("by ").AppendLine(document.Profile.Author.Trim());
-    }
-
-    private static void AppendMetadata(StringBuilder sb, PublishDocument document)
-    {
-        var lines = new[]
-        {
-            ("Publisher", document.Profile.Publisher),
-            ("Copyright", document.Profile.Copyright),
-            ("ISBN", document.Profile.Isbn),
-            ("Language", document.Profile.Language),
-            ("Description", document.Profile.Description),
-        };
-
-        foreach (var (label, value) in lines)
-        {
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            sb.Append(label).Append(": ").AppendLine(value.Trim());
-        }
-    }
-
-    private static void AppendPlainToc(StringBuilder sb, PublishDocument document)
-    {
-        AppendMatterStart(sb, "Table of Contents");
-        foreach (var section in document.Sections)
-        {
-            if (section.IncludeHeading)
-                sb.AppendLine(section.Title);
-            foreach (var chapter in section.Chapters)
-                sb.Append("  ").AppendLine(chapter.Title);
-        }
-    }
-
     private static void AppendMatterStart(StringBuilder sb, string title)
     {
         AppendGap(sb);
@@ -279,24 +240,6 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         }
     }
 
-    private static void AppendMetadata(StringBuilder sb, PublishDocument document)
-    {
-        var lines = new[]
-        {
-            ("Publisher", document.Profile.Publisher),
-            ("Copyright", document.Profile.Copyright),
-            ("ISBN", document.Profile.Isbn),
-            ("Language", document.Profile.Language),
-            ("Description", document.Profile.Description),
-        };
-
-        foreach (var (label, value) in lines)
-        {
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            sb.AppendLine().Append("**").Append(label).Append(":** ").AppendLine(EscapeInline(value));
-        }
-    }
-
     private static void AppendToc(StringBuilder sb, PublishDocument document)
     {
         sb.AppendLine().AppendLine("## Table of Contents");
@@ -361,33 +304,6 @@ public sealed class MarkdownPublishFormatter : IPublishExportFormatter
         sb.Append("## ").AppendLine(EscapeHeading(document.Citations.BibliographyTitle));
         foreach (var entry in document.Citations.BibliographyEntries)
             sb.AppendLine().AppendLine(SemanticPublishFormatting.CitationMarkdown(entry.Runs));
-    }
-
-    private static IReadOnlyList<string> SplitMarkdownParagraphs(string text)
-    {
-        var paragraphs = new List<string>();
-        var current = new StringBuilder();
-        foreach (var line in SplitLines(text))
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                Flush();
-                continue;
-            }
-
-            if (current.Length > 0) current.AppendLine();
-            current.Append(line.TrimEnd());
-        }
-
-        Flush();
-        return paragraphs;
-
-        void Flush()
-        {
-            if (current.Length == 0) return;
-            paragraphs.Add(current.ToString());
-            current.Clear();
-        }
     }
 
     private static PublishAssetDocument? FindAsset(PublishDocument document, Guid imageId) =>
@@ -913,20 +829,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         return sb.Append("</svg>").ToString();
     }
 
-    private static string RenderTitleBody(PublishDocument document)
-    {
-        var sb = new StringBuilder();
-        sb.Append("<section class=\"title-page\"><h1>").Append(Html(document.DisplayTitle)).AppendLine("</h1>");
-        if (!string.IsNullOrWhiteSpace(document.Profile.Subtitle))
-            sb.Append("<p class=\"subtitle\">").Append(Html(document.Profile.Subtitle)).AppendLine("</p>");
-        if (!string.IsNullOrWhiteSpace(document.Profile.Author))
-            sb.Append("<p class=\"byline\">by ").Append(Html(document.Profile.Author)).AppendLine("</p>");
-        if (!string.IsNullOrWhiteSpace(document.Profile.Publisher))
-            sb.Append("<p class=\"publisher\">").Append(Html(document.Profile.Publisher)).AppendLine("</p>");
-        sb.AppendLine("</section>");
-        return sb.ToString();
-    }
-
     private static string RenderCoverBody(
         PublishDocument document,
         IReadOnlyList<EpubImageItem> imageItems,
@@ -1036,15 +938,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 citationHrefPrefix));
         sb.AppendLine("</div>");
         sb.AppendLine("</article>");
-        return sb.ToString();
-    }
-
-    private static string RenderMatterBody(string title, string text)
-    {
-        var sb = new StringBuilder();
-        sb.Append("<section class=\"matter-page\"><h1>").Append(Html(title)).AppendLine("</h1>");
-        AppendTextBlocks(sb, text, "prose");
-        sb.AppendLine("</section>");
         return sb.ToString();
     }
 
@@ -1198,35 +1091,6 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         CompositionSemanticRole.Credit => ("p", "credit"),
         _ => ("p", null),
     };
-
-    private static void AppendAssetFigure(
-        StringBuilder sb,
-        IReadOnlyList<EpubImageItem> imageItems,
-        Guid imageId,
-        string caption,
-        string altTextOverride)
-    {
-        var image = imageItems.FirstOrDefault(candidate => !candidate.IsCover && candidate.Asset.Id == imageId);
-        if (image is null) return;
-        var alt = string.IsNullOrWhiteSpace(altTextOverride) ? image.Asset.AltText : altTextOverride;
-
-        sb.Append("<figure class=\"figure\"><img src=\"").Append(Html(image.Href))
-            .Append("\" alt=\"").Append(Html(alt)).AppendLine("\" />");
-        if (!string.IsNullOrWhiteSpace(caption))
-            sb.Append("<figcaption>").Append(Html(caption)).AppendLine("</figcaption>");
-        sb.AppendLine("</figure>");
-    }
-
-    private static void AppendParagraph(StringBuilder sb, IReadOnlyList<string> paragraph, string cssClass)
-    {
-        sb.Append("<p class=\"").Append(cssClass).Append("\">");
-        for (var i = 0; i < paragraph.Count; i++)
-        {
-            if (i > 0) sb.Append("<br />");
-            sb.Append(Html(paragraph[i]));
-        }
-        sb.AppendLine("</p>");
-    }
 
     private static EpubViewport CoverViewport(PublishDocumentProfile profile)
     {

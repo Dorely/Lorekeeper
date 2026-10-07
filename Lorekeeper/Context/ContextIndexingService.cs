@@ -587,16 +587,6 @@ public sealed class ContextIndexingService(
             sb.Append(prefix).Append("- ").Append(property.Key).Append(": ").AppendLine(property.Value?.ToString());
     }
 
-    private static void AppendObservedProperties(StringBuilder sb, IReadOnlyDictionary<string, string?> properties, string prefix)
-    {
-        foreach (var property in properties
-            .Where(property => !string.IsNullOrWhiteSpace(property.Value))
-            .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            sb.Append(prefix).Append(property.Key).Append(": ").AppendLine(property.Value);
-        }
-    }
-
     private static void AppendOptional(StringBuilder sb, string label, string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return;

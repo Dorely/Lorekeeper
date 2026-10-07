@@ -1523,15 +1523,6 @@ public sealed class PublishAssistantTools(
         && targetId != Guid.Empty
         && !string.IsNullOrWhiteSpace(target.TargetKind);
 
-    private string ReadPressRuntimeReadiness(PublicationEditionFormat format, PublicationVendor vendor)
-    {
-        var readiness = renders.GetRuntimeReadiness(format, vendor);
-        PublicationPressDescription? description = readiness.IsReady
-            ? renders.GetRuntimeDescription()
-            : null;
-        return Serialize(new { readiness, description });
-    }
-
     private async Task<string> ListNamedStylesAsync(PublishAssistantContext context, int offset, int limit)
     {
         var all = await manuscriptStyles.ListAsync(context.ProjectId);
@@ -3542,5 +3533,4 @@ public sealed class PublishAssistantTools(
         hasMore = start + returned < total,
         nextStart = start + returned < total ? start + returned : (int?)null,
     };
-    private static string Truncate(string value, int maximum) => value.Length <= maximum ? value : value[..Math.Max(0, maximum - 1)] + "…";
 }

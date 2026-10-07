@@ -912,35 +912,6 @@
         return !_dirty;
     }
 
-    private string SerializeHistorySelection() => JsonSerializer.Serialize(new
-    {
-        objectId = _selectedId,
-        surface = _surfaceRole.ToString()
-    });
-
-    private void RestoreHistorySelection(string selectionJson)
-    {
-        if (string.IsNullOrWhiteSpace(selectionJson))
-        {
-            _selectedId = null;
-            return;
-        }
-        try
-        {
-            using var document = JsonDocument.Parse(selectionJson);
-            if (document.RootElement.TryGetProperty("objectId", out var objectIdElement)
-                && objectIdElement.ValueKind == JsonValueKind.String
-                && Guid.TryParse(objectIdElement.GetString(), out var objectId)
-                && _objects.Any(item => item.Id == objectId))
-                _selectedId = objectId;
-            else
-                _selectedId = null;
-        }
-        catch (JsonException)
-        {
-            _selectedId = null;
-        }
-    }
     private void HandleKeyDown(KeyboardEventArgs e) { if (InteractionLocked || Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; if (IsCropRepositioning(selected)) { switch (e.Key) { case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break; case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break; case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break; case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break; } return; } switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private string StageStyle() => $"--cover-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--cover-zoom:{_zoom:R};--cover-bg:{_background}";
     private string FrontStyle => BoundsStyle(RegionBounds(CompositionRegionConstraint.Front));

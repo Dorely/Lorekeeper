@@ -399,14 +399,3 @@ public sealed class EditionContentService(
         return coreVariants.SequenceEqual(releaseVariants);
     }
 }
-
-internal static class ManuscriptBlockListExtensions
-{
-    public static int FindIndex(this IReadOnlyList<ManuscriptBlock> blocks, Func<ManuscriptBlock, bool> predicate)
-    {
-        for (var index = 0; index < blocks.Count; index++)
-            if (predicate(blocks[index]))
-                return index;
-        return -1;
-    }
-}

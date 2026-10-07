@@ -25,11 +25,6 @@ public sealed class PublishService(
     IAuthoringMutationFence authoringFence,
     ICitationFormatter? citationFormatter = null) : IPublishService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
-
     public Task<PublicationBookView> GetCoreWorkspaceAsync(
         Guid projectId,
         CancellationToken cancellationToken = default) =>
@@ -617,18 +612,6 @@ public sealed class PublishService(
         return await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
     }
-    private async Task<PublicationEdition> GetEditionAsync(
-        Guid projectId,
-        Guid editionId,
-        CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        return await db.PublicationEditions.FirstOrDefaultAsync(
-                    edition => edition.ProjectId == projectId && edition.Id == editionId,
-                    cancellationToken)
-                ?? throw new InvalidOperationException("Publication release was not found.");
-    }
     private static PublishDocumentProfile ProfileDocument(PublicationEdition profile) =>
         new(
             profile.TitleOverride,
@@ -851,14 +834,6 @@ public sealed class PublishService(
         int fallback) =>
         selections.FirstOrDefault(selection =>
             selection.TargetKind == kind && selection.TargetId == targetId)?.SortOrder ?? fallback;
-
-    private static bool TargetIncluded(
-        IReadOnlyList<PublishSectionDocument> sections,
-        PublishOutlineTargetKind kind,
-        Guid targetId) =>
-        kind == PublishOutlineTargetKind.Act
-            ? sections.Any(section => section.ActId == targetId)
-            : sections.SelectMany(section => section.Chapters).Any(chapter => chapter.Id == targetId);
 
     private static string ExportFileName(PublishDocument document, string extension)
     {

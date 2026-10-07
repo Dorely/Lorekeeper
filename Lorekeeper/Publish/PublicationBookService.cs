@@ -93,12 +93,6 @@ public interface IPublicationBookService
     Task<string> GetSourceFingerprintAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 
-public sealed record PublicationCoverHistoryResult(
-    PublicationCoverDesignView Cover,
-    AuthoringHistoryState History,
-    string ActionLabel,
-    string SelectionJson);
-
 internal readonly record struct PublicationOutlineTarget(
     PublishOutlineTargetKind TargetKind,
     Guid TargetId);

@@ -1510,33 +1510,6 @@
         catch (JSDisconnectedException) { }
     }
 
-    private string SerializeHistorySelection() => JsonSerializer.Serialize(new
-    {
-        objectId = _selectedId,
-        variantId = _variant?.Id
-    });
-
-    private void RestoreHistorySelection(string selectionJson)
-    {
-        if (string.IsNullOrWhiteSpace(selectionJson))
-            return;
-        try
-        {
-            using var document = JsonDocument.Parse(selectionJson);
-            if (document.RootElement.TryGetProperty("objectId", out var objectIdElement)
-                && objectIdElement.ValueKind == JsonValueKind.String
-                && Guid.TryParse(objectIdElement.GetString(), out var objectId)
-                && _objects.Any(item => item.Id == objectId))
-                _selectedId = objectId;
-            else
-                _selectedId = null;
-        }
-        catch (JsonException)
-        {
-            _selectedId = null;
-        }
-    }
-
     private string StageStyle() => $"--surface-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--zoom:{_zoom:R}";
     private string ObjectStyle(CompositionObject item) { var resolved = Resolved(item); var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null; var bounds = group is null ? item.Bounds : EffectiveBounds(item, group); var rotation = item.RotationDegrees + (group?.RotationDegrees ?? 0); var opacity = item.Opacity * (group?.Opacity ?? 1); var background = item.Kind == CompositionObjectKind.Text ? CssColor(resolved.BackgroundColor, resolved.BackgroundOpacity) : item.Kind is CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse ? resolved.FillColor : "transparent"; var strokeCqw = resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100; var fontCqw = resolved.FontSizePoints / _scene.Surface.WidthPoints * 100; var border = item.Kind == CompositionObjectKind.Line ? "0" : $"{strokeCqw:R}cqw solid {resolved.StrokeColor}"; var radius = item.Kind == CompositionObjectKind.Ellipse ? "50%" : "0"; return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%;opacity:{opacity};transform:rotate({rotation}deg);z-index:{item.ZIndex + (group?.ZIndex ?? 0)};background:{background};border:{border};border-radius:{radius};color:{resolved.FillColor};font-family:{FontCssName(resolved.FontFamilyKey)};font-size:{fontCqw:R}cqw;font-style:{(resolved.Italic ? "italic" : "normal")};font-weight:{resolved.FontWeight};line-height:{resolved.LineHeight};letter-spacing:{resolved.LetterSpacingEm}em;text-align:{CssTextAlignment(resolved.TextAlignment)};justify-content:{CssVerticalAlignment(resolved.VerticalAlignment)};text-shadow:{CssTextShadow(resolved.TextShadow)}"); }
     private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");

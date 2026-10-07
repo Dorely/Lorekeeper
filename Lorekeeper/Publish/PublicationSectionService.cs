@@ -51,12 +51,6 @@ public sealed record PublicationSectionDesignedPageResult(
     DesignedPageView Page,
     string PlacementId);
 
-public sealed record PublicationSectionHistoryResult(
-    PublicationSectionView Section,
-    AuthoringHistoryState History,
-    string ActionLabel,
-    string SelectionJson);
-
 public interface IPublicationSectionService
 {
     Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default);
@@ -1267,12 +1261,6 @@ public sealed class PublicationSectionService(
                     .SetProperty(item => item.Revision, item => item.Revision + 1)
                     .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
     }
-    private static string RemapDocumentId(string json, Guid id)
-    {
-        var document = ManuscriptCodec.Deserialize(json);
-        return ManuscriptCodec.Serialize(document with { ManuscriptId = id });
-    }
-
     private static ManuscriptDocument CreateSystemDocument(Guid id, PublicationSectionSystemRole role)
     {
         List<ManuscriptBlock> blocks = role switch

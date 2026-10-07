@@ -1017,23 +1017,6 @@ public sealed class ProjectVersionRestoreService(
         }
     }
 
-    private static void ValidateReviewTarget(ProjectVersionReviewTarget target)
-    {
-        if (target.ChapterId == Guid.Empty)
-            throw new ArgumentException("A review target must identify a chapter.", nameof(target));
-        if (!Enum.IsDefined(target.ContentTarget.Kind))
-            throw new ArgumentException("The review content target is invalid.", nameof(target));
-        if (target.ContentTarget.IsCore)
-        {
-            if (target.ContentTarget.EditionId is not null)
-                throw new ArgumentException("The Core review target cannot include an edition ID.", nameof(target));
-            return;
-        }
-
-        if (target.ContentTarget.EditionId is not Guid editionId || editionId == Guid.Empty)
-            throw new ArgumentException("An edition review target requires an edition ID.", nameof(target));
-    }
-
     private static VersionHistorySnapshotNarrativeArea MergeSelectedChapters(
         VersionHistorySnapshotNarrativeArea current,
         VersionHistorySnapshotNarrativeArea target,

@@ -929,17 +929,6 @@ public sealed class PublicationCoverService(
         PublicationEdition edition,
         CoverGeometry geometry,
         CompositionScene scene,
-        List<string> diagnostics)
-    {
-        var structured = new List<PublicationCoverDiagnostic>();
-        AddSceneDiagnostics(edition, geometry, scene, structured);
-        diagnostics.AddRange(structured.Select(item => item.Message));
-    }
-
-    internal static void AddSceneDiagnostics(
-        PublicationEdition edition,
-        CoverGeometry geometry,
-        CompositionScene scene,
         List<PublicationCoverDiagnostic> diagnostics)
     {
         if (edition.Vendor == PublicationVendor.IngramSpark

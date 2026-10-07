@@ -464,25 +464,6 @@ public static partial class ManuscriptCodec
             JsonSerializer.Serialize(left.Notes, JsonOptions),
             JsonSerializer.Serialize(right.Notes, JsonOptions),
             StringComparison.Ordinal);
-
-    public static bool IsPlainTextOnly(ManuscriptDocument document) =>
-        document.Content.All(block =>
-            block.Type switch
-            {
-                ManuscriptBlockType.SceneBreak =>
-                    string.Equals(
-                        block.StyleRole,
-                        ManuscriptStyleRoles.SceneBreak,
-                        StringComparison.OrdinalIgnoreCase),
-                ManuscriptBlockType.Paragraph =>
-                    string.Equals(
-                        block.StyleRole,
-                        ManuscriptStyleRoles.Body,
-                        StringComparison.OrdinalIgnoreCase)
-                    && block.Content.All(inline => inline.Type == ManuscriptInlineType.Text && inline.Marks.Count == 0),
-                _ => false,
-            });
-
     private static bool IsSceneBreak(string value)
     {
         var compact = string.Concat(value.Where(character => !char.IsWhiteSpace(character)));

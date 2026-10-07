@@ -56,12 +56,6 @@ public interface IDesignedPageService
     Task<DesignedPageView> ResetReleaseOverrideAsync(Guid projectId, Guid pageId, Guid editionId, CancellationToken cancellationToken = default);
 }
 
-public sealed record DesignedPageHistoryMutationResult(
-    DesignedPageContent Content,
-    AuthoringHistoryState History,
-    string ActionLabel,
-    string SelectionJson);
-
 public sealed class DesignedPageService(
     IAppDatabaseOperationFactory database,
     IManuscriptService manuscripts,

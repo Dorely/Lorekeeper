@@ -1229,39 +1229,6 @@ public sealed class PublicationEditionService(
             ManuscriptCodec.JsonOptions);
     }
 
-    private async Task<string> BibliographicContentHashAsync(
-        Guid editionId,
-        CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var projectId = await db.PublicationEditions.AsNoTracking().Where(item => item.Id == editionId)
-            .Select(item => item.ProjectId).SingleAsync(cancellationToken);
-        var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
-        var outline = effective.OutlineItems.OrderBy(item => item.SortOrder)
-            .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }).ToList();
-        var publicationSections = effective.PublicationSections
-            .OrderBy(item => item.Anchor).ThenBy(item => item.TargetId).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
-            .Select(item => new
-            {
-                item.CoreSectionId,
-                item.Title,
-                item.Kind,
-                item.SystemRole,
-                item.Anchor,
-                item.TargetKind,
-                item.TargetId,
-                item.InclusionMode,
-                item.StartSide,
-                item.LocalOrder,
-                Content = CanonicalManuscriptContent(ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
-            });
-        var canonical = JsonSerializer.Serialize(
-            new { Outline = outline, PublicationSections = publicationSections },
-            ManuscriptCodec.JsonOptions);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
-    }
-
     private async Task EnsureSharedIsbnContentMutableAsync(
         PublicationEdition edition,
         CancellationToken cancellationToken)
@@ -1710,15 +1677,10 @@ public sealed class PublicationEditionService(
             PublicationSectionOrderJson = source.PublicationSectionOrderJson,
         };
 
-    private static string Clean(string? value) => value?.Trim() ?? string.Empty;
-
     private static void AddDifference<T>(List<string> differences, string label, T left, T right)
     {
         if (!EqualityComparer<T>.Default.Equals(left, right))
             differences.Add($"{label}: {left} → {right}");
     }
-
-    private static string FirstNonEmpty(params string[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
 }

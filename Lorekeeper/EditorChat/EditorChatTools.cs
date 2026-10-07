@@ -1597,28 +1597,6 @@ IActService acts,
         },
     };
 
-    private async Task<object> EntityPayloadAsync(
-        Guid projectId,
-        StoryEntity entity,
-        EntityRelationContextOptions relationOptions)
-    {
-        var relationContext = await entityRelations.BuildForEntityAsync(projectId, entity.Id, relationOptions);
-        return new
-        {
-            id = entity.Id,
-            type = entity.Type,
-            name = entity.Name,
-            order = entity.Order,
-            parentId = entity.ParentId,
-            properties = entity.Properties,
-            summary = entity.Summary,
-            aliases = entity.Aliases,
-            wikiSections = entity.WikiSections,
-            sourceEvidence = entity.SourceEvidence,
-            relationContext,
-        };
-    }
-
     private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId, int? pageNumber)
     {
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
@@ -2097,12 +2075,6 @@ IActService acts,
             return JsonSerializer.Serialize(new { ok = false, code = "COMPOSITION_REJECTED", targetId = chapterId, summary = ex.Message });
         }
     }
-
-    private static string LayoutLabel(DesignedPageLayoutMode layoutMode) => layoutMode switch
-    {
-        DesignedPageLayoutMode.FacingSpread => "facing-spread",
-        _ => "single-page",
-    };
 
     private async Task<string> ApplyFocusedManuscriptOperationsAsync(
         EditorChatContext ctx,
@@ -3240,35 +3212,6 @@ IActService acts,
             : (bitmap.Width, bitmap.Height);
     }
 
-    private static object RasterMetadata(int? width, int? height) => new
-    {
-        width,
-        height,
-        orientation = width is null || height is null
-            ? "unknown"
-            : width == height
-                ? "square"
-                : width > height ? "landscape" : "portrait",
-        aspectRatio = width is null || height is null || width <= 0 || height <= 0
-            ? "unknown"
-            : ReducedAspectRatio(width.Value, height.Value),
-    };
-
-    private static string ReducedAspectRatio(int width, int height)
-    {
-        var a = Math.Abs(width);
-        var b = Math.Abs(height);
-        while (b != 0)
-        {
-            var next = a % b;
-            a = b;
-            b = next;
-        }
-
-        var divisor = Math.Max(1, a);
-        return $"{width / divisor}:{height / divisor}";
-    }
-
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
 
@@ -3519,11 +3462,6 @@ IActService acts,
 
     private static string? TruncatePropertyValue(string? value) =>
         string.IsNullOrEmpty(value) || value.Length <= 240 ? value : value[..240] + "...";
-
-    private static double HeightUtilizationPercent(double availableHeightPixels, double requiredHeightPixels) =>
-        availableHeightPixels <= 0
-            ? 0
-            : Math.Round(requiredHeightPixels / availableHeightPixels * 100, 1, MidpointRounding.AwayFromZero);
 
     private static bool IsSearchableEntityType(string type) =>
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)

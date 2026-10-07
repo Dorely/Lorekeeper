@@ -828,42 +828,6 @@ public sealed class VisualCompositionMigrationService(
         };
     }
 
-    private static CompositionScene AdaptSceneToStandardLeaf(
-        CompositionScene source,
-        PublicationEdition edition)
-    {
-        var targetWidth = edition.PageWidthInches * 72;
-        var targetHeight = edition.PageHeightInches * 72;
-        var scale = Math.Min(targetWidth / source.Surface.WidthPoints, targetHeight / source.Surface.HeightPoints);
-        var contentWidth = source.Surface.WidthPoints * scale;
-        var contentHeight = source.Surface.HeightPoints * scale;
-        var offsetX = (targetWidth - contentWidth) / 2;
-        var offsetY = (targetHeight - contentHeight) / 2;
-        return source with
-        {
-            Surface = source.Surface with
-            {
-                Kind = CompositionSurfaceKind.SinglePage,
-                OutputPageMode = CompositionOutputPageMode.EditionLeaves,
-                WidthPoints = targetWidth,
-                HeightPoints = targetHeight,
-                BleedPoints = edition.Bleed ? 9 : 0,
-                SafeInsetPoints = edition.PageMarginInches * 72,
-                AllowIndependentPdfPage = false,
-            },
-            Objects = source.Objects.Select(item => item with
-            {
-                Bounds = new CompositionBounds
-                {
-                    XPercent = (offsetX + item.Bounds.XPercent / 100 * contentWidth) / targetWidth * 100,
-                    YPercent = (offsetY + item.Bounds.YPercent / 100 * contentHeight) / targetHeight * 100,
-                    WidthPercent = item.Bounds.WidthPercent / 100 * contentWidth / targetWidth * 100,
-                    HeightPercent = item.Bounds.HeightPercent / 100 * contentHeight / targetHeight * 100,
-                },
-            }).ToList(),
-        };
-    }
-
     internal static CompositionScene AdaptLegacySceneForEdition(
         CompositionScene source,
         ChapterPageLayoutKind layoutKind,

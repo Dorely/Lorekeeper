@@ -70,50 +70,6 @@ public static class AuthoringSnapshotCodec
             _options));
     }
 
-    public static AuthoringManuscriptSnapshot ReadManuscript(string payload) =>
-        JsonSerializer.Deserialize<AuthoringManuscriptSnapshot>(payload, _options)
-        ?? throw new InvalidDataException("The authoring-history manuscript snapshot is malformed.");
-
-    public static string DescribeManuscriptAction(string beforePayload, string afterPayload, string documentName)
-    {
-        var before = ManuscriptCodec.Deserialize(ReadManuscript(beforePayload).ManuscriptJson);
-        var after = ManuscriptCodec.Deserialize(ReadManuscript(afterPayload).ManuscriptJson);
-        var beforePages = before.Content
-            .Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.DesignedPageId.HasValue)
-            .Select(item => item.DesignedPageId!.Value)
-            .ToList();
-        var afterPages = after.Content
-            .Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.DesignedPageId.HasValue)
-            .Select(item => item.DesignedPageId!.Value)
-            .ToList();
-        if (afterPages.Except(beforePages).Any())
-            return "Insert Designed Page";
-        if (beforePages.Except(afterPages).Any())
-            return "Delete Designed Page";
-        if (!beforePages.SequenceEqual(afterPages))
-            return "Move Designed Page";
-
-        var beforeFigures = before.Content
-            .Where(item => item.Type == ManuscriptBlockType.Figure)
-            .Select(item => JsonSerializer.Serialize(item, _options));
-        var afterFigures = after.Content
-            .Where(item => item.Type == ManuscriptBlockType.Figure)
-            .Select(item => JsonSerializer.Serialize(item, _options));
-        if (!beforeFigures.SequenceEqual(afterFigures))
-            return "Edit Figure";
-
-        var beforeStructure = before.Content.Select(item => (item.Id, item.Type));
-        var afterStructure = after.Content.Select(item => (item.Id, item.Type));
-        if (!beforeStructure.SequenceEqual(afterStructure))
-            return $"Edit {documentName} structure";
-        return !string.Equals(
-            ManuscriptCodec.ProjectPlainText(before),
-            ManuscriptCodec.ProjectPlainText(after),
-            StringComparison.Ordinal)
-            ? $"Edit {documentName} text"
-            : $"Format {documentName} text";
-    }
-
     public static async Task<string> CaptureDesignedPageAsync(
         AppDbContext db,
         Guid projectId,

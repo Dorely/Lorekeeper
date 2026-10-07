@@ -56,16 +56,6 @@ public sealed class ProjectImportJobIntegrationTests
                 new AppDatabaseWriteCoordinator(),
                 projectMutations);
 
-    private sealed class TestWebHostEnvironment(string webRootPath) : IWebHostEnvironment
-    {
-        public string ApplicationName { get; set; } = "Lorekeeper.Tests";
-        public IFileProvider WebRootFileProvider { get; set; } = new PhysicalFileProvider(webRootPath);
-        public string WebRootPath { get; set; } = webRootPath;
-        public string EnvironmentName { get; set; } = "Development";
-        public string ContentRootPath { get; set; } = Directory.GetParent(webRootPath)!.FullName;
-        public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(Directory.GetParent(webRootPath)!.FullName);
-    }
-
     [Fact]
     public async Task V12CoverImportPreservesLegacyBodyExclusionAndClearsAmbiguousArtwork()
     {

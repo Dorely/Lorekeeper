@@ -38,7 +38,4 @@ public static class ChapterFormatting
         var normalized = body.Replace("\r\n", "\n").Replace('\r', '\n');
         return [.. normalized.Split('\n')];
     }
-
-    /// <summary>Join lines back into a body using LF line endings.</summary>
-    public static string JoinLines(IEnumerable<string> lines) => string.Join("\n", lines);
 }

@@ -990,15 +990,6 @@ public sealed class ProjectImageJobService(
         return asset;
     }
 
-    private async Task TouchProjectAsync(Guid projectId, DateTime now, CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var project = await db.Projects.FirstOrDefaultAsync(candidate => candidate.Id == projectId, cancellationToken);
-        if (project is not null)
-            project.UpdatedAt = now;
-    }
-
     private ProjectImageGenerationWorkItem ToWorkItem(ProjectImageGenerationJob job) =>
         new(
             job.ProjectId,

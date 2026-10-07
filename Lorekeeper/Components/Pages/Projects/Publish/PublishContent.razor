@@ -1611,20 +1611,6 @@ else
         ? _coreOutline.Count(item => _coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId)))
         : _releaseSelections.Count(item => item.Value);
 
-    private async Task RefreshCoreDataAsync()
-    {
-        if (Project is null) return;
-        _core = await Books.GetOrCreateAsync(Project.Id);
-        var details = await Books.GetDetailsAsync(Project.Id);
-        _coreOutline = details.Outline;
-        _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
-        _coreDetailsLoaded = true;
-        _coreDraft = CoreDraft.From(_core);
-        _coreDirty = false;
-        _coreOutlineDirty = false;
-        _releases = await Releases.ListAsync(Project.Id);
-    }
-
     private async Task SaveCoreAsync()
     {
         if (Project is null || _core is null || (!_coreDirty && !_coreOutlineDirty)) return;
@@ -2536,7 +2522,6 @@ else
 
     private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; QueueFormAutosave(); }
     private void CoreCitationStyleChanged(ChangeEventArgs args) { if (Enum.TryParse<CitationStyle>(args.Value?.ToString(), out var style)) { _coreDraft.CitationStyle = style; _coreDirty = true; QueueFormAutosave(); } }
-    private void MarkCoreDirty() { _coreDirty = true; QueueFormAutosave(); }
     private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; QueueFormAutosave(); }
     private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; QueueFormAutosave(); }
     private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }

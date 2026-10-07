@@ -168,10 +168,6 @@ public sealed class DesktopUpdateService : IDesktopUpdateService
             Clean(version),
             ReleaseUri: releaseUri));
     }
-
-    public void MarkError(string error) =>
-        SetSnapshot(new DesktopUpdateSnapshot(DesktopUpdateStatus.Error, Error: Clean(error)));
-
     private void SetSnapshot(DesktopUpdateSnapshot snapshot)
     {
         lock (_lock)

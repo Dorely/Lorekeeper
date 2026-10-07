@@ -464,11 +464,6 @@
             ?? string.Empty;
     }
 
-    private static string ObservationPreview(IngestSourceObservation observation) =>
-        !string.IsNullOrWhiteSpace(observation.Summary) ? observation.Summary
-        : !string.IsNullOrWhiteSpace(observation.Notes) ? observation.Notes
-        : observation.ObservedProperties.Values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-
     private static string PluralSuffix(int count) => count == 1 ? string.Empty : "s";
 
     private async Task SaveEditAsync(StoryEntity e)

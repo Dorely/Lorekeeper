@@ -20,31 +20,6 @@ public static partial class LogRedaction
         "apikey",
         "session_key",
     ];
-
-    public static IReadOnlyDictionary<string, string> RedactHeaders(IEnumerable<KeyValuePair<string, string>>? headers)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            if (headers is not null)
-            {
-                foreach (var header in headers)
-                {
-                    var name = header.Key.Trim();
-                    result[name] = IsSensitive(name) ? RedactedPlaceholder : header.Value;
-                }
-            }
-        }
-        catch
-        {
-            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["payload"] = FullyRedactedPlaceholder,
-            };
-        }
-        return result;
-    }
-
     public static string RedactJson(string? payload)
     {
         if (string.IsNullOrWhiteSpace(payload))

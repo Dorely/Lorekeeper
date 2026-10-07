@@ -2112,9 +2112,6 @@ public sealed class PublicationRenderProcessor(
     private static Guid DeterministicFontId(string value) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
-    internal static PressStagedAsset StageAsset(PublishAssetDocument asset)
-        => StageAsset(asset, 256L * 1024 * 1024);
-
     private static PressStagedAsset StageAsset(PublishAssetDocument asset, long maximumBytes)
     {
         if (asset.Data.LongLength == 0 || asset.Data.LongLength > maximumBytes)

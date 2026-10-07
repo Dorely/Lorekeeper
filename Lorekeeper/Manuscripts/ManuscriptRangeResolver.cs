@@ -36,22 +36,6 @@ public static class ManuscriptRangeResolver
             return block with { Content = content };
         }).ToList();
     }
-
-    public static string ResolveText(
-        ManuscriptDocument document,
-        IReadOnlyList<ManuscriptRangeReference> references)
-    {
-        var blocks = document.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
-        return string.Join(" ", references.Select(reference =>
-        {
-            if (!blocks.TryGetValue(reference.BlockId, out var block))
-                throw new InvalidDataException($"Content reference '{reference.BlockId}' does not exist in the composition manuscript.");
-            var text = ManuscriptCodec.Text(block);
-            var (start, end) = ValidateRange(reference, text);
-            return text[start..end];
-        }));
-    }
-
     public static IReadOnlyList<string> ValidateCoverage(
         ManuscriptDocument document,
         IEnumerable<IReadOnlyList<ManuscriptRangeReference>> referenceSets)

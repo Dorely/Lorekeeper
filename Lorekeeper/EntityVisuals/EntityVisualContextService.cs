@@ -109,17 +109,3 @@ public sealed class EntityVisualContextService(
         AssociationOrigin: example.Origin,
         ImageSource: example.Image.Source);
 }
-
-public sealed class EntityVisualContextCollector
-{
-    private readonly List<EntityVisualContextReference> _references = [];
-
-    public void AddRange(IEnumerable<EntityVisualContextReference> references) => _references.AddRange(references);
-
-    public IReadOnlyList<EntityVisualContextReference> Drain()
-    {
-        var result = _references.ToList();
-        _references.Clear();
-        return result;
-    }
-}

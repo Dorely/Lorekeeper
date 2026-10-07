@@ -427,23 +427,6 @@ else
         _ => "secondary",
     };
 
-    private static RenderFragment RenderProperties(IReadOnlyDictionary<string, string?> properties) => @<section class="research-detail-section">
-        <h6>Properties</h6>
-        @if (properties.Count == 0)
-        {
-            <p class="text-muted small mb-0"><em>No properties.</em></p>
-        }
-        else
-        {
-            <div class="research-detail-key-values">
-                @foreach (var property in properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
-                {
-                    @RenderKeyValue(property.Key, property.Value)
-                }
-            </div>
-        }
-    </section>;
-
     private static RenderFragment RenderKeyValue(string label, string? value) => @<div class="research-detail-key-value">
         <span>@label</span>
         <strong>@BlankFallback(value)</strong>

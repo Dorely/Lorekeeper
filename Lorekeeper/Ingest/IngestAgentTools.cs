@@ -13,7 +13,7 @@ using Microsoft.Extensions.AI;
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestAgentTools(
-IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore graph, IEntityTypeService entityTypes, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages)
+IAppDatabaseOperationFactory database, IEntityService entities, IEntityTypeService entityTypes, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
@@ -747,30 +747,6 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
                     && item.Status == IngestStagingRecordStatus.Active
                     && item.EntityId == entityId);
     }
-    private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(default);
-        databaseOperation.ShareWithNestedOperations();
-        var nodes = databaseOperation.Repositories.GraphNodes;
-        var sourceChunkNode = await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceChunkNodeType, context.SourceChunkId.ToString("N"));
-        var targetNode = sourceChunkNode
-            ?? await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceNodeType, context.SourceId.ToString("N"));
-        if (targetNode is null) return;
-
-        await graph.UpsertEdgeAsync(
-            entityNode.Id,
-            targetNode.Id,
-            IngestGraphSync.ExtractedFromEdgeType,
-            new Dictionary<string, object?>
-            {
-                ["ingestJobId"] = context.JobId.ToString("N"),
-                ["sourceId"] = context.SourceId.ToString("N"),
-                ["sourceChunkId"] = context.SourceChunkId.ToString("N"),
-                ["sourceChunkIndex"] = context.SourceChunkIndex,
-                ["sourceGraphTargetType"] = targetNode.NodeType,
-            });
-    }
-
     private async Task<HashSet<string>> GetAllowedEntityTypesAsync(Guid projectId)
     {
         var definitions = await GetAllowedEntityTypeDefinitionsAsync(projectId);
@@ -1037,22 +1013,6 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
         }
     }
 
-    private static bool PayloadContainsSource(string payloadJson, Guid sourceId)
-    {
-        if (string.IsNullOrWhiteSpace(payloadJson) || !LooksLikeJsonRoot(payloadJson, '{')) return false;
-        try
-        {
-            using var document = JsonDocument.Parse(payloadJson);
-            return document.RootElement.TryGetProperty("sourceId", out var sourceProperty)
-                && Guid.TryParse(sourceProperty.ValueKind == JsonValueKind.String ? sourceProperty.GetString() : sourceProperty.GetRawText(), out var parsed)
-                && parsed == sourceId;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
     private static int ReadIntPayload(string payloadJson, string propertyName)
     {
         if (string.IsNullOrWhiteSpace(payloadJson) || !LooksLikeJsonRoot(payloadJson, '{')) return -1;
@@ -1241,9 +1201,6 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
         string text => text,
         _ => value?.ToString(),
     };
-
-    private static string ReadProperty(IReadOnlyDictionary<string, object?> properties, string key) =>
-        properties.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
 
     private static bool LooksLikeJsonRoot(string json, char rootChar)
     {

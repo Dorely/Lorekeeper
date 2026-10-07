@@ -67,9 +67,6 @@ public static class ProjectSearchSourceTypes
             _ => value,
         };
     }
-
-    public static bool IsKnown(string sourceType) =>
-        All.Contains(Normalize(sourceType));
 }
 
 public sealed record ProjectSearchRequest(

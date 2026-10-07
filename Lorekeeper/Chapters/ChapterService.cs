@@ -787,25 +787,6 @@ public class ChapterService(
         return new EditionManuscriptState(chapterOverride, document, snapshot);
     }
 
-    private async Task<EditionManuscriptState> GetRequiredEditionStateWithoutRevisionAsync(
-        EditorContentTarget target,
-        Chapter chapter,
-        CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
-        var chapterOverride = await db.PublicationEditionChapterOverrides
-            .SingleOrDefaultAsync(item => item.EditionId == edition.Id && item.ChapterId == chapter.Id, cancellationToken);
-        var document = chapterOverride is null
-            ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
-            : ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapter.Id, chapterOverride.Revision);
-        var snapshot = chapterOverride is null
-            ? await SnapshotAsync(chapter, cancellationToken)
-            : await EditionSnapshotAsync(target, chapter, cancellationToken);
-        return new EditionManuscriptState(chapterOverride, document, snapshot);
-    }
-
     private async Task<PublicationEdition> RequireEditableEditionAsync(
         EditorContentTarget target,
         Guid projectId,

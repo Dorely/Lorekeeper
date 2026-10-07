@@ -1249,7 +1249,6 @@ else
     private bool LayoutControlsLocked => EditorMutationLocked;
     private bool ReadOnlyNavigationLocked => _chapterLocked && !_projectContestLock.IsLocked;
     private bool AssistantContextControlsLocked => ReadOnlyNavigationLocked;
-    private bool ContestReviewActive => _contestReviewProjection is not null;
     private bool CanResolveContestReview => _contestReviewProjection is { } projection
         && projection.Candidates.All(candidate => candidate.Status is not ContestCandidateStatus.Pending and not ContestCandidateStatus.Running)
         && projection.Candidates.Any(candidate =>
@@ -2764,28 +2763,6 @@ else
         && _current?.Id == chapterId
         && _contentTarget == target;
 
-    private async Task OpenReviewForActiveChapterChangesAsync()
-    {
-        if (Project is null || _current is null) return;
-
-        if (_mode == EditorMode.Review)
-        {
-            var locationIdentity = CurrentManuscriptLocationIdentity();
-            var location = await CaptureCurrentLocationAsync();
-            if (locationIdentity is not null)
-                RememberManuscriptLocation(locationIdentity, location);
-            await RefreshReviewChangesAsync();
-            if (location is not null)
-                QueueManuscriptLocationRestore();
-        }
-        else
-        {
-            await SetModeAsync(EditorMode.Review);
-        }
-
-        StateHasChanged();
-    }
-
     private async Task OpenReviewForContestResultsAsync()
     {
         if (_projectContestLock is { IsLocked: true, ChapterId: Guid chapterId })
@@ -3881,23 +3858,6 @@ else
         designedPage.After?.Name
         ?? designedPage.Before?.Name
         ?? designedPage.DesignedPageId.ToString("N");
-
-    private static string FormatDesignedPageReview(ProjectExportDesignedPage? designedPage)
-    {
-        if (designedPage is null)
-            return "(not present)";
-
-        var contents = designedPage.Contents
-            .OrderBy(content => content.EditionId)
-            .ThenBy(content => content.Id)
-            .Select(content => $"content {content.Id:N} · target {(content.EditionId?.ToString("N") ?? "Core")} · revision {content.Revision} · active variant {content.ActiveVariantId?.ToString("N") ?? "none"}");
-        return string.Join(
-            "\n",
-            $"Name: {designedPage.Name}",
-            $"Release-only scope: {designedPage.ScopeEditionId?.ToString("N") ?? "shared"}",
-            "Contents:",
-            string.Join("\n", contents));
-    }
 
     private bool CanApproveReviewDesignedPage(ProjectVersionReviewDesignedPage designedPage)
     {
@@ -5268,18 +5228,6 @@ else
             ManuscriptRevision = snapshot.Revision,
             RenderVersion = document.RenderVersion + 1,
         };
-    }
-
-    private void RecordEditorSave(ManuscriptSnapshot snapshot)
-    {
-        if (_editorDocument is { } document && document.ChapterId == snapshot.ChapterId)
-        {
-            _editorDocument = document with
-            {
-                ManuscriptJson = ManuscriptCodec.Serialize(snapshot.Document),
-                ManuscriptRevision = snapshot.Revision,
-            };
-        }
     }
 
     private void ReplaceCachedChapter(Chapter chapter)

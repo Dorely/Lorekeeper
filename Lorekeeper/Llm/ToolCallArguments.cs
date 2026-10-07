@@ -9,10 +9,6 @@ public static class ToolCallArguments
         IDictionary<string, object?>? arguments,
         string? argumentsJson = null) =>
         new(ParseObject(argumentsJson) ?? Normalize(arguments));
-
-    public static IDictionary<string, object?>? ParseObjectOrNull(string? argumentsJson) =>
-        ParseObject(argumentsJson);
-
     public static string Serialize(IDictionary<string, object?>? arguments)
     {
         if (arguments is null || arguments.Count == 0)

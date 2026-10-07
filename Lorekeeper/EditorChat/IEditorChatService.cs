@@ -46,7 +46,6 @@ public sealed class EditorChatContext(
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
     private EditorContestStartRequest? _contestRequest;
     private Guid? _currentImageGenerationJobId;
-    private readonly HashSet<Guid> _directlyEditedChapterBodies = [];
     private readonly List<EditorChatVisualAttachment> _visuals = [];
     private readonly List<EditorChatModelImageAttachment> _modelOnlyImages = [];
 
@@ -73,14 +72,6 @@ public sealed class EditorChatContext(
                 return _currentImageGenerationJobId;
         }
     }
-
-    public bool ShouldBypassReviewForChapterBody(Chapter chapter) =>
-        _directlyEditedChapterBodies.Contains(chapter.Id)
-        || string.IsNullOrWhiteSpace(chapter.PlainText);
-
-    public void MarkChapterBodyDirectlyEdited(Guid chapterId) =>
-        _directlyEditedChapterBodies.Add(chapterId);
-
     public void BeginToolCall(Guid assistantMessageId, string toolCallId, string toolName, string argumentsJson)
     {
         CurrentAssistantMessageId = assistantMessageId;

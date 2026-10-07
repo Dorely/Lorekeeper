@@ -668,11 +668,6 @@ public sealed class PublicationSectionMigrationService(
         PublicationImagePlacementKind.ChapterEnding or PublicationImagePlacementKind.AfterChapter => PublicationSectionAnchor.AfterChapter,
         _ => PublicationSectionAnchor.Back,
     };
-    private static string RemapDocument(string json, Guid sourceId, long revision, out Guid id)
-    {
-        id = Guid.NewGuid();
-        return RemapDocument(json, sourceId, revision, id);
-    }
     private static string RemapDocument(string json, Guid sourceId, long revision, Guid id)
     {
         using var root = JsonDocument.Parse(json);
