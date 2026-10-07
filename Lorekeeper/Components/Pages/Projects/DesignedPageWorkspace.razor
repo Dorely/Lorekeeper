@@ -875,9 +875,13 @@
             return;
         _ = await Books.GetOrCreateAsync(ProjectId);
         var target = new PublicationSectionTarget(ProjectId, ContentTarget.EditionId);
-        foreach (var field in _semanticBlocks.Where(block => block.PublicationField is not null)
+        // Materialize the fields first: the loop replaces list entries, which
+        // invalidates any live enumerator over _semanticBlocks.
+        var fields = _semanticBlocks.Where(block => block.PublicationField is not null)
             .Select(block => block.PublicationField!.Value)
-            .Distinct())
+            .Distinct()
+            .ToList();
+        foreach (var field in fields)
         {
             var value = PublicationTextBindings.NormalizeSemanticText(
                 await PublicationSections.ResolveBoundFieldAsync(target, field));
