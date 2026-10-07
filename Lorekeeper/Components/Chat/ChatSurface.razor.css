@@ -210,6 +210,7 @@
 }
 
 .chat-tool-group-icon {
+    flex: 0 0 auto;
     width: 1.5rem;
     text-align: center;
     font-weight: 700;
@@ -429,7 +430,8 @@
 .chat-scroll { background: var(--lk-surface); }
 .chat-msg-user { background: var(--lk-accent); }
 .chat-msg-asst { background: var(--lk-soft); border: 1px solid var(--lk-line); }
-.chat-tool-group { border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.chat-tool-group { background: var(--lk-surface); border-color: var(--lk-line); border-radius: var(--lk-radius-md); }
+.chat-tool-group > summary:hover { background: var(--lk-accent-soft); }
 .chat-reasoning { border-color: var(--lk-line); border-radius: var(--lk-radius-md); background: var(--lk-surface-subtle); }
 .chat-reasoning-label, .chat-reasoning-body { color: var(--lk-text-muted); }
 .chat-reasoning-body { border-top-color: var(--lk-line); }
