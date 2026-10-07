@@ -306,6 +306,9 @@ public sealed class PublicationCoverService(
         if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
         {
             db.ChangeTracker.Clear();
+            // beforeDesign may be the tracked entity whose revision was already bumped; nothing was written, so
+            // the view must keep the stored revision or the editor's next save is rejected as a conflict.
+            beforeDesign.Revision = update.ExpectedRevision;
             return await ViewAsync(edition, beforeDesign, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
@@ -457,6 +460,7 @@ public sealed class PublicationCoverService(
         if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
         {
             db.ChangeTracker.Clear();
+            beforeDesign.Revision = update.ExpectedRevision;
             return await ViewAsync(edition, beforeDesign, cancellationToken, surfaceRole);
         }
         await db.SaveChangesAsync(cancellationToken);
@@ -559,6 +563,7 @@ public sealed class PublicationCoverService(
         if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
         {
             db.ChangeTracker.Clear();
+            beforeDesign.Revision = expectedRevision;
             return await ViewAsync(edition, beforeDesign, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
