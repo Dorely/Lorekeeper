@@ -1,6 +1,6 @@
 {
-  "registryVersion": "2026.09.3",
-  "reviewedAtUtc": "2026-09-02T00:00:00Z",
+  "registryVersion": "2026.10.1",
+  "reviewedAtUtc": "2026-10-06T00:00:00Z",
   "sources": [
     "https://kdp.amazon.com/en_US/help/topic/G201834180",
     "https://kdp.amazon.com/en_US/help/topic/G201857950",
@@ -25,13 +25,11 @@
   ],
   "profiles": [
     {
-      "key": "generic-pb-bw-50-white",
+      "key": "generic-pb-bw",
       "vendor": "Generic",
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "BlackAndWhite",
-      "basisWeightPounds": 50,
-      "gsm": 74,
       "coverMaterial": "PrintedCover",
       "coverModes": [
         "Simplex",
@@ -43,45 +41,17 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002252
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-pb-bw-60-cream",
-      "vendor": "Generic",
-      "format": "Paperback",
-      "binding": "PerfectBound",
-      "interiorProcess": "BlackAndWhite",
-      "basisWeightPounds": 60,
-      "gsm": 90,
-      "coverMaterial": "PrintedCover",
-      "coverModes": [
-        "Simplex",
-        "Duplex"
-      ],
-      "trimSizes": [],
-      "allowsCustomTrim": true,
-      "minimumPages": 2,
-      "maximumPages": 10000,
-      "pdfProfile": "generic-print-v2",
-      "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.0025
-      },
-      "minimumSubmittedPages": 2,
-      "maximumSubmittedPages": 10000
-    },
-    {
-      "key": "generic-pb-stdcolor-60-white",
+      "key": "generic-pb-stdcolor",
       "vendor": "Generic",
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "StandardColor",
-      "basisWeightPounds": 60,
-      "gsm": 90,
       "coverMaterial": "PrintedCover",
       "coverModes": [
         "Simplex",
@@ -93,20 +63,17 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002252
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-pb-premcolor-80-white",
+      "key": "generic-pb-premcolor",
       "vendor": "Generic",
       "format": "Paperback",
       "binding": "PerfectBound",
       "interiorProcess": "PremiumColor",
-      "basisWeightPounds": 80,
-      "gsm": 118,
       "coverMaterial": "PrintedCover",
       "coverModes": [
         "Simplex",
@@ -118,20 +85,17 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002347
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-case-bw-50-white",
+      "key": "generic-case-bw",
       "vendor": "Generic",
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "BlackAndWhite",
-      "basisWeightPounds": 50,
-      "gsm": 74,
       "coverMaterial": "CaseLaminate",
       "coverModes": [
         "Simplex"
@@ -142,44 +106,17 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002252
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-case-bw-60-cream",
-      "vendor": "Generic",
-      "format": "Hardcover",
-      "binding": "CaseBound",
-      "interiorProcess": "BlackAndWhite",
-      "basisWeightPounds": 60,
-      "gsm": 90,
-      "coverMaterial": "CaseLaminate",
-      "coverModes": [
-        "Simplex"
-      ],
-      "trimSizes": [],
-      "allowsCustomTrim": true,
-      "minimumPages": 2,
-      "maximumPages": 10000,
-      "pdfProfile": "generic-print-v2",
-      "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.0025
-      },
-      "minimumSubmittedPages": 2,
-      "maximumSubmittedPages": 10000
-    },
-    {
-      "key": "generic-case-stdcolor-60-white",
+      "key": "generic-case-stdcolor",
       "vendor": "Generic",
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "StandardColor",
-      "basisWeightPounds": 60,
-      "gsm": 90,
       "coverMaterial": "CaseLaminate",
       "coverModes": [
         "Simplex"
@@ -190,20 +127,17 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002252
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-case-premcolor-80-white",
+      "key": "generic-case-premcolor",
       "vendor": "Generic",
       "format": "Hardcover",
       "binding": "CaseBound",
       "interiorProcess": "PremiumColor",
-      "basisWeightPounds": 80,
-      "gsm": 118,
       "coverMaterial": "CaseLaminate",
       "coverModes": [
         "Simplex"
@@ -214,8 +148,7 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "Caliper",
-        "inchesPerPage": 0.002347
+        "kind": "UserDefined"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000

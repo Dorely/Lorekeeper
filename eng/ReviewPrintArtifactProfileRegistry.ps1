@@ -41,8 +41,8 @@ foreach ($profile in $registry.profiles) {
             $failures.Add("$($profile.key): frozen lookup contains a non-positive measurement")
         }
     }
-    if ($profile.spineModel.kind -eq "Unsupported" -and $profile.vendor -ne "Generic") {
-        $failures.Add("$($profile.key): a named-vendor artifact profile cannot have unsupported spine geometry")
+    if (($profile.spineModel.kind -eq "UserDefined") -ne ($profile.vendor -eq "Generic")) {
+        $failures.Add("$($profile.key): only other-printer profiles take user-defined printer dimensions, and they must")
     }
     if ($profile.spineModel.kind -eq "RoundedCaliper" -and
         (-not $profile.spineModel.inchesPerPage -or -not $profile.spineModel.roundToIncrementInches)) {
@@ -78,7 +78,8 @@ foreach ($profile in $registry.profiles | Sort-Object vendor, format, key) {
         "FrozenLookup" { "$($profile.spineModel.anchors.Count) exact measurements" }
         "Caliper" { "published thickness formula" }
         "RoundedCaliper" { "calibrated rounded formula" }
-        default { "unsupported" }
+        "UserDefined" { "user-entered printer dimensions" }
+        default { "unknown" }
     }
     $lines.Add("| ``$($profile.key)`` | $($profile.vendor) | $($profile.format) | $($profile.interiorProcess) | $($profile.coverMaterial) | $weight | $($profile.minimumSubmittedPages)-$($profile.maximumSubmittedPages) | $spineEvidence |")
 }

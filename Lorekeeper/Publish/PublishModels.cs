@@ -155,6 +155,7 @@ public sealed record PublicationEditionView(
     public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
     public CitationStyle CitationStyle { get; init; } = CitationStyle.Chicago18NotesBibliography;
+    public PrinterDimensions? PrinterDimensions { get; init; }
 }
 
 public sealed record PublicationEditionCreate(
@@ -194,7 +195,8 @@ public sealed record PublicationReleaseOverridePatch(
     PrintProjectUse? PrintProjectUse = null,
     PrintIdentifierMode? PrintIdentifierMode = null,
     PrintCoverSubmissionMode? PrintCoverSubmissionMode = null,
-    CitationStyle? CitationStyle = null);
+    CitationStyle? CitationStyle = null,
+    PrinterDimensions? PrinterDimensions = null);
 
 public sealed record PublicationEditionCompareView(
     PublicationEditionSummary Left,

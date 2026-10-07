@@ -71,7 +71,7 @@ projection repair do not retain an EF context across that client flush.
 
 ### Snapshot contract
 
-The format ID remains `lorekeeper.version-history-snapshot`. Current schema v11
+The format ID remains `lorekeeper.version-history-snapshot`. Current schema v12
 uses this stable layout:
 
 ```text
@@ -105,11 +105,14 @@ canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
-`N` format. Writers emit the exact canonical schema-v11 file set with manuscript
+`N` format. Writers emit the exact canonical schema-v12 file set with manuscript
 v7 tables, notes, and citation identities; undeclared files and
 noncanonical paths or encodings fail closed. Readers route every predecessor
 from schema v1 through v10 through an explicit adapter only after
 validating the predecessor's original manifest and file hashes.
+Schema v12 adds optional Other printer dimensions to publication releases; the
+field is omitted when no dimensions are entered, so schema v11 publication files
+read unchanged.
 Schema v11 adds World Brief to the narrative file, comparison, restore, and clone
 payload. Schema v1-v10 narrative files validate against their original DTO before
 adapting to an empty brief. Null current content is rejected. Operational brief

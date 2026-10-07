@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 15);
-    assert_eq!(value["rendererVersion"], "2.1.10");
+    assert_eq!(value["rendererVersion"], "2.1.11");
     assert_eq!(
         value["profiles"],
         json!([
@@ -536,7 +536,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 15);
-    assert_eq!(response["rendererVersion"], "2.1.10");
+    assert_eq!(response["rendererVersion"], "2.1.11");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -4157,22 +4157,188 @@ fn every_specific_frozen_spine_table_has_an_exact_even_page_measurement() {
 }
 
 #[test]
-fn generic_print_fails_without_a_supported_artifact_profile() {
-    let mut job = PreparedJob::new("generic-paperback-v1");
+fn retired_generic_print_profile_keys_are_unknown() {
+    for retired in ["generic-perfectbound-v1", "generic-pb-bw-50-white"] {
+        let mut job = PreparedJob::new("generic-print-v2");
+        job.configure_physical((
+            "generic-pb-bw",
+            "Generic",
+            "Paperback",
+            "PrintedCover",
+            &["perfect-bound-outside"],
+        ));
+        job.request["printArtifactProfile"]["printerDimensions"] =
+            json!({ "paperThicknessInches": 0.0025 });
+        job.request["printArtifactProfile"]["artifactProfileKey"] = json!(retired);
+        job.write_request();
+        let output = job.render();
+        assert!(!output.status.success(), "{retired}");
+        assert!(
+            has_diagnostic(&response(&output), "PRESS_PRINT_ARTIFACT_PROFILE_UNKNOWN"),
+            "{retired}"
+        );
+    }
+}
+
+fn normalized_interior_pages(response: &Value) -> f64 {
+    let pages = artifact_value(response, "interior-pdf")["pageCount"]
+        .as_u64()
+        .expect("page count") as f64;
+    if (pages as usize).is_multiple_of(2) {
+        pages
+    } else {
+        pages + 1.0
+    }
+}
+
+#[test]
+fn generic_paperback_cover_uses_the_users_paper_thickness_and_spine_allowance() {
+    let mut job = PreparedJob::new("generic-print-v2");
     job.configure_physical((
-        "generic-pb-bw-50-white",
+        "generic-pb-bw",
         "Generic",
         "Paperback",
         "PrintedCover",
         &["perfect-bound-outside"],
     ));
-    job.request["printArtifactProfile"]["artifactProfileKey"] = json!("generic-perfectbound-v1");
+    job.request["printArtifactProfile"]["printerDimensions"] =
+        json!({ "paperThicknessInches": 0.003, "spineAllowanceInches": 0.06 });
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert!(
+        response["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|item| item["kind"] == "perfect-bound-cover-pdf")
+    );
+    let expected = (12.0 + normalized_interior_pages(&response) * 0.003 + 0.06 + 0.25) * 72.0;
+    let actual = response["evidence"]["coverWidthPoints"]
+        .as_f64()
+        .expect("cover width");
+    assert!(
+        (actual - expected).abs() < 0.01,
+        "actual={actual} expected={expected}"
+    );
+}
+
+#[test]
+fn generic_hardcover_case_wrap_uses_the_users_wrap_and_hinge() {
+    let mut job = PreparedJob::new("generic-print-v2");
+    job.configure_physical((
+        "generic-case-bw",
+        "Generic",
+        "Hardcover",
+        "CaseLaminate",
+        &["case-wrap"],
+    ));
+    job.request["printArtifactProfile"]["printerDimensions"] = json!({
+        "paperThicknessInches": 0.0025,
+        "spineAllowanceInches": 0.0,
+        "caseWrapInches": 0.75,
+        "caseHingeInches": 0.4
+    });
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert!(
+        response["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|item| item["kind"] == "case-cover-pdf")
+    );
+    let expected =
+        (12.0 + normalized_interior_pages(&response) * 0.0025 + 2.0 * 0.4 + 2.0 * 0.75) * 72.0;
+    let actual = response["evidence"]["coverWidthPoints"]
+        .as_f64()
+        .expect("cover width");
+    assert!(
+        (actual - expected).abs() < 0.01,
+        "actual={actual} expected={expected}"
+    );
+}
+
+#[test]
+fn generic_print_requires_complete_in_range_printer_dimensions() {
+    let cases = [
+        (
+            "generic-pb-bw",
+            "Paperback",
+            "PrintedCover",
+            "perfect-bound-outside",
+            None,
+            "PRESS_PRINTER_DIMENSIONS_REQUIRED",
+        ),
+        (
+            "generic-case-bw",
+            "Hardcover",
+            "CaseLaminate",
+            "case-wrap",
+            Some(json!({ "paperThicknessInches": 0.0025 })),
+            "PRESS_PRINTER_DIMENSIONS_REQUIRED",
+        ),
+        (
+            "generic-pb-bw",
+            "Paperback",
+            "PrintedCover",
+            "perfect-bound-outside",
+            Some(json!({ "paperThicknessInches": 0.5 })),
+            "PRESS_PRINTER_DIMENSIONS_INVALID",
+        ),
+        (
+            "generic-pb-bw",
+            "Paperback",
+            "PrintedCover",
+            "perfect-bound-outside",
+            Some(json!({ "paperThicknessInches": 0.0025, "caseWrapInches": 0.75 })),
+            "PRESS_PRINTER_DIMENSIONS_INVALID",
+        ),
+    ];
+    for (key, format, material, surface, dimensions, code) in cases {
+        let mut job = PreparedJob::new("generic-print-v2");
+        job.configure_physical((key, "Generic", format, material, &[surface]));
+        if let Some(dimensions) = dimensions {
+            job.request["printArtifactProfile"]["printerDimensions"] = dimensions;
+            job.write_request();
+        }
+        let output = job.render();
+        assert!(!output.status.success(), "{key} {code}");
+        assert!(has_diagnostic(&response(&output), code), "{key} {code}");
+    }
+}
+
+#[test]
+fn named_vendor_profiles_reject_printer_dimensions() {
+    let mut job = PreparedJob::new("kdp-hardcover-v1");
+    job.configure_physical((
+        "kdp-hc-bw-50-2252",
+        "AmazonKdp",
+        "Hardcover",
+        "CaseLaminate",
+        &["case-wrap"],
+    ));
+    job.request["printArtifactProfile"]["printerDimensions"] =
+        json!({ "paperThicknessInches": 0.003, "caseWrapInches": 0.75 });
     job.write_request();
     let output = job.render();
     assert!(!output.status.success());
     assert!(has_diagnostic(
         &response(&output),
-        "PRESS_PRINT_ARTIFACT_PROFILE_UNKNOWN"
+        "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH"
     ));
 }
 

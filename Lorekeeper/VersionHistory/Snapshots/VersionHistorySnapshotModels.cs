@@ -8,7 +8,7 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 11;
+    public const int SchemaVersion = 12;
     public const int ImageUpscaleSchemaVersion = 5;
     public const int CoverDescriptionSchemaVersion = 6;
     public const int DesignedPagesSchemaVersion = 7;

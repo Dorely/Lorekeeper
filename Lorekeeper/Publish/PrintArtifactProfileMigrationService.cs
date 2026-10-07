@@ -54,10 +54,10 @@ public sealed class PrintArtifactProfileMigrationService(
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Ink = 'Color' THEN 'ingram-pb-premium70'
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-50-2225'
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-50-2009'
-                        WHEN Format = 'Paperback' THEN 'generic-pb-bw-50-white'
+                        WHEN Format = 'Paperback' THEN 'generic-pb-bw'
                         WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-50-2252'
                         WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-50-2009'
-                        WHEN Format = 'Hardcover' THEN 'generic-case-bw-50-white'
+                        WHEN Format = 'Hardcover' THEN 'generic-case-bw'
                         ELSE ''
                     END,
                     PrintFinish = 'Matte',
@@ -167,8 +167,8 @@ public sealed class PrintArtifactProfileMigrationService(
                 $"""
                 UPDATE PublicationEditions
                 SET PrintArtifactProfileKey = CASE
-                        WHEN Format = 'Paperback' AND PrintArtifactProfileKey = 'generic-perfectbound-v1' THEN 'generic-pb-bw-50-white'
-                        WHEN Format = 'Hardcover' AND PrintArtifactProfileKey = 'generic-casebound-v1' THEN 'generic-case-bw-50-white'
+                        WHEN Format = 'Paperback' AND PrintArtifactProfileKey = 'generic-perfectbound-v1' THEN 'generic-pb-bw'
+                        WHEN Format = 'Hardcover' AND PrintArtifactProfileKey = 'generic-casebound-v1' THEN 'generic-case-bw'
                         ELSE PrintArtifactProfileKey
                     END,
                     PrintArtifactRegistryVersion = CASE

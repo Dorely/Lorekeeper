@@ -353,7 +353,10 @@ its planned features are not claims about current capabilities.
   profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu.
   Print-release creation chooses the destination and creates the release first;
   trim, interior color process, paper weight/thickness, cover construction, and
-  cover-upload topology are configured afterward in that release's setup. Paper
+  cover-upload topology are configured afterward in that release's setup. An
+  Other printer release instead takes the printer's paper thickness per page
+  and spine allowance, plus case wrap and hinge for hardcover, from the author
+  and cannot be prepared until they are entered. Paper
   color, finish, pricing, listing, and account choices are intentionally outside
   Lorekeeper because they do not change the prepared artifacts.
   B&N paperback, printed-case hardcover, and dust-jacket hardcover releases use

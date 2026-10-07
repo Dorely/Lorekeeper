@@ -174,7 +174,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationEditionFormat format, PublicationVendor destination) => ListPrintArtifactOptions(format, destination),
                 name: "list_print_artifact_options",
-                description: "List only inputs that change Paperback or Hardcover artifacts: interior process, paper weight/thickness, cover construction, cover modes, trims, and page limits. Paper color and finish are intentionally excluded."),
+                description: "List only inputs that change Paperback or Hardcover artifacts: interior process, paper weight/thickness, cover construction, cover modes, trims, and page limits. Paper color and finish are intentionally excluded. Generic (other printer) options have no registry thickness; they report printerDimensionsRequired and take the user's own printer dimensions instead."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, int pageCount, string? surfaceRole = null) => ReadPrintGeometryAsync(context, releaseId, pageCount, surfaceRole),
                 name: "read_print_artifact_geometry",
@@ -182,7 +182,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (string name, PublicationEditionFormat format, PublicationVendor destination) => CreateReleaseAsync(context, name, format, destination),
                 name: "create_publication_release",
-                description: "Create an optional release from safe application-managed presets. Use Generic destination for EPUB and PDF ebook; Paperback and Hardcover destinations are AmazonKdp, IngramSpark, or Generic."),
+                description: "Create an optional release from safe application-managed presets. EPUB and PDF ebook always use Generic. Paperback and Hardcover destinations are AmazonKdp, IngramSpark, BarnesAndNoblePress, Lulu, or Generic (another printer). If the user has not named a printer or service for a print release, ask which one before creating it; never choose Generic by default. A Generic print release cannot be prepared until its PrinterDimensions are set from the user's printer."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, int contentStart = 0, int contentCount = 30) => ReadWorkspaceAsync(context, releaseId, contentStart, contentCount),
                 name: "read_publication_release",
@@ -190,7 +190,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationReleaseOverridePatch patch) => PatchReleaseAsync(context, releaseId, patch),
                 name: "patch_publication_release_overrides",
-                description: "Revision-check sparse release artifact settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied."),
+                description: "Revision-check sparse release artifact settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied. PrinterDimensions (inches) applies only to Generic Paperback and Hardcover releases and replaces all four values: PaperThicknessInches per page (required), SpineAllowanceInches added once, and for Hardcover CaseWrapInches (required) and CaseHingeInches on each side of the spine. Use the values the user gives from their printer; never estimate them."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, bool enabled, long expectedRevision, bool confirmDiscard = false) =>
                     SetEditionContentEnabledAsync(context, releaseId, enabled, expectedRevision, confirmDiscard),
@@ -974,6 +974,7 @@ public sealed class PublishAssistantTools(
             item.BasisWeightPounds,
             item.Gsm,
             paperThicknessInchesPerPage = EffectiveCaliper(item),
+            printerDimensionsRequired = item.SpineModel.IsUserDefined,
             construction = item.CoverMaterial.ToString(),
             coverModes = item.CoverModes,
             trims = item.TrimSizes.Take(20),
@@ -1013,6 +1014,10 @@ public sealed class PublishAssistantTools(
             PageWidthInches = workspace.Edition.PageWidthInches,
             PageHeightInches = workspace.Edition.PageHeightInches,
             Bleed = workspace.Edition.Bleed,
+            PrinterPaperThicknessInches = workspace.Edition.PrinterDimensions?.PaperThicknessInches,
+            PrinterSpineAllowanceInches = workspace.Edition.PrinterDimensions?.SpineAllowanceInches,
+            PrinterCaseWrapInches = workspace.Edition.PrinterDimensions?.CaseWrapInches,
+            PrinterCaseHingeInches = workspace.Edition.PrinterDimensions?.CaseHingeInches,
         }, pageCount, surfaceRole);
         return Serialize(new { ok = true, targetId = releaseId, revision = workspace.Edition.Revision, geometry });
     }
@@ -1285,6 +1290,7 @@ public sealed class PublishAssistantTools(
                 workspace.Edition.PrintArtifactRegistryVersion,
                 workspace.Edition.PrintArtifactProfileKey,
                 workspace.Edition.PrintCoverMode,
+                workspace.Edition.PrinterDimensions,
                 PrintBleedManaged = workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover,
                 workspace.Edition.AllowDesignedPageOverrides,
                 workspace.Edition.InheritsCoreCover,

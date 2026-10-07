@@ -32,6 +32,10 @@ the live test project; terminate the browser host after the run.
   ordinary pages retain Project Page Setup geometry. Disable it and confirm the
   same spread becomes two regular facing leaves. Create a PDF ebook release and
   confirm it inherits the Core choice, then customize and reset that release.
+- Create an Other printer paperback and confirm Release setup asks for paper
+  thickness per page and spine allowance, preparation is blocked until the
+  thickness is entered, and the spine width follows the entered values. Repeat
+  with an Other printer hardcover, which also asks for case wrap and hinge.
 - Create Paperback (KDP, IngramSpark, and Other printer where applicable), EPUB
   ebook, and PDF ebook releases. Confirm print controls appear only for
   paperback, EPUB controls only for EPUB, and inherited PDF-presentation/front-cover controls

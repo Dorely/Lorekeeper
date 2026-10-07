@@ -1,6 +1,6 @@
 [package]
 name = "lorekeeper-press"
-version = "2.1.10"
+version = "2.1.11"
 edition = "2024"
 publish = false
 

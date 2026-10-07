@@ -1965,6 +1965,15 @@ public sealed class PublicationRenderProcessor(
                 printProduct.BarcodeHeightInches,
                 printProduct.BarcodeInsetInches,
                 spineModel = ToPressSpineModel(printProduct.SpineModel),
+                printerDimensions = printProduct.SpineModel.IsUserDefined
+                    ? new
+                    {
+                        paperThicknessInches = release.PrinterPaperThicknessInches,
+                        spineAllowanceInches = release.PrinterSpineAllowanceInches ?? 0,
+                        caseWrapInches = printProduct.RequiresCaseCover ? release.PrinterCaseWrapInches : null,
+                        caseHingeInches = printProduct.RequiresCaseCover ? release.PrinterCaseHingeInches ?? 0 : 0,
+                    }
+                    : null,
                 requiredCoverSurfaces,
             },
             document = new

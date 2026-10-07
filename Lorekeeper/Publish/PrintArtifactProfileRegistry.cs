@@ -38,7 +38,11 @@ public sealed record PrintSpineModel(
     decimal? InchesPerPage = null,
     IReadOnlyList<PrintSpineAnchor>? Anchors = null,
     decimal BaseInches = 0,
-    decimal? RoundToIncrementInches = null);
+    decimal? RoundToIncrementInches = null)
+{
+    public const string UserDefinedKind = "UserDefined";
+    public bool IsUserDefined => Kind == UserDefinedKind;
+}
 
 public sealed record PrintArtifactProfile(
     string Key,
@@ -93,7 +97,7 @@ public interface IPrintArtifactProfileRegistry
 
 public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
 {
-    public const string CurrentVersion = "2026.09.3";
+    public const string CurrentVersion = "2026.10.1";
     private const string ResourceSuffix = "PrintArtifactProfiles.print-artifact-profiles-v1.json";
     private readonly PrintArtifactProfileRegistrySnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, PrintArtifactProfile> _profiles;
@@ -136,6 +140,13 @@ public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
                 && (profile.SpineModel.InchesPerPage is null or <= 0
                     || profile.SpineModel.RoundToIncrementInches is null or <= 0))
                 throw new InvalidDataException($"Print artifact profile '{profile.Key}' has an incomplete rounded-caliper spine model.");
+            if (profile.SpineModel.IsUserDefined != (profile.Vendor == PublicationVendor.Generic)
+                || profile.SpineModel.IsUserDefined
+                    && (profile.SpineModel.InchesPerPage is not null
+                        || profile.SpineModel.Anchors is { Count: > 0 }
+                        || profile.SpineModel.BaseInches != 0
+                        || profile.SpineModel.RoundToIncrementInches is not null))
+                throw new InvalidDataException($"Print artifact profile '{profile.Key}' must use a user-defined spine model only for other printers.");
             if (profile.SpineModel.Kind == "FrozenLookup")
             {
                 var expectedPages = Enumerable.Range(profile.MinimumPages, profile.MaximumPages - profile.MinimumPages + 1)
@@ -175,12 +186,12 @@ public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark) => "ingram-pb-bw-50-2009",
             (PublicationEditionFormat.Paperback, PublicationVendor.BarnesAndNoblePress) => "bn-pb-bw-50-6x9",
             (PublicationEditionFormat.Paperback, PublicationVendor.Lulu) => "lulu-pb-bw-60-white",
-            (PublicationEditionFormat.Paperback, _) => "generic-pb-bw-50-white",
+            (PublicationEditionFormat.Paperback, _) => "generic-pb-bw",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark) => "ingram-hc-case-bw-50-2009",
             (PublicationEditionFormat.Hardcover, PublicationVendor.BarnesAndNoblePress) => "bn-hc-case-bw-50-6x9",
             (PublicationEditionFormat.Hardcover, PublicationVendor.Lulu) => "lulu-hc-case-bw-80-white",
-            (PublicationEditionFormat.Hardcover, _) => "generic-case-bw-50-white",
+            (PublicationEditionFormat.Hardcover, _) => "generic-case-bw",
             _ => throw new InvalidOperationException("Digital releases do not use a print artifact profile."),
         };
         return GetRequired(key);
@@ -223,26 +234,57 @@ public interface IPrintGeometryService
 
 public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry) : IPrintGeometryService
 {
+    public const double MaximumPaperThicknessInches = 0.02;
+    public const double MaximumSpineAllowanceInches = 1;
+    public const double MaximumCaseWrapInches = 2;
+    public const double MaximumCaseHingeInches = 1;
+
+    /// <summary>Returns why an other-printer release's dimensions are out of range, or null when every entered value is usable.</summary>
+    public static string? InvalidPrinterDimensions(PrinterDimensions? dimensions) =>
+        dimensions?.PaperThicknessInches is { } thickness && !(thickness > 0 && thickness <= MaximumPaperThicknessInches)
+            ? $"Paper thickness per page must be greater than 0 and at most {MaximumPaperThicknessInches} in."
+        : dimensions?.SpineAllowanceInches is { } allowance && !(allowance >= 0 && allowance <= MaximumSpineAllowanceInches)
+            ? $"Spine allowance must be between 0 and {MaximumSpineAllowanceInches} in."
+        : dimensions?.CaseWrapInches is { } wrap && !(wrap > 0 && wrap <= MaximumCaseWrapInches)
+            ? $"Case wrap must be greater than 0 and at most {MaximumCaseWrapInches} in."
+        : dimensions?.CaseHingeInches is { } hinge && !(hinge >= 0 && hinge <= MaximumCaseHingeInches)
+            ? $"Hinge must be between 0 and {MaximumCaseHingeInches} in."
+        : null;
+
+    /// <summary>Returns which required printer dimensions an other-printer release still needs, or null when it has them all.</summary>
+    public static string? MissingPrinterDimensions(PublicationEdition edition, PrintArtifactProfile product)
+    {
+        if (!product.SpineModel.IsUserDefined)
+            return null;
+        var missing = new List<string>();
+        if (edition.PrinterPaperThicknessInches is null)
+            missing.Add("paper thickness per page");
+        if (product.RequiresCaseCover && edition.PrinterCaseWrapInches is null)
+            missing.Add("case wrap");
+        return missing.Count == 0
+            ? null
+            : $"Enter your printer's {string.Join(" and ", missing)} in Release setup before preparing this other-printer release.";
+    }
+
     public PrintCoverGeometry Calculate(PublicationEdition edition, int submittedPageCount, string? surfaceRole = null)
     {
         var product = registry.GetRequired(edition.PrintArtifactProfileKey);
-        var normalizedPages = product.Vendor switch
-        {
-            PublicationVendor.AmazonKdp => submittedPageCount + (submittedPageCount % 2),
-            PublicationVendor.IngramSpark => submittedPageCount + (submittedPageCount % 2),
-            PublicationVendor.BarnesAndNoblePress => submittedPageCount + (submittedPageCount % 2),
-            PublicationVendor.Lulu => submittedPageCount + (submittedPageCount % 2),
-            _ => submittedPageCount,
-        };
+        var normalizedPages = submittedPageCount + (submittedPageCount % 2);
         if (submittedPageCount < (product.MinimumSubmittedPages ?? product.MinimumPages)
             || submittedPageCount > (product.MaximumSubmittedPages ?? product.MaximumPages))
             throw new InvalidOperationException($"The selected artifact settings support {product.MinimumSubmittedPages ?? product.MinimumPages}-{product.MaximumSubmittedPages ?? product.MaximumPages} submitted pages; this interior has {submittedPageCount}.");
         if (normalizedPages < product.MinimumPages || normalizedPages > product.MaximumPages)
             throw new InvalidOperationException($"The selected artifact settings support {product.MinimumPages}–{product.MaximumPages} pages; this interior has {normalizedPages}.");
+        if (MissingPrinterDimensions(edition, product) is { } missing)
+            throw new InvalidOperationException(missing);
+        if (product.SpineModel.IsUserDefined && InvalidPrinterDimensions(PrinterDimensions.From(edition)) is { } invalid)
+            throw new InvalidOperationException(invalid);
 
-        var spine = CalculateSpine(product, normalizedPages);
+        var spine = CalculateSpine(product, edition, normalizedPages);
         var trimWidth = (decimal)edition.PageWidthInches;
         var trimHeight = (decimal)edition.PageHeightInches;
+        var caseWrap = (decimal)(edition.PrinterCaseWrapInches ?? 0);
+        var caseHinge = (decimal)(edition.PrinterCaseHingeInches ?? 0);
         var (bleed, wrap, hinge, gutter, flap, insideNoInk, surfaceWidth, surfaceHeight) = product.Vendor switch
         {
             PublicationVendor.AmazonKdp when product.Format == PublicationEditionFormat.Hardcover =>
@@ -283,11 +325,22 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
                 (0.125m, 0m, 0m, 0m, 0m, 0m,
                     2 * trimWidth + spine + 0.25m,
                     trimHeight + 0.25m),
-            _ => throw new InvalidOperationException("Other-printer releases require a supported print artifact profile before preparation."),
+            PublicationVendor.Generic when product.RequiresCaseCover =>
+                (caseWrap, caseWrap, caseHinge, 0m, 0m, 0m,
+                    2 * trimWidth + spine + 2 * caseHinge + 2 * caseWrap,
+                    trimHeight + 2 * caseWrap),
+            PublicationVendor.Generic =>
+                (0.125m, 0m, 0m, 0m, 0m, 0m,
+                    2 * trimWidth + spine + 0.25m,
+                    trimHeight + 0.25m),
+            _ => throw new InvalidOperationException($"Print artifact profile '{product.Key}' has no cover geometry."),
         };
 
         var fingerprintSource = FormattableString.Invariant($"{registry.Version}|{product.Key}|{edition.PrintCoverMode}|{trimWidth:0.####}|{trimHeight:0.####}|{normalizedPages}|{spine:0.#####}|{surfaceWidth:0.#####}|{surfaceHeight:0.#####}");
+        if (product.SpineModel.IsUserDefined)
+            fingerprintSource += FormattableString.Invariant($"|{edition.PrinterPaperThicknessInches:0.######}|{edition.PrinterSpineAllowanceInches ?? 0:0.#####}|{caseWrap:0.#####}|{caseHinge:0.#####}");
         var fingerprint = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprintSource))).ToLowerInvariant();
+        var genericCase = product.Vendor == PublicationVendor.Generic && product.RequiresCaseCover;
         return new(submittedPageCount, normalizedPages, normalizedPages, spine, surfaceWidth, surfaceHeight,
             trimWidth, trimHeight, bleed, wrap, hinge, gutter, flap, insideNoInk, fingerprint)
         {
@@ -297,23 +350,25 @@ public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry)
                     : product.RequiresCaseCover
                         ? 6.944444444444444444m
                         : trimWidth + 0.125m
-                : 0,
+                : genericCase ? trimWidth + caseHinge : 0,
             FrontRegionWidthInches = product.Vendor == PublicationVendor.BarnesAndNoblePress
                 ? product.RequiresDustJacket
                     ? 6.694444444444444444m
                     : product.RequiresCaseCover
                         ? 6.944444444444444444m
                         : trimWidth + 0.125m
+                : genericCase ? trimWidth + caseHinge : 0,
+            CoverRegionYInches = genericCase ? caseWrap : 0,
+            CoverRegionHeightInches = product.Vendor == PublicationVendor.BarnesAndNoblePress ? surfaceHeight
+                : genericCase ? trimHeight
                 : 0,
-            CoverRegionYInches = 0,
-            CoverRegionHeightInches = product.Vendor == PublicationVendor.BarnesAndNoblePress ? surfaceHeight : 0,
         };
     }
 
-    private static decimal CalculateSpine(PrintArtifactProfile product, int pages)
+    private static decimal CalculateSpine(PrintArtifactProfile product, PublicationEdition edition, int pages)
     {
-        if (product.SpineModel.Kind == "Unsupported")
-            throw new InvalidOperationException("Other-printer releases require a supported print artifact profile before preparation.");
+        if (product.SpineModel.IsUserDefined && edition.PrinterPaperThicknessInches is double thickness)
+            return decimal.Round((decimal)thickness * pages + (decimal)(edition.PrinterSpineAllowanceInches ?? 0), 5, MidpointRounding.AwayFromZero);
         if (product.SpineModel.Kind == "RoundedCaliper"
             && product.SpineModel.InchesPerPage is decimal roundedCaliper
             && product.SpineModel.RoundToIncrementInches is decimal increment)

@@ -276,11 +276,13 @@ fn validate_registry_profile(
                 .iter()
                 .any(|actual| actual == surface)
         });
-    if !matches_scalar || !trim_matches || !spine_matches || !surfaces_match {
+    let dimensions_match =
+        product.spine_model.kind == "UserDefined" || product.printer_dimensions.is_none();
+    if !matches_scalar || !trim_matches || !spine_matches || !surfaces_match || !dimensions_match {
         return Err(Diagnostic::error(
             "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH",
             format!(
-                "The resolved print artifact profile differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match})."
+                "The resolved print artifact profile differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, printerDimensions={dimensions_match})."
             ),
         ));
     }
@@ -340,6 +342,59 @@ fn rounded_caliper_inches(
     (unrounded / increment_inches).round() * increment_inches
 }
 
+/// Returns the other-printer dimensions the user entered, after checking they are complete and in range.
+fn printer_dimensions(
+    product: &crate::model::PrintArtifactProfile,
+) -> Result<(f32, f32, f32, f32), Diagnostic> {
+    let invalid = |message: &str| Diagnostic::error("PRESS_PRINTER_DIMENSIONS_INVALID", message);
+    let dimensions = product.printer_dimensions.as_ref().ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_PRINTER_DIMENSIONS_REQUIRED",
+            "Other-printer releases require the printer's paper thickness before preparation.",
+        )
+    })?;
+    let thickness = dimensions.paper_thickness_inches.ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_PRINTER_DIMENSIONS_REQUIRED",
+            "Other-printer releases require the printer's paper thickness before preparation.",
+        )
+    })?;
+    if !(thickness.is_finite() && thickness > 0.0 && thickness <= 0.02) {
+        return Err(invalid(
+            "Paper thickness per page must be greater than 0 and at most 0.02 in.",
+        ));
+    }
+    let allowance = dimensions.spine_allowance_inches;
+    if !(allowance.is_finite() && (0.0..=1.0).contains(&allowance)) {
+        return Err(invalid("Spine allowance must be between 0 and 1 in."));
+    }
+    let hinge = dimensions.case_hinge_inches;
+    if !(hinge.is_finite() && (0.0..=1.0).contains(&hinge)) {
+        return Err(invalid("Hinge must be between 0 and 1 in."));
+    }
+    let wrap = match (product.binding.as_str(), dimensions.case_wrap_inches) {
+        ("CaseBound", Some(wrap)) if wrap.is_finite() && wrap > 0.0 && wrap <= 2.0 => wrap,
+        ("CaseBound", Some(_)) => {
+            return Err(invalid(
+                "Case wrap must be greater than 0 and at most 2 in.",
+            ));
+        }
+        ("CaseBound", None) => {
+            return Err(Diagnostic::error(
+                "PRESS_PRINTER_DIMENSIONS_REQUIRED",
+                "Other-printer hardcovers require the printer's case wrap before preparation.",
+            ));
+        }
+        (_, None) if hinge == 0.0 => 0.0,
+        _ => {
+            return Err(invalid(
+                "Case wrap and hinge apply only to other-printer hardcovers.",
+            ));
+        }
+    };
+    Ok((thickness, allowance, wrap, hinge))
+}
+
 fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Diagnostic> {
     let product = request.print_artifact_profile.as_ref().ok_or_else(|| {
         Diagnostic::error(
@@ -373,11 +428,9 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
             ),
         ));
     }
-    if product.spine_model.kind == "Unsupported" {
-        return Err(Diagnostic::error(
-            "PRESS_SPINE_MODEL_UNSUPPORTED",
-            "Other-printer releases require a supported print artifact profile before preparation.",
-        ));
+    if product.spine_model.kind == "UserDefined" {
+        let (thickness, allowance, _, _) = printer_dimensions(product)?;
+        return Ok(thickness * pages as f32 + allowance);
     }
     if product.spine_model.kind == "RoundedCaliper" {
         let caliper = product.spine_model.inches_per_page.ok_or_else(|| {
@@ -476,6 +529,13 @@ fn physical_cover_surfaces(
                 "case-wrap" if product.vendor == "AmazonKdp" => {
                     (2.0 * trim_width + spine + 1.02, trim_height + 1.02)
                 }
+                "case-wrap" if product.vendor == "Generic" => match printer_dimensions(product) {
+                    Ok((_, _, wrap, hinge)) => (
+                        2.0 * trim_width + spine + 2.0 * hinge + 2.0 * wrap,
+                        trim_height + 2.0 * wrap,
+                    ),
+                    Err(diagnostic) => return Some(Err(diagnostic)),
+                },
                 "case-wrap" if product.vendor == "Lulu" => {
                     (2.0 * trim_width + spine + 0.25, trim_height + 0.25)
                 }

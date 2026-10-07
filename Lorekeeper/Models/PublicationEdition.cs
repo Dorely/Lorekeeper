@@ -109,6 +109,10 @@ public class PublicationEdition
     public PrintIdentifierMode PrintIdentifierMode { get; set; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverMode PrintCoverMode { get; set; } = PrintCoverMode.Simplex;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } = PrintCoverSubmissionMode.FullWrapMeasured;
+    public double? PrinterPaperThicknessInches { get; set; }
+    public double? PrinterSpineAllowanceInches { get; set; }
+    public double? PrinterCaseWrapInches { get; set; }
+    public double? PrinterCaseHingeInches { get; set; }
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
     public bool InheritsCoreCover { get; set; } = true;
@@ -146,4 +150,31 @@ public class PublicationEdition
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Cover measurements an "Other printer" release takes from the user's printer, in inches.
+/// Paper thickness is per page; spine allowance is added once; case wrap and hinge apply to each edge of a hardcover case.
+/// </summary>
+public sealed record PrinterDimensions(
+    double? PaperThicknessInches,
+    double? SpineAllowanceInches = null,
+    double? CaseWrapInches = null,
+    double? CaseHingeInches = null)
+{
+    public static PrinterDimensions? From(PublicationEdition edition) =>
+        edition.PrinterPaperThicknessInches is null
+        && edition.PrinterSpineAllowanceInches is null
+        && edition.PrinterCaseWrapInches is null
+        && edition.PrinterCaseHingeInches is null
+            ? null
+            : new(edition.PrinterPaperThicknessInches, edition.PrinterSpineAllowanceInches, edition.PrinterCaseWrapInches, edition.PrinterCaseHingeInches);
+
+    public static void Apply(PublicationEdition edition, PrinterDimensions? dimensions)
+    {
+        edition.PrinterPaperThicknessInches = dimensions?.PaperThicknessInches;
+        edition.PrinterSpineAllowanceInches = dimensions?.SpineAllowanceInches;
+        edition.PrinterCaseWrapInches = dimensions?.CaseWrapInches;
+        edition.PrinterCaseHingeInches = dimensions?.CaseHingeInches;
+    }
 }

@@ -38,6 +38,7 @@ public sealed class EditionContentMigrationService(
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
             item => item.MigrationName == MigrationName && item.Status == ManuscriptMigrationStatus.Completed,
             cancellationToken))

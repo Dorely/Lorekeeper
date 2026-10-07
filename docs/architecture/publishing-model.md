@@ -98,8 +98,14 @@ Release creation is explicit: no release or ISBN is created automatically. The
 creation dialog establishes release format, destination, name, and any
 destination-level use mode. Release setup then exposes only artifact-affecting
 choices: trim, interior color process, paper weight/thickness, cover
-construction, cover printing topology, and cover submission. There is no print
-product selector. Paper color, finish, price, listing, account, tax, and
+construction, cover printing topology, and cover submission. An Other printer
+release replaces the paper choice with the printer's own measurements: paper
+thickness per page, optional spine allowance, and for hardcover the case wrap
+and optional hinge. Readiness reports `PRINTER_DIMENSIONS_REQUIRED` until they
+are entered, they apply only to Other printer print releases, and changing the
+destination clears them. The Publish Assistant asks which printer to use when
+the request names none, and asks for these measurements rather than estimating
+them. There is no print product selector. Paper color, finish, price, listing, account, tax, and
 fulfillment settings remain at the printer because they do not change generated
 bytes or geometry.
 

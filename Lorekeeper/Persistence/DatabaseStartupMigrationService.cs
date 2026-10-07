@@ -58,6 +58,7 @@ public sealed class DatabaseStartupMigrationService(
     private const string BarnesAndNoblePrintMigrationId = "20260830201715_BarnesAndNoblePrintPublishingV31";
     private const string ArtifactOnlyPrintSettingsMigrationId = "20260830212921_ArtifactOnlyPrintSettingsV32";
     internal const string RichCitationsMigrationId = "20260918020240_RichCitationsAndDocxM5B";
+    internal const string GenericPrinterDimensionsMigrationId = "20261007065536_GenericPrinterDimensions";
 
     public async Task<bool> ApplyAsync(
         CancellationToken cancellationToken = default,
@@ -78,6 +79,7 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking manuscripts", "Validating chapters, illustrations, and revision history.", 2, totalSteps);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
@@ -95,6 +97,7 @@ public sealed class DatabaseStartupMigrationService(
         // tables. The visual migration reads them through the current EF model.
         await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking designed pages", "Migrating visual compositions and semantic text bindings.", 5, totalSteps);
         var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -127,6 +130,7 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
 
         var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
@@ -135,6 +139,7 @@ public sealed class DatabaseStartupMigrationService(
                 PublicationCoreMigrationService.SchemaMigrationId,
                 cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         // A brand-new database has no Projects table when the initial
         // compatibility check runs at the top of startup. The historical
         // migrations above create that table with the retired
@@ -151,15 +156,18 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication structure", "Validating Core Book content and ownership.", 7, totalSteps);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking edition content", "Preparing release-specific manuscript content.", 8, totalSteps);
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
@@ -167,6 +175,7 @@ public sealed class DatabaseStartupMigrationService(
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await editionContentMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
@@ -174,11 +183,13 @@ public sealed class DatabaseStartupMigrationService(
         await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication sections", "Validating front matter, body order, and back matter.", 9, totalSteps);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking print artifacts", "Preparing artifact profiles and cover configuration.", 10, totalSteps);
         var migrationsBeforeArtifactProfiles = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -197,8 +208,10 @@ public sealed class DatabaseStartupMigrationService(
                 await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
                 await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
                 await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+                await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
             }
             await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+            await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
             await printArtifactProfileMigration.ApplyPendingAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
@@ -217,6 +230,7 @@ public sealed class DatabaseStartupMigrationService(
                 PublicationCoreMigrationService.CleanupMigrationId,
                 cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         if (!migrationsBeforeCleanup.Contains(PrintArtifactProfileMigrationService.CleanupMigrationId))
@@ -227,6 +241,7 @@ public sealed class DatabaseStartupMigrationService(
                 cancellationToken);
         }
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         // Historical cleanup migrations rebuild PublicationEditions from their
@@ -251,10 +266,12 @@ public sealed class DatabaseStartupMigrationService(
         await RemovePrintArtifactProfileCompatibilityColumnsAsync(db, cancellationToken);
         await CleanupDetachedCompositionsAsync(db, cancellationToken);
         await EnsureCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await PrepareDesignedPageTransitionAsync(db, designedPageMigration, cancellationToken);
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
         await RemoveCitationCompatibilityColumnsAsync(db, cancellationToken);
+        await RemovePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
@@ -385,6 +402,55 @@ public sealed class DatabaseStartupMigrationService(
 #pragma warning disable EF1002
             await db.Database.ExecuteSqlRawAsync(
                 $"ALTER TABLE \"{table}\" DROP COLUMN \"CitationStyle\";",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
+        db.ChangeTracker.Clear();
+    }
+
+    private static readonly string[] PrinterDimensionColumns =
+    [
+        "PrinterPaperThicknessInches",
+        "PrinterSpineAllowanceInches",
+        "PrinterCaseWrapInches",
+        "PrinterCaseHingeInches",
+    ];
+
+    internal static async Task EnsurePrinterDimensionCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(GenericPrinterDimensionsMigrationId)
+            || !await HasTableAsync(db, "PublicationEditions", cancellationToken))
+            return;
+        foreach (var column in PrinterDimensionColumns)
+        {
+            if (await HasColumnAsync(db, "PublicationEditions", column, cancellationToken))
+                continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"PublicationEditions\" ADD COLUMN \"{column}\" REAL NULL;",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemovePrinterDimensionCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(GenericPrinterDimensionsMigrationId))
+            return;
+        foreach (var column in PrinterDimensionColumns)
+        {
+            if (!await HasColumnAsync(db, "PublicationEditions", column, cancellationToken))
+                continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"PublicationEditions\" DROP COLUMN \"{column}\";",
                 cancellationToken);
 #pragma warning restore EF1002
         }

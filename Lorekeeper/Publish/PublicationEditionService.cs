@@ -240,6 +240,7 @@ public sealed class PublicationEditionService(
         if (patch.Destination is { } destination)
         {
             edition.Vendor = destination;
+            if (destination != PublicationVendor.Generic) PrinterDimensions.Apply(edition, null);
             if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
             {
                 var product = printArtifactProfiles.GetDefault(edition.Format, destination);
@@ -280,6 +281,17 @@ public sealed class PublicationEditionService(
         }
         if (patch.PrintIdentifierMode is { } identifierMode) edition.PrintIdentifierMode = identifierMode;
         if (patch.PrintCoverSubmissionMode is { } submissionMode) edition.PrintCoverSubmissionMode = submissionMode;
+        if (patch.PrinterDimensions is { } printerDimensions)
+        {
+            if (edition.Vendor != PublicationVendor.Generic
+                || edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+                throw new InvalidOperationException("Printer dimensions apply only to other-printer paperback and hardcover releases.");
+            PrinterDimensions.Apply(edition, printerDimensions with
+            {
+                CaseWrapInches = edition.Format == PublicationEditionFormat.Hardcover ? printerDimensions.CaseWrapInches : null,
+                CaseHingeInches = edition.Format == PublicationEditionFormat.Hardcover ? printerDimensions.CaseHingeInches : null,
+            });
+        }
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
         if (edition.Format == PublicationEditionFormat.Epub)
@@ -619,7 +631,7 @@ public sealed class PublicationEditionService(
         return HashCanonical(new
         {
             Project = project,
-            Edition = new
+            Edition = WithPrinterDimensions(edition, new
             {
                 edition.Format,
                 edition.Vendor,
@@ -643,7 +655,7 @@ public sealed class PublicationEditionService(
                 edition.PageHeightInches,
                 edition.InheritsCoreCover,
                 edition.SelectedCoverImageId,
-            },
+            }),
             InteriorPageCount = interiorPageCount,
             Cover = canonicalCover,
             CoreCover = canonicalCoreCover,
@@ -1033,7 +1045,7 @@ public sealed class PublicationEditionService(
             })
             .ToListAsync(cancellationToken);
         object canonicalEdition = includeCover
-            ? new
+            ? WithPrinterDimensions(edition, new
             {
                 edition.Name,
                 edition.Format,
@@ -1073,7 +1085,7 @@ public sealed class PublicationEditionService(
                 edition.BodyLineHeight,
                 edition.InheritsCoreCover,
                 edition.SelectedCoverImageId,
-            }
+            })
             : new
             {
                 edition.Format,
@@ -1125,6 +1137,12 @@ public sealed class PublicationEditionService(
         var canonical = JsonSerializer.Serialize(value, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
+
+    // Printer dimensions join a fingerprint only when entered, so releases without them keep their prepared fingerprints.
+    private static object WithPrinterDimensions(PublicationEdition edition, object canonicalEdition) =>
+        PrinterDimensions.From(edition) is { } dimensions
+            ? new { Release = canonicalEdition, PrinterDimensions = dimensions }
+            : canonicalEdition;
 
     private static void CollectReferencedImageIds(string json, ISet<Guid> target)
     {
@@ -1360,8 +1378,12 @@ public sealed class PublicationEditionService(
             });
             if (!trimMatches && !product.AllowsCustomTrim)
                 throw new InvalidOperationException($"The selected print artifact settings are unavailable at {edition.PageWidthInches:0.###} x {edition.PageHeightInches:0.###} inches.");
+            if (!product.SpineModel.IsUserDefined && PrinterDimensions.From(edition) is not null)
+                throw new InvalidOperationException("Printer dimensions apply only to other-printer releases.");
+            if (product.SpineModel.IsUserDefined && PrintGeometryService.InvalidPrinterDimensions(PrinterDimensions.From(edition)) is { } invalidDimensions)
+                throw new InvalidOperationException(invalidDimensions);
         }
-        else if (edition.Vendor != PublicationVendor.Generic || edition.Bleed)
+        else if (edition.Vendor != PublicationVendor.Generic || edition.Bleed || PrinterDimensions.From(edition) is not null)
         {
             throw new InvalidOperationException("Digital releases use application-managed artifact settings.");
         }
@@ -1486,6 +1508,7 @@ public sealed class PublicationEditionService(
             PrintIdentifierMode = edition.PrintIdentifierMode,
             PrintCoverSubmissionMode = edition.PrintCoverSubmissionMode,
             CitationStyle = edition.CitationStyle,
+            PrinterDimensions = PrinterDimensions.From(edition),
         };
 
     private static PublicationEditionOutlineItem NewOutlineItem(
@@ -1671,6 +1694,10 @@ public sealed class PublicationEditionService(
             PrintCoverMode = source.PrintCoverMode,
             PrintCoverSubmissionMode = source.PrintCoverSubmissionMode,
             Bleed = source.Bleed,
+            PrinterPaperThicknessInches = source.PrinterPaperThicknessInches,
+            PrinterSpineAllowanceInches = source.PrinterSpineAllowanceInches,
+            PrinterCaseWrapInches = source.PrinterCaseWrapInches,
+            PrinterCaseHingeInches = source.PrinterCaseHingeInches,
             PageWidthInches = source.PageWidthInches,
             PageHeightInches = source.PageHeightInches,
             PageMarginInches = source.PageMarginInches,

@@ -1571,6 +1571,11 @@ public sealed class ProjectImportJobProcessor(
                     || !Enum.IsDefined(edition.PrintCoverSubmissionMode)
                     || edition.CoverDesign is { } coverDesign && !Enum.IsDefined(coverDesign.SpineReadingDirection)))
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} contains invalid print-use or cover-orientation values.");
+            if (edition.PrinterDimensions is not null
+                && (edition.Vendor != PublicationVendor.Generic
+                    || edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+                    || PrintGeometryService.InvalidPrinterDimensions(edition.PrinterDimensions) is not null))
+                throw new InvalidOperationException($"Publication edition {edition.Id:N} contains invalid printer dimensions.");
             if (edition.OutlineItems.Any(item => item.SortOrder < 0)
                 || edition.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1))
             {
@@ -3072,6 +3077,10 @@ public sealed class ProjectImportJobProcessor(
             PrintIdentifierMode = formatVersion >= 26 ? importedEdition.PrintIdentifierMode : PrintIdentifierMode.UserSuppliedIsbn,
             PrintCoverSubmissionMode = formatVersion >= 26 ? importedEdition.PrintCoverSubmissionMode : PrintCoverSubmissionMode.FullWrapMeasured,
             Bleed = importedEdition.Bleed,
+            PrinterPaperThicknessInches = importedEdition.PrinterDimensions?.PaperThicknessInches,
+            PrinterSpineAllowanceInches = importedEdition.PrinterDimensions?.SpineAllowanceInches,
+            PrinterCaseWrapInches = importedEdition.PrinterDimensions?.CaseWrapInches,
+            PrinterCaseHingeInches = importedEdition.PrinterDimensions?.CaseHingeInches,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             RectoChapterStarts = importedEdition.RectoChapterStarts,
             CitationStyle = importedEdition.CitationStyle,
@@ -4621,25 +4630,29 @@ public sealed class ProjectImportJobProcessor(
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-50-2225",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-50-2009",
-            (PublicationEditionFormat.Paperback, _, LegacyPublicationPaper.Cream, _) => "generic-pb-bw-60-cream",
-            (PublicationEditionFormat.Paperback, _, _, _) => "generic-pb-bw-50-white",
+            (PublicationEditionFormat.Paperback, _, _, _) => "generic-pb-bw",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-50-2500",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-50-2224",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-50-2009",
-            (PublicationEditionFormat.Hardcover, _, LegacyPublicationPaper.Cream, _) => "generic-case-bw-60-cream",
-            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-case-bw-50-white",
+            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-case-bw",
             _ => string.Empty,
         };
 
     private static string NormalizePrintArtifactProfileKey(string key) => key switch
     {
-        "generic-perfectbound-template" => "generic-pb-bw-50-white",
-        "generic-perfectbound-v1" => "generic-pb-bw-50-white",
-        "generic-casebound-template" => "generic-case-bw-50-white",
-        "generic-casebound-v1" => "generic-case-bw-50-white",
+        "generic-perfectbound-template" => "generic-pb-bw",
+        "generic-perfectbound-v1" => "generic-pb-bw",
+        "generic-casebound-template" => "generic-case-bw",
+        "generic-casebound-v1" => "generic-case-bw",
+        "generic-pb-bw-50-white" or "generic-pb-bw-60-cream" => "generic-pb-bw",
+        "generic-pb-stdcolor-60-white" => "generic-pb-stdcolor",
+        "generic-pb-premcolor-80-white" => "generic-pb-premcolor",
+        "generic-case-bw-50-white" or "generic-case-bw-60-cream" => "generic-case-bw",
+        "generic-case-stdcolor-60-white" => "generic-case-stdcolor",
+        "generic-case-premcolor-80-white" => "generic-case-premcolor",
         "kdp-pb-bw-white" => "kdp-pb-bw-50-2252",
         "kdp-pb-bw-cream" => "kdp-pb-bw-50-2500",
         "kdp-pb-bw-groundwood" => "kdp-pb-bw-45-2350",

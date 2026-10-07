@@ -10,9 +10,9 @@ public static class ProjectArchiveContract
 {
     public const string FormatId = "lorekeeper.archive";
     public const int EnvelopeVersion = 1;
-    public const int RecordSchemaVersion = 4;
+    public const int RecordSchemaVersion = 5;
     public const int ManuscriptSchemaVersion = 7;
-    public const int HistorySnapshotSchemaVersion = 11;
+    public const int HistorySnapshotSchemaVersion = 12;
     public const string ManifestPath = "manifest.json";
 
     public static bool CanReadRecordSchema(int version) => version is >= 1 and <= RecordSchemaVersion;

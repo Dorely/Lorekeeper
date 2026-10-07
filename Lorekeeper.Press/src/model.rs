@@ -156,6 +156,8 @@ pub struct PrintArtifactProfile {
     #[serde(default)]
     pub maximum_submitted_pages: Option<usize>,
     pub spine_model: PhysicalSpineModel,
+    #[serde(default)]
+    pub printer_dimensions: Option<PrinterDimensions>,
     #[serde(default = "default_cover_safety_inches")]
     pub cover_safety_inches: f32,
     #[serde(default = "default_barcode_width_inches")]
@@ -183,6 +185,20 @@ pub enum RenderMode {
     #[default]
     Production,
     Preview,
+}
+
+/// Cover measurements an other-printer release takes from the user's printer, in inches.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrinterDimensions {
+    #[serde(default)]
+    pub paper_thickness_inches: Option<f32>,
+    #[serde(default)]
+    pub spine_allowance_inches: f32,
+    #[serde(default)]
+    pub case_wrap_inches: Option<f32>,
+    #[serde(default)]
+    pub case_hinge_inches: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

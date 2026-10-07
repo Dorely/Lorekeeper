@@ -414,7 +414,7 @@ public sealed class ProjectImportJobIntegrationTests
             Language = "en",
             Isbn = "9780306406157",
             PrintArtifactRegistryVersion = "2026.08.1",
-            PrintArtifactProfileKey = "generic-pb-bw-50-white",
+            PrintArtifactProfileKey = "generic-pb-bw",
             PrintCoverMode = PrintCoverMode.Simplex,
             PageWidthInches = 6,
             PageHeightInches = 9,
@@ -900,6 +900,90 @@ public sealed class ProjectImportJobIntegrationTests
             PublicationEditionOverrideField.RectoChapterStarts,
             JsonSerializer.Deserialize<List<PublicationEditionOverrideField>>(
                 importedEdition.OverrideFieldsJson) ?? []);
+    }
+
+    [Fact]
+    public async Task ExportImportPreservesOtherPrinterDimensionsAndRejectsOutOfRangeValues()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var source = new Project { Name = "Other printer source", Slug = "other-printer-source" };
+        var destination = new Project { Name = "Other printer destination", Slug = "other-printer-destination" };
+        var rejected = new Project { Name = "Other printer rejected", Slug = "other-printer-rejected" };
+        db.Projects.AddRange(source, destination, rejected);
+        db.PublicationBooks.Add(new PublicationBook { ProjectId = source.Id });
+        db.PublicationEditions.Add(new PublicationEdition
+        {
+            ProjectId = source.Id,
+            Name = "Local hardcover",
+            Format = PublicationEditionFormat.Hardcover,
+            Vendor = PublicationVendor.Generic,
+            PrintArtifactRegistryVersion = PrintArtifactProfileRegistry.CurrentVersion,
+            PrintArtifactProfileKey = "generic-case-bw",
+            PrinterPaperThicknessInches = 0.0025,
+            PrinterSpineAllowanceInches = 0.05,
+            PrinterCaseWrapInches = 0.75,
+            PrinterCaseHingeInches = 0.4,
+            PageWidthInches = 6,
+            PageHeightInches = 9,
+        });
+        db.PublicationEditions.Add(new PublicationEdition
+        {
+            ProjectId = source.Id,
+            Name = "Unmeasured paperback",
+            Format = PublicationEditionFormat.Paperback,
+            Vendor = PublicationVendor.Generic,
+            PrintArtifactRegistryVersion = PrintArtifactProfileRegistry.CurrentVersion,
+            PrintArtifactProfileKey = "generic-pb-bw",
+            PageWidthInches = 6,
+            PageHeightInches = 9,
+        });
+        await db.SaveChangesAsync();
+
+        var exporter = new ProjectImportExportService(
+            Database(db),
+            new ProjectImportJobQueue(),
+            new ProjectImportJobNotifier());
+        var document = (await exporter.CaptureArchiveDocumentAsync(source.Id, ProjectExportKind.Full)).Document;
+        Assert.Equal(
+            new PrinterDimensions(0.0025, 0.05, 0.75, 0.4),
+            document.PublicationEditions.Single(edition => edition.Name == "Local hardcover").PrinterDimensions);
+        Assert.Null(document.PublicationEditions.Single(edition => edition.Name == "Unmeasured paperback").PrinterDimensions);
+        var json = JsonSerializer.Serialize(document, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        await using (var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+        {
+            var import = await exporter.CreateImportJobAsync(destination.Id, "other-printer.lorekeeper.json", jsonStream);
+            await (await CreateProcessorAsync(db, destination)).RunAsync(import.Id);
+            db.ChangeTracker.Clear();
+            var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(job => job.Id == import.Id);
+            Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        }
+        var imported = await db.PublicationEditions.AsNoTracking()
+            .Where(edition => edition.ProjectId == destination.Id)
+            .ToDictionaryAsync(edition => edition.Name);
+        Assert.Equal(new PrinterDimensions(0.0025, 0.05, 0.75, 0.4), PrinterDimensions.From(imported["Local hardcover"]));
+        Assert.Null(PrinterDimensions.From(imported["Unmeasured paperback"]));
+
+        var tampered = json.Replace("\"paperThicknessInches\":0.0025", "\"paperThicknessInches\":0.5", StringComparison.Ordinal);
+        Assert.NotEqual(json, tampered);
+        await using (var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(tampered)))
+        {
+            var import = await exporter.CreateImportJobAsync(rejected.Id, "other-printer-invalid.lorekeeper.json", jsonStream);
+            await (await CreateProcessorAsync(db, rejected)).RunAsync(import.Id);
+            db.ChangeTracker.Clear();
+            var failed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(job => job.Id == import.Id);
+            Assert.Equal(ProjectImportJobStatus.Failed, failed.Status);
+            Assert.Contains("invalid printer dimensions", failed.ErrorMessage, StringComparison.Ordinal);
+        }
+        Assert.Empty(await db.PublicationEditions.AsNoTracking()
+            .Where(edition => edition.ProjectId == rejected.Id)
+            .ToListAsync());
     }
 
     [Fact]

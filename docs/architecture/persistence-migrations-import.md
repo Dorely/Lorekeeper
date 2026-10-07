@@ -59,6 +59,25 @@ fills an empty destination brief, preserves an identical brief, and refuses
 conflicting nonempty content inside the rollback-safe transaction. Graph voice
 properties travel with their entities and remapped entity identities.
 
+The forward GenericPrinterDimensions migration adds four nullable
+PublicationEditions columns for the user-entered paper thickness, spine
+allowance, case wrap, and case hinge of Other printer print releases. It maps the
+eight retired paper-specific Generic profile keys to the three per-process
+`UserDefined` keys for each construction and stamps those rows with registry
+`2026.10.1`. Existing rows keep null dimensions, so their releases report
+`PRINTER_DIMENSIONS_REQUIRED` instead of preparing from an estimated caliper.
+Named-vendor rows are unchanged. Startup migration stages that read releases
+through the current model on older schemas add these columns temporarily and
+remove them before the migration owns them, as with the citation-style
+compatibility column.
+
+Archive-record schema 5 adds an optional `printerDimensions` object to
+publication releases. It is written only when entered, so schema 1-4 records
+read unchanged. Import rejects dimensions on a named-vendor or digital release
+and values outside the application's ranges, rolling back the whole import.
+Legacy and archived Generic profile keys map to the per-process `UserDefined`
+keys without dimensions.
+
 The forward AddVoiceWorkspace migration renames the Writing Coach conversation
 and message tables to Voice, preserving IDs, transcripts, protocol metadata, and
 model selections, migrating attachment surfaces, and adding sample Revision.
@@ -349,7 +368,7 @@ Legacy project export v31 is the final JSON format and is import-only. Its
 adapter retains the durable print registry/profile fields, removes finish, and
 accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-at that boundary. New `.lorekeeper` full archives use archive-record schema 4
+at that boundary. New `.lorekeeper` full archives use archive-record schema 5
 and include the current v7
 manuscript model, Core/release annotations, the complete retained-source closure,
 page setup, independent Designed

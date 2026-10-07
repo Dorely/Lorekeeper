@@ -345,7 +345,12 @@ public sealed class PublicationPreparationWorker(
                 "Preparation job {JobId} started: targetKind={TargetKind}, edition={EditionId}, fingerprint={Fingerprint}",
                 jobId, job.TargetKind, job.EditionId, job.SourceFingerprint);
 
-            var blockers = await ReadinessBlockersAsync(database, db, job, cancellationToken);
+            var blockers = await ReadinessBlockersAsync(
+                database,
+                db,
+                job,
+                scope.ServiceProvider.GetRequiredService<IPrintArtifactProfileRegistry>(),
+                cancellationToken);
             if (blockers.Count > 0)
             {
                 job.Status = PublicationPreparationStatus.Blocked;
@@ -818,6 +823,7 @@ public sealed class PublicationPreparationWorker(
         IAppDatabaseOperationFactory database,
         AppDbContext db,
         PublicationPreparationJob job,
+        IPrintArtifactProfileRegistry printArtifactProfiles,
         CancellationToken cancellationToken)
     {
         string title; string author; string language;
@@ -838,6 +844,9 @@ public sealed class PublicationPreparationWorker(
         if (string.IsNullOrWhiteSpace(language)) result.Add(new("error", "LANGUAGE_REQUIRED", "Choose the book language in Core Book."));
         if (job.Edition?.Vendor == PublicationVendor.IngramSpark && string.IsNullOrWhiteSpace(job.Edition.Isbn))
             result.Add(new("error", "ISBN_REQUIRED", "Add the ISBN assigned to this IngramSpark release."));
+        if (job.Edition is { Format: PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover } printEdition
+            && PrintGeometryService.MissingPrinterDimensions(printEdition, printArtifactProfiles.GetRequired(printEdition.PrintArtifactProfileKey)) is { } missing)
+            result.Add(new("error", "PRINTER_DIMENSIONS_REQUIRED", missing));
         return result;
     }
 

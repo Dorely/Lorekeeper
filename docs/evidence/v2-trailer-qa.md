@@ -59,12 +59,17 @@ stops before the defect appeared.
   the target's active job, or stops when there is none. Retested: the agent
   prepared the paperback again in both follow-up turns, replacing its earlier
   jobs while the page watched the Paperback tab, and no error appeared.
-- **"Other printer" print releases (not fixed; tracked separately):**
-  - The release form offers "Other printer" for paperbacks, but preparation
-    always rejects it ("Other-printer releases require a supported print
+- **"Other printer" print releases (fixed after recording):**
+  - The release form offered "Other printer" for paperbacks, but preparation
+    always rejected it ("Other-printer releases require a supported print
     artifact profile before preparation.").
   - The first publish turn chose it because the prompt named no printer.
   - The trailer shows the follow-up turn that moved the paperback to Amazon KDP.
+  - Fixed by "Prepare Other printer releases from user-entered dimensions":
+    Other printer releases now prepare from the paper thickness (and, for
+    hardcover, case wrap) the user enters, and the Publish Assistant asks which
+    printer to use instead of defaulting to Other printer. Not retested in the
+    app; the trailer footage is unchanged.
 - **Chapter 2 draft hang (not reproduced):** one Chapter 2 draft attempt
   stalled for over 17 minutes at `apply_manuscript_operations` and was
   abandoned. The same request then finished in 142 s on a freshly started

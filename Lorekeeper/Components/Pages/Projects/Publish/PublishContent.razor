@@ -684,7 +684,20 @@ else
                     {
                         <label class="field"><span>Interior printing</span><select class="form-select" value="@selectedArtifactProfile.InteriorProcess" @onchange="ReleaseInteriorProcessChanged">@foreach (var process in InteriorProcessOptions()){<option value="@process">@InteriorProcessLabel(process)</option>}</select><small>This changes the PDF color contract.</small></label>
                         <label class="field"><span>Cover construction</span><select class="form-select" value="@selectedArtifactProfile.CoverMaterial" @onchange="ReleaseCoverConstructionChanged">@foreach (var material in CoverConstructionOptions()){<option value="@material">@CoverConstructionLabel(material)</option>}</select><small>This determines which cover surfaces Lorekeeper prepares.</small></label>
-                        <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small>@if (_releaseDraft.Vendor == PublicationVendor.Generic){<small>Thickness values are Lorekeeper-owned estimates; verify them with your final printer before production.</small>}</label>
+                        @if (selectedArtifactProfile.SpineModel.IsUserDefined)
+                        {
+                            <label class="field artifact-profile-field"><span>Paper thickness per page (in)</span><input class="form-control" type="number" min="0.0001" max="@PrintGeometryService.MaximumPaperThicknessInches" step="0.0001" @bind="_releaseDraft.PrinterPaperThicknessInches" @bind:after="MarkReleaseDirty" /><small>Enter the per-page thickness from your printer's spine calculation; the spine is pages × thickness + allowance. @CurrentSpineDescription()</small></label>
+                            <label class="field"><span>Spine allowance (in)</span><input class="form-control" type="number" min="0" max="@PrintGeometryService.MaximumSpineAllowanceInches" step="0.0625" @bind="_releaseDraft.PrinterSpineAllowanceInches" @bind:after="MarkReleaseDirty" /><small>Any fixed amount your printer adds to the spine. Leave blank for none.</small></label>
+                            @if (selectedArtifactProfile.RequiresCaseCover)
+                            {
+                                <label class="field"><span>Case wrap (in)</span><input class="form-control" type="number" min="0.0625" max="@PrintGeometryService.MaximumCaseWrapInches" step="0.0625" @bind="_releaseDraft.PrinterCaseWrapInches" @bind:after="MarkReleaseDirty" /><small>Cover material that folds around each board edge, from your printer's case template.</small></label>
+                                <label class="field"><span>Hinge (in)</span><input class="form-control" type="number" min="0" max="@PrintGeometryService.MaximumCaseHingeInches" step="0.0625" @bind="_releaseDraft.PrinterCaseHingeInches" @bind:after="MarkReleaseDirty" /><small>Gap on each side of the spine. Leave blank for none.</small></label>
+                            }
+                        }
+                        else
+                        {
+                            <label class="field artifact-profile-field"><span>Paper thickness</span><select @key="(selectedArtifactProfile.InteriorProcess, selectedArtifactProfile.CoverMaterial)" class="form-select" value="@selectedArtifactProfile.Key" @onchange="ReleasePaperThicknessChanged">@foreach (var profile in PaperThicknessOptions()){<option value="@profile.Key">@PaperThicknessLabel(profile)</option>}</select><small>Only weight and measured thickness are used here because they change the spine. Paper color and finish are chosen at the printer. @CurrentSpineDescription()</small></label>
+                        }
                         @if (selectedArtifactProfile.TrimSizes.Count > 0)
                         {
                             <label class="field"><span>Trim size</span><select @key="_releaseDraft.PrintArtifactProfileKey" class="form-select" value="@CurrentTrimKey()" @onchange="PrintTrimChanged">@foreach (var trim in selectedArtifactProfile.TrimSizes){<option value="@trim">@(trim.Replace("x", " x ")) in</option>}@if(selectedArtifactProfile.AllowsCustomTrim){<option value="custom">Custom printer trim</option>}</select></label>
@@ -1780,7 +1793,8 @@ else
                     PrintProjectUse: _releaseDraft.PrintProjectUse,
                     PrintIdentifierMode: _releaseDraft.PrintIdentifierMode,
                     PrintCoverSubmissionMode: _releaseDraft.PrintCoverSubmissionMode,
-                    CitationStyle: CitationValue(PublicationEditionOverrideField.CitationStyle, _releaseDraft.CitationStyle));
+                    CitationStyle: CitationValue(PublicationEditionOverrideField.CitationStyle, _releaseDraft.CitationStyle),
+                    PrinterDimensions: _releaseDraft.Vendor == PublicationVendor.Generic ? _releaseDraft.PrinterDimensions() : null);
                 revision = (await Releases.PatchOverridesAsync(Project.Id, id, patch)).Revision;
             }
             if (_releaseContentDirty)
@@ -2690,6 +2704,7 @@ else
             ? _releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? PrintIdentifierMode.VendorSku : PrintIdentifierMode.VendorAssignedIsbn
             : PrintIdentifierMode.UserSuppliedIsbn;
         _releaseDraft.PrintCoverSubmissionMode = PrintCoverSubmissionMode.FullWrapMeasured;
+        if (_releaseDraft.Vendor != PublicationVendor.Generic) _releaseDraft.ApplyPrinterDimensions(null);
         MarkReleaseDirty(paginationChanged);
     }
     private void ReleaseInteriorProcessChanged(ChangeEventArgs args)
@@ -2822,12 +2837,13 @@ else
                 PageWidthInches = _releaseDraft.PageWidthInches,
                 PageHeightInches = _releaseDraft.PageHeightInches,
             };
+            PrinterDimensions.Apply(edition, _releaseDraft.PrinterDimensions());
             var geometry = PrintGeometry.Calculate(edition, pages.Value);
             return $"Current interior: {geometry.SubmittedPageCount} submitted / {geometry.NormalizedCoverPageCount} cover-calculation pages - {geometry.SpineWidthInches:0.#####} in spine.";
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
-            return "Spine width needs a compatible page count and supported artifact profile.";
+            return exception.Message;
         }
     }
     private IReadOnlyList<PublicationArtifactKind> ReleaseArtifactKinds(PublicationEditionFormat format)
@@ -2863,6 +2879,15 @@ else
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public CitationStyle CitationStyle { get; set; } = CitationStyle.Chicago18NotesBibliography;
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, CitationStyle = item.CitationStyle };
+        public double? PrinterPaperThicknessInches { get; set; } public double? PrinterSpineAllowanceInches { get; set; } public double? PrinterCaseWrapInches { get; set; } public double? PrinterCaseHingeInches { get; set; }
+        public PrinterDimensions PrinterDimensions() => new(PrinterPaperThicknessInches, PrinterSpineAllowanceInches, PrinterCaseWrapInches, PrinterCaseHingeInches);
+        public void ApplyPrinterDimensions(PrinterDimensions? dimensions)
+        {
+            PrinterPaperThicknessInches = dimensions?.PaperThicknessInches;
+            PrinterSpineAllowanceInches = dimensions?.SpineAllowanceInches;
+            PrinterCaseWrapInches = dimensions?.CaseWrapInches;
+            PrinterCaseHingeInches = dimensions?.CaseHingeInches;
+        }
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, CitationStyle = item.CitationStyle, PrinterPaperThicknessInches = item.PrinterDimensions?.PaperThicknessInches, PrinterSpineAllowanceInches = item.PrinterDimensions?.SpineAllowanceInches, PrinterCaseWrapInches = item.PrinterDimensions?.CaseWrapInches, PrinterCaseHingeInches = item.PrinterDimensions?.CaseHingeInches };
     }
 }

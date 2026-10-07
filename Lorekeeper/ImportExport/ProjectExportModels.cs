@@ -412,6 +412,8 @@ public sealed record ProjectExportPublicationEdition(
     public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PrinterDimensions? PrinterDimensions { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? BodyFontSizePoints { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? BodyLineHeight { get; init; }

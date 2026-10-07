@@ -41,6 +41,7 @@ public sealed class CoverDescriptionMigrationTests
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
                 await DatabaseStartupMigrationService.EnsureCitationCompatibilityColumnsAsync(db, default);
+                await DatabaseStartupMigrationService.EnsurePrinterDimensionCompatibilityColumnsAsync(db, default);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO Projects
                         (Id, ReviewEditsEnabled, ContestModeEnabled, CreatedAt,
@@ -72,6 +73,7 @@ public sealed class CoverDescriptionMigrationTests
                          {surfaceScenesJson}, 1, {now}, {now});
                     """);
                 await DatabaseStartupMigrationService.RemoveCitationCompatibilityColumnsAsync(db, default);
+                await DatabaseStartupMigrationService.RemovePrinterDimensionCompatibilityColumnsAsync(db, default);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

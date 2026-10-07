@@ -679,6 +679,7 @@ public sealed class ProjectImportExportService(
             PrintProjectUse = profile.PrintProjectUse,
             PrintIdentifierMode = profile.PrintIdentifierMode,
             PrintCoverSubmissionMode = profile.PrintCoverSubmissionMode,
+            PrinterDimensions = PrinterDimensions.From(profile),
             RectoChapterStarts = profile.RectoChapterStarts,
             CitationStyle = profile.CitationStyle,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
