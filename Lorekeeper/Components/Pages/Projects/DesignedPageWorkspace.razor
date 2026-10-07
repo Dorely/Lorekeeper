@@ -1970,14 +1970,12 @@
         if (_workspaceModule is null)
         {
             _dotNetReference?.Dispose();
-            if (_journalModule is not null)
-                await _journalModule.DisposeAsync();
+            await DisposeModuleAsync(_journalModule);
             return;
         }
         try
         {
             await _workspaceModule.InvokeVoidAsync("disconnectTextOverflow", _stageElement);
-            await _workspaceModule.DisposeAsync();
         }
         catch (JSDisconnectedException)
         {
@@ -1985,10 +1983,19 @@
         }
         finally
         {
+            await DisposeModuleAsync(_workspaceModule);
             _dotNetReference?.Dispose();
-            if (_journalModule is not null)
-                await _journalModule.DisposeAsync();
+            await DisposeModuleAsync(_journalModule);
         }
+    }
+
+    // A closed or reloaded window disposes the circuit first; its JS modules are already gone with it.
+    private static async Task DisposeModuleAsync(IJSObjectReference? module)
+    {
+        if (module is null)
+            return;
+        try { await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
     }
 
     private string AuthoringTargetId() => ContentTarget.EditionId is { } editionId
