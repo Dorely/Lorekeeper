@@ -1,12 +1,16 @@
 # Lorekeeper
 
-**A local-first desktop studio for writing books, from first premise to
+**An AI-assisted book studio where you stay the author, from first premise to
 print-ready files.**
 
-Plan your story, research your world, write and revise chapters, design pages
-and covers, and prepare EPUB, PDF ebook, and print-ready paperback and
-hardcover files, all in one project on your own computer. AI assistants are
-optional and use your own provider account or local model server.
+Lorekeeper's assistants plan, draft, and revise inside an organized project
+while you keep control of the details: review and approve each change they
+make, edit everything directly, and keep your outline, story facts, and sources
+in order. Connect your OpenAI account to use its chat, image, and embedding
+models right in the workspace. When the book is ready, Lorekeeper produces EPUB,
+PDF ebook, and print-ready paperback and hardcover files, including full-wrap
+covers measured to the final spine, with its own built-in renderer and no
+licensed PDF software. Everything stays in one project on your own computer.
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-dorely-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dorely)
 
@@ -18,21 +22,32 @@ provenance, and a reproducible export recipe.
 
 ## Highlights
 
-- **Plan:** outline, Book Brief, a story graph of characters, places, and
+- **AI authorship you direct:** six assistants (Outline, Editor, Voice, World,
+  Images, and Publish) work directly in your outline, chapters, story graph, and
+  pages. Turn on Review Edits to approve or undo each change they make, and
+  revise every word yourself in a structured chapter editor.
+- **Your OpenAI account, built in:** connect once to use OpenAI chat, image, and
+  embedding models across the workspace. OpenAI-compatible providers and local
+  model servers also work.
+- **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
+  EPUB, and PDF ebook releases, with covers sized to the calculated spine and
+  print profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu, or
+  your own printer's measurements. Lorekeeper's built-in renderer produces and
+  validates the PDFs without a licensed PDF engine.
+
+Everything else supports those three:
+
+- **Organize:** outline, Book Brief, a story graph of characters, places, and
   events, project facts, and read-only links to earlier books in a series.
-- **Research:** import PDF, EPUB, Word, image, and saved-webpage sources with
-  stable citations, and build a living World Brief with web research.
-- **Write:** a structured chapter editor with Book Text Styles, Figures,
-  tables, footnotes, citations, DOCX import, and a true paginated Read preview.
-- **Assistants:** six AI assistants (Outline, Editor, Voice, World, Images, and
-  Publish) work directly in your project. Turn on Review Edits to approve or
-  undo each change they make.
+- **Research and world building:** import PDF, EPUB, Word, image, and
+  saved-webpage sources with stable citations, and build a living World Brief
+  with web research.
+- **Voice and writing samples:** build character dialogue and point-of-view
+  profiles, and give the Editor samples of your own prose to match.
+- **Write and edit:** Book Text Styles, Figures, tables, footnotes, citations,
+  DOCX import, and a true paginated Read preview.
 - **Images and design:** generate and edit artwork, keep canonical character
   and location references, and compose Designed Pages and covers on a canvas.
-- **Publish:** one Core Book plus paperback, hardcover, EPUB, and PDF ebook
-  releases, with print profiles for Amazon KDP, IngramSpark, Barnes & Noble
-  Press, and Lulu, or your own printer's measurements. Lorekeeper's built-in
-  renderer produces and validates the PDFs.
 - **History:** local checkpoints with readable comparisons and restore, plus
   optional sync to your own GitHub repository.
 - **Your data stays local:** projects live in local SQLite, move between
@@ -63,16 +78,17 @@ saved them. See [examples](examples/README.md) for details.
 
 ## Installation
 
-Application downloads and release notes belong to
+Download the latest release from
 [Dorely/Lorekeeper releases](https://github.com/Dorely/Lorekeeper/releases).
-The v1 release and the free Microsoft Store listing are being prepared; until
-they are published, existing packages remain available from the
-[historical download repository](https://github.com/Dorely/Lorekeeper-Releases/releases).
+v1.0.0 is also published to the
+[historical download repository](https://github.com/Dorely/Lorekeeper-Releases/releases)
+so earlier installs can find it; later releases appear only here. A free
+Microsoft Store listing is in certification.
 
 - **Windows x64:** per-user installer or portable executable; no .NET or Node.js
   installation is required. Direct downloads are unsigned. The free Microsoft
-  Store MSIX edition is prepared separately for Store signing and managed updates;
-  its listing and certification are pending.
+  Store edition is signed by the Store and updates through it; its listing is in
+  certification.
 - **Linux x64:** AppImage and Debian package built on Ubuntu 24.04. Install a DEB
   with `sudo apt install ./Lorekeeper-<version>-amd64.deb`, or make
   `Lorekeeper-<version>-x86_64.AppImage` executable and run it as your regular
@@ -84,7 +100,7 @@ they are published, existing packages remain available from the
   Developer ID notarization and Mac App Store distribution are not established.
 
 AI, search, embedding, and image services use your own accounts and may charge
-separately. See [privacy](PRIVACY.md), [support](SUPPORT.md), and
+separately. Writing, design, and publishing still work without an AI provider. See [privacy](PRIVACY.md), [support](SUPPORT.md), and
 [security reporting](SECURITY.md). Use GitHub issues for support; the package
 maintainer's GitHub noreply address is not monitored for support.
 
