@@ -44,7 +44,7 @@ $machArchitecture = 'arm64'
 $sqliteVecPlatformCheck = '-p:EnableUnsupportedPlatformTargetCheck=false'
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
 
-foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto', 'unzip'))
+foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto', 'unzip', 'curl'))
 {
     if (-not (Get-Command $commandName -ErrorAction SilentlyContinue))
     {
@@ -341,21 +341,42 @@ try
     }
     $appPath = $unpackedApps[0].FullName
     # electron-builder keeps only Electron.app from the runtime zip on macOS, so
-    # Electron's LICENSE and Chromium notice come from the exact cached zip that
-    # electron-builder downloaded and checksum-verified for this package.
+    # Electron's LICENSE and Chromium notice come from the same release zip,
+    # verified against the installed electron package's checksums.
     $electronZipName = "electron-v$lockedElectronVersion-darwin-$artifactArchitecture.zip"
-    $electronCacheRoots = @($env:ELECTRON_CACHE, (Join-Path $HOME 'Library/Caches/electron')) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Container) }
-    $electronZips = @($electronCacheRoots | ForEach-Object {
-        Get-ChildItem -LiteralPath $_ -Recurse -File -Filter $electronZipName
-    })
-    if ($electronZips.Count -eq 0)
+    $electronChecksums = Get-Content -Raw (Join-Path $stageDirectory 'node_modules/electron/checksums.json') | ConvertFrom-Json
+    $expectedElectronZipHash = [string]$electronChecksums.$electronZipName
+    if ([string]::IsNullOrWhiteSpace($expectedElectronZipHash))
     {
-        throw "The cached Electron runtime $electronZipName was not found under: $($electronCacheRoots -join ', ')"
+        throw "The installed electron package has no checksum for $electronZipName."
+    }
+    $electronZipPath = $null
+    foreach ($cacheRoot in @($env:ELECTRON_CACHE, (Join-Path $HOME 'Library/Caches/electron')))
+    {
+        if ([string]::IsNullOrWhiteSpace($cacheRoot) -or -not (Test-Path -LiteralPath $cacheRoot -PathType Container)) { continue }
+        foreach ($candidate in @(Get-ChildItem -LiteralPath $cacheRoot -Recurse -Depth 2 -File -Filter $electronZipName))
+        {
+            if ((Get-FileHash -LiteralPath $candidate.FullName -Algorithm SHA256).Hash -eq $expectedElectronZipHash.ToUpperInvariant())
+            {
+                $electronZipPath = $candidate.FullName
+                break
+            }
+        }
+        if ($electronZipPath) { break }
+    }
+    if (-not $electronZipPath)
+    {
+        $electronZipPath = Join-Path $outputDirectory $electronZipName
+        Invoke-CheckedCommand curl @('--fail', '--location', '--silent', '--show-error', '--output', $electronZipPath,
+            "https://github.com/electron/electron/releases/download/v$lockedElectronVersion/$electronZipName")
+        if ((Get-FileHash -LiteralPath $electronZipPath -Algorithm SHA256).Hash -ne $expectedElectronZipHash.ToUpperInvariant())
+        {
+            throw "The downloaded $electronZipName does not match the installed electron package checksum."
+        }
     }
     $electronNoticeDirectory = Join-Path $outputDirectory 'electron-notices'
     Remove-GeneratedDirectory $electronNoticeDirectory
-    Invoke-CheckedCommand unzip @('-o', '-q', $electronZips[0].FullName, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
+    Invoke-CheckedCommand unzip @('-o', '-q', $electronZipPath, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
     $appResources = Join-Path $appPath 'Contents/Resources'
     Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSES.chromium.html') -Destination $appResources -Force
     Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
