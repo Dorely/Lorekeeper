@@ -264,7 +264,9 @@ the same full-measure rule for manuscript typography. Final lines and explicit
 hard-break paragraph endings remain ragged. A positive first-line indent
 shortens the opening line's measure for both wrapping and justification, so
 that line ends on the same right edge as the rest of the paragraph instead of
-overrunning it by the indent. Composition text uses the scene's
+overrunning it by the indent. When a block is rewrapped after its opening
+lines, a hyphen the source carries at the break stays on the earlier line;
+only a hyphen inserted by hyphenation is absent from the remaining text. Composition text uses the scene's
 Start, Center, End, or Justify alignment and applies identical spacing to
 text-shadow and foreground paint in the layout trace and PDF.
 

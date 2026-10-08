@@ -7909,9 +7909,21 @@ fn consumed_text_offset(full_text: &str, search_offset: usize, line: &str) -> us
     full_text
         .get(search_offset..)
         .and_then(|remaining| {
-            remaining
-                .find(searchable)
-                .map(|relative| search_offset + relative + searchable.len())
+            remaining.find(searchable).map(|relative| {
+                let end = search_offset + relative + searchable.len();
+                // A line-final hyphen is either inserted by hyphenation or a
+                // hyphen the source already carries; the latter belongs to the
+                // consumed line, or the remainder would repeat it.
+                if searchable.len() < line.len()
+                    && full_text
+                        .get(end..)
+                        .is_some_and(|tail| tail.starts_with('-'))
+                {
+                    end + 1
+                } else {
+                    end
+                }
+            })
         })
         .unwrap_or(search_offset)
 }
@@ -10005,6 +10017,16 @@ mod tests {
         let lines = wrap("A measured café sentence breaks safely.", 12);
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.is_char_boundary(line.len())));
+    }
+
+    #[test]
+    fn consumed_line_keeps_a_source_hyphen_out_of_the_remainder() {
+        let text = "The ward-light poured down.";
+        let source_hyphen = consumed_text_offset(text, 0, "The ward-");
+        assert_eq!(&text[source_hyphen..], "light poured down.");
+        let text = "A characteristically long word.";
+        let inserted_hyphen = consumed_text_offset(text, 0, "A characteris-");
+        assert_eq!(&text[inserted_hyphen..], "tically long word.");
     }
 
     #[test]
