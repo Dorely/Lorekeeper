@@ -340,6 +340,20 @@ try
         throw "Expected one unpacked Lorekeeper.app, found $($unpackedApps.Count)."
     }
     $appPath = $unpackedApps[0].FullName
+    # electron-builder keeps only Electron.app from the runtime zip on macOS, so
+    # Electron's LICENSE and Chromium notice must be placed inside the bundle.
+    $electronNoticeRoots = @(
+        (Join-Path $stageDirectory 'node_modules/electron/dist'),
+        $unpackedApps[0].Parent.FullName
+    ) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'LICENSES.chromium.html') -PathType Leaf }
+    if (@($electronNoticeRoots).Count -eq 0 -or
+        -not (Test-Path -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSE') -PathType Leaf))
+    {
+        throw 'The Electron runtime LICENSE and LICENSES.chromium.html were not found for the macOS bundle.'
+    }
+    $appResources = Join-Path $appPath 'Contents/Resources'
+    Copy-Item -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSES.chromium.html') -Destination $appResources -Force
+    Copy-Item -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
     Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot `
         -ManagedRoot (Join-Path $appPath 'Contents/Resources/bin') -DesktopRoot $appPath
     $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
@@ -350,44 +364,42 @@ try
     # before verification. This keeps PublicationPressRuntime.VerifyManifest
     # fail-closed on unsigned or tampered files while allowing the intended
     # ad-hoc signed artifact to pass.
-    $pressManifestWasRepaired = Repair-PressRuntimeManifest -PressRoot $pressRoot
-    if ($pressManifestWasRepaired)
+    $null = Repair-PressRuntimeManifest -PressRoot $pressRoot
+    # The added Electron notices always require re-sealing the bundle and DMG.
+    Write-Host "Re-signing $appPath after adding Electron notices and any press manifest repair." -ForegroundColor Yellow
+    Invoke-CheckedCommand codesign @('--force', '--deep', '--sign', '-', $appPath)
+    # Rebuild the DMG from the re-signed bundle so the shipped artifact
+    # contains the notices and repaired manifest. Use a fresh UDZO image.
+    Write-Host "Rebuilding DMG at $dmgPath from repaired bundle." -ForegroundColor Yellow
+    Remove-Item -LiteralPath $dmgPath -Force
+    $dmgStaging = Join-Path $outputDirectory "dmg-staging-$([Guid]::NewGuid().ToString('N'))"
+    try
     {
-        Write-Host "Re-signing $appPath after press manifest repair." -ForegroundColor Yellow
-        Invoke-CheckedCommand codesign @('--force', '--deep', '--sign', '-', $appPath)
-        # Rebuild the DMG from the re-signed bundle so the shipped artifact
-        # contains the repaired manifest. Use a fresh UDZO image.
-        Write-Host "Rebuilding DMG at $dmgPath from repaired bundle." -ForegroundColor Yellow
-        Remove-Item -LiteralPath $dmgPath -Force
-        $dmgStaging = Join-Path $outputDirectory "dmg-staging-$([Guid]::NewGuid().ToString('N'))"
-        try
+        New-Item -ItemType Directory -Path $dmgStaging | Out-Null
+        # Preserve framework symlinks and bundle metadata when staging the
+        # repaired app; PowerShell Copy-Item can dereference macOS bundle
+        # symlinks and leave codesign with an ambiguous framework layout.
+        Invoke-CheckedCommand ditto @($appPath, (Join-Path $dmgStaging 'Lorekeeper.app'))
+        # Recreate the conventional Applications symlink if absent.
+        $appsLink = Join-Path $dmgStaging 'Applications'
+        if (-not (Test-Path -LiteralPath $appsLink))
         {
-            New-Item -ItemType Directory -Path $dmgStaging | Out-Null
-            # Preserve framework symlinks and bundle metadata when staging the
-            # repaired app; PowerShell Copy-Item can dereference macOS bundle
-            # symlinks and leave codesign with an ambiguous framework layout.
-            Invoke-CheckedCommand ditto @($appPath, (Join-Path $dmgStaging 'Lorekeeper.app'))
-            # Recreate the conventional Applications symlink if absent.
-            $appsLink = Join-Path $dmgStaging 'Applications'
-            if (-not (Test-Path -LiteralPath $appsLink))
-            {
-                & ln -s /Applications $appsLink 2>$null
-            }
-            Invoke-CheckedCommand hdiutil @('create', '-volname', 'Lorekeeper', '-srcfolder', $dmgStaging, '-ov', '-format', 'UDZO', $dmgPath)
-            Invoke-CheckedCommand hdiutil @('verify', $dmgPath)
+            & ln -s /Applications $appsLink 2>$null
         }
-        finally
-        {
-            if (Test-Path -LiteralPath $dmgStaging) { Remove-Item -LiteralPath $dmgStaging -Recurse -Force -ErrorAction SilentlyContinue }
-        }
-        # Re-signing is idempotent for the same binary content (ad-hoc signature
-        # is deterministic), so the manifest repaired before re-sign must still
-        # match. Re-verify to guard against a non-deterministic re-sign.
-        $stillMismatched = Repair-PressRuntimeManifest -PressRoot $pressRoot
-        if ($stillMismatched)
-        {
-            throw 'Press manifest still mismatched after re-sign; ad-hoc signature is not stable.'
-        }
+        Invoke-CheckedCommand hdiutil @('create', '-volname', 'Lorekeeper', '-srcfolder', $dmgStaging, '-ov', '-format', 'UDZO', $dmgPath)
+        Invoke-CheckedCommand hdiutil @('verify', $dmgPath)
+    }
+    finally
+    {
+        if (Test-Path -LiteralPath $dmgStaging) { Remove-Item -LiteralPath $dmgStaging -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    # Re-signing is idempotent for the same binary content (ad-hoc signature
+    # is deterministic), so the manifest repaired before re-sign must still
+    # match. Re-verify to guard against a non-deterministic re-sign.
+    $stillMismatched = Repair-PressRuntimeManifest -PressRoot $pressRoot
+    if ($stillMismatched)
+    {
+        throw 'Press manifest still mismatched after re-sign; ad-hoc signature is not stable.'
     }
     Invoke-CheckedCommand codesign @('--verify', '--deep', '--strict', '--verbose=2', $appPath)
     $signatureDetails = (& codesign --display --verbose=4 $appPath 2>&1) -join [Environment]::NewLine

@@ -218,7 +218,10 @@ The builders use exact dependency/editor/Press inputs, check immutable channel
 metadata and notice hashes, probe the packaged renderer contract, and verify
 artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
 `Lorekeeper-<version>-x86_64.AppImage` and
-`Lorekeeper-<version>-amd64.deb` with source/archive provenance. WSL packaging
+`Lorekeeper-<version>-amd64.deb` with source/archive provenance. macOS
+electron-builder keeps only `Electron.app` from the runtime zip, so the builder
+copies Electron's `LICENSE` and `LICENSES.chromium.html` into
+`Contents/Resources`, then re-signs ad hoc and rebuilds the DMG. WSL packaging
 uses an exact committed Git archive in isolated ext4 storage and local compute.
 Its archive command sets `core.autocrlf=false` and `core.eol=lf` only for that
 invocation, so Windows Git cannot change committed text bytes before the native
