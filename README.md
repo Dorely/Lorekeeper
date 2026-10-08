@@ -51,6 +51,16 @@ provenance, and a reproducible export recipe.
 | ![Typeset print interior](media/screenshots/07-print-interior-pdf.jpg) | ![EPUB preview](media/screenshots/08-epub-preview.jpg) |
 | Preview the typeset print interior in facing pages. | Preview the EPUB before you publish. |
 
+## Example books
+
+Two complete print packages made in Lorekeeper, committed exactly as the app
+saved them. See [examples](examples/README.md) for details.
+
+| | |
+|---|---|
+| [![Cover of My Dad, the Lighthouse Keeper](media/examples/lighthouse-cover.jpg)](examples/README.md#my-dad-the-lighthouse-keeper) | [![Cover of Falanaras, Blood Knight](media/examples/falanaras-cover.jpg)](examples/README.md#falanaras-blood-knight) |
+| **My Dad, the Lighthouse Keeper**: a full-color 8.5 × 11 in picture book with full-bleed illustrated spreads. [Interior](examples/my-dad-the-lighthouse-keeper/interior.pdf) · [Cover](examples/my-dad-the-lighthouse-keeper/outside-cover.pdf) | **Falanaras, Blood Knight**: a 6 × 9 in black-and-white novel (unofficial Warcraft fan fiction). [Interior](examples/falanaras-blood-knight/interior.pdf) · [Cover](examples/falanaras-blood-knight/outside-cover.pdf) |
+
 ## Installation
 
 Application downloads and release notes belong to

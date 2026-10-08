@@ -1,0 +1,60 @@
+{
+  "profileId": "lulu-pb-bw-60-white",
+  "profileVersion": "lulu-print-v1",
+  "profileReviewedAtUtc": "2026-08-12T00:00:00Z",
+  "profileSources": [
+    "Bundled Lorekeeper print-artifact profile registry 2026.10.1"
+  ],
+  "sourceFingerprint": "b9b9126dfbf6ab8cf073e747f0848791a05a4e12e291d7c94cb7c1803cf0d04a",
+  "packageIdentity": "package:ea9568e0420658a9cbcd4fd821cb98ed51233e98104c4a5b4b3d7d7ae2d6ba09",
+  "validatedArtifacts": [
+    {
+      "kind": "InteriorPdf",
+      "sha256": "ef6ede6e2b97e767129d9955c27948ebf158e6b74b98fcce17158b321a90fe02",
+      "byteLength": 4778809,
+      "pageCount": 354,
+      "rendererVersion": "2.1.17",
+      "profileId": "lulu-print-v1"
+    },
+    {
+      "kind": "PerfectBoundCoverPdf",
+      "sha256": "322bf8545039fad18870f161b3e24b7c3d6e5c94659aed56fe672c7e5429607f",
+      "byteLength": 2103182,
+      "pageCount": 1,
+      "rendererVersion": "2.1.17",
+      "profileId": "lulu-print-v1"
+    }
+  ],
+  "isLorekeeperValidated": true,
+  "canPackage": true,
+  "currentPackage": null,
+  "items": [
+    {
+      "severity": "warning",
+      "code": "COVER_BARCODE_OVERLAP",
+      "message": "Object 8ef2d3d14f35447db4a2d26cc87345b1 places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.",
+      "artifactKind": "PerfectBoundCoverPdf",
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "warning",
+      "code": "BLANK_PAGE_REVIEW_RECOMMENDED",
+      "message": "Inspect the prepared interior for intentional or accidental blank pages before upload.",
+      "artifactKind": null,
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "info",
+      "code": "LOREKEEPER_VALIDATED_SCOPE",
+      "message": "Lorekeeper validation covers the generated file structure and selected profile; vendor acceptance occurs only after upload to the selected service.",
+      "artifactKind": null,
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    }
+  ]
+}

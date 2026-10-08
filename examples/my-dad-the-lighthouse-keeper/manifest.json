@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "label": "Lorekeeper validated",
+  "editionId": "e2039564-a48b-4907-89d6-75698fa52f34",
+  "sourceFingerprint": "917666e7d67979e107208d635f51f20aa3d72a566c41bd496c3476c7ae0a3400",
+  "profile": {
+    "profileId": "lulu-pb-premcolor-80-white",
+    "profileVersion": "lulu-print-v1",
+    "profileReviewedAtUtc": "2026-08-12T00:00:00Z"
+  },
+  "printArtifactSettings": {
+    "registryVersion": "2026.10.1",
+    "registrySha256": "90d9d112fdc5664a418f83b252868b87577777ad05d02daf2f01ce64d18af541",
+    "printArtifactProfileKey": "lulu-pb-premcolor-80-white",
+    "printCoverMode": "Simplex"
+  },
+  "runtime": {
+    "assembler": "lorekeeper-package-v1",
+    "epubExporter": null,
+    "packageIdentity": "package:879135e26b4e359202915e52461df9abd6051f9ad36c9851811f87ba19ea663d"
+  },
+  "files": [
+    {
+      "path": "interior.pdf",
+      "kind": "InteriorPdf",
+      "mediaType": "application/pdf",
+      "byteLength": 46514296,
+      "sha256": "4600678317112f2a78211372b78386f9ba71752d3080fd5415a30f5813e5ec79"
+    },
+    {
+      "path": "outside-cover.pdf",
+      "kind": "PerfectBoundCoverPdf",
+      "mediaType": "application/pdf",
+      "byteLength": 3381829,
+      "sha256": "a33d72ea7b8956ef4fbc0d4faca92330654d165d51328b355462a11887e8d182"
+    },
+    {
+      "path": "preflight.json",
+      "kind": "PreflightReport",
+      "mediaType": "application/json",
+      "byteLength": 3119,
+      "sha256": "7f4306c2c2bf863c316899d95e844fef8ff3403a501fd10451f8aa8450261bbd"
+    },
+    {
+      "path": "upload-map.json",
+      "kind": "Manifest",
+      "mediaType": "application/json",
+      "byteLength": 236,
+      "sha256": "d30d4fbd626dc090896b37a43f286a91f8e1e419b4e17c092c89095aa58a8337"
+    }
+  ]
+}

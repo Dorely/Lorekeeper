@@ -1,0 +1,13 @@
+{
+  "artifactProfile": "lulu-pb-bw-60-white",
+  "files": [
+    {
+      "file": "interior.pdf",
+      "uploadAs": "interior"
+    },
+    {
+      "file": "outside-cover.pdf",
+      "uploadAs": "outside cover"
+    }
+  ]
+}

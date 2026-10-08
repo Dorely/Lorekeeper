@@ -1,0 +1,87 @@
+{
+  "profileId": "lulu-pb-premcolor-80-white",
+  "profileVersion": "lulu-print-v1",
+  "profileReviewedAtUtc": "2026-08-12T00:00:00Z",
+  "profileSources": [
+    "Bundled Lorekeeper print-artifact profile registry 2026.10.1"
+  ],
+  "sourceFingerprint": "917666e7d67979e107208d635f51f20aa3d72a566c41bd496c3476c7ae0a3400",
+  "packageIdentity": "package:879135e26b4e359202915e52461df9abd6051f9ad36c9851811f87ba19ea663d",
+  "validatedArtifacts": [
+    {
+      "kind": "InteriorPdf",
+      "sha256": "4600678317112f2a78211372b78386f9ba71752d3080fd5415a30f5813e5ec79",
+      "byteLength": 46514296,
+      "pageCount": 34,
+      "rendererVersion": "2.1.17",
+      "profileId": "lulu-print-v1"
+    },
+    {
+      "kind": "PerfectBoundCoverPdf",
+      "sha256": "a33d72ea7b8956ef4fbc0d4faca92330654d165d51328b355462a11887e8d182",
+      "byteLength": 3381829,
+      "pageCount": 1,
+      "rendererVersion": "2.1.17",
+      "profileId": "lulu-print-v1"
+    }
+  ],
+  "isLorekeeperValidated": true,
+  "canPackage": true,
+  "currentPackage": null,
+  "items": [
+    {
+      "severity": "warning",
+      "code": "COVER_TEMPLATE_REVIEW_REQUIRED",
+      "message": "Cover geometry changed; review and acknowledge the current template before preparing files.",
+      "artifactKind": "PerfectBoundCoverPdf",
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "warning",
+      "code": "COVER_GEOMETRY_RECALCULATED",
+      "message": "Cover geometry was recalculated. Review constraint-bound objects and save the composition.",
+      "artifactKind": "PerfectBoundCoverPdf",
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "warning",
+      "code": "COVER_BARCODE_OVERLAP",
+      "message": "Object 6b12118fec714a059271226dbfca5f7f places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.",
+      "artifactKind": "PerfectBoundCoverPdf",
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "warning",
+      "code": "COVER_TEMPLATE_REVIEW_RECOMMENDED",
+      "message": "Review the calculated full-wrap cover template before preparing print files.",
+      "artifactKind": "PerfectBoundCoverPdf",
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "warning",
+      "code": "BLANK_PAGE_REVIEW_RECOMMENDED",
+      "message": "Inspect the prepared interior for intentional or accidental blank pages before upload.",
+      "artifactKind": null,
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    },
+    {
+      "severity": "info",
+      "code": "LOREKEEPER_VALIDATED_SCOPE",
+      "message": "Lorekeeper validation covers the generated file structure and selected profile; vendor acceptance occurs only after upload to the selected service.",
+      "artifactKind": null,
+      "page": null,
+      "sourceKind": null,
+      "sourceId": null
+    }
+  ]
+}

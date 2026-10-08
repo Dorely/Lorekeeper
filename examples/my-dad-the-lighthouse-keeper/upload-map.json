@@ -1,0 +1,13 @@
+{
+  "artifactProfile": "lulu-pb-premcolor-80-white",
+  "files": [
+    {
+      "file": "interior.pdf",
+      "uploadAs": "interior"
+    },
+    {
+      "file": "outside-cover.pdf",
+      "uploadAs": "outside cover"
+    }
+  ]
+}

@@ -1,3 +1,5 @@
 eng/linux/*.sh text eol=lf
 # Retain exact upstream evidence, including its original line endings/whitespace.
 licenses/** -text -whitespace
+# Example publication packages are committed byte-for-byte so their manifests verify.
+examples/*/** -text -whitespace
