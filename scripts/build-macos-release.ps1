@@ -355,7 +355,7 @@ try
     }
     $electronNoticeDirectory = Join-Path $outputDirectory 'electron-notices'
     Remove-GeneratedDirectory $electronNoticeDirectory
-    Invoke-CheckedCommand unzip @('-q', $electronZips[0].FullName, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
+    Invoke-CheckedCommand unzip @('-o', '-q', $electronZips[0].FullName, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
     $appResources = Join-Path $appPath 'Contents/Resources'
     Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSES.chromium.html') -Destination $appResources -Force
     Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
