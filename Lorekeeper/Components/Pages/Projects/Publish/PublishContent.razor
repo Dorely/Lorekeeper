@@ -2832,7 +2832,27 @@ else
     private static string CoverEyebrow(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Full-wrap cover", PublicationEditionFormat.Hardcover => "Production cover", _ => "Digital cover" };
     private static string CoverHelp(PublicationEditionFormat format) => format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? "Core artwork supplies the front; this release adds its required back, spine, wrap, jacket, and barcode regions." : "Uses the reusable Core front cover until you customize this release.";
 
-    public async ValueTask DisposeAsync() { _dispose.Cancel(); _formAutosave?.Cancel(); _formAutosave?.Dispose(); _formSaveGate.Dispose(); _dispose.Dispose(); if (_downloads is not null) await _downloads.DisposeAsync(); }
+    public async ValueTask DisposeAsync()
+    {
+        CancelFormAutosave();
+        // Form edits save after a debounce; leaving the page must not drop one.
+        if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
+        {
+            try
+            {
+                await _formSaveGate.WaitAsync();
+                try
+                {
+                    await SaveCoreAsync();
+                    await SavePageSetupAsync();
+                    await SaveReleaseAsync();
+                }
+                finally { _formSaveGate.Release(); }
+            }
+            catch { }
+        }
+        _dispose.Cancel(); _formSaveGate.Dispose(); _dispose.Dispose(); if (_downloads is not null) await _downloads.DisposeAsync();
+    }
 
     private sealed class CoreDraft
     {
