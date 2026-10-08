@@ -261,7 +261,10 @@ Flowing manuscript and composition text distribute the complete residual line
 width as inter-word spacing for justified soft-wrapped non-final lines. This
 keeps exported composition text consistent with the editor surface while using
 the same full-measure rule for manuscript typography. Final lines and explicit
-hard-break paragraph endings remain ragged. Composition text uses the scene's
+hard-break paragraph endings remain ragged. A positive first-line indent
+shortens the opening line's measure for both wrapping and justification, so
+that line ends on the same right edge as the rest of the paragraph instead of
+overrunning it by the indent. Composition text uses the scene's
 Start, Center, End, or Justify alignment and applies identical spacing to
 text-shadow and foreground paint in the layout trace and PDF.
 

@@ -7664,7 +7664,38 @@ fn append_styled_runs_with_gap(
         .and_then(|page| active_float_region(page, trim, style, previous_space_after));
     let available_width = flow_region.map_or(default_width, |region| region.1);
     let flow_x = flow_region.map_or(default_x, |region| region.0);
-    let mut wrapped = wrap_layout_runs(text, source_runs, style.size, available_width);
+    // A positive first-line indent shortens the opening line's measure; the
+    // rest of the block keeps the full measure. Float-wrapped lines carry no
+    // first-line indent, so their measure is the float region alone.
+    let opening_indent = if flow_region.is_none() {
+        style.first_line_indent.max(0.0)
+    } else {
+        0.0
+    };
+    let mut wrapped = wrap_layout_runs(
+        text,
+        source_runs,
+        style.size,
+        (available_width - opening_indent).max(0.0),
+    );
+    if opening_indent > 0.0 && wrapped.len() > 1 {
+        let mut consumed = consumed_text_offset(text, 0, &wrapped[0].0);
+        let tail = text.get(consumed..).unwrap_or("");
+        let after_spaces = tail.trim_start_matches(' ');
+        consumed += tail.len() - after_spaces.len();
+        if after_spaces.starts_with('\n') {
+            consumed += 1;
+        }
+        let remainder = text.get(consumed..).unwrap_or("");
+        let remainder_runs = slice_layout_runs(source_runs, consumed);
+        wrapped.truncate(1);
+        wrapped.extend(wrap_layout_runs(
+            remainder,
+            &remainder_runs,
+            style.size,
+            available_width,
+        ));
+    }
     let mut float_line_count = 0usize;
     if let Some((_, _, float_bottom)) = flow_region {
         let baseline = pages.last().map_or(0.0, |page| {
@@ -7775,7 +7806,7 @@ fn append_styled_runs_with_gap(
             let line_runs = wrapped_runs[offset + relative_index].clone();
             let uses_float = offset + relative_index < float_line_count
                 && page_number == first_page.unwrap_or(page_number);
-            let line_width = if uses_float {
+            let mut line_width = if uses_float {
                 available_width
             } else {
                 default_width
@@ -7783,6 +7814,7 @@ fn append_styled_runs_with_gap(
             let mut line_x = if uses_float { flow_x } else { default_x };
             if offset == 0 && relative_index == 0 && !uses_float {
                 line_x += style.first_line_indent;
+                line_width = (line_width - style.first_line_indent.max(0.0)).max(0.0);
             }
             let estimated_width = measured_run_width(&line_runs, style.size);
             let spaces = line.chars().filter(|character| *character == ' ').count();

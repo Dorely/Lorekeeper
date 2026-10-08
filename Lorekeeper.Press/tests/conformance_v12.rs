@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 15);
-    assert_eq!(value["rendererVersion"], "2.1.15");
+    assert_eq!(value["rendererVersion"], "2.1.16");
     assert_eq!(
         value["profiles"],
         json!([
@@ -536,7 +536,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 15);
-    assert_eq!(response["rendererVersion"], "2.1.15");
+    assert_eq!(response["rendererVersion"], "2.1.16");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -3494,6 +3494,60 @@ fn layout_trace_applies_sparse_paragraph_presentation_over_book_text_style() {
     let body_size = job.request["trim"]["bodyFontSizePoints"].as_f64().unwrap();
     let expected_x = margin + body_size * (2.0 + 1.5);
     assert!((line["x"].as_f64().unwrap() - expected_x).abs() < 0.1);
+}
+
+#[test]
+fn justified_first_line_indent_keeps_the_opening_line_inside_the_measure() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    let block = &mut job.request["document"]["sections"][0]["chapters"][0]["blocks"][1];
+    block["content"] = json!([{
+        "type": "Text",
+        "text": "Indented sentinel paragraph keeps every justified line within the text block. "
+            .repeat(6),
+        "marks": []
+    }]);
+    block["paragraphPresentation"] = json!({
+        "alignment": "Justify",
+        "firstLineIndentEm": 1.5,
+        "keepWithNext": false,
+        "startOnNewPage": false
+    });
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let lines = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .filter(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("justified") || text.contains("sentinel"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        lines.len() >= 4,
+        "the paragraph must wrap onto several lines"
+    );
+    let right_edge = |line: &Value| {
+        let advance = line["runs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|run| run["glyphs"].as_array().into_iter().flatten())
+            .map(|glyph| glyph["xAdvance"].as_f64().unwrap())
+            .sum::<f64>();
+        let spaces = line["text"].as_str().unwrap().matches(' ').count() as f64;
+        line["x"].as_f64().unwrap() + advance + line["wordSpacing"].as_f64().unwrap() * spaces
+    };
+    let measure = right_edge(lines[1]);
+    assert!(lines[0]["x"].as_f64().unwrap() > lines[1]["x"].as_f64().unwrap() + 10.0);
+    assert!(
+        (right_edge(lines[0]) - measure).abs() < 0.5,
+        "the indented opening line must justify to the same right edge as the rest; first={} measure={measure}",
+        right_edge(lines[0])
+    );
 }
 
 #[test]
