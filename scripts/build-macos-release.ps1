@@ -44,7 +44,7 @@ $machArchitecture = 'arm64'
 $sqliteVecPlatformCheck = '-p:EnableUnsupportedPlatformTargetCheck=false'
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
 
-foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto'))
+foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto', 'unzip'))
 {
     if (-not (Get-Command $commandName -ErrorAction SilentlyContinue))
     {
@@ -341,19 +341,24 @@ try
     }
     $appPath = $unpackedApps[0].FullName
     # electron-builder keeps only Electron.app from the runtime zip on macOS, so
-    # Electron's LICENSE and Chromium notice must be placed inside the bundle.
-    $electronNoticeRoots = @(
-        (Join-Path $stageDirectory 'node_modules/electron/dist'),
-        $unpackedApps[0].Parent.FullName
-    ) | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'LICENSES.chromium.html') -PathType Leaf }
-    if (@($electronNoticeRoots).Count -eq 0 -or
-        -not (Test-Path -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSE') -PathType Leaf))
+    # Electron's LICENSE and Chromium notice come from the exact cached zip that
+    # electron-builder downloaded and checksum-verified for this package.
+    $electronZipName = "electron-v$lockedElectronVersion-darwin-$artifactArchitecture.zip"
+    $electronCacheRoots = @($env:ELECTRON_CACHE, (Join-Path $HOME 'Library/Caches/electron')) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Container) }
+    $electronZips = @($electronCacheRoots | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Recurse -File -Filter $electronZipName
+    })
+    if ($electronZips.Count -eq 0)
     {
-        throw 'The Electron runtime LICENSE and LICENSES.chromium.html were not found for the macOS bundle.'
+        throw "The cached Electron runtime $electronZipName was not found under: $($electronCacheRoots -join ', ')"
     }
+    $electronNoticeDirectory = Join-Path $outputDirectory 'electron-notices'
+    Remove-GeneratedDirectory $electronNoticeDirectory
+    Invoke-CheckedCommand unzip @('-q', $electronZips[0].FullName, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
     $appResources = Join-Path $appPath 'Contents/Resources'
-    Copy-Item -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSES.chromium.html') -Destination $appResources -Force
-    Copy-Item -LiteralPath (Join-Path @($electronNoticeRoots)[0] 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
+    Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSES.chromium.html') -Destination $appResources -Force
+    Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
     Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot `
         -ManagedRoot (Join-Path $appPath 'Contents/Resources/bin') -DesktopRoot $appPath
     $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
