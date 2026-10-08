@@ -1494,15 +1494,6 @@ public sealed class PublicationPackageService(
                     items.Add(Error("PDF_BLACK_AND_WHITE_INTERIOR_REQUIRED", "Black-and-white editions require grayscale interior image content."));
                 }
             }
-            if (root.TryGetProperty("imageCount", out var imageCount)
-                && imageCount.ValueKind == JsonValueKind.Number
-                && imageCount.GetInt32() > 0)
-            {
-                items.Add(new(
-                    "warning",
-                    "IMAGE_RESOLUTION_REVIEW",
-                    "Review effective image resolution in the rendered page map before upload."));
-            }
         }
         catch (JsonException)
         {
