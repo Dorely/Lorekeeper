@@ -121,6 +121,19 @@
   },
   "mac": {
     "icon": "icon.png",
+    "files": [
+      "!packaging{,/**/*}"
+    ],
+    "extraResources": [
+      {
+        "from": "packaging/macos",
+        "to": ".",
+        "filter": [
+          "LICENSE.electron.txt",
+          "LICENSES.chromium.html"
+        ]
+      }
+    ],
     "identity": "-",
     "hardenedRuntime": false,
     "publish": null,

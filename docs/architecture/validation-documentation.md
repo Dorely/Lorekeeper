@@ -220,9 +220,9 @@ artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
 `Lorekeeper-<version>-x86_64.AppImage` and
 `Lorekeeper-<version>-amd64.deb` with source/archive provenance. macOS
 electron-builder keeps only `Electron.app` from the runtime zip, so the builder
-copies Electron's `LICENSE` and `LICENSES.chromium.html` from that release zip, verified
-against the installed `electron` package checksums, into
-`Contents/Resources`, then re-signs ad hoc and rebuilds the DMG. WSL packaging
+first extracts Electron's `LICENSE` and `LICENSES.chromium.html` from that release
+zip and stages them as extra resources before signing and imaging. It then checks
+the zip against the installed `electron` package checksums and the bundled copies. WSL packaging
 uses an exact committed Git archive in isolated ext4 storage and local compute.
 Its archive command sets `core.autocrlf=false` and `core.eol=lf` only for that
 invocation, so Windows Git cannot change committed text bytes before the native

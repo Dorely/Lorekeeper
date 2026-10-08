@@ -63,6 +63,7 @@
     <AssemblyMetadata Include="LorekeeperDistributionChannel" Value="$(LorekeeperDistributionChannel)" />
     <Content Include="ElectronHostHook\index.js" Link=".electron\ElectronHostHook\index.js" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <Content Include="..\eng\linux\AppRun.sh" Link=".electron\packaging\linux\AppRun.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+    <Content Include="..\publish\electron-notices-osx-arm64\LICENSE*" Link=".electron\packaging\macos\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="" />
     <Content Include="..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\licenses\**\*" Link="licenses\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

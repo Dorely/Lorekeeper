@@ -43,6 +43,10 @@ $machArchitecture = 'arm64'
 # ARM64 PlatformTarget values. The packaged dylib is validated below.
 $sqliteVecPlatformCheck = '-p:EnableUnsupportedPlatformTargetCheck=false'
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
+# electron-builder keeps only Electron.app from the runtime zip on macOS. The
+# project stages Electron's LICENSE and Chromium notice from here as extra
+# resources, so they are inside the bundle before it is signed and imaged.
+$electronNoticeDirectory = Join-Path $repoRoot "publish/electron-notices-$runtimeIdentifier"
 
 foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto', 'unzip', 'curl'))
 {
@@ -225,6 +229,22 @@ try
 {
     Remove-GeneratedDirectory $stageDirectory
     Remove-GeneratedDirectory $outputDirectory
+    Remove-GeneratedDirectory $electronNoticeDirectory
+
+    $projectXml = [xml](Get-Content -LiteralPath $projectPath -Raw)
+    $projectElectronVersion = [string]@($projectXml.Project.PropertyGroup.ElectronVersion | Where-Object { $_ })[0]
+    if ([string]::IsNullOrWhiteSpace($projectElectronVersion))
+    {
+        throw 'The project does not declare ElectronVersion.'
+    }
+    $electronZipName = "electron-v$projectElectronVersion-darwin-$artifactArchitecture.zip"
+    New-Item -ItemType Directory -Path $electronNoticeDirectory | Out-Null
+    $electronZipPath = Join-Path $electronNoticeDirectory $electronZipName
+    Invoke-CheckedCommand curl @('--fail', '--location', '--silent', '--show-error', '--max-time', '600',
+        '--output', $electronZipPath,
+        "https://github.com/electron/electron/releases/download/v$projectElectronVersion/$electronZipName")
+    Invoke-CheckedCommand unzip @('-o', '-q', $electronZipPath, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
+    Move-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSE') -Destination (Join-Path $electronNoticeDirectory 'LICENSE.electron.txt')
 
     foreach ($requiredPath in @(
         (Join-Path $semanticEditorDirectory 'package-lock.json'),
@@ -340,46 +360,25 @@ try
         throw "Expected one unpacked Lorekeeper.app, found $($unpackedApps.Count)."
     }
     $appPath = $unpackedApps[0].FullName
-    # electron-builder keeps only Electron.app from the runtime zip on macOS, so
-    # Electron's LICENSE and Chromium notice come from the same release zip,
-    # verified against the installed electron package's checksums.
-    $electronZipName = "electron-v$lockedElectronVersion-darwin-$artifactArchitecture.zip"
+    # The notice source must be the exact runtime release the lock installed.
     $electronChecksums = Get-Content -Raw (Join-Path $stageDirectory 'node_modules/electron/checksums.json') | ConvertFrom-Json
     $expectedElectronZipHash = [string]$electronChecksums.$electronZipName
-    if ([string]::IsNullOrWhiteSpace($expectedElectronZipHash))
+    if ($projectElectronVersion -ne $lockedElectronVersion -or
+        [string]::IsNullOrWhiteSpace($expectedElectronZipHash) -or
+        (Get-FileHash -LiteralPath $electronZipPath -Algorithm SHA256).Hash -ne $expectedElectronZipHash.ToUpperInvariant())
     {
-        throw "The installed electron package has no checksum for $electronZipName."
+        throw "The Electron notice source $electronZipName does not match the installed electron package."
     }
-    $electronZipPath = $null
-    foreach ($cacheRoot in @($env:ELECTRON_CACHE, (Join-Path $HOME 'Library/Caches/electron')))
+    foreach ($noticeName in @('LICENSE.electron.txt', 'LICENSES.chromium.html'))
     {
-        if ([string]::IsNullOrWhiteSpace($cacheRoot) -or -not (Test-Path -LiteralPath $cacheRoot -PathType Container)) { continue }
-        foreach ($candidate in @(Get-ChildItem -LiteralPath $cacheRoot -Recurse -Depth 2 -File -Filter $electronZipName))
+        $packagedNotice = Join-Path $appPath "Contents/Resources/$noticeName"
+        if (-not (Test-Path -LiteralPath $packagedNotice -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $packagedNotice -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath (Join-Path $electronNoticeDirectory $noticeName) -Algorithm SHA256).Hash)
         {
-            if ((Get-FileHash -LiteralPath $candidate.FullName -Algorithm SHA256).Hash -eq $expectedElectronZipHash.ToUpperInvariant())
-            {
-                $electronZipPath = $candidate.FullName
-                break
-            }
-        }
-        if ($electronZipPath) { break }
-    }
-    if (-not $electronZipPath)
-    {
-        $electronZipPath = Join-Path $outputDirectory $electronZipName
-        Invoke-CheckedCommand curl @('--fail', '--location', '--silent', '--show-error', '--output', $electronZipPath,
-            "https://github.com/electron/electron/releases/download/v$lockedElectronVersion/$electronZipName")
-        if ((Get-FileHash -LiteralPath $electronZipPath -Algorithm SHA256).Hash -ne $expectedElectronZipHash.ToUpperInvariant())
-        {
-            throw "The downloaded $electronZipName does not match the installed electron package checksum."
+            throw "Lorekeeper.app does not contain the verified Electron $noticeName."
         }
     }
-    $electronNoticeDirectory = Join-Path $outputDirectory 'electron-notices'
-    Remove-GeneratedDirectory $electronNoticeDirectory
-    Invoke-CheckedCommand unzip @('-o', '-q', $electronZipPath, 'LICENSE', 'LICENSES.chromium.html', '-d', $electronNoticeDirectory)
-    $appResources = Join-Path $appPath 'Contents/Resources'
-    Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSES.chromium.html') -Destination $appResources -Force
-    Copy-Item -LiteralPath (Join-Path $electronNoticeDirectory 'LICENSE') -Destination (Join-Path $appResources 'LICENSE.electron.txt') -Force
     Assert-ReleaseNoticeClosure -RepositoryRoot $repoRoot `
         -ManagedRoot (Join-Path $appPath 'Contents/Resources/bin') -DesktopRoot $appPath
     $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
@@ -390,42 +389,44 @@ try
     # before verification. This keeps PublicationPressRuntime.VerifyManifest
     # fail-closed on unsigned or tampered files while allowing the intended
     # ad-hoc signed artifact to pass.
-    $null = Repair-PressRuntimeManifest -PressRoot $pressRoot
-    # The added Electron notices always require re-sealing the bundle and DMG.
-    Write-Host "Re-signing $appPath after adding Electron notices and any press manifest repair." -ForegroundColor Yellow
-    Invoke-CheckedCommand codesign @('--force', '--deep', '--sign', '-', $appPath)
-    # Rebuild the DMG from the re-signed bundle so the shipped artifact
-    # contains the notices and repaired manifest. Use a fresh UDZO image.
-    Write-Host "Rebuilding DMG at $dmgPath from repaired bundle." -ForegroundColor Yellow
-    Remove-Item -LiteralPath $dmgPath -Force
-    $dmgStaging = Join-Path $outputDirectory "dmg-staging-$([Guid]::NewGuid().ToString('N'))"
-    try
+    $pressManifestWasRepaired = Repair-PressRuntimeManifest -PressRoot $pressRoot
+    if ($pressManifestWasRepaired)
     {
-        New-Item -ItemType Directory -Path $dmgStaging | Out-Null
-        # Preserve framework symlinks and bundle metadata when staging the
-        # repaired app; PowerShell Copy-Item can dereference macOS bundle
-        # symlinks and leave codesign with an ambiguous framework layout.
-        Invoke-CheckedCommand ditto @($appPath, (Join-Path $dmgStaging 'Lorekeeper.app'))
-        # Recreate the conventional Applications symlink if absent.
-        $appsLink = Join-Path $dmgStaging 'Applications'
-        if (-not (Test-Path -LiteralPath $appsLink))
+        Write-Host "Re-signing $appPath after press manifest repair." -ForegroundColor Yellow
+        Invoke-CheckedCommand codesign @('--force', '--deep', '--sign', '-', $appPath)
+        # Rebuild the DMG from the re-signed bundle so the shipped artifact
+        # contains the repaired manifest. Use a fresh UDZO image.
+        Write-Host "Rebuilding DMG at $dmgPath from repaired bundle." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $dmgPath -Force
+        $dmgStaging = Join-Path $outputDirectory "dmg-staging-$([Guid]::NewGuid().ToString('N'))"
+        try
         {
-            & ln -s /Applications $appsLink 2>$null
+            New-Item -ItemType Directory -Path $dmgStaging | Out-Null
+            # Preserve framework symlinks and bundle metadata when staging the
+            # repaired app; PowerShell Copy-Item can dereference macOS bundle
+            # symlinks and leave codesign with an ambiguous framework layout.
+            Invoke-CheckedCommand ditto @($appPath, (Join-Path $dmgStaging 'Lorekeeper.app'))
+            # Recreate the conventional Applications symlink if absent.
+            $appsLink = Join-Path $dmgStaging 'Applications'
+            if (-not (Test-Path -LiteralPath $appsLink))
+            {
+                & ln -s /Applications $appsLink 2>$null
+            }
+            Invoke-CheckedCommand hdiutil @('create', '-volname', 'Lorekeeper', '-srcfolder', $dmgStaging, '-ov', '-format', 'UDZO', $dmgPath)
+            Invoke-CheckedCommand hdiutil @('verify', $dmgPath)
         }
-        Invoke-CheckedCommand hdiutil @('create', '-volname', 'Lorekeeper', '-srcfolder', $dmgStaging, '-ov', '-format', 'UDZO', $dmgPath)
-        Invoke-CheckedCommand hdiutil @('verify', $dmgPath)
-    }
-    finally
-    {
-        if (Test-Path -LiteralPath $dmgStaging) { Remove-Item -LiteralPath $dmgStaging -Recurse -Force -ErrorAction SilentlyContinue }
-    }
-    # Re-signing is idempotent for the same binary content (ad-hoc signature
-    # is deterministic), so the manifest repaired before re-sign must still
-    # match. Re-verify to guard against a non-deterministic re-sign.
-    $stillMismatched = Repair-PressRuntimeManifest -PressRoot $pressRoot
-    if ($stillMismatched)
-    {
-        throw 'Press manifest still mismatched after re-sign; ad-hoc signature is not stable.'
+        finally
+        {
+            if (Test-Path -LiteralPath $dmgStaging) { Remove-Item -LiteralPath $dmgStaging -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        # Re-signing is idempotent for the same binary content (ad-hoc signature
+        # is deterministic), so the manifest repaired before re-sign must still
+        # match. Re-verify to guard against a non-deterministic re-sign.
+        $stillMismatched = Repair-PressRuntimeManifest -PressRoot $pressRoot
+        if ($stillMismatched)
+        {
+            throw 'Press manifest still mismatched after re-sign; ad-hoc signature is not stable.'
+        }
     }
     Invoke-CheckedCommand codesign @('--verify', '--deep', '--strict', '--verbose=2', $appPath)
     $signatureDetails = (& codesign --display --verbose=4 $appPath 2>&1) -join [Environment]::NewLine
