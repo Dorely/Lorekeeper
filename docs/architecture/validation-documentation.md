@@ -222,7 +222,9 @@ artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
 electron-builder keeps only `Electron.app` from the runtime zip, so the builder
 first extracts Electron's `LICENSE` and `LICENSES.chromium.html` from that release
 zip and stages them as extra resources before signing and imaging. It then checks
-the zip against the installed `electron` package checksums and the bundled copies. WSL packaging
+the zip against the installed `electron` package checksums and the bundled copies.
+Its isolated startup check runs the installed bundle's packaged .NET host, because
+opening any Electron window stalls hosted macOS runners. WSL packaging
 uses an exact committed Git archive in isolated ext4 storage and local compute.
 Its archive command sets `core.autocrlf=false` and `core.eol=lf` only for that
 invocation, so Windows Git cannot change committed text bytes before the native

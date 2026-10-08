@@ -514,20 +514,21 @@ try
             [IO.File]::SetUnixFileMode($logPath, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
         }
 
+        # Launching any Electron window stalls hosted macOS runners, so start the
+        # installed bundle's packaged .NET host directly on the validation port.
+        # The Electron executable is still checked by signature and architecture.
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = Join-Path $installedApp 'Contents/MacOS/Lorekeeper'
+        $startInfo.FileName = Join-Path $installedApp "Contents/Resources/bin/$($manifest.executable)"
         $startInfo.WorkingDirectory = $tempInstallRoot
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
-        $startInfo.ArgumentList.Add("--user-data-dir=$(Join-Path $tempInstallRoot 'electron-user-data')")
+        $startInfo.Environment['ASPNETCORE_URLS'] = 'http://localhost:1455'
         $databasePath = Join-Path $dataDirectory 'lorekeeper.db'
         $startInfo.Environment['ConnectionStrings__DefaultConnection'] = 'Data Source="' + $databasePath.Replace('"', '""') + '"'
         $startInfo.Environment['VersionHistory__HistoryRoot'] = $historyDirectory
         $startInfo.Environment['ASPNETCORE_ENVIRONMENT'] = 'Production'
         $startInfo.Environment['DOTNET_ENVIRONMENT'] = 'Production'
-        $startInfo.Environment['Desktop__BindHost'] = 'localhost'
-        $startInfo.Environment['Desktop__HttpPort'] = '1455'
         $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
         if (@($listeners | Where-Object Port -EQ 1455).Count -gt 0)
         {
@@ -535,7 +536,7 @@ try
         }
         $process = [Diagnostics.Process]::Start($startInfo)
         if ($null -eq $process) { throw 'The isolated packaged Mac application did not start.' }
-        # Upstream Electron logs loopback authentication material. Keep both
+        # The host can log loopback authentication material. Keep both
         # streams private and never copy their contents into workflow output.
         $stdoutCopyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdoutStream)
         $stderrCopyTask = $process.StandardError.BaseStream.CopyToAsync($stderrStream)
