@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lorekeeper Privacy Policy</title>
+<style>
+:root { color-scheme: light dark; --fg: #1d1b18; --bg: #fbfaf7; --link: #6b3fa0; }
+@media (prefers-color-scheme: dark) { :root { --fg: #ece8e1; --bg: #171614; --link: #c4a3ef; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 Georgia, "Times New Roman", serif; }
+main { max-width: 42rem; margin: 0 auto; padding: 3rem 16px 4rem; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 2rem 0 .5rem; }
+a { color: var(--link); }
+code { font-family: Consolas, monospace; font-size: .9em; }
+li { margin: .4rem 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Lorekeeper Privacy Policy</h1>
+<p>Effective date: October 13, 2026</p>
+<p>This policy covers the Lorekeeper desktop application published by Dorely, including the Microsoft Store edition and the builds released on GitHub.</p>
+<h2>Summary</h2>
+<p>Lorekeeper does not collect, sell, or share your personal information. The developer operates no Lorekeeper account system, cloud workspace, analytics, telemetry, or advertising service, and receives none of your projects or usage data. Your work stays on your computer unless you choose to connect a third-party service.</p>
+<h2>Information stored on your computer</h2>
+<p>Lorekeeper stores the following in a local SQLite database and Electron browser storage under your Windows user profile:</p>
+<ul>
+<li>projects, manuscripts, outlines, canon, sources, images, fonts, and settings;</li>
+<li>assistant conversations, background jobs, and unsent drafts;</li>
+<li>API keys and OAuth tokens for providers you connect;</li>
+<li>local version-history repositories and recovery backups.</li>
+</ul>
+<p>Lorekeeper does not encrypt this data itself. Anyone with access to your Windows account can read it. Release builds do not write diagnostic logs.</p>
+<h2>Third-party services you choose to use</h2>
+<p>Lorekeeper contacts an outside service only when you configure and use one:</p>
+<ul>
+<li><strong>AI, embedding, search, and image providers</strong> (for example OpenAI) receive the content needed for the request you make. Depending on the feature, that can include manuscript text, canon, writing samples, sources, and images. Each provider's own privacy policy, retention terms, and charges apply.</li>
+<li><strong>OAuth sign-in</strong> opens the provider's authorization page in your browser, and Lorekeeper stores the resulting credential locally.</li>
+<li><strong>GitHub version-history sync</strong> is opt-in for each remote repository you attach. Creative snapshots, sources, images, and fonts are pushed to that repository. Credentials, chats, jobs, and search indexes are never included.</li>
+<li><strong>Update checks</strong> in GitHub-released builds read public GitHub release information. The Microsoft Store edition receives updates through the Store.</li>
+</ul>
+<p>The developer receives no data from any of these services.</p>
+<h2>Children</h2>
+<p>Lorekeeper is a general-audience writing tool and does not knowingly collect information from anyone, including children.</p>
+<h2>Retention and deletion</h2>
+<p>Your data stays on your computer until you delete it. Deleting a project in Lorekeeper removes it from the working database; earlier recovery backups can retain a copy until they are pruned. In the Microsoft Store edition, Windows removes Lorekeeper's local data when you uninstall the app, so export projects (<code>.lorekeeper</code> archives) or sync them to GitHub first if you want to keep them. Deleting a local project does not delete a GitHub repository you attached. Data you sent to a third-party provider is subject to that provider's retention policy.</p>
+<h2>Security</h2>
+<p>Keep your Windows account protected, and treat project exports and backups as private files. Report vulnerabilities privately as described in <a href="https://github.com/Dorely/Lorekeeper/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+<h2>Changes to this policy</h2>
+<p>Updates to this policy are published at this address and in the Lorekeeper source repository with a new effective date.</p>
+<h2>Contact</h2>
+<p>Questions about this policy can be raised through <a href="https://github.com/Dorely/Lorekeeper/issues">GitHub issues</a>. Do not post private projects, databases, keys, or tokens in public issues.</p>
+</main>
+</body>
+</html>
