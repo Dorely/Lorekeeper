@@ -54,9 +54,12 @@ repository's intended generated-output boundary.
 
 MSIX versions use `major+1.minor.patch.0`: source `1.0.0` becomes `2.0.0.0`,
 preserving monotonic updates after the earlier feasibility versions.
-Windows 11 declares the scoped Lorekeeper application-data preservation rule;
-Windows 10 uses the filesystem-virtualization fallback. These are manifest
-declarations, not installed-system evidence.
+The package declares no `unvirtualizedResources` capability; certification
+denied it on 2026-10-13. Standard MSIX filesystem virtualization redirects
+`%LocalAppData%\Lorekeeper` writes into package-private storage, which persists
+across Store updates and is removed on uninstall. Users keep data across
+reinstalls through `.lorekeeper` project exports or GitHub history sync. This is
+the manifest contract, not installed-system evidence.
 
 On 2026-10-05, the fresh Store closure, MakeAppx pack/unpack, license retention,
 local CMS verification, and ephemeral certificate/key cleanup were exercised.

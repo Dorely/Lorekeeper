@@ -328,6 +328,11 @@ any later package build in the same PowerShell process. Malformed metadata or
 unexpected framework attribute constructors fail closed.
 MakeAppx runs semantic validation without `/nv`. The manifest deliberately
 uses the full-trust desktop model; it does not imply AppContainer confinement.
+It declares no `unvirtualizedResources` capability (certification denied it on
+2026-10-13), so standard MSIX redirection keeps `%LocalAppData%\Lorekeeper`
+writes in package storage that survives updates and is removed on uninstall.
+The Store privacy URL is the standalone `gh-pages` copy of `PRIVACY.md`; the
+MSIX runbook owns that page's sync and public-access check.
 Source SemVer maps to MSIX `major+1.minor.patch.0`.
 Install, upgrade, data retention, Windows 11, OAuth/print/file behavior,
 Store submission, and certification require separately authorized target evidence.

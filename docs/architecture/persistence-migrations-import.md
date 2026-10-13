@@ -510,7 +510,10 @@ and OAuth redirect configuration remain local-host-only unless an explicit
 security architecture change expands exposure. Version-history repositories use
 the separate development `History/` root (ignored by the source repository) or
 packaged `%LocalAppData%/Lorekeeper/History/<repository-id>.git`; they are not a
-SQLite backup or a portable v26 export.
+SQLite backup or a portable v26 export. The Store MSIX leaves filesystem
+virtualization on, so Windows redirects these per-user paths into package
+storage that survives updates but is deleted on uninstall; exports and GitHub
+sync are the user's durable copies there.
 
 Image-upscale lineage is durable portable state. V29 and later preserve parent identity
 and structured upscale metadata, remap parents on import, and fail closed when

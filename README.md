@@ -649,6 +649,10 @@ operations.
 SQLite databases, API keys, OAuth tokens, temporary verification databases, and
 publish output are local state and are ignored by git.
 
+The Microsoft Store edition keeps this data in Windows' per-app storage, which
+survives updates and is removed when you uninstall. Export projects as
+`.lorekeeper` archives or attach GitHub history sync before uninstalling.
+
 Development builds (the host environment must be Development) write diagnostic
 logs to bounded daily files under
 `%LOCALAPPDATA%\Lorekeeper\dev-logs`, retained for 14 days or 50 MB. These

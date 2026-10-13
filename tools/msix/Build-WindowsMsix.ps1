@@ -500,7 +500,7 @@ try
             makeAppxSemanticValidation = 'passed during pack without /nv'
             requiredContent = @('AppxManifest.xml', 'Assets/*.png', 'app/Lorekeeper.exe', 'app/resources/bin/Lorekeeper.dll', 'app/resources/bin/press-runtime/lorekeeper-press.exe')
             signature = $signatureResult
-            dataPreservation = 'Manifest excludes LocalAppData/Lorekeeper virtualization on Windows 11 and disables filesystem virtualization on Windows 10; installed update/uninstall evidence remains required.'
+            dataPreservation = 'Standard MSIX filesystem virtualization: LocalAppData/Lorekeeper writes persist across updates in package storage and are removed on uninstall; installed update/uninstall evidence remains required.'
             installed = $false
         }
     }

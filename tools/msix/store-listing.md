@@ -54,10 +54,12 @@ The current manifest requires Windows 10 build 19041 or later; do not claim a
 particular Windows version, memory limit, or performance result has been tested
 until the installed package has been exercised there.
 
-**Support URL:** `https://github.com/Dorely/Lorekeeper/issues`, after the repository
-is public. **Privacy URL:**
-`https://github.com/Dorely/Lorekeeper/blob/main/PRIVACY.md`, after confirming it is
-readable without authentication. The owner must choose supported
+**Support URL:** `https://github.com/Dorely/Lorekeeper/issues`. **Privacy URL:**
+`https://dorely.github.io/Lorekeeper/privacy/`, a standalone page titled
+"Lorekeeper Privacy Policy" served from the `gh-pages` branch. Certification
+rejected the GitHub blob view of `PRIVACY.md` on 2026-10-13 as not displaying a
+privacy policy. Keep that page's text identical to `PRIVACY.md` and confirm it
+loads without authentication before each submission. The owner must choose supported
 markets and complete the IARC rating questionnaire from the actual application.
 
 ## Capability explanations for certification
@@ -69,13 +71,12 @@ user-directed file import/export and printing. These operations run as the
 current user; the application does not require administrator privileges. The
 manifest declares the packaged desktop model, not AppContainer isolation.
 
-**unvirtualizedResources:** Authored project data and history in
-`%LocalAppData%\Lorekeeper` must survive application uninstall and reinstall.
-Windows 11 uses a scoped filesystem virtualization exclusion for that directory.
-Windows 10 uses the filesystem-virtualization-disabled fallback because scoped
-exclusions are unavailable there. Registry virtualization remains enabled.
-Installed-package validation must confirm these preservation boundaries before
-submission; the manifest alone is not that evidence.
+**Filesystem virtualization:** The package does not request
+`unvirtualizedResources`; certification denied it on 2026-10-13. Lorekeeper's
+`%LocalAppData%\Lorekeeper` data uses standard MSIX redirection: it persists
+across Store updates and is removed with the app on uninstall. The privacy
+policy and support page tell users to keep `.lorekeeper` exports or GitHub
+history sync for anything they need after uninstalling.
 
 ## Review and upload procedure
 

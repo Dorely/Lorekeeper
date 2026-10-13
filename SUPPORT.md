@@ -5,6 +5,9 @@ Lorekeeper is maintained on a best-effort basis. Use
 installation problems, and focused questions. Check existing issues first and
 include the version, operating system, install channel, and reproduction steps.
 
+Uninstalling the Microsoft Store edition removes its local data. Export
+projects or attach GitHub history sync first if you plan to reinstall.
+
 Use a small synthetic project when an example is needed. Do not upload your
 database, private manuscripts, provider credentials, OAuth tokens, raw
 diagnostic logs, or private GitHub remote details. Review any excerpt before
