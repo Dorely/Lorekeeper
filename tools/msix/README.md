@@ -63,7 +63,12 @@ the manifest contract, not installed-system evidence.
 
 On 2026-10-05, the fresh Store closure, MakeAppx pack/unpack, license retention,
 local CMS verification, and ephemeral certificate/key cleanup were exercised.
-Installation, upgrade, uninstall/data retention, Windows 11, Store-managed
-updates, production identity, and Store certification remain unperformed. Run
-them only in an explicitly authorized disposable Windows profile and record the
-exact package version and target OS. No submission or Store listing was created.
+Store certification passed on 2026-10-14 for package `2.0.1.0` (source
+`1.0.1`, production identity `Dorely.Lorekeeper`), and the listing is live as
+[product 9N3QQPF401L5](https://apps.microsoft.com/detail/9N3QQPF401L5). The first submission, `2.0.0.0`, was rejected for
+the privacy URL and the `unvirtualizedResources` request; Partner Center keeps
+that package name reserved, so every resubmission needs a higher source version.
+Installation, upgrade, uninstall/data retention, Windows 11, and Store-managed
+updates on owner hardware remain unrecorded. Run them only in an explicitly
+authorized disposable Windows profile and record the exact package version and
+target OS.

@@ -1,9 +1,10 @@
 # Microsoft Store submission materials
 
-These materials prepare a free Windows desktop MSIX listing. They are reviewable
-copy and a submission checklist, not a published listing or certification result.
-Do not upload packages, reserve an identity, accept account terms, or submit for
-certification until the owner authorizes those external steps.
+These materials back the free Windows desktop MSIX listing, published as
+[product 9N3QQPF401L5](https://apps.microsoft.com/detail/9N3QQPF401L5) after certification passed on 2026-10-14 for
+package `2.0.1.0`. Keep this copy in step with the live listing. Do not upload
+packages, accept account terms, or submit updates for certification until the
+owner authorizes those external steps.
 
 ## Listing copy
 
@@ -106,9 +107,10 @@ history sync for anything they need after uninstalling.
    that AI requires an optional user-owned provider. Never include a personal API
    key or OAuth token in the package or certification notes.
 7. Let the owner review the complete draft before submitting it for certification.
-   Add the real Microsoft Store badge/link to the repository only when the product
-   ID and published listing exist. Future updates retain the same Store identity
-   and permanent `(source major + 1).minor.patch.0` package-version mapping.
+   The README carries the official Store badge linking to `https://apps.microsoft.com/detail/9N3QQPF401L5`. Future updates
+   retain the same Store identity and permanent
+   `(source major + 1).minor.patch.0` package-version mapping, and each upload
+   needs a source version higher than any package already uploaded.
 
 ## Trailer deliverables
 

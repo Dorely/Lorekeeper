@@ -12,6 +12,8 @@ PDF ebook, and print-ready paperback and hardcover files, including full-wrap
 covers measured to the final spine, with its own built-in renderer and no
 licensed PDF software. Everything stays in one project on your own computer.
 
+<a href="https://apps.microsoft.com/detail/9N3QQPF401L5?mode=direct"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft"/></a>
+
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-dorely-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dorely)
 
 https://github.com/user-attachments/assets/64498034-7feb-4a12-a66c-748eeffa59f9
@@ -82,13 +84,14 @@ Download the latest release from
 [Dorely/Lorekeeper releases](https://github.com/Dorely/Lorekeeper/releases).
 v1.0.0 is also published to the
 [historical download repository](https://github.com/Dorely/Lorekeeper-Releases/releases)
-so earlier installs can find it; later releases appear only here. A free
-Microsoft Store listing is in certification.
+so earlier installs can find it; later releases appear only here. Windows users
+can also install Lorekeeper free from the
+[Microsoft Store](https://apps.microsoft.com/detail/9N3QQPF401L5).
 
 - **Windows x64:** per-user installer or portable executable; no .NET or Node.js
-  installation is required. Direct downloads are unsigned. The free Microsoft
-  Store edition is signed by the Store and updates through it; its listing is in
-  certification.
+  installation is required. Direct downloads are unsigned. The free
+  [Microsoft Store edition](https://apps.microsoft.com/detail/9N3QQPF401L5) is signed by the Store and updates through
+  it. Its local data is removed when you uninstall, so export projects first.
 - **Linux x64:** AppImage and Debian package built on Ubuntu 24.04. Install a DEB
   with `sudo apt install ./Lorekeeper-<version>-amd64.deb`, or make
   `Lorekeeper-<version>-x86_64.AppImage` executable and run it as your regular
@@ -858,8 +861,10 @@ certificate and private key. It never trusts or installs the package.
 `-CheckOnly` checks an existing Store closure without packaging or certificate
 operations. Source `1.0.0` maps to MSIX `2.0.0.0` through the reserved major
 offset, preserving monotonic upgrades from the prior feasibility series.
-Install, upgrade, uninstall/data retention, Windows 11, and Store certification
-remain target-specific acceptance checks.
+Microsoft Store certification passed on 2026-10-14 for package `2.0.1.0`
+(source `1.0.1`), published as [product 9N3QQPF401L5](https://apps.microsoft.com/detail/9N3QQPF401L5). Install, upgrade,
+uninstall/data retention, and Windows 11 behavior remain target-specific
+acceptance checks.
 
 </details>
 

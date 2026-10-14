@@ -334,8 +334,10 @@ writes in package storage that survives updates and is removed on uninstall.
 The Store privacy URL is the standalone `gh-pages` copy of `PRIVACY.md`; the
 MSIX runbook owns that page's sync and public-access check.
 Source SemVer maps to MSIX `major+1.minor.patch.0`.
-Install, upgrade, data retention, Windows 11, OAuth/print/file behavior,
-Store submission, and certification require separately authorized target evidence.
+Store certification passed on 2026-10-14 for package `2.0.1.0` (Store product
+9N3QQPF401L5); Partner Center never accepts a reused package version. Install,
+upgrade, data retention, Windows 11, and OAuth/print/file behavior on owner
+hardware still require separately authorized target evidence.
 The free price and BYO-provider charges are documented in the MSIX runbook.
 
 The native macOS arm64 builder performs dependency/editor/Press checks and
@@ -410,7 +412,7 @@ and update behavior requires target-specific, user-authorized evidence.
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared build-and-test preflight/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree main-repository publisher, with the final v1 old-feed handoff. |
 | [`scripts/build-linux-release.ps1`](../../scripts/build-linux-release.ps1), [`scripts/build-linux-release-wsl.ps1`](../../scripts/build-linux-release-wsl.ps1), and [`eng/linux/AppRun.sh`](../../eng/linux/AppRun.sh) | Local native/WSL exact-source Linux package and provenance checks; source-owned launcher sandbox behavior is owned by runtime-host.md. |
-| [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, and pending installed/certification boundary. |
+| [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, certified Store product 9N3QQPF401L5, and pending installed-behavior boundary. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), [`licenses/appimage-runtime/sources.json`](../../licenses/appimage-runtime/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/runtime source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. AppImage source/relink clearance is separate from notice inclusion. |
 | [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1), [inventory](../research/m0.4-distribution-inventory.md), and [public-sharing audit](../evidence/public-sharing-audit.md) | Local dependency/notice and platform-prerequisite inventory plus sanitized all-ref/GitHub clearance; detailed findings stay ignored/private and no publication is performed. |
