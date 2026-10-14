@@ -15,6 +15,9 @@
 .model-list-note { color: var(--lk-muted); font-size: 0.72rem; }
 .embedding-note,.embedding-test-success,.embedding-warning { border-radius: var(--lk-radius-md); display: grid; gap: 0.3rem; margin-top: 0.85rem; padding: 0.75rem; }
 .embedding-note { background: var(--lk-accent-soft); color: var(--lk-accent); font-size: 0.78rem; }
+.local-model-guide { display: grid; font-size: 0.78rem; gap: 0.3rem; max-width: 36rem; text-align: left; }
+.local-model-guide ol { margin: 0; padding-left: 1.2rem; }
+.local-model-guide > span { color: var(--lk-muted); }
 .embedding-test-success { align-items: center; background: var(--lk-success-soft); grid-template-columns: auto auto 1fr; }
 .embedding-test-success span:last-child,.embedding-warning > span { color: var(--lk-muted); font-size: 0.75rem; }
 .embedding-warning { background: var(--lk-warning-soft); border: 1px solid var(--lk-warning-border); }

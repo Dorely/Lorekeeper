@@ -78,6 +78,12 @@ and values outside the application's ranges, rolling back the whole import.
 Legacy and archived Generic profile keys map to the per-process `UserDefined`
 keys without dimensions.
 
+The forward RemoveOpenAiAccountEmbeddings migration deletes the singleton
+embedding configuration when it references an account-backed `LlmProvider`,
+because OpenAI account connections no longer serve embeddings. Provider,
+account, token, and stored vector rows are unchanged; semantic features remain
+disabled until another embedding connection is tested and saved.
+
 The forward AddVoiceWorkspace migration renames the Writing Coach conversation
 and message tables to Voice, preserving IDs, transcripts, protocol metadata, and
 model selections, migrating attachment surfaces, and adding sample Revision.

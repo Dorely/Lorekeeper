@@ -6,8 +6,8 @@ print-ready files.**
 Lorekeeper's assistants plan, draft, and revise inside an organized project
 while you keep control of the details: review and approve each change they
 make, edit everything directly, and keep your outline, story facts, and sources
-in order. Connect your OpenAI account to use its chat, image, and embedding
-models right in the workspace. When the book is ready, Lorekeeper produces EPUB,
+in order. Connect your OpenAI account to use its chat and image models right in
+the workspace, and run a free local embedding model for semantic search. When the book is ready, Lorekeeper produces EPUB,
 PDF ebook, and print-ready paperback and hardcover files, including full-wrap
 covers measured to the final spine, with its own built-in renderer and no
 licensed PDF software. Everything stays in one project on your own computer.
@@ -28,9 +28,10 @@ provenance, and a reproducible export recipe.
   Images, and Publish) work directly in your outline, chapters, story graph, and
   pages. Turn on Review Edits to approve or undo each change they make, and
   revise every word yourself in a structured chapter editor.
-- **Your OpenAI account, built in:** connect once to use OpenAI chat, image, and
-  embedding models across the workspace. OpenAI-compatible providers and local
-  model servers also work.
+- **Your OpenAI account, built in:** connect once to use OpenAI chat and image
+  models across the workspace. OpenAI-compatible providers and local model
+  servers also work, and semantic search uses a local Ollama or LM Studio
+  embedding model (or any API-key embeddings endpoint).
 - **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
   EPUB, and PDF ebook releases, with covers sized to the calculated spine and
   print profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu, or
@@ -168,7 +169,7 @@ technical map.
   full audit transcript and call metadata. The live token counter reflects the
   tombstone; if all eligible results are exhausted, the turn fails closed with reset
   or larger-context-model guidance.
-- Configurable OpenAI-account and OpenAI-compatible chat/embedding providers. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper never fetches an account model list dynamically. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
+- Configurable OpenAI-account chat providers and OpenAI-compatible chat/embedding providers. OpenAI account connections do not provide embeddings; Settings > Embeddings guides you to a local Ollama model (`ollama pull nomic-embed-text`) or LM Studio, and API-key providers with an embeddings endpoint also work. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper never fetches an account model list dynamically. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
 
 </details>
 

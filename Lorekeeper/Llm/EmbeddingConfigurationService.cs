@@ -18,7 +18,7 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var providers = databaseOperation.Repositories.LlmProviders;
         return (await providers.GetAllAsync(cancellationToken))
-                    .Where(provider => provider.CredentialSourceId is null)
+                    .Where(provider => provider.CredentialSourceId is null && !CodexProvider.IsAccountBacked(provider))
                     .OrderBy(provider => provider.DisplayName ?? provider.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
     }
@@ -30,9 +30,7 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
             provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(request.ProviderId, cancellationToken)
                 ?? throw new InvalidOperationException($"Provider connection {request.ProviderId} was not found.");
         }
-        if (provider.CredentialSourceId is not null)
-            throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
-        ValidateProviderApiKind(provider, request.ApiKind);
+        ValidateEmbeddingConnection(provider);
 
         var modelId = NormalizeModelId(request.ModelId);
         var embeddings = await client.GenerateAsync(provider, request.ApiKind, modelId, ["Lorekeeper embedding test"], cancellationToken);
@@ -52,9 +50,7 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
         {
             var provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(draft.ProviderId, cancellationToken)
                 ?? throw new InvalidOperationException($"Provider connection {draft.ProviderId} was not found.");
-            if (provider.CredentialSourceId is not null)
-                throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
-            ValidateProviderApiKind(provider, draft.ApiKind);
+            ValidateEmbeddingConnection(provider);
 
             var snapshot = await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken);
             changed = HasChanged(snapshot, draft);
@@ -105,45 +101,6 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
             rebuildQueue.Enqueue(new EmbeddingRebuildRequest(configuration.Id, now));
 
         return new EmbeddingSaveResult(configuration, changed);
-    }
-
-    public async Task<bool> ConfigureCodexDefaultIfUnsetAsync(int providerId, CancellationToken cancellationToken = default)
-    {
-        LlmProvider provider;
-        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
-        {
-            if (await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken) is not null)
-                return false;
-            provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(providerId, cancellationToken)
-                ?? throw new InvalidOperationException($"Provider connection {providerId} was not found.");
-        }
-        if (provider.CredentialSourceId is not null)
-            throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
-        if (!CodexProvider.IsAccountBacked(provider))
-            throw new InvalidOperationException("Automatic Codex embeddings can only be configured for the OpenAI Codex provider.");
-
-        var test = await TestAsync(
-            new EmbeddingTestRequest(provider.Id, EmbeddingApiKind.OpenAICompatible, CodexProvider.DefaultEmbeddingModel),
-            cancellationToken);
-
-        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
-        {
-            if (await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken) is not null)
-                return false;
-        }
-
-        await SaveAsync(
-            new EmbeddingConfigurationDraft(
-                provider.Id,
-                EmbeddingApiKind.OpenAICompatible,
-                test.ModelId,
-                test.Dimensions,
-                test.ProviderId,
-                test.ApiKind,
-                test.ModelId),
-            cancellationToken);
-
-        return true;
     }
 
     public async Task<EmbeddingUnsetResult> UnsetAsync(CancellationToken cancellationToken = default)
@@ -203,9 +160,11 @@ IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuil
         || !string.Equals(existing.ModelId, draft.ModelId.Trim(), StringComparison.Ordinal)
         || existing.Dimensions != draft.TestedDimensions;
 
-    private static void ValidateProviderApiKind(LlmProvider provider, EmbeddingApiKind apiKind)
+    private static void ValidateEmbeddingConnection(LlmProvider provider)
     {
-        if (CodexProvider.IsAccountBacked(provider) && apiKind != EmbeddingApiKind.OpenAICompatible)
-            throw new InvalidOperationException("OpenAI Codex embeddings only support the OpenAI-compatible embedding API.");
+        if (provider.CredentialSourceId is not null)
+            throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
+        if (CodexProvider.IsAccountBacked(provider))
+            throw new InvalidOperationException("OpenAI account connections cannot provide embeddings. Use a local Ollama or LM Studio connection, or an API-key provider.");
     }
 }

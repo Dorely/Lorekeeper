@@ -79,7 +79,7 @@ overrides; runtime resolution supplies catalog defaults only when an override is
 absent. Unsupported saved effort values fail closed.
 
 OpenAI account model discovery is intentionally absent: Lorekeeper never calls
-`/v1/models` for an account-backed chat or embedding connection. The bundled
+`/v1/models` for an account-backed connection. The bundled
 seven-model manifest is the complete account model list, while Advanced accepts
 an exact manual model ID followed by the existing explicit Test workflow.
 User-configured OpenAI-compatible connections may still discover models through
@@ -208,7 +208,7 @@ It accepts only exact allowlisted HTTPS authorization targets. Electron opens th
 validated URL through the system browser; browser hosting returns the URL to be
 rendered as an explicit user-activated external link. Settings polls only while
 its flow is pending, cancels on user cancellation or unmount, and ensures the
-local account catalog plus previously unset embedding configuration after success.
+local account catalog after success.
 The `/auth/callback` endpoint accepts success or denial, consumes the flow, and
 renders a standalone no-store Lorekeeper completion page. It never redirects to
 Settings or opens another application session.
@@ -229,8 +229,8 @@ assistant tool payloads.
 Callback commit, disconnect, reconnect start, and token refresh are serialized
 per account for the whole process and begin from fresh persistence reads. The
 external ChatGPT account identity is read only at the successful authorization
-boundary and persisted on `OpenAiAccount`; chat, vision, embeddings, model
-requests, and image generation use that persisted identity and never inspect
+boundary and persisted on `OpenAiAccount`; chat, vision, model requests, and
+image generation use that persisted identity and never inspect
 access-token shape at request time. Account model discovery is not a supported
 runtime path. A migrated token without persisted external identity fails closed
 as Reauthentication required.
@@ -265,8 +265,18 @@ model, dimensions, and last-tested state. The settings flow lists eligible
 connections, discovers or accepts a model, tests it before save, and may unset the
 feature. `ProviderEmbeddingService` resolves the current provider/model, truncates
 oversized input, batches requests, validates returned dimensions, and reports
-availability. `EmbeddingClient` supports native Ollama `/api/embed`,
-OpenAI-compatible `/v1/embeddings`, and OpenAI account authorization routing.
+availability. `EmbeddingClient` supports native Ollama `/api/embed` and
+OpenAI-compatible `/v1/embeddings` using the connection's own endpoint and key.
+
+OpenAI account connections are not embedding connections. Their ChatGPT-plan
+authorization is billed against the linked platform organization's prepaid API
+credits at `api.openai.com/v1/embeddings` (live probe on 2026-10-14 returned
+`429 credit_balance_exhausted` for every header, model, and organization
+variant), so the settings list excludes them and test/save reject them. Settings
+directs users to a local Ollama or LM Studio embedding model, or an API-key
+provider. The forward `RemoveOpenAiAccountEmbeddings` migration deletes an
+active configuration that referenced an account-backed connection; stored
+vectors remain and are rebuilt when another model is saved.
 
 Changing the active embedding model cancels and awaits any current bulk rebuild,
 updates configuration, and queues a versioned replacement. `EmbeddingRebuildQueue`

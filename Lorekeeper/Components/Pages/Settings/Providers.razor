@@ -11,7 +11,6 @@
 @inject IOpenAiAccountAuthorizationService OpenAiAuthorization
 @inject IOpenAiAccountTokenService OpenAiTokens
 @inject IOpenAiCallbackOriginValidator CallbackOrigin
-@inject IEmbeddingConfigurationService EmbeddingConfiguration
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
 @inject IModelCatalogService ModelCatalog
@@ -940,19 +939,7 @@
     private async Task FinishOpenAiConnectionAsync(int accountId, CancellationToken cancellationToken)
     {
         await OpenAiCatalog.EnsureCatalogAsync(accountId, cancellationToken);
-        var accountModels = (await ProviderService.GetAllAsync(cancellationToken))
-            .Where(provider => provider.OpenAiAccountId == accountId)
-            .ToList();
-        var providerId = accountModels.FirstOrDefault(provider => provider.IsDefault)?.Id
-            ?? accountModels.FirstOrDefault(provider =>
-                OpenAiAccountModelCatalog.Find(provider.ModelId)?.IsPreferred == true)?.Id
-            ?? accountModels.FirstOrDefault()?.Id;
-        var configuredEmbedding = providerId is int id
-            && await EmbeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(id, cancellationToken);
-        var message = configuredEmbedding
-            ? $"OpenAI account connected. Codex embeddings use {CodexProvider.DefaultEmbeddingModel}."
-            : "OpenAI account connected. Existing embedding settings were kept.";
-        SetStatus(message, "success");
+        SetStatus("OpenAI account connected.", "success");
         await ReloadAsync();
     }
 
