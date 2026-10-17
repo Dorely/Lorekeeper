@@ -185,6 +185,8 @@ Inspect the resulting committed bundle and notice changes. Windows and macOS
 release builders repeat a locked install, audit, and deterministic rebuild; they
 fail if the committed bundle is stale or if anything other than one matching
 bundle and notice reaches staging.
+The generated bundle is checked out with LF through `.gitattributes`, matching
+esbuild's exact output even when Windows Git enables `core.autocrlf`.
 
 ### Press conformance verification
 
