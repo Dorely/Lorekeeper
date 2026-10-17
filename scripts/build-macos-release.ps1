@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$Version
+    [string]$Version,
+    [switch]$RunStartupCheck
 )
 
 Set-StrictMode -Version Latest
@@ -502,57 +503,64 @@ try
         Invoke-CheckedCommand ditto @($mountedApp.FullName, $installedApp)
         Invoke-CheckedCommand codesign @('--verify', '--deep', '--strict', '--verbose=2', $installedApp)
 
-        $dataDirectory = Join-Path $tempInstallRoot 'data'
-        $historyDirectory = Join-Path $tempInstallRoot 'history'
-        New-Item -ItemType Directory -Path $dataDirectory, $historyDirectory | Out-Null
-        $stdoutPath = Join-Path $tempInstallRoot 'startup.stdout.log'
-        $stderrPath = Join-Path $tempInstallRoot 'startup.stderr.log'
-        $stdoutStream = [IO.File]::Open($stdoutPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        $stderrStream = [IO.File]::Open($stderrPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        foreach ($logPath in @($stdoutPath, $stderrPath))
+        if ($RunStartupCheck)
         {
-            [IO.File]::SetUnixFileMode($logPath, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
-        }
-
-        # Launching any Electron window stalls hosted macOS runners, so start the
-        # installed bundle's packaged .NET host directly on the validation port.
-        # The Electron executable is still checked by signature and architecture.
-        $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = Join-Path $installedApp "Contents/Resources/bin/$($manifest.executable)"
-        $startInfo.WorkingDirectory = $tempInstallRoot
-        $startInfo.UseShellExecute = $false
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError = $true
-        $startInfo.Environment['ASPNETCORE_URLS'] = 'http://localhost:1455'
-        $databasePath = Join-Path $dataDirectory 'lorekeeper.db'
-        $startInfo.Environment['ConnectionStrings__DefaultConnection'] = 'Data Source="' + $databasePath.Replace('"', '""') + '"'
-        $startInfo.Environment['VersionHistory__HistoryRoot'] = $historyDirectory
-        $startInfo.Environment['ASPNETCORE_ENVIRONMENT'] = 'Production'
-        $startInfo.Environment['DOTNET_ENVIRONMENT'] = 'Production'
-        $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
-        if (@($listeners | Where-Object Port -EQ 1455).Count -gt 0)
-        {
-            throw 'TCP port 1455 is already occupied; refusing to launch a competing validation host.'
-        }
-        $process = [Diagnostics.Process]::Start($startInfo)
-        if ($null -eq $process) { throw 'The isolated packaged Mac application did not start.' }
-        # The host can log loopback authentication material. Keep both
-        # streams private and never copy their contents into workflow output.
-        $stdoutCopyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdoutStream)
-        $stderrCopyTask = $process.StandardError.BaseStream.CopyToAsync($stderrStream)
-        $ready = $false
-        for ($attempt = 0; $attempt -lt 90; $attempt++)
-        {
-            if ($process.HasExited) { throw "Lorekeeper exited during startup with code $($process.ExitCode)." }
-            try
+            $dataDirectory = Join-Path $tempInstallRoot 'data'
+            $historyDirectory = Join-Path $tempInstallRoot 'history'
+            New-Item -ItemType Directory -Path $dataDirectory, $historyDirectory | Out-Null
+            $stdoutPath = Join-Path $tempInstallRoot 'startup.stdout.log'
+            $stderrPath = Join-Path $tempInstallRoot 'startup.stderr.log'
+            $stdoutStream = [IO.File]::Open($stdoutPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            $stderrStream = [IO.File]::Open($stderrPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            foreach ($logPath in @($stdoutPath, $stderrPath))
             {
-                $response = Invoke-WebRequest -Uri 'http://localhost:1455/' -TimeoutSec 2
-                if ($response.StatusCode -eq 200) { $ready = $true; break }
+                [IO.File]::SetUnixFileMode($logPath, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite)
             }
-            catch { }
-            Start-Sleep -Seconds 1
+
+            # Launching any Electron window stalls hosted macOS runners, so start the
+            # installed bundle's packaged .NET host directly on the validation port.
+            # The Electron executable is still checked by signature and architecture.
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = Join-Path $installedApp "Contents/Resources/bin/$($manifest.executable)"
+            $startInfo.WorkingDirectory = $tempInstallRoot
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $startInfo.Environment['ASPNETCORE_URLS'] = 'http://localhost:1455'
+            $databasePath = Join-Path $dataDirectory 'lorekeeper.db'
+            $startInfo.Environment['ConnectionStrings__DefaultConnection'] = 'Data Source="' + $databasePath.Replace('"', '""') + '"'
+            $startInfo.Environment['VersionHistory__HistoryRoot'] = $historyDirectory
+            $startInfo.Environment['ASPNETCORE_ENVIRONMENT'] = 'Production'
+            $startInfo.Environment['DOTNET_ENVIRONMENT'] = 'Production'
+            $listeners = [Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+            if (@($listeners | Where-Object Port -EQ 1455).Count -gt 0)
+            {
+                throw 'TCP port 1455 is already occupied; refusing to launch a competing validation host.'
+            }
+            $process = [Diagnostics.Process]::Start($startInfo)
+            if ($null -eq $process) { throw 'The isolated packaged Mac application did not start.' }
+            # The host can log loopback authentication material. Keep both
+            # streams private and never copy their contents into workflow output.
+            $stdoutCopyTask = $process.StandardOutput.BaseStream.CopyToAsync($stdoutStream)
+            $stderrCopyTask = $process.StandardError.BaseStream.CopyToAsync($stderrStream)
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 90; $attempt++)
+            {
+                if ($process.HasExited) { throw "Lorekeeper exited during startup with code $($process.ExitCode)." }
+                try
+                {
+                    $response = Invoke-WebRequest -Uri 'http://localhost:1455/' -TimeoutSec 2
+                    if ($response.StatusCode -eq 200) { $ready = $true; break }
+                }
+                catch { }
+                Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Lorekeeper did not become ready at http://localhost:1455/.' }
         }
-        if (-not $ready) { throw 'Lorekeeper did not become ready at http://localhost:1455/.' }
+        else
+        {
+            Write-Host 'Packaged-host startup smoke check skipped; not explicitly authorized.'
+        }
     }
     finally
     {

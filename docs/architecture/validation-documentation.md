@@ -341,8 +341,12 @@ hardware still require separately authorized target evidence.
 The free price and BYO-provider charges are documented in the MSIX runbook.
 
 The native macOS arm64 builder performs dependency/editor/Press checks and
-creates an ad-hoc-signed DMG. Its app startup exercise requires explicit manual
-authorization. The startup check refuses an occupied TCP port 1455, gives only
+creates an ad-hoc-signed DMG. Its app startup exercise is disabled by default and
+requires explicit authorization through `-RunStartupCheck`. The driver and
+publisher forward `-RunMacStartupCheck` through the workflow's default-false
+`run_startup_check` input. Without it, DMG mount/copy/signature, architecture,
+renderer capability, and checksum checks still run, but no app host is started.
+The startup check refuses an occupied TCP port 1455, gives only
 its child process absolute temporary SQLite/history paths and separate Electron
 user data, and captures stdout/stderr in private temporary files that are never
 echoed or uploaded. It resolves the macOS temporary-directory symlink prefix,

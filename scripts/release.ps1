@@ -19,6 +19,7 @@ param(
     [ValidateSet('Patch', 'Minor', 'Major')]
     [string]$Bump = 'Patch',
     [switch]$WindowsOnly,
+    [switch]$RunMacStartupCheck,
     [string]$LinuxDistribution = 'Ubuntu',
     [switch]$MakeSourcePublicAfterV1,
     [switch]$CheckOnly,
@@ -250,6 +251,7 @@ try
     if (-not $WindowsOnly)
     {
         $null = Assert-AppImagePublicationReady -RepositoryRoot $repoRoot -CheckOnly:$CheckOnly
+        Write-Host "macOS startup smoke check explicitly enabled: $($RunMacStartupCheck.IsPresent)"
         & (Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1') -Distribution $LinuxDistribution -CheckOnly
     }
     if ($CheckOnly)
@@ -299,6 +301,7 @@ try
     if ((Invoke-ReleaseCommand git @('rev-parse', 'origin/main')) -ne $releaseHead) { throw 'origin/main moved after the push. Rerun verification on its new state.' }
     $publishArguments = @{ Version = $Version; AllowDirectMainPush = $true }
     if ($WindowsOnly) { $publishArguments.WindowsOnly = $true }
+    if ($RunMacStartupCheck) { $publishArguments.RunMacStartupCheck = $true }
     $publishArguments.LinuxDistribution = $LinuxDistribution
     if ($MakeSourcePublicAfterV1) { $publishArguments.MakeSourcePublicAfterV1 = $true }
     if ($Notes) { $publishArguments.Notes = $Notes }

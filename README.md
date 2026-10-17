@@ -830,6 +830,10 @@ The native Apple Silicon builder is `scripts/build-macos-release.ps1`, run on
 macOS arm64. The dispatch-only GitHub workflow supplies the Mac host; general CI
 and hosted Linux validation are not part of this release process. Current DMGs
 are ad-hoc signed; notarization and Mac App Store acceptance remain unperformed.
+The packaged-host startup smoke check is opt-in: pass `-RunStartupCheck` to the
+Mac builder, or `-RunMacStartupCheck` to the release driver/publisher, only when
+explicitly authorized. Without it, packaging and integrity checks still run but
+the application is not started.
 
 The project version in `Lorekeeper/Lorekeeper.csproj` is the single version
 source. Build-only version overrides are for deliberate packaging validation.

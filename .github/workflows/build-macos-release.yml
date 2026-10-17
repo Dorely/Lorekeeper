@@ -16,6 +16,11 @@ on:
         description: Unique orchestration identifier
         required: true
         type: string
+      run_startup_check:
+        description: Explicitly authorize the isolated packaged-host startup smoke check
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -60,7 +65,8 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-        run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION
+          RUN_STARTUP_CHECK: ${{ inputs.run_startup_check }}
+        run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION -RunStartupCheck:($env:RUN_STARTUP_CHECK -eq 'true')
 
       - name: Upload architecture artifact
         uses: actions/upload-artifact@v7

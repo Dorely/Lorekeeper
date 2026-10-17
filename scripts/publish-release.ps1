@@ -11,6 +11,8 @@ param(
 
     [switch]$WindowsOnly,
 
+    [switch]$RunMacStartupCheck,
+
     [string]$LinuxDistribution = 'Ubuntu',
 
     [switch]$MakeSourcePublicAfterV1,
@@ -411,7 +413,8 @@ try
             '--ref', 'main',
             '-f', "version=$Version",
             '-f', "source_commit=$sourceCommit",
-            '-f', "correlation_id=$correlationId"
+            '-f', "correlation_id=$correlationId",
+            '-f', "run_startup_check=$($RunMacStartupCheck.IsPresent.ToString().ToLowerInvariant())"
         )
 
         for ($attempt = 0; $attempt -lt 30 -and -not $macRunId; $attempt++)
