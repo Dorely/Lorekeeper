@@ -4775,7 +4775,8 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("BlockId")
+                    b.Property<string>("BlockId")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ChapterId")

@@ -63,7 +63,7 @@ public sealed record PublicationArtifactView(
     bool IsLegacy,
     bool IsStale);
 
-public sealed record PublicationPageMapView(Guid ChapterId, Guid BlockId, int PageNumber);
+public sealed record PublicationPageMapView(Guid ChapterId, string BlockId, int PageNumber);
 
 public sealed record PublicationRenderComparison(
     Guid LeftJobId,
@@ -75,7 +75,7 @@ public sealed record PublicationRenderComparison(
     IReadOnlyList<PublicationPageMovement> Movements,
     string Explanation);
 
-public sealed record PublicationPageMovement(Guid ChapterId, Guid BlockId, int FromPage, int ToPage);
+public sealed record PublicationPageMovement(Guid ChapterId, string BlockId, int FromPage, int ToPage);
 
 public interface IPublicationRenderService
 {
@@ -471,14 +471,14 @@ public sealed class PublicationRenderService(
         var left = await GetAsync(projectId, editionId, leftJobId, cancellationToken);
         var right = await GetAsync(projectId, editionId, rightJobId, cancellationToken);
         var leftMap = (await GetPageMapAsync(projectId, editionId, leftJobId, cancellationToken))
-            .ToDictionary(entry => (entry.ChapterId, entry.BlockId));
+            .ToDictionary(entry => (entry.ChapterId, BlockId: ComparisonBlockId(entry.BlockId)));
         var rightMap = (await GetPageMapAsync(projectId, editionId, rightJobId, cancellationToken))
-            .ToDictionary(entry => (entry.ChapterId, entry.BlockId));
+            .ToDictionary(entry => (entry.ChapterId, BlockId: ComparisonBlockId(entry.BlockId)));
         var movements = leftMap.Keys.Intersect(rightMap.Keys)
             .Where(key => leftMap[key].PageNumber != rightMap[key].PageNumber)
             .Select(key => new PublicationPageMovement(
                 key.ChapterId,
-                key.BlockId,
+                leftMap[key].BlockId,
                 leftMap[key].PageNumber,
                 rightMap[key].PageNumber))
             .OrderBy(movement => movement.FromPage)
@@ -491,6 +491,11 @@ public sealed class PublicationRenderService(
             : $"Content or release settings changed, moving {movements.Count} mapped blocks and changing the publication by {delta:+#;-#;0} pages.";
         return new(leftJobId, rightJobId, leftPages, rightPages, delta, movements.Count, movements, explanation);
     }
+
+    // Earlier maps persisted GUIDs in the provider's canonical spelling. Match those
+    // identities across renders without rewriting current opaque manuscript IDs.
+    private static string ComparisonBlockId(string blockId) =>
+        Guid.TryParse(blockId, out var id) ? id.ToString("D") : blockId;
 
     private static PublicationArtifactView? PrimaryBookArtifact(IReadOnlyList<PublicationArtifactView> artifacts) =>
         artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf)
@@ -1532,17 +1537,15 @@ public sealed class PublicationRenderProcessor(
                 throw new InvalidOperationException("The renderer returned an incomplete or duplicate semantic page map.");
             }
         }
-        // Publication-section block IDs are stable manuscript identifiers, but they are not
-        // necessarily GUIDs. Validate them above as part of the complete Press map; persist only
-        // chapter entries in the chapter-navigation table whose contract remains Guid-based.
+        // Block IDs are opaque manuscript identifiers in both chapters and publication sections.
+        // Preserve their exact spelling; only chapter ownership is GUID-based.
         var parsedPageMap = returnedPageMap
             .Where(entry => expectedChapterPageMap.Contains((entry.OwnerId, entry.BlockId)))
             .Select(entry =>
             {
-                if (!Guid.TryParse(entry.OwnerId, out var chapterId)
-                    || !Guid.TryParse(entry.BlockId, out var blockId))
+                if (!Guid.TryParse(entry.OwnerId, out var chapterId))
                     throw new InvalidOperationException("The renderer returned an invalid chapter page-map entry.");
-                return (ChapterId: chapterId, BlockId: blockId, entry.PageNumber);
+                return (ChapterId: chapterId, entry.BlockId, entry.PageNumber);
             })
             .ToList();
         var fingerprintAfterRender = coreTarget

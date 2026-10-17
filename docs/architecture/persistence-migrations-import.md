@@ -91,6 +91,12 @@ Voice profiles remain canonical graph properties carried by archives and history
 
 ## Scope and ownership
 
+`PreservePublicationBlockIdentifiers` advances the page-map EF model from GUID
+to string block IDs. SQLite already stores this column as non-null TEXT, so the
+migration preserves existing rows and indexes without rewriting data. New maps
+retain exact manuscript identifiers, including non-GUID and case-sensitive IDs;
+manuscript content and references are unchanged.
+
 `AppDbContext` owns the EF model and relationships for projects, Book Briefs,
 outline, graph, manuscripts, annotations, page setup, styles, fonts, images,
 chats, ingest/import, publishing, composition, jobs, and audit state.

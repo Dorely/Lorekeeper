@@ -110,6 +110,6 @@ public class PublicationPageMapEntry
     public Guid RenderJobId { get; set; }
     public PublicationRenderJob RenderJob { get; set; } = null!;
     public Guid ChapterId { get; set; }
-    public Guid BlockId { get; set; }
+    public string BlockId { get; set; } = string.Empty;
     public int PageNumber { get; set; }
 }

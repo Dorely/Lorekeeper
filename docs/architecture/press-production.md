@@ -384,6 +384,9 @@ minimum effective DPI only as artifact evidence.
 Press owns immutable artifact evidence. `PublicationRenderService` persists
 edition/Core target, status, bytes, length, SHA-256, source fingerprint,
 renderer/profile provenance, diagnostics, and stable block/page mappings.
+Chapter page maps preserve opaque manuscript block IDs as strings, including
+non-GUID IDs; only chapter ownership is GUID-based. Render comparisons match
+GUID spellings by identity for existing maps while retaining ordinal opaque IDs.
 Project-scoped range endpoints recompute length and hash before returning an
 ETag or body. Corrupt rows fail closed. Renderer version, installed manifest,
 selected profile/registry, source fingerprint, EPUB exporter version, and

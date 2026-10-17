@@ -1147,7 +1147,7 @@ public sealed class LorekeeperPressMigrationTests
                 {
                     RenderJobId = completedJobId,
                     ChapterId = chapterId,
-                    BlockId = Guid.NewGuid(),
+                    BlockId = Guid.NewGuid().ToString("D"),
                     PageNumber = 17,
                 });
                 await db.SaveChangesAsync();
