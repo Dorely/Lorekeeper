@@ -215,7 +215,8 @@ Windows uses `scripts/build-windows-release.ps1`; Linux uses
 `scripts/build-linux-release-wsl.ps1` on Windows or
 `scripts/build-linux-release.ps1` natively on Ubuntu 24.04 x64.
 The release, packaging, MSIX, and distribution scripts require PowerShell 7;
-they use .NET APIs and operators that Windows PowerShell 5.1 lacks.
+they use .NET APIs and operators that Windows PowerShell 5.1 lacks. Store
+submission requires PowerShell 7.5 or later.
 The builders use exact dependency/editor/Press inputs, check immutable channel
 metadata and notice hashes, probe the packaged renderer contract, and verify
 artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
@@ -316,6 +317,7 @@ For Store preparation:
 .\scripts\build-windows-release.ps1 -KeepUnpacked -DistributionChannel Store
 .\tools\msix\Build-WindowsMsix.ps1 -IdentityPath .\tools\msix\store-identity.json
 .\tools\msix\Build-WindowsMsix.ps1 -LocalValidation -CheckOnly
+.\tools\msix\Submit-WindowsMsix.ps1 -ReleaseNotes '' -CheckOnly
 ```
 
 The production identity comes from Partner Center and the production package is
@@ -341,6 +343,14 @@ Store certification passed on 2026-10-14 for package `2.0.1.0` (Store product
 upgrade, data retention, Windows 11, and OAuth/print/file behavior on owner
 hardware still require separately authorized target evidence.
 The free price and BYO-provider charges are documented in the MSIX runbook.
+`Submit-WindowsMsix.ps1` (PowerShell 7.5) is the only Partner Center writer. It
+uses the `msstore` CLI, whose Entra application key lives only in Windows
+Credential Manager. It requires a Store-channel report whose source version and
+SHA-256 match, refuses while a submission is pending or when any live package is
+not older, creates a draft with `--noCommit`, verifies the draft holds exactly
+that package, replaces listing release notes, and re-reads them. It commits for
+certification only with `-Submit`; `-CheckOnly` is read-only. A draft left behind
+by a failure stays for owner inspection; the script never deletes one.
 
 The native macOS arm64 builder performs dependency/editor/Press checks and
 creates an ad-hoc-signed DMG. Its app startup exercise is disabled by default and
@@ -365,6 +375,12 @@ version-only commit, preflight before that commit and again on its exact source,
 normal push, native packaging, and publication. `-CheckOnly` previews without
 editing, committing, pushing, packaging, or publishing. `-WindowsOnly` omits
 Linux and macOS; `-LinuxDistribution` selects the local WSL distribution.
+`-StoreSubmission Draft|Submit` is stable-only and requires the ignored identity
+file. Preview and publisher start run the read-only Store check; the publisher
+builds the Store closure and MSIX after staging Free artifacts (the Store build
+replaces `publish/win-x64`) and uploads only after GitHub publication, so a Store
+failure leaves a published GitHub release and a retained package to resubmit.
+Store notes come only from `-Notes`/`-NotesFile`, never generated GitHub notes.
 Completed feature files must already be committed. Divergence, unrelated dirty
 work, altered verification source, staged/concurrent version changes, and
 partial publication require inspection; no reset, force push, or tag overwrite
@@ -418,7 +434,7 @@ and update behavior requires target-specific, user-authorized evidence.
 | [`scripts/release.ps1`](../../scripts/release.ps1), [`eng/ReleaseWorkflow.ps1`](../../eng/ReleaseWorkflow.ps1), and [`.vscode/tasks.json`](../../.vscode/tasks.json) | Stable release preparation/preview driver, shared build-and-test preflight/version/tag checks, and explicit editor entry points. |
 | [`scripts/build-windows-release.ps1`](../../scripts/build-windows-release.ps1), [`scripts/build-macos-release.ps1`](../../scripts/build-macos-release.ps1), and [`scripts/publish-release.ps1`](../../scripts/publish-release.ps1) | Target-native builders and the clean-tree main-repository publisher, with the final v1 old-feed handoff. |
 | [`scripts/build-linux-release.ps1`](../../scripts/build-linux-release.ps1), [`scripts/build-linux-release-wsl.ps1`](../../scripts/build-linux-release-wsl.ps1), and [`eng/linux/AppRun.sh`](../../eng/linux/AppRun.sh) | Local native/WSL exact-source Linux package and provenance checks; source-owned launcher sandbox behavior is owned by runtime-host.md. |
-| [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, separate ephemeral local validation, free listing, certified Store product 9N3QQPF401L5, and pending installed-behavior boundary. |
+| [`tools/msix/Build-WindowsMsix.ps1`](../../tools/msix/Build-WindowsMsix.ps1), [`tools/msix/Submit-WindowsMsix.ps1`](../../tools/msix/Submit-WindowsMsix.ps1), [runbook](../../tools/msix/README.md), and [listing inputs](../../tools/msix/store-listing.md) | Exact Partner Center identity, unsigned production MSIX, `msstore` draft/certification submission, separate ephemeral local validation, free listing, certified Store product 9N3QQPF401L5, and pending installed-behavior boundary. |
 | [`.github/workflows/build-macos-release.yml`](../../.github/workflows/build-macos-release.yml) | Dispatch-only native macOS arm64 build used by the Windows release orchestrator. |
 | [`tools/distribution/Export-ThirdPartyNotices.ps1`](../../tools/distribution/Export-ThirdPartyNotices.ps1), [`licenses/third-party/sources.json`](../../licenses/third-party/sources.json), [`licenses/appimage-runtime/sources.json`](../../licenses/appimage-runtime/sources.json), and [`THIRD-PARTY-NOTICES.txt`](../../THIRD-PARTY-NOTICES.txt) | Exact package/runtime source/full-text evidence retention and offline deterministic notice checks; dependency changes require deliberate refresh/review. AppImage source/relink clearance is separate from notice inclusion. |
 | [`tools/distribution/Export-M0DistributionInventory.ps1`](../../tools/distribution/Export-M0DistributionInventory.ps1), [inventory](../research/m0.4-distribution-inventory.md), and [public-sharing audit](../evidence/public-sharing-audit.md) | Local dependency/notice and platform-prerequisite inventory plus sanitized all-ref/GitHub clearance; detailed findings stay ignored/private and no publication is performed. |

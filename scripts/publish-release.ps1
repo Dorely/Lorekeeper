@@ -17,6 +17,9 @@ param(
 
     [switch]$MakeSourcePublicAfterV1,
 
+    [ValidateSet('Draft', 'Submit')]
+    [string]$StoreSubmission,
+
     [switch]$AllowDirectMainPush
 )
 
@@ -43,6 +46,10 @@ if ($MakeSourcePublicAfterV1 -and $Version -cne '1.0.0')
 if ($Version -ceq '1.0.0' -and $Prerelease)
 {
     throw 'The v1.0.0 bridge must be a stable release.'
+}
+if ($StoreSubmission -and ($Prerelease -or $Version.Contains('-')))
+{
+    throw 'Microsoft Store submission requires a stable release.'
 }
 
 foreach ($commandName in @('git', 'gh', 'dotnet', 'node', 'npm.cmd'))
@@ -72,6 +79,9 @@ $macWorkflowArtifactNames = @(
 )
 $buildScript = Join-Path $PSScriptRoot 'build-windows-release.ps1'
 $linuxBuildScript = Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1'
+$msixBuildScript = Join-Path $repoRoot 'tools\msix\Build-WindowsMsix.ps1'
+$storeSubmitScript = Join-Path $repoRoot 'tools\msix\Submit-WindowsMsix.ps1'
+$storeIdentityPath = Join-Path $repoRoot 'tools\msix\store-identity.json'
 $macRunId = $null
 $generatedNotesPath = $null
 $sourceWasPrivate = $false
@@ -84,6 +94,8 @@ if ($NotesFile)
         throw "Release notes file was not found: $NotesFile"
     }
 }
+# Store "What's new" is plain text, so only author-supplied notes are carried there.
+$storeReleaseNotes = if ($NotesFile) { [System.IO.File]::ReadAllText($NotesFile).Trim() } elseif ($Notes) { $Notes.Trim() } else { '' }
 
 function Remove-GeneratedDirectory
 {
@@ -388,6 +400,14 @@ try
     {
         Assert-ReleaseTagUnused -Repository $repository -Tag $tag
     }
+    if ($StoreSubmission)
+    {
+        if (-not (Test-Path -LiteralPath $storeIdentityPath -PathType Leaf))
+        {
+            throw "Store submission requires the Partner Center identity file: $storeIdentityPath"
+        }
+        & $storeSubmitScript -ReleaseNotes $storeReleaseNotes -CheckOnly
+    }
     $appImageSourceArchivePath = if (-not $WindowsOnly)
     {
         Assert-AppImagePublicationReady -RepositoryRoot $repoRoot
@@ -557,6 +577,12 @@ try
             Sort-Object Name |
             Select-Object -ExpandProperty FullName
     )
+    if ($StoreSubmission)
+    {
+        # The Store closure replaces publish/win-x64, so it runs after the Free artifacts are staged.
+        & $buildScript -Version $Version -KeepUnpacked -DistributionChannel Store
+        & $msixBuildScript -IdentityPath $storeIdentityPath
+    }
 
     $notesText = if ($NotesFile) { [System.IO.File]::ReadAllText($NotesFile) } elseif ($Notes) { $Notes } else
     {
@@ -660,6 +686,18 @@ try
         Write-Host "  https://github.com/$repository/releases/tag/$tag"
     }
     Write-Host "Release staging retained at $releaseDirectory"
+
+    if ($StoreSubmission)
+    {
+        try
+        {
+            & $storeSubmitScript -ReleaseNotes $storeReleaseNotes -Submit:($StoreSubmission -ceq 'Submit')
+        }
+        catch
+        {
+            throw "GitHub release $tag is published. The Store step failed; resolve it, then rerun tools/msix/Submit-WindowsMsix.ps1 against the retained .artifacts/msix/store package. $($_.Exception.Message)"
+        }
+    }
 }
 catch
 {

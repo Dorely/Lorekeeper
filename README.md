@@ -748,7 +748,8 @@ the current renderer.
 - Node.js 22.12 or later for Electron.NET desktop builds
 - Rust 1.97.1 for source builds; the packaged app has no Rust or Cargo runtime requirement
 - PowerShell 7 (`pwsh`) for the release, packaging, MSIX, and distribution
-  scripts; Windows PowerShell 5.1 cannot run them
+  scripts (7.5 or later for Store submission); Windows PowerShell 5.1 cannot
+  run them
 
 Every Debug and Release build produces the app-owned `press-runtime` bundle
 automatically from `Cargo.lock`. It contains only the native executable, approved
@@ -856,10 +857,17 @@ Copy the empty [identity example](tools/msix/store-identity.example.json) and
 supply the reserved package name, publisher, publisher display name, and app
 display name. The production path uses MakeAppx semantic validation, retains the
 complete notice set, and leaves the MSIX unsigned for Microsoft Store signing.
-It does not install certificates or submit a listing. The package is prepared
-for a free listing with Store-managed updates and your own independently billed
-provider accounts. See the [MSIX runbook](tools/msix/README.md) and
+It does not install certificates or contact Partner Center. The package is
+prepared for a free listing with Store-managed updates and your own independently
+billed provider accounts. See the [MSIX runbook](tools/msix/README.md) and
 [listing material](tools/msix/store-listing.md).
+
+`tools/msix/Submit-WindowsMsix.ps1` uploads the prepared package through the
+Microsoft Store Developer CLI (`msstore`, configured once with
+`msstore reconfigure`). It refuses while another submission is pending or when
+the Store already holds an equal or newer package, sets the plain-text release
+notes, and leaves a Partner Center draft unless `-Submit` commits it for
+certification. `-CheckOnly` only reads the current submission.
 
 `-LocalValidation` instead uses a separate local identity and an ephemeral
 certificate to check package structure and CMS integrity, then removes the
@@ -891,7 +899,11 @@ selection, its version-only commit, preflight before and after that commit, the
 normal push, native packaging, checksum verification, and publication. Use
 `-Version <major.minor.patch>` or `-Bump Minor|Major` for a deliberate version,
 `-LinuxDistribution <name>` for the configured WSL distribution, and
-`-WindowsOnly` to omit Linux and macOS. Do not use publication to test tooling.
+`-WindowsOnly` to omit Linux and macOS. `-StoreSubmission Draft` also builds the
+Store MSIX before GitHub publication and uploads it as a Partner Center draft
+afterward; `-StoreSubmission Submit` commits that draft for certification. Store
+"What's new" text comes only from `-Notes` or `-NotesFile` (plain text, at most
+1,500 characters). Do not use publication to test tooling.
 
 Public AppImage distribution is approved in
 [`eng/appimage-publication.json`](eng/appimage-publication.json). Every Linux

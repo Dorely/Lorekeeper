@@ -26,10 +26,40 @@ The default output is `.artifacts/msix/store/Lorekeeper-Store-<version>-x64.msix
 with `msix-package.json`. The script validates immutable Store metadata, stages
 the exact package, runs SDK MakeAppx semantic validation without `/nv`, unpacks
 it, verifies contents and all notice hashes, and leaves it unsigned. It does not
-create certificates, install a package, contact Partner Center, or submit a
-listing. See [store-listing.md](store-listing.md) for prepared copy, free pricing,
-capability explanations, privacy link, screenshot/trailer requirements, and the
-later owner-operated upload.
+create certificates, install a package, or contact Partner Center. See
+[store-listing.md](store-listing.md) for prepared copy, free pricing, capability
+explanations, privacy link, and screenshot/trailer requirements.
+
+## Store submission
+
+`Submit-WindowsMsix.ps1` uploads the prepared package to product `9N3QQPF401L5`
+through the [Microsoft Store Developer CLI](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/commands)
+(`msstore`, PowerShell 7.5 or later). One-time owner setup: associate a Microsoft
+Entra tenant with the Partner Center account, create a Partner Center Entra
+application with the Manager role, add a key, then run `msstore reconfigure` with
+the tenant, seller, and client IDs and paste the key at its prompt. The key lives
+only in Windows Credential Manager; never place it in files, arguments, or logs.
+It expires after at most two years; rerun `msstore reconfigure` with a new key.
+
+```powershell
+.\tools\msix\Submit-WindowsMsix.ps1 -ReleaseNotes '' -CheckOnly
+.\tools\msix\Submit-WindowsMsix.ps1 -ReleaseNotes 'Plain-text What''s new'
+.\tools\msix\Submit-WindowsMsix.ps1 -ReleaseNotes 'Plain-text What''s new' -Submit
+```
+
+`-CheckOnly` reads the current submission only: it requires that nothing is
+pending and that every live package version is lower than the source mapping;
+`-Version` previews a planned version. A real run also requires
+`msix-package.json` to describe the current source version and the package
+SHA-256 to match. It then creates a draft with `msstore publish --noCommit`,
+confirms the draft holds exactly that package with no equal or newer live
+package, replaces every listing's release notes (at most 1,500 characters; empty
+clears them), and re-reads the draft. Without `-Submit` the draft stays in
+Partner Center for review; `-Submit` commits it for certification, which
+completes asynchronously. The run records `store-submission.json` beside the
+package. A failure after upload leaves the draft in Partner Center; finish or
+delete it there before rerunning. The release driver's `-StoreSubmission`
+option builds and submits through this script; see the repository README.
 
 Channel and informational-version checks read bounded PE metadata without
 loading application code. Inspection handles close on success and failure, so

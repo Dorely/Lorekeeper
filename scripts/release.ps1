@@ -5,12 +5,15 @@ Prepares and publishes a stable Lorekeeper release from main in one command.
 Invocation authorizes a version commit, a normal push to main, native builds,
 and publication to the main repository (also the old download repository for v1.0.0 only). Defaults to the next patch version,
 or reuses an already prepared unpublished version. Never commits unrelated files.
+-StoreSubmission Draft|Submit additionally authorizes a Microsoft Store upload.
 .EXAMPLE
 .\scripts\release.ps1 -CheckOnly
 .EXAMPLE
 .\scripts\release.ps1
 .EXAMPLE
 .\scripts\release.ps1 -Bump Minor -WindowsOnly
+.EXAMPLE
+.\scripts\release.ps1 -StoreSubmission Draft -NotesFile .\notes.txt
 #>
 [CmdletBinding()]
 param(
@@ -22,6 +25,8 @@ param(
     [switch]$RunMacStartupCheck,
     [string]$LinuxDistribution = 'Ubuntu',
     [switch]$MakeSourcePublicAfterV1,
+    [ValidateSet('Draft', 'Submit')]
+    [string]$StoreSubmission,
     [switch]$CheckOnly,
     [string]$Notes,
     [string]$NotesFile
@@ -254,6 +259,17 @@ try
         Write-Host "macOS startup smoke check explicitly enabled: $($RunMacStartupCheck.IsPresent)"
         & (Join-Path $PSScriptRoot 'build-linux-release-wsl.ps1') -Distribution $LinuxDistribution -CheckOnly
     }
+    if ($StoreSubmission)
+    {
+        $storeAction = if ($StoreSubmission -ceq 'Submit') { 'submit it for certification' } else { 'leave it as a draft for review' }
+        Write-Host "Microsoft Store: build the Store MSIX before publication, then upload it and $storeAction."
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'tools/msix/store-identity.json') -PathType Leaf))
+        {
+            throw 'Store submission requires the ignored Partner Center identity file tools/msix/store-identity.json.'
+        }
+        $storeReleaseNotes = if ($NotesFile) { [System.IO.File]::ReadAllText($NotesFile).Trim() } elseif ($Notes) { $Notes.Trim() } else { '' }
+        & (Join-Path $repoRoot 'tools/msix/Submit-WindowsMsix.ps1') -ReleaseNotes $storeReleaseNotes -Version $Version -CheckOnly
+    }
     if ($CheckOnly)
     {
         Invoke-ReleasePreflight $repoRoot
@@ -304,6 +320,7 @@ try
     if ($RunMacStartupCheck) { $publishArguments.RunMacStartupCheck = $true }
     $publishArguments.LinuxDistribution = $LinuxDistribution
     if ($MakeSourcePublicAfterV1) { $publishArguments.MakeSourcePublicAfterV1 = $true }
+    if ($StoreSubmission) { $publishArguments.StoreSubmission = $StoreSubmission }
     if ($Notes) { $publishArguments.Notes = $Notes }
     if ($NotesFile) { $publishArguments.NotesFile = $NotesFile }
     & (Join-Path $PSScriptRoot 'publish-release.ps1') @publishArguments

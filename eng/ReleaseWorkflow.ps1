@@ -26,6 +26,25 @@ function Get-LorekeeperVersion
     return $versionMatches[0].Groups['version'].Value
 }
 
+function ConvertTo-MsixVersion
+{
+    param([Parameter(Mandatory)][string]$Version)
+
+    $coreMatch = [regex]::Match($Version, '^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$')
+    if (-not $coreMatch.Success)
+    {
+        throw "Version '$Version' must be stable three-part SemVer for Store packaging."
+    }
+
+    $parts = @('major', 'minor', 'patch') | ForEach-Object { [uint64]$coreMatch.Groups[$_].Value }
+    if ($parts[0] -gt 65534 -or $parts[1] -gt 65535 -or $parts[2] -gt 65535)
+    {
+        throw "Version '$Version' exceeds the permanent (major+1).minor.patch.0 Store mapping."
+    }
+
+    return "$($parts[0] + 1).$($parts[1]).$($parts[2]).0"
+}
+
 function Get-LorekeeperReleaseRepositories
 {
     param([Parameter(Mandatory)][string]$Version)

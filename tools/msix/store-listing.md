@@ -4,7 +4,9 @@ These materials back the free Windows desktop MSIX listing, published as
 [product 9N3QQPF401L5](https://apps.microsoft.com/detail/9N3QQPF401L5) after certification passed on 2026-10-14 for
 package `2.0.1.0`. Keep this copy in step with the live listing. Do not upload
 packages, accept account terms, or submit updates for certification until the
-owner authorizes those external steps.
+owner authorizes those external steps. Update packages and release notes go
+through [`Submit-WindowsMsix.ps1`](README.md#store-submission); listing copy,
+images, and trailers remain Partner Center edits.
 
 ## Listing copy
 
@@ -110,7 +112,9 @@ history sync for anything they need after uninstalling.
    The README carries the official Store badge linking to `https://apps.microsoft.com/detail/9N3QQPF401L5`. Future updates
    retain the same Store identity and permanent
    `(source major + 1).minor.patch.0` package-version mapping, and each upload
-   needs a source version higher than any package already uploaded.
+   needs a source version higher than any package already uploaded. Updates
+   upload through `Submit-WindowsMsix.ps1`: a draft by default, or committed for
+   certification only when the owner passes `-Submit`.
 
 ## Trailer deliverables
 
