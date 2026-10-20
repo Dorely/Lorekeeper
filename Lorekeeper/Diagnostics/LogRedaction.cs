@@ -30,7 +30,7 @@ public static partial class LogRedaction
             {
                 var key = match.Groups["key"].Value;
                 return IsSensitive(key)
-                    ? $"{match.Groups["prefix"].Value}{RedactedPlaceholder}{match.Groups["suffix"].Value}"
+                    ? $"{match.Groups["prefix"].Value}\"{RedactedPlaceholder}\""
                     : match.Value;
             });
         }
