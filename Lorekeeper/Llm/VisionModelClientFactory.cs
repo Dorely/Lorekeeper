@@ -309,7 +309,8 @@ public sealed class VisionModelClientFactory(
         }
         else
         {
-            body["temperature"] = 0;
+            // Omit temperature: newer models (e.g. current Claude models behind
+            // Anthropic's OpenAI-compatible endpoint) reject it outright.
             body["max_tokens"] = clampedMaxOutputTokens;
         }
         var json = JsonSerializer.Serialize(body);
