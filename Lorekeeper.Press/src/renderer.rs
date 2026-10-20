@@ -3368,14 +3368,24 @@ fn append_inline_illustration(
         }
         + spacing_before.max(0.0)
         + spacing_after.max(0.0);
+    // A Figure never shares a band with an earlier wrapped Figure.
+    if let Some(page) = pages.last_mut() {
+        clear_wrapped_figures(page, trim);
+    }
+    // Remaining space and placement share one flow cursor so a Figure that is
+    // judged to fit is placed exactly where it was measured.
+    let flow_top = |page: &LayoutPage| {
+        page.lines
+            .iter()
+            .rev()
+            .find(|line| line.semantic_role != LayoutSemanticRole::Caption)
+            .map_or(page_height - margin, |line| line.y - line.size * 1.6)
+    };
     let remaining_height = pages.last().map_or(0.0, |page| {
         if page.kind != PageKind::Body {
             return 0.0;
         }
-        page.lines
-            .last()
-            .map_or(available_height, |line| line.y - line.size * 1.6 - margin)
-            - page.footnote_height
+        flow_top(page) - margin - page.footnote_height
     });
     if remaining_height < required_height {
         pages.push(empty_body_page());
@@ -3384,19 +3394,17 @@ fn append_inline_illustration(
         pages.push(empty_body_page());
     }
     let page = pages.last_mut().expect("body page");
-    let content_top = page
-        .lines
-        .iter()
-        .rev()
-        .find(|line| line.semantic_role != LayoutSemanticRole::Caption)
-        .map_or(page_height - margin, |line| line.y - line.size * 1.6);
-    let content_top = content_top - spacing_before.max(0.0);
+    let figure_top = flow_top(page);
+    let content_top = figure_top - spacing_before.max(0.0);
     let image_top = if caption_placement == "Above" {
         content_top - caption_extent
     } else {
         content_top
     };
     let image_y = image_top - image_height;
+    // Prose wraps only when the requested side holds a readable measure; otherwise
+    // the Figure reserves its full band exactly like an unwrapped Figure.
+    let wraps = float_text_measure(text_wrap, image_x, image_width, trim, 0.0).is_some();
     page.images.push(LayoutImage {
         asset_id,
         x: image_x,
@@ -3416,8 +3424,9 @@ fn append_inline_illustration(
         reading_order: None,
         semantic_id: None,
         semantic_parent_id: None,
-        text_wrap: (!text_wrap.is_empty() && text_wrap != "None").then(|| text_wrap.to_owned()),
+        text_wrap: wraps.then(|| text_wrap.to_owned()),
         accessibility_role: None,
+        wrap_band: None,
     });
 
     let first_caption_y = match caption_placement {
@@ -3454,50 +3463,26 @@ fn append_inline_illustration(
         });
         page.paint_order.push(LayoutPaint::Shape(shape_index));
     }
-    if text_wrap.is_empty() || text_wrap == "None" {
-        let flow_bottom = if caption_placement == "Below" {
-            caption_bottom - caption_space_after
-        } else {
-            image_y
-        } - spacing_after.max(0.0);
-        let mut spacer_y = content_top;
-        while spacer_y > flow_bottom {
-            page.lines.push(LayoutLine {
-                text: String::new(),
-                runs: Vec::new(),
-                size: trim.body_font_size_points,
-                x: margin,
-                y: spacer_y,
-                baseline_offset_points: line_baseline_offset_points(
-                    trim.body_font_size_points,
-                    BlockStyle::body(trim).face,
-                    &[],
-                ),
-                word_spacing: 0.0,
-                character_spacing: 0.0,
-                rotation_degrees: 0.0,
-                rotation_origin_x: None,
-                rotation_origin_y: None,
-                opacity: 1.0,
-                light_text: false,
-                fill_rgb: None,
-                semantic_role: LayoutSemanticRole::Paragraph,
-                artifact: true,
-                language: None,
-                reading_order: None,
-                semantic_id: None,
-                semantic_parent_id: None,
-                source_start_utf16: None,
-                source_end_utf16: None,
-                link_page: None,
-            });
-            spacer_y -= line_step;
-        }
-    }
     let detach_caption = !keep_with_caption
         && caption_placement == "Below"
         && !caption_lines.is_empty()
         && caption_bottom < margin;
+    let flow_bottom = if caption_placement == "Below" && !detach_caption {
+        caption_bottom - caption_space_after
+    } else {
+        image_y
+    } - spacing_after.max(0.0);
+    if wraps {
+        if let Some(image) = page.images.last_mut() {
+            image.wrap_band = Some((figure_top, flow_bottom));
+        }
+    } else {
+        let mut spacer_y = content_top;
+        while spacer_y > flow_bottom {
+            page.lines.push(flow_spacer_line(trim, spacer_y));
+            spacer_y -= line_step;
+        }
+    }
     if !detach_caption {
         for (index, (text, runs)) in caption_lines.iter().cloned().enumerate() {
             let baseline_offset_points =
@@ -3590,6 +3575,71 @@ fn append_inline_illustration(
                 link_page: None,
             });
         }
+        // Following content continues below the detached caption, not over it.
+        if let Some(last_caption_y) = caption_page.lines.last().map(|line| line.y) {
+            caption_page
+                .lines
+                .push(flow_spacer_line(trim, last_caption_y - caption_space_after));
+        }
+    }
+}
+
+/// An invisible full-measure artifact line that advances the flow cursor past
+/// space reserved by a Figure.
+fn flow_spacer_line(trim: &crate::model::Trim, y: f32) -> LayoutLine {
+    LayoutLine {
+        text: String::new(),
+        runs: Vec::new(),
+        size: trim.body_font_size_points,
+        x: trim.margin_inches * 72.0,
+        y,
+        baseline_offset_points: line_baseline_offset_points(
+            trim.body_font_size_points,
+            BlockStyle::body(trim).face,
+            &[],
+        ),
+        word_spacing: 0.0,
+        character_spacing: 0.0,
+        rotation_degrees: 0.0,
+        rotation_origin_x: None,
+        rotation_origin_y: None,
+        opacity: 1.0,
+        light_text: false,
+        fill_rgb: None,
+        semantic_role: LayoutSemanticRole::Paragraph,
+        artifact: true,
+        language: None,
+        reading_order: None,
+        semantic_id: None,
+        semantic_parent_id: None,
+        source_start_utf16: None,
+        source_end_utf16: None,
+        link_page: None,
+    }
+}
+
+/// Moves the flow cursor below every wrapped Figure band on the page, so content
+/// that cannot share a band starts beneath the image, caption, and after-spacing.
+fn clear_wrapped_figures(page: &mut LayoutPage, trim: &crate::model::Trim) {
+    let Some(band_bottom) = page
+        .images
+        .iter()
+        .filter_map(|image| image.wrap_band.map(|(_, bottom)| bottom))
+        .reduce(f32::min)
+    else {
+        return;
+    };
+    // The next line's ascent stays above neither the band nor its caption.
+    let size = trim.body_font_size_points;
+    let spacer_y = band_bottom + size * trim.body_line_height.max(1.0) - size * 0.82;
+    let cursor = page
+        .lines
+        .iter()
+        .rev()
+        .find(|line| line.semantic_role != LayoutSemanticRole::Caption)
+        .map_or(f32::INFINITY, |line| line.y);
+    if spacer_y < cursor {
+        page.lines.push(flow_spacer_line(trim, spacer_y));
     }
 }
 
@@ -3959,6 +4009,7 @@ fn designed_page(
                         semantic_id: Some(string(&item, "id")),
                         semantic_parent_id: None,
                         text_wrap: None,
+                        wrap_band: None,
                         accessibility_role: item
                             .get("accessibilityRole")
                             .and_then(Value::as_str)
@@ -7062,6 +7113,10 @@ fn append_semantic_table(
             "A table declares more header rows than rows.",
         ));
     }
+    // Table rows use the full measure, so they start below any wrapped Figure.
+    if let Some(page) = pages.last_mut() {
+        clear_wrapped_figures(page, trim);
+    }
     validate_table_grid(rows, weights.len(), header_count)?;
 
     let mut body_style = BlockStyle::body(trim);
@@ -7659,9 +7714,20 @@ fn append_styled_runs_with_gap(
     let default_x = trim.margin_inches * 72.0 + style.indent;
     let default_width =
         (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent - style.right_indent;
-    let flow_region = pages
+    let flow_region = match pages
         .last()
-        .and_then(|page| active_float_region(page, trim, style, previous_space_after));
+        .map(|page| active_float_region(page, trim, style, previous_space_after))
+    {
+        Some(FloatFlow::Beside(x, width, bottom)) => Some((x, width, bottom)),
+        Some(FloatFlow::Blocked) => {
+            if let Some(page) = pages.last_mut() {
+                clear_wrapped_figures(page, trim);
+            }
+            None
+        }
+        Some(FloatFlow::Clear) | None => None,
+    };
+    let float_page = pages.len();
     let available_width = flow_region.map_or(default_width, |region| region.1);
     let flow_x = flow_region.map_or(default_x, |region| region.0);
     // A positive first-line indent shortens the opening line's measure; the
@@ -7702,8 +7768,11 @@ fn append_styled_runs_with_gap(
             next_flow_baseline_with_gap(page, trim, style, true, previous_space_after)
         });
         let step = style.size * style.line_height.max(1.0);
-        let capacity =
-            (((baseline - float_bottom) / step).ceil().max(0.0) as usize).min(wrapped.len());
+        // A line returns to the full measure only once its ascent clears the band.
+        let capacity = (((baseline + style.size * 0.82 - float_bottom) / step)
+            .ceil()
+            .max(0.0) as usize)
+            .min(wrapped.len());
         if capacity < wrapped.len() {
             let mut consumed = 0usize;
             for (line, _) in wrapped.iter().take(capacity) {
@@ -7804,8 +7873,8 @@ fn append_styled_runs_with_gap(
         first_page.get_or_insert(page_number);
         for (relative_index, line) in lines[offset..offset + take].iter().enumerate() {
             let line_runs = wrapped_runs[offset + relative_index].clone();
-            let uses_float = offset + relative_index < float_line_count
-                && page_number == first_page.unwrap_or(page_number);
+            let uses_float =
+                offset + relative_index < float_line_count && page_number == float_page;
             let mut line_width = if uses_float {
                 available_width
             } else {
@@ -7873,35 +7942,70 @@ fn append_styled_runs_with_gap(
     first_page.unwrap_or_else(|| pages.len().max(1))
 }
 
+/// How the next flowing line relates to the latest wrapped Figure band it meets.
+enum FloatFlow {
+    /// No wrapped band shares the line's vertical extent.
+    Clear,
+    /// The line wraps beside the band at `(x, width)` until the band's bottom.
+    Beside(f32, f32, f32),
+    /// The band leaves this style no readable measure, so the line starts below it.
+    Blocked,
+}
+
+const FLOAT_GUTTER_POINTS: f32 = 8.0;
+const MINIMUM_FLOAT_MEASURE_EMS: f32 = 6.0;
+
+/// The text measure `(x, width)` on a Figure's requested wrap side, or `None`
+/// when that side cannot hold a readable measure of body text.
+fn float_text_measure(
+    wrap: &str,
+    image_x: f32,
+    image_width: f32,
+    trim: &crate::model::Trim,
+    indent: f32,
+) -> Option<(f32, f32)> {
+    let margin = trim.margin_inches * 72.0;
+    let right = trim.width_inches * 72.0 - margin;
+    let (x, width) = match wrap {
+        "Start" => (
+            margin + indent,
+            image_x - FLOAT_GUTTER_POINTS - margin - indent,
+        ),
+        "End" => (
+            image_x + image_width + FLOAT_GUTTER_POINTS,
+            right - image_x - image_width - FLOAT_GUTTER_POINTS,
+        ),
+        _ => return None,
+    };
+    (width >= trim.body_font_size_points * MINIMUM_FLOAT_MEASURE_EMS).then_some((x, width))
+}
+
 fn active_float_region(
     page: &LayoutPage,
     trim: &crate::model::Trim,
     style: &BlockStyle,
     previous_space_after: f32,
-) -> Option<(f32, f32, f32)> {
+) -> FloatFlow {
     let baseline = next_flow_baseline_with_gap(page, trim, style, true, previous_space_after);
-    let margin = trim.margin_inches * 72.0;
-    let right = trim.width_inches * 72.0 - margin;
-    let gutter = 8.0;
-    page.images.iter().rev().find_map(|image| {
-        let wrap = image.text_wrap.as_deref()?;
-        if baseline <= image.y || baseline >= image.y + image.height {
-            return None;
-        }
-        match wrap {
-            "Start" if image.x - gutter > margin => Some((
-                margin + style.indent,
-                image.x - gutter - margin - style.indent,
-                image.y,
-            )),
-            "End" if image.x + image.width + gutter < right => Some((
-                image.x + image.width + gutter,
-                right - image.x - image.width - gutter,
-                image.y,
-            )),
-            _ => None,
-        }
-    })
+    let line_top = baseline + style.size * 0.82;
+    let line_bottom = baseline - style.size * 0.30;
+    page.images
+        .iter()
+        .rev()
+        .find_map(|image| {
+            let wrap = image.text_wrap.as_deref()?;
+            let (band_top, band_bottom) = image.wrap_band?;
+            if line_top <= band_bottom || line_bottom >= band_top {
+                return None;
+            }
+            Some(
+                float_text_measure(wrap, image.x, image.width, trim, style.indent)
+                    .map_or(FloatFlow::Blocked, |(x, width)| {
+                        FloatFlow::Beside(x, width, band_bottom)
+                    }),
+            )
+        })
+        .unwrap_or(FloatFlow::Clear)
 }
 
 fn consumed_text_offset(full_text: &str, search_offset: usize, line: &str) -> usize {
@@ -8941,6 +9045,7 @@ fn dedicated_figure_page_with_layout(
                 semantic_id: None,
                 semantic_parent_id: None,
                 text_wrap: None,
+                wrap_band: None,
                 accessibility_role: None,
             })
             .into_iter()
@@ -9166,6 +9271,7 @@ fn cover_layout(
                 semantic_id: None,
                 semantic_parent_id: None,
                 text_wrap: None,
+                wrap_band: None,
                 accessibility_role: None,
             })
             .into_iter()
@@ -9264,6 +9370,7 @@ fn digital_cover_layout(
                 semantic_id: None,
                 semantic_parent_id: None,
                 text_wrap: None,
+                wrap_band: None,
                 accessibility_role: None,
             })
             .into_iter()

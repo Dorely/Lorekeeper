@@ -522,6 +522,11 @@ pub struct LayoutImage {
     pub semantic_parent_id: Option<String>,
     pub text_wrap: Option<String>,
     pub accessibility_role: Option<String>,
+    /// Vertical band (top, bottom) that a wrapped flowing Figure reserves for its
+    /// image, caption, and declared spacing. Following prose wraps beside this band
+    /// and content that cannot wrap starts below it.
+    #[serde(skip)]
+    pub wrap_band: Option<(f32, f32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

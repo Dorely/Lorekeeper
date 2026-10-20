@@ -1264,18 +1264,24 @@ public sealed class PublicationRenderProcessor(
             if (!currentInterior)
                 throw new InvalidOperationException("The manuscript changed after the interior was prepared. Prepare the interior before rendering its cover.");
         }
+        // Press maps every chapter block, including empty paragraphs, to the page its flow
+        // reached. Publication sections map only blocks that place content.
         var expectedChapterPageMap = document.Sections
             .SelectMany(section => section.Chapters)
-            .SelectMany(chapter => chapter.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
+            .SelectMany(chapter => chapter.Manuscript.Content.Select(block => (
                 OwnerId: chapter.Id.ToString("D"),
                 BlockId: block.Id)))
             .ToHashSet();
         var expectedPublicationSectionPageMap = document.PublicationSections
             .Where(section => section.SystemRole != PublicationSectionSystemRole.Contents)
-            .SelectMany(section => section.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
+            .SelectMany(section => section.Manuscript.Content.Where(IsPressPageMappedSectionBlock).Select(block => (
                 OwnerId: section.Id.ToString("D"),
                 BlockId: block.Id)))
             .ToHashSet();
+        var chapterOwnerIds = document.Sections
+            .SelectMany(section => section.Chapters)
+            .Select(chapter => chapter.Id.ToString("D"))
+            .ToHashSet(StringComparer.Ordinal);
         var expectedPageMap = expectedChapterPageMap
             .Concat(expectedPublicationSectionPageMap)
             .ToHashSet();
@@ -1508,13 +1514,14 @@ public sealed class PublicationRenderProcessor(
                 foreach (var group in extra.GroupBy(entry => entry.OwnerId))
                 {
                     var ownerId = group.Key;
+                    var sourceKind = chapterOwnerIds.Contains(ownerId) ? "chapter" : "publication-section";
                     mergedDiagnostics.Add(new PublicationRenderDiagnostic(
                         "warning",
                         "PRESS_PAGE_MAP_UNEXPECTED",
                         $"The reading copy page map contains an unexpected entry for {ownerId}.",
                         null,
                         null,
-                        "publication-section",
+                        sourceKind,
                         ownerId));
                 }
 
@@ -2406,9 +2413,13 @@ public sealed class PublicationRenderProcessor(
             && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
     }
 
-    private static bool IsPressPageMappedBlock(ManuscriptBlock block) =>
-        block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
-        || !string.IsNullOrWhiteSpace(ManuscriptCodec.Text(block));
+    // Mirrors Press publication-section flow: list items always paint their marker, and note
+    // references and citations always paint their generated text.
+    private static bool IsPressPageMappedSectionBlock(ManuscriptBlock block) =>
+        block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage
+            or ManuscriptBlockType.Table or ManuscriptBlockType.ListItem
+        || block.Content.Any(inline => inline.Type is ManuscriptInlineType.NoteReference or ManuscriptInlineType.Citation
+            || !string.IsNullOrWhiteSpace(inline.Text));
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
     {

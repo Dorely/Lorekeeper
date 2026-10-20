@@ -2225,6 +2225,186 @@ fn floated_figure_wraps_following_prose_on_the_requested_side() {
     );
 }
 
+fn float_figure(id: &str, width_percent: u32, alignment: &str, text_wrap: &str) -> Value {
+    let caption = format!("Caption for {id} wraps across a second line of figure caption text");
+    json!({
+        "id": id, "type": "Figure", "styleRole": "figure-caption",
+        "assetId": "90000000-0000-0000-0000-000000000001", "caption": caption,
+        "altText": format!("Illustration {id}"), "decorative": false,
+        "presentation": { "placement": "Float", "widthPercent": width_percent,
+            "alignment": alignment, "textWrap": text_wrap, "fit": "Contain",
+            "cropXPercent": 50, "cropYPercent": 50, "spacingBeforePoints": 6,
+            "spacingAfterPoints": 6, "startOnNewPage": false, "keepWithCaption": true,
+            "captionPlacement": "Below" },
+        "content": [{ "type": "Text", "text": caption, "marks": [] }]
+    })
+}
+
+fn long_paragraph(id: &str, sentinel: &str) -> Value {
+    json!({
+        "id": id, "type": "Paragraph", "styleRole": "body",
+        "content": [{ "type": "Text", "text": format!("{sentinel} ").repeat(60), "marks": [] }]
+    })
+}
+
+fn line_top(line: &Value) -> f64 {
+    line["y"].as_f64().unwrap() + line["size"].as_f64().unwrap() * 0.82
+}
+
+fn line_bottom(line: &Value) -> f64 {
+    line["y"].as_f64().unwrap() - line["size"].as_f64().unwrap() * 0.30
+}
+
+/// The page holding a Figure, its image, and the lowest edge of image plus caption.
+fn figure_band<'a>(pages: &'a [Value], id: &str) -> (usize, &'a Value, f64) {
+    let (page_index, image) = pages
+        .iter()
+        .enumerate()
+        .find_map(|(index, page)| {
+            page["images"]
+                .as_array()?
+                .iter()
+                .find(|image| image["semanticId"] == id)
+                .map(|image| (index, image))
+        })
+        .expect("figure image");
+    let bottom = pages[page_index]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| line["semanticId"] == id && line["semanticRole"] == "Caption")
+        .map(line_bottom)
+        .fold(image["y"].as_f64().unwrap(), f64::min);
+    (page_index, image, bottom)
+}
+
+fn prose_lines<'a>(page: &'a Value, sentinel: &str) -> Vec<&'a Value> {
+    page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(sentinel))
+        })
+        .collect()
+}
+
+#[test]
+fn wrapped_figure_without_a_readable_side_measure_reserves_its_band() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([
+        float_figure("wide-float", 100, "Center", "End"),
+        long_paragraph("after-wide-float", "Overlapsentinel")
+    ]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().unwrap();
+    let (page_index, image, band_bottom) = figure_band(pages, "wide-float");
+    let image_top = image["y"].as_f64().unwrap() + image["height"].as_f64().unwrap();
+    let prose = prose_lines(&pages[page_index], "Overlapsentinel");
+    assert!(!prose.is_empty(), "prose continues on the figure page");
+    for line in prose {
+        assert!(
+            line_top(line) <= band_bottom || line_bottom(line) >= image_top,
+            "prose must not overlap the figure or its caption: line={line}, band_bottom={band_bottom}, image_top={image_top}"
+        );
+    }
+    assert!(
+        image["textWrap"].is_null(),
+        "a wrap side without a readable measure must not report wrapping"
+    );
+}
+
+#[test]
+fn wrapped_prose_stays_beside_the_caption_and_returns_below_the_band() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([
+        float_figure("side-float", 40, "Start", "End"),
+        long_paragraph("beside-float", "Besidesentinel")
+    ]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().unwrap();
+    let (page_index, image, band_bottom) = figure_band(pages, "side-float");
+    assert_eq!(image["textWrap"], "End");
+    let image_right = image["x"].as_f64().unwrap() + image["width"].as_f64().unwrap();
+    let prose = prose_lines(&pages[page_index], "Besidesentinel");
+    assert!(
+        prose
+            .iter()
+            .any(|line| line["x"].as_f64().unwrap() >= image_right),
+        "prose wraps on the requested end side"
+    );
+    let full_measure = prose
+        .iter()
+        .filter(|line| line["x"].as_f64().unwrap() < image_right)
+        .collect::<Vec<_>>();
+    assert!(
+        !full_measure.is_empty(),
+        "prose returns to the full measure"
+    );
+    for line in full_measure {
+        assert!(
+            line_top(line) <= band_bottom,
+            "full-measure prose must start below the image and caption: line={line}, band_bottom={band_bottom}"
+        );
+    }
+}
+
+#[test]
+fn content_that_cannot_wrap_starts_below_earlier_wrapped_figures() {
+    let mut job =
+        PreparedJob::from_fixture_with_profile("rich-content-v14.json", "generic-digital-pdf-v1");
+    job.request["protocolVersion"] = json!(15);
+    let chapter = &mut job.request["document"]["sections"][0]["chapters"][0];
+    let table = chapter["blocks"][1].clone();
+    chapter["notes"] = json!([]);
+    chapter["blocks"] = json!([
+        float_figure("first-float", 40, "Start", "End"),
+        float_figure("second-float", 40, "Start", "End"),
+        table
+    ]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().unwrap();
+    let (first_page, _, first_bottom) = figure_band(pages, "first-float");
+    let (second_page, second_image, second_bottom) = figure_band(pages, "second-float");
+    if second_page == first_page {
+        let second_top =
+            second_image["y"].as_f64().unwrap() + second_image["height"].as_f64().unwrap();
+        assert!(
+            second_top <= first_bottom,
+            "a following Figure starts below an earlier wrapped band: second_top={second_top}, first_bottom={first_bottom}"
+        );
+    }
+    let (table_page, table_line) = pages
+        .iter()
+        .enumerate()
+        .find_map(|(index, page)| {
+            page["lines"]
+                .as_array()?
+                .iter()
+                .find(|line| line["text"] == "Name")
+                .map(|line| (index, line))
+        })
+        .expect("table header line");
+    if table_page == second_page {
+        assert!(
+            line_top(table_line) <= second_bottom,
+            "a table starts below a wrapped band: line={table_line}, band_bottom={second_bottom}"
+        );
+    }
+    assert!(
+        first_page == second_page || table_page == second_page,
+        "the fixture must exercise at least one same-page clearance"
+    );
+}
+
 #[test]
 fn figure_fit_crop_position_and_above_caption_are_preserved_in_layout() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");

@@ -243,6 +243,15 @@ reconstructing typography from browser defaults.
 Block spacing collapses across adjacent semantic blocks. A flowing Figure's
 declared after-spacing participates in that same baseline calculation so the
 following prose enters and remains within the active float exclusion region.
+A wrapped flowing Figure reserves one band from its top through its image,
+caption, and after-spacing. Prose whose line box meets that band wraps on the
+requested side and returns to the full measure only once its ascent clears the
+band, so it never runs over the caption. Wrapping applies only when the
+requested side holds at least six body ems; otherwise the Figure reserves its
+band like an unwrapped Figure and the trace reports no wrap. Content that cannot
+share the band, such as a later Figure, a table, or an indented style without a
+readable side measure, starts below it, and a detached caption keeps following
+flow below itself. A Figure's fit check and placement use the same flow cursor.
 
 Physical print profiles differ deliberately. KDP and Generic artifact profiles
 emit PDF 1.7 and extend page-edge art through the vendor bleed box while the
@@ -385,7 +394,11 @@ Press owns immutable artifact evidence. `PublicationRenderService` persists
 edition/Core target, status, bytes, length, SHA-256, source fingerprint,
 renderer/profile provenance, diagnostics, and stable block/page mappings.
 Chapter page maps preserve opaque manuscript block IDs as strings, including
-non-GUID IDs; only chapter ownership is GUID-based. Render comparisons match
+non-GUID IDs; only chapter ownership is GUID-based. Press maps every chapter
+block, including empty paragraphs, to the page its flow reached, while
+publication sections map only blocks that place content (text, list markers,
+note references, citations, scene breaks, Figures, tables, and Designed Pages);
+the application's expected map follows the same rule. Render comparisons match
 GUID spellings by identity for existing maps while retaining ordinal opaque IDs.
 Project-scoped range endpoints recompute length and hash before returning an
 ETag or body. Corrupt rows fail closed. Renderer version, installed manifest,
