@@ -2319,6 +2319,41 @@ fn wrapped_figure_without_a_readable_side_measure_reserves_its_band() {
 }
 
 #[test]
+fn wrap_decision_uses_a_relative_quarter_measure_side_share() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    let cases = [
+        ("half-centered", 50, "Center", "End", true),
+        ("three-quarter-start", 75, "Start", "End", true),
+        ("four-fifths-start", 80, "Start", "End", false),
+        ("start-against-start", 40, "Start", "Start", false),
+    ];
+    let mut blocks = Vec::new();
+    for (id, width, alignment, wrap, _) in cases {
+        blocks.push(float_figure(id, width, alignment, wrap));
+        blocks.push(long_paragraph(&format!("after-{id}"), "Sharesentinel"));
+    }
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!(blocks);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().unwrap();
+    for (id, _, _, wrap, wraps) in cases {
+        let (_, image, _) = figure_band(pages, id);
+        if wraps {
+            assert_eq!(
+                image["textWrap"], wrap,
+                "{id} leaves a quarter of the measure"
+            );
+        } else {
+            assert!(
+                image["textWrap"].is_null(),
+                "{id} leaves less than a quarter of the measure"
+            );
+        }
+    }
+}
+
+#[test]
 fn wrapped_prose_stays_beside_the_caption_and_returns_below_the_band() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([

@@ -82,6 +82,14 @@
       "textColorRgb": [1.0, 1.0, 1.0]
     }
   },
+  "figure": {
+    "minimumWidthPercent": 10.0,
+    "flowFrameMaxTextAreaHeightFraction": 0.34,
+    "flowFrameMaxHeightToWidth": 1.25,
+    "dedicatedFrameTextAreaHeightFraction": 0.75,
+    "wrapGutterPoints": 8.0,
+    "minimumWrapSideFraction": 0.25
+  },
   "inline": {
     "superscript": { "sizeScale": 0.7, "baselineShiftEm": 0.35 },
     "subscript": { "sizeScale": 0.7, "baselineShiftEm": -0.2 },

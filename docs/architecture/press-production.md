@@ -247,8 +247,13 @@ A wrapped flowing Figure reserves one band from its top through its image,
 caption, and after-spacing. Prose whose line box meets that band wraps on the
 requested side and returns to the full measure only once its ascent clears the
 band, so it never runs over the caption. Wrapping applies only when the
-requested side holds at least six body ems; otherwise the Figure reserves its
-band like an unwrapped Figure and the trace reports no wrap. Content that cannot
+requested side holds at least a quarter of the text measure; otherwise the
+Figure reserves its band like an unwrapped Figure and the trace reports no
+wrap. That share, the wrap gutter, the minimum Figure width, and the flowing
+and dedicated frame height caps live in the `figure` section of the shared
+typography defaults, relative to the text area, so the editor reaches the same
+decisions at its own line width. Full-width and full-bleed placements use the
+whole measure in chapters, publication sections, and notes. Content that cannot
 share the band, such as a later Figure, a table, or an indented style without a
 readable side measure, starts below it, and a detached caption keeps following
 flow below itself. A Figure's fit check and placement use the same flow cursor.

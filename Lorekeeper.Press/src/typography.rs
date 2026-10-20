@@ -17,6 +17,7 @@ pub struct TypographyDefaults {
     pub list_item: ListItemDefaults,
     pub scene_break: SceneBreakDefaults,
     pub caption: BlockDefaults,
+    pub figure: FigureDefaults,
     pub inline: InlineDefaults,
 }
 
@@ -86,6 +87,19 @@ pub struct SceneBreakDefaults {
     pub space_before_points: f32,
     #[serde(rename = "spaceAfterPoints")]
     pub space_after_points: f32,
+}
+
+/// Figure frame and wrap geometry shared with the editor, expressed relative to
+/// the text area so the editor reproduces it at its own line width.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FigureDefaults {
+    pub minimum_width_percent: f32,
+    pub flow_frame_max_text_area_height_fraction: f32,
+    pub flow_frame_max_height_to_width: f32,
+    pub dedicated_frame_text_area_height_fraction: f32,
+    pub wrap_gutter_points: f32,
+    pub minimum_wrap_side_fraction: f32,
 }
 
 #[derive(Debug, Deserialize)]

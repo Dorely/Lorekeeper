@@ -184,22 +184,75 @@ function textBlockAttrs(element, defaultRole) {
     };
 }
 
-function figureDomStyle(presentation) {
+// Figure frame and wrap geometry from the shared Press typography defaults. Every value is
+// relative to the text measure, so Edit reproduces Press layout at its own line width.
+const fallbackFigureGeometry = Object.freeze({
+    minimumWidthPercent: 10,
+    flowFrameMaxTextAreaHeightFraction: 0.34,
+    flowFrameMaxHeightToWidth: 1.25,
+    dedicatedFrameTextAreaHeightFraction: 0.75,
+    wrapGutterPoints: 8,
+    minimumWrapSideFraction: 0.25
+});
+let figureGeometry = fallbackFigureGeometry;
+
+function figureLayout(presentation) {
     const value = {...defaultFigurePresentation, ...(presentation || {})};
+    const dedicated = value.placement === "dedicatedPage" || value.placement === "fullBleed";
+    const widthPercent = value.placement === "fullWidth" || value.placement === "fullBleed"
+        ? 100
+        : Math.max(figureGeometry.minimumWidthPercent, Math.min(100, Number(value.widthPercent) || 100));
+    const width = widthPercent / 100;
+    const startOffset = value.alignment === "start" ? 0 : value.alignment === "end" ? 1 - width : (1 - width) / 2;
+    const side = value.textWrap === "start" ? startOffset : value.textWrap === "end" ? 1 - width - startOffset : 0;
+    // Press wraps only when the requested side holds a readable share of the measure;
+    // otherwise the Figure keeps its whole band and text continues below it.
+    const wrap = !dedicated && side > 0 && side >= figureGeometry.minimumWrapSideFraction - 0.00005
+        ? value.textWrap
+        : null;
+    return {value, dedicated, widthPercent, startOffset, wrap};
+}
+
+function figureDomStyle(presentation) {
+    const {value, dedicated, widthPercent, startOffset, wrap} = figureLayout(presentation);
     const styles = [
-        `width:${Math.max(5, Math.min(100, Number(value.widthPercent || 100)))}%`,
+        `width:${widthPercent}%`,
         "position:relative",
         "display:flex",
-        "flex-direction:column"
+        "flex-direction:column",
+        "container-type:inline-size",
+        "clear:both",
+        `--lk-figure-start-offset:${startOffset * 100}%`,
+        `--lk-figure-space-after:${Number(value.spacingAfterPoints || 0)}pt`
     ];
-    if (value.alignment === "start") styles.push("margin-left:0", "margin-right:auto");
-    else if (value.alignment === "end") styles.push("margin-left:auto", "margin-right:0");
-    else styles.push("margin-left:auto", "margin-right:auto");
-    if (value.placement === "float") styles.push(value.textWrap === "start" ? "float:right" : "float:left");
-    if (value.startOnNewPage) styles.push("break-before:page");
+    if (wrap === "end")
+        styles.push("float:left", `margin-left:${startOffset * 100}%`, "margin-right:var(--lk-figure-wrap-gutter,8pt)");
+    else if (wrap === "start")
+        styles.push("float:right", `margin-right:${(1 - widthPercent / 100 - startOffset) * 100}%`, "margin-left:var(--lk-figure-wrap-gutter,8pt)");
+    else
+        styles.push(`margin-left:${startOffset * 100}%`, "margin-right:0");
+    if (value.startOnNewPage || dedicated) styles.push("break-before:page");
+    if (dedicated) styles.push("break-after:page");
     styles.push(`padding-top:${Number(value.spacingBeforePoints || 0)}pt`);
     styles.push(`padding-bottom:${Number(value.spacingAfterPoints || 0)}pt`);
     return styles.join(";");
+}
+
+// The frame matches Press: 100cqw is the Figure width, and the text-area variables convert
+// Press's page-relative height caps into multiples of the editor's measure.
+function figureImageStyle(presentation) {
+    const {value, dedicated, widthPercent} = figureLayout(presentation);
+    const measures = 100 / widthPercent;
+    const height = dedicated
+        ? `calc(var(--lk-figure-dedicated-text-height,1.25) * ${measures} * 100cqw)`
+        : `min(calc(var(--lk-figure-flow-text-height,0.57) * ${measures} * 100cqw),calc(var(--lk-figure-flow-height-to-width,1.25) * 100cqw))`;
+    return [
+        "width:100%",
+        `height:${height}`,
+        "max-height:none",
+        `object-fit:${value.fit === "cover" ? "cover" : "contain"}`,
+        `object-position:${value.cropXPercent ?? 50}% ${value.cropYPercent ?? 50}%`
+    ].join(";");
 }
 
 function designedPageDom(node) {
@@ -359,6 +412,7 @@ const schema = new Schema({
                     "data-decorative": String(node.attrs.decorative),
                     "data-accessibility-role": node.attrs.accessibilityRole || "figure",
                     "data-caption-placement": (node.attrs.presentation || {}).captionPlacement || "below",
+                    "data-wrap": figureLayout(node.attrs.presentation).wrap || "none",
                     lang: node.attrs.language || null,
                     "data-presentation": JSON.stringify(node.attrs.presentation || {}),
                     style: figureDomStyle(node.attrs.presentation)
@@ -367,7 +421,7 @@ const schema = new Schema({
                     src: node.attrs.imageUrl,
                     alt: node.attrs.decorative ? "" : node.attrs.altText,
                     draggable: "false",
-                    style: `object-fit:${node.attrs.presentation?.fit === "cover" ? "cover" : "contain"};object-position:${node.attrs.presentation?.cropXPercent ?? 50}% ${node.attrs.presentation?.cropYPercent ?? 50}%`
+                    style: figureImageStyle(node.attrs.presentation)
                 }],
                 ["figcaption", {style: paragraphStyle(node.attrs.paragraphPresentation)}, 0]
             ]
@@ -1813,12 +1867,14 @@ function buildFigureInspector(view, projectImages) {
         fields.get("altText").setCustomValidity("");
         const imageId = fields.get("imageId").value;
         const image = projectImages.find(candidate => candidate.id === imageId);
+        const placement = fields.get("placement").value;
+        const textWrap = placement === "float" && fields.get("textWrap").value === "none" ? "end" : fields.get("textWrap").value;
         const presentation = {
             ...current,
-            placement: fields.get("placement").value,
+            placement,
             widthPercent: Math.min(100, Math.max(1, number("widthPercent"))),
             alignment: fields.get("alignment").value,
-            textWrap: fields.get("textWrap").value,
+            textWrap,
             fit: fields.get("fit").value,
             cropXPercent: Math.min(100, Math.max(0, number("cropXPercent"))),
             cropYPercent: Math.min(100, Math.max(0, number("cropYPercent"))),
@@ -1840,7 +1896,12 @@ function buildFigureInspector(view, projectImages) {
         }));
     };
     for (const input of fields.values()) input.addEventListener("change", apply);
-    panel.append(heading, controls);
+    const wrapNotice = document.createElement("p");
+    wrapNotice.className = "semantic-figure-wrap-notice";
+    wrapNotice.setAttribute("role", "status");
+    wrapNotice.hidden = true;
+    wrapNotice.textContent = "Text continues below this image because the wrap side is too narrow. Reduce the width or change the alignment to wrap text beside it.";
+    panel.append(heading, controls, wrapNotice);
     // The selection context row opens the inspector; it stays closed until asked for.
     let expanded = false;
     const inspector = {
@@ -1851,6 +1912,7 @@ function buildFigureInspector(view, projectImages) {
             const selected = selectedFigure(view); panel.hidden = !selected || !expanded; if (!selected) return;
             const attrs = selected.node.attrs;
             const presentation = {...defaultFigurePresentation, ...(attrs.presentation || {})};
+            wrapNotice.hidden = presentation.textWrap === "none" || Boolean(figureLayout(presentation).wrap);
             for (const name of ["placement", "widthPercent", "alignment", "textWrap", "fit", "cropXPercent", "cropYPercent", "spacingBeforePoints", "spacingAfterPoints", "captionPlacement"])
                 fields.get(name).value = presentation[name];
             fields.get("startOnNewPage").checked = presentation.startOnNewPage;
@@ -1987,19 +2049,15 @@ async function editFigurePresentation(view, root) {
         ],
         validate: value => {
             const width = Number(value.width);
-            return Number.isFinite(width) && width > 0 && width <= 100
-                ? null
-                : "Width must be between 1 and 100 percent.";
+            if (!Number.isFinite(width) || width <= 0 || width > 100)
+                return "Width must be between 1 and 100 percent.";
+            if (value.placement === "float" && !figureLayout(quickFigurePresentation(current, value)).wrap)
+                return `Float with text needs a width of ${Math.floor((1 - figureGeometry.minimumWrapSideFraction) * 100)}% or less so text fits beside the image.`;
+            return null;
         }
     });
     if (!values) return;
-    const presentation = {
-        ...current,
-        placement: values.placement,
-        widthPercent: Number(values.width),
-        fit: values.fit,
-        textWrap: values.placement === "float" ? (current.textWrap === "none" ? "end" : current.textWrap) : "none"
-    };
+    const presentation = quickFigurePresentation(current, values);
     view.dispatch(view.state.tr.setNodeMarkup(
         selected.position,
         undefined,
@@ -2007,6 +2065,24 @@ async function editFigurePresentation(view, root) {
     view.focus();
 }
 
+
+// A float keeps its chosen wrap side; a centered image moves to the opposite edge so the
+// text beside it has room, as it will in print.
+function quickFigurePresentation(current, values) {
+    const float = values.placement === "float";
+    const textWrap = float ? (current.textWrap === "none" ? "end" : current.textWrap) : "none";
+    const alignment = float && current.alignment === "center"
+        ? (textWrap === "end" ? "start" : "end")
+        : current.alignment;
+    return {
+        ...current,
+        placement: values.placement,
+        widthPercent: Number(values.width),
+        fit: values.fit,
+        alignment,
+        textWrap
+    };
+}
 
 function textBlockMatches(doc, search) {
     if (!search) return [];
@@ -2407,6 +2483,18 @@ function installTypographyRules(root, typography = {}) {
                 rules.push(`${selector(target)}{${declarations.join(";")}}`);
         };
         const body = current.body || {};
+        figureGeometry = {...fallbackFigureGeometry, ...(current.figure || {})};
+        const textAreaHeightToWidth = Number(current.textAreaHeightToWidth) || 1;
+        add("", [
+            `--lk-figure-flow-text-height:${figureGeometry.flowFrameMaxTextAreaHeightFraction * textAreaHeightToWidth}`,
+            `--lk-figure-flow-height-to-width:${figureGeometry.flowFrameMaxHeightToWidth}`,
+            `--lk-figure-dedicated-text-height:${figureGeometry.dedicatedFrameTextAreaHeightFraction * textAreaHeightToWidth}`,
+            `--lk-figure-wrap-gutter:${figureGeometry.wrapGutterPoints}pt`
+        ]);
+        // Press starts tables and Designed Pages below any wrapped Figure band, and notes never wrap.
+        add("> .semantic-rich-table", ["clear:both"]);
+        add("> .semantic-designed-page", ["clear:both"]);
+        rules.push(`.semantic-editor.semantic-editor .semantic-note-editor .semantic-prosemirror figure{float:none!important;margin-left:var(--lk-figure-start-offset,0)!important;margin-right:0!important}`);
         add("> *", typographyDeclarations(body, {}, false));
         add("p", typographyDeclarations(body));
         add("[data-style-role=body]", typographyDeclarations(body));
@@ -2462,7 +2550,7 @@ function installTypographyRules(root, typography = {}) {
         const overlayBackground = cssRgb(overlay.backgroundColorRgb, overlay.backgroundOpacity ?? 0) || "transparent";
         const overlayVertical = overlay.paddingVerticalEm ?? 0;
         const overlayHorizontal = overlay.paddingHorizontalEm ?? 0;
-        rules.push(`${selector("figure[data-caption-placement=overlay]")} > figcaption{position:absolute;inset-inline:0;bottom:0;box-sizing:border-box;margin-left:0!important;margin-right:0!important;padding-block:${overlayVertical}em;padding-inline-start:calc(${overlayHorizontal}em + var(--lk-caption-left-indent,0em));padding-inline-end:calc(${overlayHorizontal}em + var(--lk-caption-right-indent,0em));color:${overlayText};background:${overlayBackground};}`);
+        rules.push(`${selector("figure[data-caption-placement=overlay]")} > figcaption{position:absolute;inset-inline:0;bottom:var(--lk-figure-space-after,0pt);box-sizing:border-box;margin-left:0!important;margin-right:0!important;padding-block:${overlayVertical}em;padding-inline-start:calc(${overlayHorizontal}em + var(--lk-caption-left-indent,0em));padding-inline-end:calc(${overlayHorizontal}em + var(--lk-caption-right-indent,0em));color:${overlayText};background:${overlayBackground};}`);
         rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption{display:block;padding:.25em .5em;border:1px dashed var(--lk-line-strong,#cbd3df);color:var(--lk-text-muted,#647086);background:var(--lk-surface-subtle,transparent);opacity:.9;}`);
         rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption::before{content:"Hidden in Read";display:block;margin-bottom:.2em;font-family:'Lorekeeper-builtin-nunito',sans-serif;font-size:.72em;font-style:normal;font-weight:700;letter-spacing:.04em;}`);
         styleElement.textContent = rules.join("\n");

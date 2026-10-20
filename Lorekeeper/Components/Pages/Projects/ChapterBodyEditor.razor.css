@@ -622,14 +622,11 @@
     margin: 0;
 }
 
+/* Frame size, fit, and crop come from the Figure's inline style, which mirrors Press. */
 .semantic-editor ::deep .semantic-prosemirror figure img {
     display: block;
     max-width: 100%;
-    max-height: 70vh;
-    width: 100%;
-    height: auto;
-    margin: 0 auto;
-    object-fit: contain;
+    margin: 0;
     user-select: none;
     -webkit-user-drag: none;
     cursor: pointer;
@@ -819,6 +816,16 @@
 }
 
 .semantic-editor ::deep .semantic-figure-inspector[hidden] {
+    display: none;
+}
+
+.semantic-editor ::deep .semantic-figure-wrap-notice {
+    margin: .5rem 0 0;
+    color: var(--lk-text-muted, #647086);
+    font-size: .85rem;
+}
+
+.semantic-editor ::deep .semantic-figure-wrap-notice[hidden] {
     display: none;
 }
 

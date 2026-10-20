@@ -3320,8 +3320,8 @@ fn append_inline_illustration(
     let page_height = trim.height_inches * 72.0;
     let available_width = trim.width_inches * 72.0 - margin * 2.0;
     let available_height = page_height - margin * 2.0;
-    let image_width = available_width * (width_percent / 100.0).clamp(0.1, 1.0);
-    let image_height = (available_height * 0.34).min(image_width * 1.25);
+    let image_width = figure_width(available_width, width_percent);
+    let image_height = flow_figure_height(available_height, image_width);
     let image_x = match alignment.to_ascii_lowercase().as_str() {
         "left" => margin,
         "right" => margin + available_width - image_width,
@@ -6068,7 +6068,7 @@ fn validate_caption_bounds(
                     .get("widthPercent")
                     .and_then(Value::as_f64)
                     .unwrap_or(100.0) as f32;
-                let image_width = available_width * (width_percent / 100.0).clamp(0.1, 1.0);
+                let image_width = figure_width(available_width, width_percent);
                 let caption_style = block_style(document, value, trim);
                 let caption_runs = block_runs(document, value, &caption_style);
                 let (_, caption_width) =
@@ -6093,7 +6093,7 @@ fn validate_caption_bounds(
                     + lines.saturating_sub(1) as f32 * caption_step
                     + caption_style.space_after.max(0.0);
                 let fits = if inline {
-                    let image_height = (available_height * 0.34).min(image_width * 1.25);
+                    let image_height = flow_figure_height(available_height, image_width);
                     image_height + caption_extent <= available_height
                 } else {
                     caption_extent + 72.0 <= available_height
@@ -6898,7 +6898,14 @@ fn append_note_blocks(
                 &runs,
                 &style,
                 string(block, "assetId"),
-                presentation["widthPercent"].as_f64().unwrap_or(100.0) as f32,
+                if matches!(
+                    string(presentation, "placement").as_str(),
+                    "FullWidth" | "FullBleed"
+                ) {
+                    100.0
+                } else {
+                    presentation["widthPercent"].as_f64().unwrap_or(100.0) as f32
+                },
                 presentation["cropXPercent"].as_f64().unwrap_or(50.0) as f32,
                 presentation["cropYPercent"].as_f64().unwrap_or(50.0) as f32,
                 alignment,
@@ -7952,11 +7959,23 @@ enum FloatFlow {
     Blocked,
 }
 
-const FLOAT_GUTTER_POINTS: f32 = 8.0;
-const MINIMUM_FLOAT_MEASURE_EMS: f32 = 6.0;
+/// A Figure's frame width within the text measure.
+fn figure_width(available_width: f32, width_percent: f32) -> f32 {
+    let minimum = typography::defaults().figure.minimum_width_percent / 100.0;
+    available_width * (width_percent / 100.0).clamp(minimum, 1.0)
+}
+
+/// A flowing Figure's frame height, capped by the text area and by the frame width.
+fn flow_figure_height(available_height: f32, image_width: f32) -> f32 {
+    let figure = &typography::defaults().figure;
+    (available_height * figure.flow_frame_max_text_area_height_fraction)
+        .min(image_width * figure.flow_frame_max_height_to_width)
+}
 
 /// The text measure `(x, width)` on a Figure's requested wrap side, or `None`
-/// when that side cannot hold a readable measure of body text.
+/// when that side, less any start indent, holds less than the minimum fraction
+/// of the text measure. The rule is relative so the editor reaches the same
+/// decision at its own line width.
 fn float_text_measure(
     wrap: &str,
     image_x: f32,
@@ -7964,20 +7983,23 @@ fn float_text_measure(
     trim: &crate::model::Trim,
     indent: f32,
 ) -> Option<(f32, f32)> {
+    let figure = &typography::defaults().figure;
+    let gutter = figure.wrap_gutter_points;
     let margin = trim.margin_inches * 72.0;
-    let right = trim.width_inches * 72.0 - margin;
-    let (x, width) = match wrap {
-        "Start" => (
-            margin + indent,
-            image_x - FLOAT_GUTTER_POINTS - margin - indent,
-        ),
+    let available_width = trim.width_inches * 72.0 - margin * 2.0;
+    let right = margin + available_width;
+    let (x, side) = match wrap {
+        "Start" => (margin + indent, image_x - margin - indent),
         "End" => (
-            image_x + image_width + FLOAT_GUTTER_POINTS,
-            right - image_x - image_width - FLOAT_GUTTER_POINTS,
+            image_x + image_width + gutter,
+            right - image_x - image_width,
         ),
         _ => return None,
     };
-    (width >= trim.body_font_size_points * MINIMUM_FLOAT_MEASURE_EMS).then_some((x, width))
+    // A small tolerance keeps exact boundary widths, such as a centered half-width
+    // Figure, on the same side of the rule as the editor's arithmetic.
+    let readable = side >= available_width * figure.minimum_wrap_side_fraction - 0.01;
+    (readable && side > gutter).then_some((x, side - gutter))
 }
 
 fn active_float_region(
@@ -8955,7 +8977,7 @@ fn dedicated_figure_page_with_layout(
 ) -> LayoutPage {
     let margin = trim.margin_inches * 72.0;
     let available_width = trim.width_inches * 72.0 - margin * 2.0;
-    let image_width = available_width * (width_percent / 100.0).clamp(0.1, 1.0);
+    let image_width = figure_width(available_width, width_percent);
     let image_x = match alignment.to_ascii_lowercase().as_str() {
         "left" => margin,
         "right" => margin + available_width - image_width,
@@ -8973,7 +8995,10 @@ fn dedicated_figure_page_with_layout(
         + caption_lines.len().saturating_sub(1) as f32 * caption_step;
     let available_height = trim.height_inches * 72.0 - margin * 2.0;
     let image_y = margin + available_height * 0.2 + caption_style.space_after.max(0.0);
-    let image_height = available_height * 0.75;
+    let image_height = available_height
+        * typography::defaults()
+            .figure
+            .dedicated_frame_text_area_height_fraction;
     LayoutPage {
         kind: PageKind::Designed,
         flow_page_id: None,

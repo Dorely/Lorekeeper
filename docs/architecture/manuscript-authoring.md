@@ -257,7 +257,15 @@ line breaks and pagination. Explicit heading levels, bundled font aliases,
 inline marks, block spacing, list and scene-break metrics, inset-quotation
 text/rule color and rule geometry, and Figure caption color/overlay treatment
 must resolve from the same defaults before sparse named styles and direct
-presentation are applied. The quotation's configured left indent is the total
+presentation are applied. Figure layout follows the same contract: the editor
+reads the shared `figure` defaults and the page text area's height-to-width
+ratio, sizes each frame to Press's width and height caps against its own
+measure, positions it by alignment, wraps text only on a side Press would wrap
+with the same gutter, starts tables and Designed Pages below wrapped Figures,
+and never wraps Figures inside notes. The inspector says when a requested wrap
+falls back to text below the image, and the Float preset moves a centered image
+to the opposite edge and rejects widths that leave no wrap side.
+The quotation's configured left indent is the total
 text inset; its rule and gap are placed within that measure, and a quotation
 continued across pages receives one rule segment on every occupied page. Body
 size and leading from page setup apply to quotation text in both surfaces.

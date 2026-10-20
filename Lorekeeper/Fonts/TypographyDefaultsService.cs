@@ -50,8 +50,19 @@ public sealed class TypographyDefaultsService : ITypographyDefaultsService
             Defaults.ListItem,
             Defaults.SceneBreak,
             Defaults.Caption,
+            Defaults.Figure,
             Defaults.Inline,
-            pageSetup.Revision);
+            pageSetup.Revision,
+            TextAreaHeightToWidth(pageSetup));
+
+    // The editor sizes Figure frames against its own line width, so it needs the page text
+    // area's shape rather than its physical size.
+    private static double TextAreaHeightToWidth(ProjectPageSetup pageSetup)
+    {
+        var width = pageSetup.PageWidthInches - pageSetup.PageMarginInches * 2;
+        var height = pageSetup.PageHeightInches - pageSetup.PageMarginInches * 2;
+        return width > 0 && height > 0 ? height / width : 1;
+    }
 
     private static void Validate(TypographyDefaults defaults)
     {
@@ -77,7 +88,16 @@ public sealed class TypographyDefaultsService : ITypographyDefaultsService
             || !IsValidRgb(captionOverlay.TextColorRgb)
             || blockDefaults.Any(block => !IsValidTextAlign(block.TextAlign))
             || !IsValidTextAlign(defaults.ListItem.TextAlign)
-            || !IsValidTextAlign(defaults.SceneBreak.TextAlign))
+            || !IsValidTextAlign(defaults.SceneBreak.TextAlign)
+            || defaults.Figure is not
+            {
+                MinimumWidthPercent: > 0 and <= 100,
+                FlowFrameMaxTextAreaHeightFraction: > 0 and <= 1,
+                FlowFrameMaxHeightToWidth: > 0,
+                DedicatedFrameTextAreaHeightFraction: > 0 and <= 1,
+                WrapGutterPoints: >= 0,
+                MinimumWrapSideFraction: > 0 and < 1,
+            })
         {
             throw new InvalidDataException("The bundled manuscript typography defaults are incomplete.");
         }
@@ -99,6 +119,7 @@ public sealed record TypographyDefaults(
     TypographyListDefaults ListItem,
     TypographySceneBreakDefaults SceneBreak,
     TypographyBlockDefaults Caption,
+    TypographyFigureDefaults Figure,
     TypographyInlineDefaults Inline);
 
 public sealed record TypographyFontFamilyKeys(
@@ -148,6 +169,14 @@ public sealed record TypographySceneBreakDefaults(
     double SpaceBeforePoints,
     double SpaceAfterPoints);
 
+public sealed record TypographyFigureDefaults(
+    double MinimumWidthPercent,
+    double FlowFrameMaxTextAreaHeightFraction,
+    double FlowFrameMaxHeightToWidth,
+    double DedicatedFrameTextAreaHeightFraction,
+    double WrapGutterPoints,
+    double MinimumWrapSideFraction);
+
 public sealed record TypographyInlineDefaults(
     TypographyInlineMarkDefaults Superscript,
     TypographyInlineMarkDefaults Subscript,
@@ -170,5 +199,7 @@ public sealed record EditorTypographyConfiguration(
     TypographyListDefaults ListItem,
     TypographySceneBreakDefaults SceneBreak,
     TypographyBlockDefaults Caption,
+    TypographyFigureDefaults Figure,
     TypographyInlineDefaults Inline,
-    long PageSetupRevision);
+    long PageSetupRevision,
+    double TextAreaHeightToWidth);
