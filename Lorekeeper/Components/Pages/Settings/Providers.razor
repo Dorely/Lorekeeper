@@ -47,89 +47,97 @@
     {
         <section class="lk-section-card provider-add-card" aria-labelledby="add-connection-title">
             <div class="lk-section-heading">
-                <div><span class="lk-section-kicker">OpenAI-compatible API</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and initial model, test it, then save the verified connection.</p></div>
+                <div><span class="lk-section-kicker">OpenAI-compatible API</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and credentials, choose an initial model, test it, then save. Add more models to the connection afterwards.</p></div>
             </div>
-            <div class="connection-form-grid">
-                <label class="field-wide">
-                    <span>Provider preset</span>
-                    <select class="form-select" value="@_newProviderPresetSlug" @onchange="OnNewProviderPresetChanged">
-                        <option value="">Custom / manual entry</option>
-                        @foreach (var preset in LlmProviderCatalog.Presets.Where(preset => preset.Slug != LlmProviderCatalog.CustomPresetSlug))
-                        {
-                            <option value="@preset.Slug">@preset.DisplayName</option>
-                        }
-                    </select>
-                    @if (SelectedNewProviderPreset is { } selectedPreset)
-                    {
-                        <small class="field-note">
-                            @selectedPreset.Note
-                            @if (selectedPreset.KeyManagementUrl is { } keyUrl)
+            <fieldset class="form-group-block">
+                <legend>Connection</legend>
+                <div class="connection-form-grid">
+                    <label class="field-wide">
+                        <span>Provider preset</span>
+                        <select class="form-select" value="@_newProviderPresetSlug" @onchange="OnNewProviderPresetChanged">
+                            <option value="">Custom / manual entry</option>
+                            @foreach (var preset in LlmProviderCatalog.Presets.Where(preset => preset.Slug != LlmProviderCatalog.CustomPresetSlug))
                             {
-                                <a href="@keyUrl" target="_blank" rel="noopener">Get an API key</a>
-                            }
-                        </small>
-                    }
-                </label>
-
-                <label><span>Name (slug)</span><input class="form-control" @bind="_newProvider.Name" placeholder="ollama-local" /></label>
-                <label><span>Display name</span><input class="form-control" @bind="_newProvider.DisplayName" placeholder="Local Ollama" /></label>
-                <label class="field-wide"><span>Endpoint URL</span><input class="form-control" @bind="_newProvider.EndpointUrl" placeholder="http://localhost:11434/v1" /></label>
-                <label>
-                    <span>Initial model ID</span>
-                    <div class="model-id-field">
-                        <input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" />
-                        <button type="button" class="btn btn-outline-secondary" disabled="@AnyTestRunning" @onclick="ListNewProviderModelsAsync">@(_listingNewProviderModels ? "Listing…" : "List models")</button>
-                    </div>
-                    @if (_newProviderModels.Count > 0)
-                    {
-                        <select class="form-select form-select-sm" value="@_newProvider.ModelId" @onchange="OnNewProviderModelSelected">
-                            <option value="">-- Select a model --</option>
-                            @foreach (var candidate in _newProviderModels)
-                            {
-                                <option value="@candidate">@candidate</option>
+                                <option value="@preset.Slug">@preset.DisplayName</option>
                             }
                         </select>
-                        <small class="field-note">Pick a discovered model, or type any model ID above.</small>
+                        @if (SelectedNewProviderPreset is { } selectedPreset)
+                        {
+                            <small class="field-note">
+                                @selectedPreset.Note
+                                @if (selectedPreset.KeyManagementUrl is { } keyUrl)
+                                {
+                                    <a href="@keyUrl" target="_blank" rel="noopener">Get an API key</a>
+                                }
+                            </small>
+                        }
+                    </label>
+
+                    <label><span>Name (slug)</span><input class="form-control" @bind="_newProvider.Name" placeholder="ollama-local" /></label>
+                    <label><span>Display name</span><input class="form-control" @bind="_newProvider.DisplayName" placeholder="Local Ollama" /></label>
+                    <label class="field-wide"><span>Endpoint URL</span><input class="form-control" @bind="_newProvider.EndpointUrl" placeholder="http://localhost:11434/v1" /></label>
+                    <label><span>Authentication</span><select class="form-select" @bind="_newProvider.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
+                    @if (_newProvider.AuthType == AuthType.ApiKey)
+                    {
+                        <label class="field-wide"><span>API key</span><input type="password" class="form-control" @bind="_newProvider.ApiKey" autocomplete="off" /></label>
                     }
-                </label>
-                <label>
-                    <span>Thinking effort</span>
-                    <select class="form-select" @bind="_newProvider.ReasoningEffort">
-                        <option value="">Provider default</option>
-                        @foreach (var choice in ReasoningEffortChoices)
+                </div>
+            </fieldset>
+            <fieldset class="form-group-block">
+                <legend>Initial model</legend>
+                <div class="connection-form-grid">
+                    <label class="field-wide">
+                        <span>Model ID</span>
+                        <div class="model-id-field">
+                            <input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" />
+                            <button type="button" class="btn btn-outline-secondary" disabled="@AnyTestRunning" @onclick="ListNewProviderModelsAsync">@(_listingNewProviderModels ? "Listing…" : "List models")</button>
+                        </div>
+                        @if (_newProviderModels.Count > 0)
                         {
-                            <option value="@choice.Value">@choice.Label</option>
+                            <select class="form-select form-select-sm" value="@_newProvider.ModelId" @onchange="OnNewProviderModelSelected">
+                                <option value="">-- Select a model --</option>
+                                @foreach (var candidate in _newProviderModels)
+                                {
+                                    <option value="@candidate">@candidate</option>
+                                }
+                            </select>
+                            <small class="field-note">Pick a discovered model, or type any model ID above.</small>
                         }
-                    </select>
-                    <small class="field-note">Higher effort can improve complex work, with more latency and token use. Support depends on the model. "Provider default" omits the parameter entirely — use it for gateways that reject <code>reasoning_effort</code>.</small>
-                </label>
-                <label>
-                    <span>Max output tokens</span>
-                    <input type="number" min="1" step="1" class="form-control" placeholder="Provider default" @bind="_newProvider.MaxOutputTokens" />
-                    <small class="field-note">Optional response budget, including reasoning when counted by the provider. Leave blank to use the provider default.</small>
-                </label>
-                <label>
-                    <span>Max input tokens</span>
-                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto (model/default)" @bind="_newProvider.MaxInputTokens" />
-                    <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
-                </label>
-                <label>
-                    <span>Max tokens field</span>
-                    <select class="form-select" @bind="_newProvider.MaxTokensField">
-                        @foreach (var choice in MaxTokensFieldChoices)
-                        {
-                            <option value="@choice.Value">@choice.Label</option>
-                        }
-                    </select>
-                    <small class="field-note">Field name carrying the output budget. "Auto" follows the endpoint (legacy <code>max_tokens</code> for DeepSeek/Together and local servers, OpenAI <code>max_completion_tokens</code> otherwise). Override for gateways that reject the auto-chosen field.</small>
-                </label>
-                <label><span>Authentication</span><select class="form-select" @bind="_newProvider.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
-                @if (_newProvider.AuthType == AuthType.ApiKey)
-                {
-                    <label class="field-wide"><span>API key</span><input type="password" class="form-control" @bind="_newProvider.ApiKey" autocomplete="off" /></label>
-                }
-                <label class="connection-checkbox"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsDefault" /><span>Make this the default after verification</span></label>
-            </div>
+                    </label>
+                    <label>
+                        <span>Thinking effort</span>
+                        <select class="form-select" @bind="_newProvider.ReasoningEffort">
+                            <option value="">Provider default</option>
+                            @foreach (var choice in ReasoningEffortChoices)
+                            {
+                                <option value="@choice.Value">@choice.Label</option>
+                            }
+                        </select>
+                        <small class="field-note">Higher effort can improve complex work, with more latency and token use. Support depends on the model. "Provider default" omits the parameter entirely — use it for gateways that reject <code>reasoning_effort</code>.</small>
+                    </label>
+                    <label>
+                        <span>Max output tokens</span>
+                        <input type="number" min="1" step="1" class="form-control" placeholder="Provider default" @bind="_newProvider.MaxOutputTokens" />
+                        <small class="field-note">Optional response budget, including reasoning when counted by the provider. Leave blank to use the provider default.</small>
+                    </label>
+                    <label>
+                        <span>Max input tokens</span>
+                        <input type="number" min="1" step="1" class="form-control" placeholder="Auto (model/default)" @bind="_newProvider.MaxInputTokens" />
+                        <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
+                    </label>
+                    <label>
+                        <span>Max tokens field</span>
+                        <select class="form-select" @bind="_newProvider.MaxTokensField">
+                            @foreach (var choice in MaxTokensFieldChoices)
+                            {
+                                <option value="@choice.Value">@choice.Label</option>
+                            }
+                        </select>
+                        <small class="field-note">Field name carrying the output budget. "Auto" follows the endpoint (legacy <code>max_tokens</code> for DeepSeek/Together and local servers, OpenAI <code>max_completion_tokens</code> otherwise). Override for gateways that reject the auto-chosen field.</small>
+                    </label>
+                    <label class="connection-checkbox"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsDefault" /><span>Make this the default after verification</span></label>
+                </div>
+            </fieldset>
             <div class="provider-form-actions">
                 <button type="button" class="btn btn-outline-info" disabled="@AnyTestRunning" @onclick="TestNewProviderAsync">@(_isTestingNewProvider ? "Testing…" : "Test")</button>
                 <button type="button" class="btn btn-primary" disabled="@(!CanAddNewProvider)" @onclick="CreateProviderAsync">Save connection</button>
@@ -139,12 +147,22 @@
     }
 
     <section class="provider-list" aria-label="Configured provider connections">
-        <article class="connection-card codex-card">
+        <article class="connection-section codex-card">
+            @{
+                var openAiSectionKey = "openai-account";
+                var openAiExpanded = IsSectionExpanded(openAiSectionKey);
+                var openAiBodyId = $"{openAiSectionKey}-body";
+                var codexProvider = _codexProvider;
+            }
             <header class="connection-header">
-                <div class="connection-identity">
-                    <span class="connection-mark">AI</span>
-                    <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI account</h2><p>Use the bundled model catalog without managing an API key or running manual model tests.</p></div>
-                </div>
+                <button type="button" class="connection-toggle" aria-expanded="@(openAiExpanded ? "true" : "false")" aria-controls="@openAiBodyId" @onclick="() => ToggleSection(openAiSectionKey)">
+                    <span class="connection-chevron" aria-hidden="true"></span>
+                    <div class="connection-identity">
+                        <span class="connection-mark">AI</span>
+                        <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI account</h2><p>Use the bundled model catalog without managing an API key or running manual model tests.</p></div>
+                    </div>
+                </button>
+                <span class="connection-summary">@($"{CodexModels.Count} model(s) · {CodexModels.Count(model => IsChatReady(model))} chat-ready")</span>
                 <div class="connection-actions">
                     @if (_authorizationFlow?.IsPending == true)
                     {
@@ -162,159 +180,92 @@
                         <span class="lk-status-pill is-warning">Not connected</span>
                         <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Connect OpenAI</button>
                     }
-                </div>
-            </header>
-            @if (_callbackOrigin is { IsValid: false })
-            {
-                <div class="alert alert-warning">@_callbackOrigin.Message</div>
-            }
-            @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastAuthenticationError))
-            {
-                <div class="alert alert-warning">@_openAiAccount.LastAuthenticationError</div>
-            }
-            @if (_authorizationTarget is not null)
-            {
-                <div class="alert alert-info">
-                    OpenAI authorization is ready. Use this explicit external link, then return to this page while Lorekeeper completes the connection.
-                    <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
-                </div>
-            }
-            @if (_codexProvider is not null)
-            {
-                <div class="model-list">
-                    @foreach (var model in CodexModels)
+                    @if (codexProvider is not null)
                     {
-                        <div class="model-row">
-                            <div class="model-row-main">
-                                <div class="model-fields">
-                                    <label><span>Display name · @(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog" : "Manual")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" /></label>
-                                    <label>
-                                        <span>Model ID</span>
-                                        <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog)" />
-                                        @if (model.ModelOrigin == LlmModelOrigin.Manual)
-                                        {
-                                            <small class="field-note">Enter an exact model ID, then use Test before saving it as the default.</small>
-                                        }
-                                    </label>
-                                    <label>
-                                        <span>Thinking effort</span>
-                                        <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
-                                            <option value="">@ReasoningDefaultLabel(model)</option>
-                                            @foreach (var choice in ReasoningChoicesFor(model))
-                                            {
-                                                <option value="@choice.Value">@choice.Label</option>
-                                            }
-                                        </select>
-                                        <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Only efforts supported by this catalog model are offered." : "Higher levels use more time and tokens; model support varies.")</small>
-                                    </label>
-                                    @RenderMaxTokenControls(model)
-                                </div>
-                                <div class="model-status-panel">
-                                    <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
-                                    @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
-                                    <div class="model-actions">
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                        @if (model.ModelOrigin == LlmModelOrigin.Manual)
-                                        {
-                                            <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
-                                        }
-                                        @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
-                                        @if (model.ModelOrigin == LlmModelOrigin.Manual){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
-                                    </div>
-                                </div>
-                            </div>
-                            @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
-                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => { _collapsedSections.Remove(openAiSectionKey); ToggleAddChild(codexProvider.Id); }">Add manual model</button>
                     }
                 </div>
-                <div class="connection-footer"><button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(_codexProvider.Id)">Advanced: add manual model</button></div>
-                @RenderChildForm(_codexProvider)
+            </header>
+            @if (openAiExpanded)
+            {
+                <div class="connection-body" id="@openAiBodyId">
+                    @if (_callbackOrigin is { IsValid: false })
+                    {
+                        <div class="alert alert-warning">@_callbackOrigin.Message</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastAuthenticationError))
+                    {
+                        <div class="alert alert-warning">@_openAiAccount.LastAuthenticationError</div>
+                    }
+                    @if (_authorizationTarget is not null)
+                    {
+                        <div class="alert alert-info">
+                            OpenAI authorization is ready. Use this explicit external link, then return to this page while Lorekeeper completes the connection.
+                            <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
+                        </div>
+                    }
+                    @if (codexProvider is not null)
+                    {
+                        @RenderModelGrid(CodexModels, true)
+                        @RenderChildForm(codexProvider)
+                    }
+                </div>
             }
         </article>
 
         @foreach (var connection in OtherParents)
         {
-            <article class="connection-card">
+            var sectionKey = $"connection-{connection.Id}";
+            var expanded = IsSectionExpanded(sectionKey);
+            var bodyId = $"{sectionKey}-body";
+            var models = ModelsFor(connection);
+            var readyModelCount = models.Count(model => IsChatReady(model));
+            <article class="connection-section">
                 <header class="connection-header">
-                    <div class="connection-identity">
-                        <span class="connection-mark">@ConnectionInitial(connection)</span>
-                        <div><span class="lk-section-kicker">@AuthLabel(connection)</span><h2>@(connection.DisplayName ?? connection.Name)</h2><p title="@connection.EndpointUrl">@connection.EndpointUrl</p></div>
-                    </div>
+                    <button type="button" class="connection-toggle" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@bodyId" @onclick="() => ToggleSection(sectionKey)">
+                        <span class="connection-chevron" aria-hidden="true"></span>
+                        <div class="connection-identity">
+                            <span class="connection-mark">@ConnectionInitial(connection)</span>
+                            <div><span class="lk-section-kicker">@AuthLabel(connection)</span><h2>@(connection.DisplayName ?? connection.Name)</h2><p title="@connection.EndpointUrl">@connection.EndpointUrl</p></div>
+                        </div>
+                    </button>
+                    <span class="connection-summary">@($"{models.Count} model(s) · {readyModelCount} chat-ready")</span>
                     <div class="connection-actions">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => StartEditConnection(connection)">@(_editingConnectionId == connection.Id ? "Close edit" : "Edit connection")</button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddChild(connection.Id)">Add model</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleConnectionDelete(connection.Id)">Delete</button>
+                        @if (readyModelCount > 0)
+                        {
+                            <span class="lk-status-pill is-success">Ready</span>
+                        }
+                        else
+                        {
+                            <span class="lk-status-pill is-warning">Needs test</span>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => { _collapsedSections.Remove(sectionKey); StartEditConnection(connection); }">@(_editingConnectionId == connection.Id ? "Close edit" : "Edit connection")</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => { _collapsedSections.Remove(sectionKey); ToggleAddChild(connection.Id); }">Add model</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => { _collapsedSections.Remove(sectionKey); ToggleConnectionDelete(connection.Id); }">Delete</button>
                     </div>
                 </header>
 
-                @if (_editingConnectionId == connection.Id && _connectionEdit is not null)
+                @if (expanded)
                 {
-                    <div class="connection-edit-panel">
-                        <label><span>Display name</span><input class="form-control form-control-sm" @bind="_connectionEdit.DisplayName" /></label>
-                        <label class="field-wide"><span>Endpoint URL</span><input class="form-control form-control-sm" @bind="_connectionEdit.EndpointUrl" /></label>
-                        <label><span>Authentication</span><select class="form-select form-select-sm" @bind="_connectionEdit.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
-                        @if (_connectionEdit.AuthType == AuthType.ApiKey){<label class="field-wide"><span>API key</span><input type="password" class="form-control form-control-sm" @bind="_connectionEdit.ApiKey" autocomplete="off" /></label>}
-                        <div class="provider-form-actions field-wide"><button class="btn btn-sm btn-primary" @onclick="SaveConnectionAsync">Save connection</button><span class="form-hint">All nested models will require new readiness tests.</span></div>
-                    </div>
-                }
-
-                <div class="model-list">
-                    @foreach (var model in ModelsFor(connection))
-                    {
-                        <div class="model-row">
-                            <div class="model-row-main">
-                                <div class="model-fields">
-                                    <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
-                                    <label>
-                                        <span>Model ID</span>
-                                        <div class="model-id-field">
-                                            <input class="form-control form-control-sm" @bind="model.ModelId" />
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
-                                        </div>
-                                        @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
-                                        {
-                                            <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
-                                                <option value="">-- Select a model --</option>
-                                                @foreach (var candidate in rowModels)
-                                                {
-                                                    <option value="@candidate">@candidate</option>
-                                                }
-                                            </select>
-                                            <small class="field-note">Pick a discovered model or keep your typed ID.</small>
-                                        }
-                                    </label>
-                                    <label>
-                                        <span>Thinking effort</span>
-                                        <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
-                                            <option value="">Provider default</option>
-                                            @foreach (var choice in ReasoningEffortChoices)
-                                            {
-                                                <option value="@choice.Value">@choice.Label</option>
-                                            }
-                                        </select>
-                                        <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
-                                    </label>
-                                    @RenderMaxTokenControls(model)
-                                </div>
-                                <div class="model-status-panel">
-                                    <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
-                                    @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
-                                    <div class="model-actions">
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                        <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
-                                        @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
-                                        @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
-                                    </div>
-                                </div>
+                    <div class="connection-body" id="@bodyId">
+                        @if (_editingConnectionId == connection.Id && _connectionEdit is not null)
+                        {
+                            <div class="connection-edit-panel">
+                                <label><span>Display name</span><input class="form-control form-control-sm" @bind="_connectionEdit.DisplayName" /></label>
+                                <label class="field-wide"><span>Endpoint URL</span><input class="form-control form-control-sm" @bind="_connectionEdit.EndpointUrl" /></label>
+                                <label><span>Authentication</span><select class="form-select form-select-sm" @bind="_connectionEdit.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
+                                @if (_connectionEdit.AuthType == AuthType.ApiKey){<label class="field-wide"><span>API key</span><input type="password" class="form-control form-control-sm" @bind="_connectionEdit.ApiKey" autocomplete="off" /></label>}
+                                <div class="provider-form-actions field-wide"><button class="btn btn-sm btn-primary" @onclick="SaveConnectionAsync">Save connection</button><span class="form-hint">All nested models will require new readiness tests.</span></div>
                             </div>
-                            @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
-                        </div>
-                    }
-                </div>
-                @RenderChildForm(connection)
-                @if (_confirmDeleteConnectionId == connection.Id)
-                {
-                    <div class="connection-delete-confirm"><div><strong>Delete this connection and its nested models?</strong><span>This removes @ModelsFor(connection).Count model configuration(s). This cannot be undone.</span></div><button class="btn btn-sm btn-danger" @onclick="() => DeleteConnectionAsync(connection)">Delete connection</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteConnectionId = null">Cancel</button></div>
+                        }
+
+                        @RenderModelGrid(models, false)
+                        @RenderChildForm(connection)
+                        @if (_confirmDeleteConnectionId == connection.Id)
+                        {
+                            <div class="connection-delete-confirm"><div><strong>Delete this connection and its nested models?</strong><span>This removes @ModelsFor(connection).Count model configuration(s). This cannot be undone.</span></div><button class="btn btn-sm btn-danger" @onclick="() => DeleteConnectionAsync(connection)">Delete connection</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteConnectionId = null">Cancel</button></div>
+                        }
+                    </div>
                 }
             </article>
         }
@@ -350,6 +301,8 @@
     private int? _editingConnectionId;
     private int? _confirmDeleteConnectionId;
     private int? _confirmDeleteModelId;
+    private readonly HashSet<string> _collapsedSections = [];
+    private readonly HashSet<int> _expandedModelDetails = [];
     private bool _isTestingNewProvider;
     private int? _testingProviderId;
     private string _newProviderPresetSlug = "";
@@ -777,6 +730,20 @@
     private void ToggleModelDelete(int id) =>
         _confirmDeleteModelId = _confirmDeleteModelId == id ? null : id;
 
+    private bool IsSectionExpanded(string key) => !_collapsedSections.Contains(key);
+
+    private void ToggleSection(string key)
+    {
+        if (!_collapsedSections.Remove(key))
+            _collapsedSections.Add(key);
+    }
+
+    private void ToggleModelDetails(int id)
+    {
+        if (!_expandedModelDetails.Remove(id))
+            _expandedModelDetails.Add(id);
+    }
+
 
     private void ToggleAddChild(int parentId)
     {
@@ -1047,6 +1014,124 @@
             models.AddRange(children);
         return models;
     }
+
+    private RenderFragment RenderModelGrid(IReadOnlyList<LlmProvider> models, bool accountBacked) => __builder =>
+    {
+        <div class="model-grid" role="table" aria-label="Models">
+            <div class="model-grid-head" role="row">
+                <span role="columnheader">Display name</span>
+                <span role="columnheader">Model ID</span>
+                <span role="columnheader">Thinking effort</span>
+                <span role="columnheader">Chat</span>
+                <span role="columnheader">Vision</span>
+                <span role="columnheader">Default</span>
+                <span role="columnheader" class="model-grid-actions-head">Actions</span>
+            </div>
+            @foreach (var model in models)
+            {
+                var detailsId = $"model-details-{model.Id}";
+                var showDetails = _expandedModelDetails.Contains(model.Id);
+                <div class="model-grid-item" role="rowgroup">
+                    <div class="model-grid-row" role="row">
+                        <div class="model-grid-cell" role="cell" data-label="Display name">
+                            <input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(accountBacked && model.ModelOrigin == LlmModelOrigin.BundledCatalog)" aria-label="Display name" />
+                            @if (accountBacked)
+                            {
+                                <span class="model-origin">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog" : "Manual")</span>
+                            }
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Model ID">
+                            <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(accountBacked && model.ModelOrigin == LlmModelOrigin.BundledCatalog)" aria-label="Model ID" />
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Thinking effort">
+                            @if (accountBacked)
+                            {
+                                <select class="form-select form-select-sm" aria-label="Thinking effort" @bind="model.ReasoningEffort">
+                                    <option value="">@ReasoningDefaultLabel(model)</option>
+                                    @foreach (var choice in ReasoningChoicesFor(model))
+                                    {
+                                        <option value="@choice.Value">@choice.Label</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <select class="form-select form-select-sm" aria-label="Thinking effort" @bind="model.ReasoningEffort">
+                                    <option value="">Provider default</option>
+                                    @foreach (var choice in ReasoningEffortChoices)
+                                    {
+                                        <option value="@choice.Value">@choice.Label</option>
+                                    }
+                                </select>
+                            }
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Chat">@RenderChatStatus(model)</div>
+                        <div class="model-grid-cell" role="cell" data-label="Vision">@RenderVisionStatus(model)</div>
+                        <div class="model-grid-cell" role="cell" data-label="Default">
+                            @if (model.IsDefault)
+                            {
+                                <span class="lk-status-pill is-accent">Default</span>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>
+                            }
+                        </div>
+                        <div class="model-grid-cell model-grid-actions" role="cell" data-label="Actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" aria-expanded="@(showDetails ? "true" : "false")" aria-controls="@detailsId" @onclick="() => ToggleModelDetails(model.Id)">@(showDetails ? "Hide details" : "Details")</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
+                            @if (!accountBacked || model.ModelOrigin == LlmModelOrigin.Manual)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
+                            }
+                            @if ((accountBacked && model.ModelOrigin == LlmModelOrigin.Manual) || (!accountBacked && model.CredentialSourceId is not null))
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>
+                            }
+                        </div>
+                    </div>
+                    @if (showDetails)
+                    {
+                        <div class="model-fields model-grid-details" id="@detailsId">
+                            @if (ModelReadinessDetail(model) is { } detail)
+                            {
+                                <div class="model-detail field-wide">@detail</div>
+                            }
+                            @if (!accountBacked)
+                            {
+                                <div class="model-grid-discovery field-wide">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
+                                    {
+                                        <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
+                                            <option value="">-- Select a model --</option>
+                                            @foreach (var candidate in rowModels)
+                                            {
+                                                <option value="@candidate">@candidate</option>
+                                            }
+                                        </select>
+                                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
+                                    }
+                                </div>
+                            }
+                            else if (model.ModelOrigin == LlmModelOrigin.Manual)
+                            {
+                                <div class="model-detail field-wide">Enter an exact model ID, then use Test before saving it as the default.</div>
+                            }
+                            <div class="field-wide">
+                                <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Only efforts supported by this catalog model are offered." : "Higher levels use more time and tokens; model support varies.")</small>
+                            </div>
+                            @RenderMaxTokenControls(model)
+                        </div>
+                    }
+                    @if (_confirmDeleteModelId == model.Id)
+                    {
+                        <div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>
+                    }
+                </div>
+            }
+        </div>
+    };
 
     private RenderFragment RenderMaxTokenControls(LlmProvider model) => __builder =>
     {

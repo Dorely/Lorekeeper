@@ -42,7 +42,13 @@ ephemeral progress to currently connected Blazor circuits.
 
 ### LLM connection model
 
-Settings > Providers manages connection cards and nested model rows. Built-in
+Settings > Providers shows each connection (the OpenAI account and every
+top-level OpenAI-compatible connection) as a collapsible section whose header
+carries only connection identity, status, and connection actions. Every model,
+including the model stored on the top-level connection row itself, appears as
+an ordinary row in the section's models grid; token budgets and model discovery
+live in each row's details area. This is presentation only: storage still keeps
+the first model on the parent row. Built-in
 OpenAI-compatible presets include OpenAI, two Cline connection modes sharing the
 same endpoint, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral,
 Together, Ollama, LM Studio, and a custom endpoint. Presets pre-fill endpoint,
