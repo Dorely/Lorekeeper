@@ -491,3 +491,6 @@ sheet per selected surface and excludes editor chrome. Verify the custom host
 hook is copied into `.electron/ElectronHostHook/index.js`. Open and cancel the
 final printer dialog only when authorized; never infer physical output or
 another operating system's driver behavior from a preview or successful build.
+For the desktop spelling context menu, syntax-check the host hook; only when
+authorized, right-click a misspelled word in an Electron editor and confirm a
+suggestion replaces it through the editor's normal input and save path.

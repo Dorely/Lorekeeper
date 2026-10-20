@@ -13,6 +13,8 @@ const STANDARD_PAPERS = [
 ];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const activePrints = new Map();
+// Global symbol so a reconnect-reloaded hook does not attach duplicate listeners.
+const SPELLING_MENU = Symbol.for("lorekeeper.spellingMenu");
 const resultJson = value => JSON.stringify(value);
 
 class HookService extends Connector {
@@ -21,6 +23,7 @@ class HookService extends Connector {
     constructor(socket, app) {
         super(socket, app);
         this.app = app;
+        installSpellingMenu(app);
         this.on("lorekeeper-print", (serializedRequest, done) => {
             this.print(serializedRequest, done);
         });
@@ -117,6 +120,56 @@ class HookService extends Connector {
                 window.destroy();
         }
     }
+}
+
+function installSpellingMenu(app) {
+    if (!app[SPELLING_MENU]) {
+        app[SPELLING_MENU] = true;
+        app.on("web-contents-created", (_event, contents) => attachSpellingMenu(contents));
+    }
+    for (const contents of Electron.webContents.getAllWebContents())
+        attachSpellingMenu(contents);
+}
+
+// Electron shows no context menu by default; expose Chromium's built-in
+// spellchecker suggestions and standard edit commands like a browser does.
+function attachSpellingMenu(contents) {
+    if (contents[SPELLING_MENU] || contents.getType() !== "window") return;
+    contents[SPELLING_MENU] = true;
+    contents.on("context-menu", (_event, params) => {
+        const template = contextMenuTemplate(contents, params);
+        if (template.length === 0) return;
+        const window = Electron.BrowserWindow.fromWebContents(contents);
+        Electron.Menu.buildFromTemplate(template).popup(window ? { window } : {});
+    });
+}
+
+function contextMenuTemplate(contents, params) {
+    if (!params.isEditable)
+        return params.selectionText ? [{ role: "copy" }] : [];
+    const template = [];
+    if (params.misspelledWord) {
+        const suggestions = params.dictionarySuggestions.map(suggestion => ({
+            label: suggestion,
+            click: () => contents.replaceMisspelling(suggestion)
+        }));
+        template.push(
+            ...(suggestions.length > 0 ? suggestions : [{ label: "No spelling suggestions", enabled: false }]),
+            { type: "separator" },
+            {
+                label: "Add to Dictionary",
+                click: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+            },
+            { type: "separator" });
+    }
+    const flags = params.editFlags;
+    template.push(
+        { role: "cut", enabled: flags.canCut },
+        { role: "copy", enabled: flags.canCopy },
+        { role: "paste", enabled: flags.canPaste },
+        { type: "separator" },
+        { role: "selectAll", enabled: flags.canSelectAll });
+    return template;
 }
 
 function standardPaper(width, height) {

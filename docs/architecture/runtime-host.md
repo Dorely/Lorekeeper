@@ -259,6 +259,15 @@ must be split into smaller ranges. Preparation is serialized to bound native
 raster memory. Image snapshots preserve EXIF orientation. The project build
 replaces only Electron.NET's empty host hook with `ElectronHostHook/index.js`
 and retains the pinned connector in build and publish output.
+
+Electron shows no context menu by default, so the same host hook attaches a
+native edit context menu to application window contents. In editable fields it
+lists Chromium's built-in spellchecker suggestions for a misspelled word (applied
+through `replaceMisspelling`), **Add to Dictionary** for the session's custom
+dictionary, and the standard cut/copy/paste/select-all roles; non-editable
+selections offer Copy. Lorekeeper keeps no dictionary or spelling state of its
+own, and the browser profile relies on the browser's native menu. This standard
+edit menu is platform text-editing chrome, not a product dialog.
 The Electron 43.6.0 pin includes the upstream fix for rejected print options
 introduced in 43.0/43.1; printer settings must not be dropped to work around that
 runtime regression.

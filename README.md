@@ -194,8 +194,8 @@ technical map.
   one-click paragraph/chapter application, capture-from-paragraph,
   compact assistant style tools, sparse per-paragraph overrides, rich inline marks,
   fast process-lifetime Undo/Redo retained across navigation and page reloads,
-  normalized paste, find/replace, and
-  outline navigation. Manual edits and AI
+  normalized paste, find/replace, right-click spelling suggestions from the
+  system spellchecker, and outline navigation. Manual edits and AI
   assistants share one revision-checked manuscript boundary; HTML is not
   authoritative.
 - In-process authoring history retains up to 100 manual actions independently for

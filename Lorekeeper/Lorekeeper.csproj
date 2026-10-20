@@ -77,7 +77,7 @@
   </Target>
 
   <!-- Keep the pinned connector/template metadata; replace only its empty hook. -->
-  <Target Name="UseLorekeeperPrintHook" AfterTargets="ElectronResolvePaths">
+  <Target Name="UseLorekeeperHostHook" AfterTargets="ElectronResolvePaths">
     <ItemGroup>
       <Content Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
       <ContentWithTargetPath Remove="$(ElectronSourceFilesPath)\ElectronHostHook\index.js" />
