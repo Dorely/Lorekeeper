@@ -1,6 +1,6 @@
 .research-pane {
     display: grid;
-    grid-template-columns: minmax(22rem, 1.1fr) minmax(24rem, 0.9fr);
+    grid-template-columns: minmax(22rem, 0.9fr) minmax(36rem, 1.1fr);
     grid-template-rows: minmax(0, 1fr);
     gap: 1rem;
     flex: 1;
@@ -18,11 +18,39 @@
 }
 
 .research-pages-pane {
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.375rem;
     padding: 0.85rem;
     background: var(--bs-body-bg, #fff);
+}
+
+.research-pages-pane > .btn-group {
+    align-self: flex-start;
+}
+
+.world-brief-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 1rem;
+    flex: 1 1 0;
+    min-height: 0;
+    padding: 0.5rem 0.5rem 0;
+}
+
+.world-brief-editor,
+.world-brief-entities {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.world-brief-editor {
+    display: flex;
+    flex-direction: column;
 }
 
 .research-side-head {

@@ -1,4 +1,5 @@
 @using Lorekeeper.Components.Pages.Projects
+@using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Context
 @using Lorekeeper.EntityVisuals
 @using Lorekeeper.Models
@@ -29,13 +30,19 @@ else
                 <button class="btn @(!_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = false">World Brief</button>
                 <button class="btn @(_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = true">Research Activity</button>
             </div>
-            <div class="p-3 flex-grow-1" style="@(_showActivity ? "display:none" : null)">
-                @if (_brief is not null)
-                {
-                    <NarrativeTextEditor @key="Project.Id" ProjectId="Project.Id" TargetId="@($"world-brief:{Project.Id:N}")"
-                        Label="World Brief" Body="@_brief.Content" Revision="_brief.Revision" Save="SaveBriefAsync" OnResumed="ReloadActivityAsync"
-                        Placeholder="Develop the established world or research context for this book. Organize it however suits your project." />
-                }
+            <div class="world-brief-layout" style="@(_showActivity ? "display:none" : null)">
+                <div class="world-brief-editor">
+                    @if (_brief is not null)
+                    {
+                        <NarrativeTextEditor @key="Project.Id" ProjectId="Project.Id" TargetId="@($"world-brief:{Project.Id:N}")"
+                            Label="World Brief" Body="@_brief.Content" Revision="_brief.Revision" Save="SaveBriefAsync" OnResumed="ReloadActivityAsync"
+                            AutoSize="true"
+                            Placeholder="Develop the established world or research context for this book. Organize it however suits your project." />
+                    }
+                </div>
+                <aside class="world-brief-entities" aria-label="Entities">
+                    <EntitiesPanel ProjectId="Project.Id" RefreshSignal="_entityRefreshSignal" OnChanged="RefreshActivityAsync" />
+                </aside>
             </div>
             <div style="@(!_showActivity ? "display:none" : null)">
 
@@ -291,6 +298,7 @@ else
 
     private WorldBrief? _brief;
     private bool _showActivity;
+    private int _entityRefreshSignal;
     private SearchProvider? _activeSearchProvider;
     private ResearchActivity? _activity;
     private Guid? _loadedProjectId;
@@ -317,7 +325,14 @@ else
         if (Project is null) return;
         _activity = await World.GetActivityAsync(Project.Id);
         _brief = await Briefs.GetAsync(Project.Id);
+        _entityRefreshSignal++;
         StateHasChanged();
+    }
+
+    private async Task RefreshActivityAsync()
+    {
+        if (Project is null) return;
+        _activity = await World.GetActivityAsync(Project.Id);
     }
 
     private async Task<NarrativeTextSnapshot> SaveBriefAsync(NarrativeTextSnapshot draft)

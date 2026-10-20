@@ -395,7 +395,9 @@ model's built-in search when its chat client offers one (OpenAI account models)
 and otherwise the active search provider; local work and ordinary chat need
 neither. The World Brief view shares its
 conversation with a separate Research Activity view, derived from touched
-entities and cached sources. Search/fetch security stays in research services.
+entities and cached sources. Its brief editor grows with its text inside a
+scrolling column beside the shared Outline entity list, which refreshes with
+World activity. Search/fetch security stays in research services.
 World primarily maintains the free-form World Brief through read_world_brief and
 update_world_brief, using exact revisions and the shared authoring mutation fence.
 Direct build/edit requests authorize saves; brainstorming stays conversational

@@ -1,15 +1,16 @@
 @using Lorekeeper.Authoring
 @implements IAsyncDisposable
 @inject IAuthoringMutationFence Fence
+@inject IJSRuntime JS
 
 <NavigationLock OnBeforeInternalNavigation="BeforeNavigationAsync" />
 
-<div class="d-flex flex-column h-100 gap-2">
+<div class="d-flex flex-column gap-2 @(AutoSize ? "flex-grow-1" : "h-100")" @ref="_rootEl">
     @if (EditTitle)
     {
         <input class="form-control" aria-label="Title" value="@_title" @oninput="TitleChangedAsync" disabled="@EditingLocked" />
     }
-    <textarea class="form-control flex-grow-1" style="min-height: 20rem; resize: vertical"
+    <textarea class="form-control flex-grow-1" style="@(AutoSize ? "min-height: 20rem; flex: 1 0 auto" : "min-height: 20rem; resize: vertical")" data-autosize="@AutoSize"
               aria-label="@Label" placeholder="@Placeholder" value="@_body"
               @oninput="BodyChangedAsync" disabled="@EditingLocked"></textarea>
     @if (_error is not null)
@@ -33,6 +34,7 @@
     [Parameter] public string Body { get; set; } = "";
     [Parameter] public long Revision { get; set; }
     [Parameter] public bool EditTitle { get; set; }
+    [Parameter] public bool AutoSize { get; set; }
     [Parameter, EditorRequired] public Func<NarrativeTextSnapshot, Task<NarrativeTextSnapshot>> Save { get; set; } = null!;
     [Parameter] public EventCallback OnResumed { get; set; }
     private readonly Guid _session = Guid.NewGuid();
@@ -56,6 +58,8 @@
     private bool _acquiring;
     private bool _disposing;
     private bool _disposed;
+    private ElementReference _rootEl;
+    private IJSObjectReference? _autoSizer;
     private bool EditingLocked => _frozen || _lease is null || _disposing || _disposed;
 
     protected override async Task OnParametersSetAsync()
@@ -73,6 +77,29 @@
     private void ReadSavedParameters()
     {
         if (!_dirty) { _title = Title; _body = Body; _savedBody = Body; _revision = Revision; _save = Save; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!AutoSize) return;
+        if (_autoSizer is null) await ImportAutoSizerAsync();
+        await RefreshAutoSizeAsync(_rootEl);
+    }
+
+    private async Task ImportAutoSizerAsync()
+    {
+        try { _autoSizer = await JS.InvokeAsync<IJSObjectReference>("import", "./js/autosizeTextareas.js"); }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshAutoSizeAsync(ElementReference root)
+    {
+        if (_autoSizer is null) return;
+
+        try { await _autoSizer.InvokeVoidAsync("refresh", root); }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
     }
 
     private async Task AcquireWriterAsync()
@@ -228,5 +255,11 @@
             _disposed = true;
         }
         finally { _saveGate.Release(); }
+        if (_autoSizer is not null)
+        {
+            try { await _autoSizer.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+        }
     }
 }
