@@ -19,6 +19,7 @@
 @inject IAuthoringMutationContextAccessor AuthoringMutations
 @inject IJSRuntime JS
 @inject IPrintPreparationService Printing
+@inject ILogger<DesignedPageWorkspace> Logger
 
 @if (_authoringWriterError is not null)
 {
@@ -33,10 +34,20 @@
     {
         <div class="alert alert-danger" role="alert">
             @PublicationDiagnosticText.SanitizeIdentifiers(_error)
-            @if (_recoveryConflict)
-            {
-                <button type="button" class="btn btn-sm btn-outline-danger ms-2" @onclick="ReloadCanonicalAsync">Discard local draft and reload</button>
-            }
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_saveNotice))
+    {
+        <div class="alert alert-warning" role="status">
+            @_saveNotice
+            <button type="button" class="btn-close ms-2" aria-label="Dismiss save notice" @onclick="() => _saveNotice = null"></button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_journalWarning))
+    {
+        <div class="alert alert-warning" role="status">
+            @_journalWarning
+            <button type="button" class="btn-close ms-2" aria-label="Dismiss local recovery warning" @onclick="() => _journalWarning = null"></button>
         </div>
     }
     @if (IsInheritedReleasePage)
@@ -412,9 +423,14 @@
     private bool _journalInitialized;
     private bool _journalRecoverable = true;
     private string? _journalToken;
-    private bool _recoveryConflict;
+    private string? _saveNotice;
+    private string? _journalWarning;
+    private bool _authoringWriterRetryScheduled;
     private long? _recoveredContentRevision;
     private long? _recoveredVariantRevision;
+    // The change version a journal-recovered draft was restored at; edits after it are this session's.
+    private long? _recoveredChangeVersion;
+    private CancellationTokenSource? _saveRetry;
     private readonly HashSet<Guid> _measuredTextObjects = [];
     private readonly HashSet<Guid> _overflowingTextObjects = [];
     private TransformState? _transform;
@@ -550,11 +566,7 @@
             && _loadedRequestedVariantId == RequestedVariantId)
             return;
         if (_dirty)
-        {
-            await SaveAsync();
-            if (_dirty)
-                return;
-        }
+            await FlushAsync();
         _error = null;
         try
         {
@@ -610,10 +622,7 @@
     {
         if (_variant?.Id == variantId) return;
         if (_dirty)
-        {
-            await SaveAsync();
-            if (_dirty) return;
-        }
+            await FlushAsync();
         _variant = ContentTarget.EditionId is Guid editionId
             ? await DesignedPages.SelectVariantAsync(ProjectId, _composition!.Id, editionId, variantId)
             : await DesignedPages.SelectAuthoringVariantAsync(ProjectId, _composition!.Id, variantId);
@@ -1039,7 +1048,7 @@
             UpdateFrameText(objectId, state.Text, takeSnapshot: true);
         _editingTextId = null;
         if (_dirty)
-            await SaveAsync();
+            await SaveWithRecoveryAsync(resolve: false);
     }
 
     private async Task ToggleInlineMarkAsync(CompositionObject item, ManuscriptMarkType mark)
@@ -1076,7 +1085,7 @@
             _textSelectionRestore = new TextSelectionRestore(item.Id, state.Start, state.End);
             MarkDirty();
             _error = null;
-            await SaveAsync();
+            await SaveWithRecoveryAsync(resolve: false);
         }
         catch (Exception exception)
         {
@@ -1309,7 +1318,7 @@
         if (!_dirty)
             return;
         _autosaveCancellation?.Cancel();
-        _ = SaveAsync();
+        _ = SaveWithRecoveryAsync(resolve: false);
     }
 
     private async Task MoveHistoryAsync(bool redo)
@@ -1350,7 +1359,7 @@
             _history = move.State;
             _replayingCanvasHistory = true;
             MarkDirty();
-            await SaveAsync();
+            await SaveWithRecoveryAsync(resolve: false);
             _replayingCanvasHistory = false;
             if (_dirty || _error is not null)
                 throw new InvalidOperationException(_error ?? "The canvas history move was not saved.");
@@ -1390,20 +1399,26 @@
         try
         {
             await Task.Delay(250, autosave.Token);
-            await InvokeAsync(SaveAsync);
+            await InvokeAsync(() => SaveWithRecoveryAsync(resolve: false));
         }
         catch (OperationCanceledException) when (autosave.IsCancellationRequested)
         {
         }
     }
 
-    private async Task SaveAsync()
+    private enum SaveOutcome { Saved, Rejected, StaleRecovery, Failed }
+
+    // Saves the visible page once. A page that changed elsewhere keeps the visible version: the save
+    // adopts the current revisions so the next attempt saves over them, and Undo restores the newer one.
+    private async Task<SaveOutcome> SaveAsync()
     {
         await _saveGate.WaitAsync();
         try
         {
             if (!_dirty || _scene is null || _variant is null)
-                return;
+                return SaveOutcome.Saved;
+            if (_authoringWriterLease is null)
+                await OpenAuthoringWriterAsync(allowDuringDisposal: true);
             if (_authoringWriterLease is null)
                 throw new InvalidOperationException(_authoringWriterError ?? "The page has no writable authoring session.");
             await EnsureWritableReleaseContentAsync();
@@ -1413,8 +1428,7 @@
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
             var semanticBlocks = _semanticBlocks.ToList();
             var journalToken = Guid.NewGuid().ToString("N");
-            if (!await PersistPendingAsync(journalToken, semanticBlocks, scene))
-                return;
+            await PersistPendingAsync(journalToken, semanticBlocks, scene);
             var expectedContentRevision = _recoveredContentRevision ?? _composition!.Revision;
             var expectedVariantRevision = _recoveredVariantRevision ?? _variant.Revision;
             DesignedPageWorkspaceSaveResult saved;
@@ -1433,13 +1447,18 @@
             _history = DeltaHistory.Read(AuthoringTargetId()).State;
             if (!saved.Applied)
             {
-                // Keep the recorded base revisions. Retrying this recovered draft
-                // against a newly read revision would overwrite canonical work.
-                _error = "This page changed elsewhere. The local recovery draft is retained and must be reconciled before saving.";
-                _recoveryConflict = true;
-                UpdateAuthoringWriterState();
-                await InvokeAsync(StateHasChanged);
-                return;
+                // A draft restored from a previous session's journal and untouched since may be one whose
+                // cleanup failed after it saved, so the current page wins over it.
+                if (_recoveredContentRevision is not null && _changeVersion == _recoveredChangeVersion)
+                    return SaveOutcome.StaleRecovery;
+                var current = await DesignedPages.GetAsync(ProjectId, PageId, ContentTarget)
+                    ?? throw new InvalidOperationException("Designed page was not found.");
+                _composition = current.Content;
+                _variant = await DesignedPages.ReadVariantAsync(ProjectId, _variant.Id);
+                _recoveredContentRevision = null;
+                _recoveredVariantRevision = null;
+                _recoveredChangeVersion = null;
+                return SaveOutcome.Rejected;
             }
             _composition = saved.Content;
             _variant = saved.Variant;
@@ -1449,21 +1468,88 @@
             {
                 _scene = scene;
                 _dirty = false;
-                if (!await RemovePendingAsync(journalToken))
-                    return;
+                await RemovePendingAsync(journalToken);
                 _recoveredContentRevision = null;
                 _recoveredVariantRevision = null;
+                _recoveredChangeVersion = null;
             }
             UpdateAuthoringWriterState();
             _error = null;
             await NotifyWorkspaceChangedAsync();
             await InvokeAsync(StateHasChanged);
+            return SaveOutcome.Saved;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Logger.LogWarning(exception, "Designed Page {PageId} could not be saved.", PageId);
             _error = exception.Message;
+            return SaveOutcome.Failed;
         }
         finally { _saveGate.Release(); }
+    }
+
+    // Saves until the page is clean. Failures retry; a resolving save never leaves the page dirty: as a
+    // last resort the unsaved draft is written to the app log and the saved page is shown instead.
+    private async Task<bool> SaveWithRecoveryAsync(bool resolve)
+    {
+        _saveRetry?.Cancel();
+        var failures = 0;
+        while (_dirty && failures < 3)
+        {
+            switch (await SaveAsync())
+            {
+                case SaveOutcome.Saved:
+                    continue;
+                case SaveOutcome.StaleRecovery:
+                    await DiscardDraftAsync("A recovered page draft was older than the saved page and was replaced by it.");
+                    return true;
+                default:
+                    if (++failures < 3)
+                        await Task.Delay(250 * failures);
+                    break;
+            }
+        }
+        if (!_dirty)
+            return true;
+        if (resolve)
+        {
+            await DiscardDraftAsync("Page changes that could not be saved were replaced by the saved page and written to the app log.");
+            return true;
+        }
+        ScheduleSaveRetry();
+        return false;
+    }
+
+    private void ScheduleSaveRetry()
+    {
+        if (_disposing || _disposed) return;
+        _saveRetry?.Cancel();
+        _saveRetry?.Dispose();
+        var retry = _saveRetry = new CancellationTokenSource();
+        _ = RetrySaveAsync(retry.Token);
+    }
+
+    private async Task RetrySaveAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(5000, cancellationToken);
+            await InvokeAsync(() => SaveWithRecoveryAsync(resolve: false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task DiscardDraftAsync(string notice)
+    {
+        Logger.LogError(
+            "Designed Page {PageId} draft was replaced by the saved page. Unsaved semantic content: {SemanticJson} Unsaved scene: {SceneJson}",
+            PageId,
+            JsonSerializer.Serialize(_semanticBlocks, ManuscriptCodec.JsonOptions),
+            _scene is null ? null : JsonSerializer.Serialize(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() }, ManuscriptCodec.JsonOptions));
+        _saveNotice = notice;
+        await ReloadCanonicalAsync();
     }
 
     private bool IsInheritedReleasePage => ContentTarget.EditionId is not null && _composition?.EditionId is null;
@@ -1485,15 +1571,9 @@
     public async Task<bool> FlushAsync()
     {
         _autosaveCancellation?.Cancel();
-        await CaptureOpenTextEditAsync();
-        while (_dirty)
-        {
-            var changeVersion = _changeVersion;
-            await SaveAsync();
-            if (!string.IsNullOrWhiteSpace(_error) || (_dirty && _changeVersion == changeVersion))
-                break;
-        }
-        return !_dirty;
+        try { await CaptureOpenTextEditAsync(); }
+        catch (JSException exception) { Logger.LogWarning(exception, "Designed Page {PageId} could not read its open text edit.", PageId); }
+        return await SaveWithRecoveryAsync(resolve: true);
     }
 
     // Frame text lives only in the browser until the editor blurs, so a save point must
@@ -1932,7 +2012,7 @@
         if (_dirty)
         {
             _autosaveCancellation?.Cancel();
-            await SaveAsync();
+            await SaveWithRecoveryAsync(resolve: false);
         }
     }
 
@@ -1950,11 +2030,14 @@
             flushed = await FlushAsync();
             await _saveGate.WaitAsync();
             _saveGate.Release();
-            flushed &= !_dirty && _journalRecoverable;
+            flushed &= !_dirty;
         }
         catch { }
         _autosaveCancellation?.Dispose();
         _autosaveCancellation = null;
+        _saveRetry?.Cancel();
+        _saveRetry?.Dispose();
+        _saveRetry = null;
         await _authoringWriterGate.WaitAsync();
         try
         {
@@ -2043,11 +2126,38 @@
         {
             // Never steal another live writer or let an ownership conflict end the circuit.
             _authoringWriterError = exception.Message;
+            ScheduleAuthoringWriterRetry();
         }
         finally
         {
             _openingAuthoringWriter = false;
             _authoringWriterGate.Release();
+        }
+    }
+
+    // Another writer usually releases the page when its window closes, so keep trying to resume editing.
+    private void ScheduleAuthoringWriterRetry()
+    {
+        if (_authoringWriterRetryScheduled || _disposing || _disposed) return;
+        _authoringWriterRetryScheduled = true;
+        _ = RetryAuthoringWriterLaterAsync();
+    }
+
+    private async Task RetryAuthoringWriterLaterAsync()
+    {
+        await Task.Delay(5000);
+        _authoringWriterRetryScheduled = false;
+        if (_disposing || _disposed || _authoringWriterError is null) return;
+        if (InteractionLocked)
+        {
+            ScheduleAuthoringWriterRetry();
+            return;
+        }
+        try { await InvokeAsync(RetryAuthoringWriterAsync); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Logger.LogWarning(exception, "Designed Page {PageId} could not resume editing.", PageId);
+            ScheduleAuthoringWriterRetry();
         }
     }
 
@@ -2065,7 +2175,8 @@
         _authoringFrozen = true;
         var saved = false;
         await InvokeAsync(async () => saved = await FlushAsync());
-        return new(capturedSequence, !saved, IsRecoverable: saved || _journalRecoverable, IsReachable: true,
+        // The component holds unsaved state in memory and a resolving flush always ends clean.
+        return new(capturedSequence, !saved, IsRecoverable: true, IsReachable: true,
             saved ? null : "AUTHORING_FLUSH_FAILED",
             saved ? null : _error ?? "Designed Page changes could not be saved.");
     }
@@ -2077,7 +2188,7 @@
         AuthoringFence.UpdateWriterState(new(
             _registeredAuthoringTarget, _authoringSessionId, _authoringWriterId, _authoringGeneration,
             _changeVersion, _changeVersion, _dirty ? 0 : _changeVersion,
-            _dirty, IsRecoverable: _journalRecoverable));
+            _dirty, IsRecoverable: true));
     }
 
     private void MarkAuthoringWriterUnreachable()
@@ -2090,10 +2201,13 @@
             IsDirty: true, IsRecoverable: false, IsReachable: false));
     }
 
-    private async Task<bool> PersistPendingAsync(string token, IReadOnlyList<ManuscriptBlock> semanticBlocks, CompositionScene scene)
+    private async Task PersistPendingAsync(string token, IReadOnlyList<ManuscriptBlock> semanticBlocks, CompositionScene scene)
     {
         if (_journalModule is null || _composition is null || _variant is null)
-            return FailJournal("The local canvas recovery journal is unavailable.");
+        {
+            FailJournal("The local canvas recovery journal is unavailable.");
+            return;
+        }
         try
         {
             await _journalModule.InvokeVoidAsync("write", ProjectId.ToString("D"), AuthoringTargetId(), token,
@@ -2102,38 +2216,41 @@
                     ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = _composition.Id, Revision = _composition.Revision, Content = semanticBlocks.ToList() }),
                     JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions)));
             _journalToken = token;
-            _journalRecoverable = true;
-            UpdateAuthoringWriterState();
-            return true;
+            JournalSucceeded();
         }
-        catch (Exception exception) { return FailJournal(exception.Message); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { FailJournal(exception.Message); }
     }
 
-    private async Task<bool> RemovePendingAsync(string token)
+    // A record whose removal fails is reconciled against the saved page when it is next recovered.
+    private async Task RemovePendingAsync(string token)
     {
         try
         {
             // A later edit can supersede this record while an older dispatch is
             // in flight. Only that later record is eligible for removal now.
             if (_journalToken != token)
-                return true;
+                return;
             if (_journalModule is null || !await _journalModule.InvokeAsync<bool>("remove", ProjectId.ToString("D"), AuthoringTargetId(), token))
-                return FailJournal("The saved page edit could not be cleared from local recovery.");
+            {
+                FailJournal("The saved page edit could not be cleared from local recovery.");
+                return;
+            }
             if (_journalToken == token) _journalToken = null;
-            return true;
+            JournalSucceeded();
         }
-        catch (Exception exception) { return FailJournal(exception.Message); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { FailJournal(exception.Message); }
     }
 
     private async Task ReloadCanonicalAsync()
     {
-        if (_journalToken is not null && !await RemovePendingAsync(_journalToken))
-            return;
+        if (_journalToken is not null)
+            await RemovePendingAsync(_journalToken);
         _dirty = false;
-        _recoveryConflict = false;
         _recoveredContentRevision = null;
         _recoveredVariantRevision = null;
+        _recoveredChangeVersion = null;
         _error = null;
+        UpdateAuthoringWriterState();
         _loadedRefreshSignal = -1;
         await OnParametersSetAsync();
     }
@@ -2181,12 +2298,12 @@
             _objects = restoredScene.Objects.ToList(); _layers = restoredScene.Layers.ToList(); _styles = restoredScene.Styles.ToList();
             _recoveredContentRevision = pending.ContentRevision;
             _recoveredVariantRevision = pending.VariantRevision;
-            _journalRecoverable = true;
             _dirty = true;
             _changeVersion++;
+            _recoveredChangeVersion = _changeVersion;
             ScheduleAutosave();
         }
-        catch (Exception exception) { _ = FailJournal(exception.Message); }
+        catch (Exception exception) { FailJournal(exception.Message); }
     }
 
     private bool PendingMatchesCanonical(DesignedPagePending pending)
@@ -2203,12 +2320,20 @@
                    == JsonSerializer.Serialize(canonicalScene, ManuscriptCodec.JsonOptions);
     }
 
-    private bool FailJournal(string message)
+    // Saving continues without the browser's recovery journal; only recovery after a crash or reload is lost.
+    private void FailJournal(string message)
     {
+        if (_journalRecoverable)
+            Logger.LogWarning("Designed Page {PageId} local recovery journal failed: {Message}", PageId, message);
         _journalRecoverable = false;
-        _error = $"Local recovery is unavailable: {message}";
-        UpdateAuthoringWriterState();
-        return false;
+        _journalWarning = "Page changes are still saving, but this browser cannot keep a local recovery copy. Changes not yet saved could be lost if the app closes unexpectedly.";
+    }
+
+    private void JournalSucceeded()
+    {
+        if (_journalRecoverable) return;
+        _journalRecoverable = true;
+        _journalWarning = null;
     }
 
     private sealed record DesignedPagePending(long ContentRevision, long VariantRevision, Guid VariantId, string SemanticJson, string SceneJson);

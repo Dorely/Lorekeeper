@@ -91,11 +91,21 @@ Before each serialized canvas dispatch, both workspaces write their bounded
 semantic/scene or cover-property/scene payload and its base revisions to the
 target-scoped `AuthoringJournalV1` IndexedDB bridge. A conditional token delete
 occurs only after the canonical commit; remount recovery uses the same
-target-scoped browser session identity to reattach any retained writer. A quota
-or journal write/read failure stays visible, marks the writer not locally
-recoverable, and therefore blocks dependent fence work. Recovered drafts retain
-their original revisions: a stale dispatch surfaces reconciliation rather than
-retrying against a newer revision and overwriting canonical work.
+target-scoped browser session identity to reattach any retained writer. In the
+cover workspace, a quota or journal write/read failure stays visible, marks the
+writer not locally recoverable, and therefore blocks dependent fence work, and
+a stale recovered draft surfaces reconciliation. The Designed Page workspace
+never leaves saving blocked, so editor chat and fences always proceed: a journal
+failure only warns that reload recovery is lost and saving continues from the
+component's in-memory state; a save the page rejected because it changed
+elsewhere adopts the current revisions and saves the visible page over them as
+an undoable change; a recovered draft untouched since restore that conflicts
+yields to the saved page, since its acknowledgement removal may have failed;
+failed saves retry, and autosave keeps retrying in the background. A flush
+(editor chat, fences, navigation, disposal) always ends clean: if the page still
+cannot be saved after three attempts, its draft is written to the app log and
+the saved page is shown with a notice. A writer registration lost to another
+live writer retries until that writer releases the page.
 
 The owning publication services remain authoritative for Core/release
 publication sections, release covers, package readiness, and production
