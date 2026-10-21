@@ -403,12 +403,36 @@
             return;
         }
 
+        // Flush and lock the editor before the turn becomes visible so a draft
+        // that cannot be saved leaves the composer and transcript untouched.
+        _running = true;
+        _error = null;
+        try
+        {
+            if (OnAiTurnStarting.HasDelegate)
+                await OnAiTurnStarting.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(
+                ex,
+                "Editor chat send failed during pre-turn editor flush/lock. ProjectId={ProjectId}, ChapterId={ChapterId}",
+                ProjectId,
+                CurrentChapterId);
+            _running = false;
+            _error = "Editor chat could not start because the chapter draft could not be saved. Resolve the save problem shown in the editor, then send again.";
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            _running = false;
+            return;
+        }
+
         var model = Snapshot(provider);
         _activeTurnModel = model;
         IncludeActiveModelOption();
         _input = string.Empty;
-        _running = true;
-        _error = null;
         _resetComposerKey++;
 
         _renderable.Add(new ChatRenderableMessage(
@@ -423,7 +447,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        var phase = "pre-turn editor flush/lock";
+        var phase = "starting editor chat turn";
         async Task ReleaseTurnAsync()
         {
             ReleaseRunningUi();
@@ -432,10 +456,6 @@
 
         try
         {
-            if (OnAiTurnStarting.HasDelegate)
-                await OnAiTurnStarting.InvokeAsync();
-
-            phase = "starting editor chat turn";
             if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, CurrentDesignedPageId, ContentTarget, text, submission.Images, model))
             {
                 _error = "Editor chat already has a running turn.";
@@ -467,9 +487,7 @@
                 phase,
                 ProjectId,
                 CurrentChapterId);
-            _error = phase == "pre-turn editor flush/lock"
-                ? "Editor chat could not start because the editor draft could not be prepared. Check server logs for details."
-                : "Editor chat failed unexpectedly. Check server logs for details.";
+            _error = "Editor chat failed unexpectedly. Check server logs for details.";
         }
         finally
         {

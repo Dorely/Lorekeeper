@@ -3457,6 +3457,10 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     let confirmedDocument = structuredClone(canonicalInitial);
     let queuedDocument = structuredClone(canonicalInitial);
     let dispatchPaused = false;
+    // True only while dispatch is paused because a journaled batch's outcome
+    // is uncertain (lost response or receipt). The next save replays it with
+    // its idempotent identity; conflicts wait for the author instead.
+    let dispatchRetryable = false;
     let journalFailure = null;
     let pendingJournalCount = 0;
     const journal = new AuthoringJournalV1(authoringTarget.projectId, authoringTarget.targetId, sessionId, error => {
@@ -3774,6 +3778,69 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         });
         conflictPanel.append(heading, details, summary, retry, discard);
     };
+    // Replays unacknowledged journal batches in sequence order with their
+    // durable batch identities. The server commits a batch it never received
+    // and replays the receipt of one it already committed, so this is safe after
+    // a remount and after an uncertain in-session dispatch.
+    const replayJournal = async () => {
+        for (const entry of await journal.pending()) {
+            try {
+                const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
+                const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+                if (!["committed", "replayed"].includes(String(result?.status || "").toLowerCase()) || !canonical) {
+                    dispatchPaused = true;
+                    dispatchRetryable = false;
+                    status.textContent = result?.conflicts?.[0]?.message || "Recovered edits need resolution before they can be saved.";
+                    showConflict(result, entry);
+                    notifyWriterState();
+                    return false;
+                }
+                revision = canonical.afterRevision;
+                targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
+                const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
+                if (canonicalTarget?.elementFingerprints)
+                    elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
+                confirmedDocument = JSON.parse(entry.afterJson);
+                queuedDocument = structuredClone(confirmedDocument);
+                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                    projectId: authoringTarget.projectId,
+                    sessionId, receiptId: result.receiptId, batchId: entry.batch.batchId,
+                    requestHash: entry.batch.requestHash
+                });
+                if (!await journal.remove(entry.key))
+                    throw new Error("The recovered edit could not be cleared from the local recovery journal.");
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                // An import is dispatched as its own batch and no new batch is
+                // journaled while dispatch is paused, so a replayed import is
+                // the one still pending locally.
+                if (entry.batch.importResources) pendingImport = null;
+                confirmedHistory.splice(confirmedHistoryCursor);
+                confirmedHistory.push({
+                    inverse: result.inverse?.operations || [],
+                    forward: entry.batch.operations,
+                    beforeSelection: entry.batch.selection?.before || null,
+                    afterSelection: entry.batch.selection?.after || null
+                });
+                confirmedHistoryCursor = confirmedHistory.length;
+                lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, Number(entry.batch.sequence));
+                lastDispatchedSequence = Math.max(lastDispatchedSequence, Number(entry.batch.sequence));
+                highestLocalSequence = Math.max(highestLocalSequence, Number(entry.batch.sequence));
+            } catch (error) {
+                dispatchPaused = true;
+                dispatchRetryable = true;
+                status.textContent = error?.message || "The recovered edit is waiting to be acknowledged.";
+                notifyWriterState();
+                return false;
+            }
+        }
+        if (journal.recoverable) {
+            dispatchPaused = false;
+            dispatchRetryable = false;
+        }
+        notifyWriterState();
+        updateStatus();
+        return journal.recoverable;
+    };
     const saveNow = () => {
         if (timer) {
             clearTimeout(timer);
@@ -3785,6 +3852,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         const selection = captureStableSelection(view);
         saveChain = saveChain.catch(() => false).then(async () => {
             if (!await reconcileUnresolvedHistory()) return false;
+            if (dispatchPaused && dispatchRetryable && journal.recoverable && authoringSession
+                && !await replayJournal()) return false;
             if (savedGeneration >= targetGeneration) return !dispatchPaused;
             if (dispatchPaused || !journal.recoverable || !authoringSession) return false;
             const before = queuedDocument;
@@ -3844,6 +3913,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
                 if (!applied || !canonical) {
                     dispatchPaused = true;
+                    dispatchRetryable = false;
                     status.textContent = result?.conflicts?.[0]?.message || "The edit needs resolution before it can be saved.";
                     showConflict(result, entry);
                     return false;
@@ -3891,9 +3961,10 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             } catch (error) {
                 // The batch/receipt remains journaled. Do not report a clean
                 // save or fabricate a new batch over an uncertain receipt;
-                // remount recovery will replay the idempotent batch and retry
-                // the acknowledgement.
+                // the next save (or a remount) replays the idempotent batch
+                // and retries the acknowledgement.
                 dispatchPaused = true;
+                dispatchRetryable = true;
                 notifyWriterState();
                 status.textContent = error?.message || "The edit is waiting to be saved.";
                 return false;
@@ -5063,52 +5134,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     // unacknowledged journal batches. Confirmed history remains process-owned.
     saveChain = saveChain.then(async () => {
         if (dispatchPaused || !journal.recoverable) return;
-        for (const entry of await journal.pending()) {
-            try {
-                const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
-                const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
-                if (!["committed", "replayed"].includes(String(result?.status || "").toLowerCase()) || !canonical) {
-                    dispatchPaused = true;
-                    status.textContent = result?.conflicts?.[0]?.message || "Recovered edits need resolution before they can be saved.";
-                    showConflict(result, entry);
-                    notifyWriterState();
-                    return;
-                }
-                revision = canonical.afterRevision;
-                targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
-                const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
-                if (canonicalTarget?.elementFingerprints)
-                    elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
-                confirmedDocument = JSON.parse(entry.afterJson);
-                queuedDocument = structuredClone(confirmedDocument);
-                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
-                    projectId: authoringTarget.projectId,
-                    sessionId, receiptId: result.receiptId, batchId: entry.batch.batchId,
-                    requestHash: entry.batch.requestHash
-                });
-                if (!await journal.remove(entry.key))
-                    throw new Error("The recovered edit could not be cleared from the local recovery journal.");
-                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
-                confirmedHistory.splice(confirmedHistoryCursor);
-                confirmedHistory.push({
-                    inverse: result.inverse?.operations || [],
-                    forward: entry.batch.operations,
-                    beforeSelection: entry.batch.selection?.before || null,
-                    afterSelection: entry.batch.selection?.after || null
-                });
-                confirmedHistoryCursor = confirmedHistory.length;
-                lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, Number(entry.batch.sequence));
-                lastDispatchedSequence = Math.max(lastDispatchedSequence, Number(entry.batch.sequence));
-                highestLocalSequence = Math.max(highestLocalSequence, Number(entry.batch.sequence));
-            } catch (error) {
-                dispatchPaused = true;
-                status.textContent = error?.message || "The recovered edit is waiting to be acknowledged.";
-                notifyWriterState();
-                return;
-            }
-        }
-        notifyWriterState();
-        updateStatus();
+        await replayJournal();
     });
     updateStatus();
     outline.update();

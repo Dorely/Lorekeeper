@@ -286,7 +286,11 @@ Visible edits apply locally first; a 500 ms typing window coalesces one action,
 while paste, formatting, and structure changes force a boundary. The editor
 journals only unacknowledged batches and recovery base data in IndexedDB before
 dispatch. Quota or journal-write failure keeps visible edits but marks them not
-locally recoverable, pauses dispatch, and blocks save claims. A target writer
+locally recoverable, pauses dispatch, and blocks save claims. A dispatch or
+receipt acknowledgement whose outcome is uncertain also pauses dispatch, but its
+batch stays journaled: the next save or flush replays the journal with the
+original batch identities, exactly as remount recovery does, and resumes
+dispatch once every entry is acknowledged. A target writer
 lease makes another browser window read-only until flush or handoff. Conflicts
 preserve the local variant for the application-owned conflict surface rather
 than silently replacing visible content. JavaScript attachment validates that
