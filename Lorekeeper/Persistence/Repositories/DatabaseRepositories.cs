@@ -12,6 +12,7 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
     public IGraphEdgeRepository GraphEdges { get; } = new GraphEdgeRepository(operation);
     public IGraphEntityTypeRepository GraphEntityTypes { get; } = new GraphEntityTypeRepository(operation);
     public IGraphNodeRepository GraphNodes { get; } = new GraphNodeRepository(operation);
+    public IImageProviderRepository ImageProviders { get; } = new ImageProviderRepository(operation);
     public IIngestRepository Ingest { get; } = new IngestRepository(operation);
     public ILlmProviderRepository LlmProviders { get; } = new LlmProviderRepository(operation);
     public IOAuthTokenRepository OAuthTokens { get; } = new OAuthTokenRepository(operation);

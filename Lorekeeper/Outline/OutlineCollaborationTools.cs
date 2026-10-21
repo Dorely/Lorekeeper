@@ -92,7 +92,7 @@ public sealed class OutlineCollaborationContext(
 /// without ambient state.
 /// </summary>
 public sealed class OutlineCollaborationTools(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IProjectFactService projectFacts, IEntityRelationContextService entityRelations, IProjectSearchService projectSearch, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IManuscriptService manuscripts, IBookBriefService bookBriefs, IBookFormatGuidanceService formatGuidance, IReferenceVisualService referenceVisuals, IAgentProjectImageWorkflow? imageWorkflow = null)
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IProjectFactService projectFacts, IEntityRelationContextService entityRelations, IProjectSearchService projectSearch, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IManuscriptService manuscripts, IBookBriefService bookBriefs, IBookFormatGuidanceService formatGuidance, IReferenceVisualService referenceVisuals, IAgentProjectImageWorkflow? imageWorkflow = null, IImageProviderService? imageProviders = null)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -124,23 +124,24 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         MaxLinksPerNode = 8,
     };
 
-    public Task<IList<AITool>> BuildAsync(
+    public async Task<IList<AITool>> BuildAsync(
         OutlineCollaborationContext context,
         CancellationToken cancellationToken = default)
     {
+        var imageGuidance = imageProviders is null ? string.Empty : await imageProviders.GetToolGuidanceAsync(cancellationToken);
         var tools = BuildSharedTools(context);
         tools.AddRange([
             AIFunctionFactory.Create(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
                     GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "generate_project_image",
-                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect the image before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect the image before attaching it." + imageGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? imageModel = null, string? background = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, imageModel, background, cancellationToken),
                 name: "edit_project_image",
-                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Use the latest accepted source image; same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail, without zooming out, cropping, or inventing surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect it before attaching it." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Use the latest accepted source image; same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail, without zooming out, cropping, or inventing surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect it before attaching it." + imageGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false, cancellationToken),
@@ -157,7 +158,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 name: "cancel_project_image_job",
                 description: "Cancel one queued or running canonical-appearance image job owned by this project."),
         ]);
-        return Task.FromResult<IList<AITool>>(tools);
+        return tools;
     }
 
     public Task<IList<AITool>> BuildEditorSharedAsync(
@@ -1174,15 +1175,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 : new { widthPixels = (int?)exception.MaximumRaster.Width, heightPixels = (int?)exception.MaximumRaster.Height, size = exception.MaximumRaster.Size },
             maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
             bindingProviderLimits = exception.Resolution.BindingProviderLimits,
-            providerConstraints = new
-            {
-                sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
-                minimumPixels = LayoutImageSizeResolver.MinimumPixels,
-                maximumPixels = LayoutImageSizeResolver.MaximumPixels,
-                maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
-                minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
-                maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-            },
+            providerConstraints = exception.Resolution.Constraints.ToToolPayload(),
             splitSuggestions = exception.SplitSuggestions.Select(suggestion => new
             {
                 rows = suggestion.Rows,

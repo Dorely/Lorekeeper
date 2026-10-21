@@ -1535,6 +1535,139 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("GraphNodes");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ImageProvider", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApiKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigurationJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EndpointUrl")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastTestMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("LastTestSucceeded")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastTestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MainlineModelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OpenAiAccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsDefault");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("OpenAiAccountId");
+
+                    b.ToTable("ImageProviders");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ImageProviderModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ImageProviderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxReferenceImages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ModelId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OutputFormatsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("QualitiesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RasterConstraintsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsEdit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsGenerate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsRegionalGuide")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsStreaming")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsTransparentBackground")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ImageProviderId", "ModelId")
+                        .IsUnique();
+
+                    b.ToTable("ImageProviderModels");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3028,6 +3161,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ImageProviderId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("InheritSourceEntityTargets")
                         .HasColumnType("INTEGER");
 
@@ -3118,6 +3254,8 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ImageProviderId");
 
                     b.HasIndex("MaskId");
 
@@ -6488,6 +6626,27 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ImageProvider", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.OpenAiAccount", "OpenAiAccount")
+                        .WithMany()
+                        .HasForeignKey("OpenAiAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OpenAiAccount");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ImageProviderModel", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.ImageProvider", "ImageProvider")
+                        .WithMany("Models")
+                        .HasForeignKey("ImageProviderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ImageProvider");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -7694,6 +7853,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("OutgoingEdges");
 
                     b.Navigation("VisualExamples");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ImageProvider", b =>
+                {
+                    b.Navigation("Models");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>

@@ -17,6 +17,7 @@ public sealed class ProjectImageJobService(
     IAppDatabaseOperationFactory database,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageDefaultRasterResolver defaultRasters,
+    IImageProviderService imageProviders,
     IOptions<ProjectImageGenerationOptions> options,
     ILogger<ProjectImageJobService> logger) : IProjectImageJobService
 {
@@ -348,18 +349,20 @@ public sealed class ProjectImageJobService(
         ProjectImageGenerateJobRequest request,
         CancellationToken cancellationToken = default)
     {
-        var size = await ResolveSizeAsync(projectId, request.Size, cancellationToken);
+        var imageModel = await imageProviders.ResolveAsync(request.ImageProviderId, request.ImageModel, cancellationToken);
+        var size = await ResolveSizeAsync(projectId, imageModel.Constraints, request.Size, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var prompt = CleanRequired(request.Prompt, "Image prompt is required.");
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, sourceImageId: null, cancellationToken);
+        ProjectImageModelCatalog.ValidateInputs(imageModel, edit: false, regionalGuide: false, referenceIds.Count, options.Value.MaxReferenceImages);
         var entityTargets = await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken);
         var count = ClampCount(request.Count);
         var layoutBound = HasLayoutTargetGeometry(request.TargetGeometryJson);
         var model = ProjectImageModelCatalog.Resolve(
-            request.ImageModel,
+            imageModel,
             request.Quality,
             request.OutputFormat,
             request.OutputCompression,
@@ -388,8 +391,8 @@ public sealed class ProjectImageJobService(
             EntityVisualTargetsJson = SerializeTargets(entityTargets),
             InheritSourceEntityTargets = false,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
-            Provider = CodexProvider.AccountProviderKey,
-            MainlineModel = options.Value.DefaultMainlineModel,
+            ImageProviderId = imageModel.ProviderId,
+            Provider = imageModel.ProviderName,
             ImageModel = model.ImageModel,
             CreatedAt = now,
             UpdatedAt = now,
@@ -408,7 +411,8 @@ public sealed class ProjectImageJobService(
         ProjectImageEditJobRequest request,
         CancellationToken cancellationToken = default)
     {
-        var size = await ResolveSizeAsync(projectId, request.Size, cancellationToken);
+        var imageModel = await imageProviders.ResolveAsync(request.ImageProviderId, request.ImageModel, cancellationToken);
+        var size = await ResolveSizeAsync(projectId, imageModel.Constraints, request.Size, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -416,21 +420,22 @@ public sealed class ProjectImageJobService(
         var prompt = CleanRequired(request.Prompt, "Image edit prompt is required.");
         var source = await GetImageAssetAsync(projectId, request.SourceImageId, cancellationToken);
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, source.Id, cancellationToken);
+        var hasPngGuide = !string.IsNullOrWhiteSpace(request.MaskPngDataUrl);
+        var hasShapeGuide = request.RegionalGuide is not null;
+        if (hasPngGuide && hasShapeGuide)
+            throw new InvalidOperationException("Supply one regional guide as either a painted PNG or inline shapes, not both.");
+        var hasRegionalGuide = hasPngGuide || hasShapeGuide;
+        ProjectImageModelCatalog.ValidateInputs(imageModel, edit: true, hasRegionalGuide, referenceIds.Count, options.Value.MaxReferenceImages);
         var count = ClampCount(request.Count);
         var layoutBound = HasLayoutTargetGeometry(request.TargetGeometryJson);
         var model = ProjectImageModelCatalog.Resolve(
-            request.ImageModel,
+            imageModel,
             request.Quality,
             request.OutputFormat,
             request.OutputCompression,
             request.Background,
             options.Value,
             layoutBound);
-        var hasPngGuide = !string.IsNullOrWhiteSpace(request.MaskPngDataUrl);
-        var hasShapeGuide = request.RegionalGuide is not null;
-        if (hasPngGuide && hasShapeGuide)
-            throw new InvalidOperationException("Supply one regional guide as either a painted PNG or inline shapes, not both.");
-        var hasRegionalGuide = hasPngGuide || hasShapeGuide;
         var sourceSize = ReadImageSize(source.Data, source.ContentType);
         if (hasRegionalGuide)
         {
@@ -441,7 +446,7 @@ public sealed class ProjectImageJobService(
                 sourceSize.Width,
                 sourceSize.Height,
                 size);
-            ProjectImageRegionalGuide.ValidateOutputSize(sourceSize.Width, sourceSize.Height, size);
+            ProjectImageRegionalGuide.ValidateOutputSize(imageModel.Constraints, sourceSize.Width, sourceSize.Height, size);
         }
         var targets = (await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken)).ToList();
         if (request.InheritSourceEntityTargets)
@@ -502,8 +507,8 @@ public sealed class ProjectImageJobService(
             EntityVisualTargetsJson = SerializeTargets(targets),
             InheritSourceEntityTargets = request.InheritSourceEntityTargets,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
-            Provider = CodexProvider.AccountProviderKey,
-            MainlineModel = options.Value.DefaultMainlineModel,
+            ImageProviderId = imageModel.ProviderId,
+            Provider = imageModel.ProviderName,
             ImageModel = model.ImageModel,
             CreatedAt = now,
             UpdatedAt = now,
@@ -986,7 +991,7 @@ public sealed class ProjectImageJobService(
         return asset;
     }
 
-    private ProjectImageGenerationWorkItem ToWorkItem(ProjectImageGenerationJob job) =>
+    private static ProjectImageGenerationWorkItem ToWorkItem(ProjectImageGenerationJob job) =>
         new(
             job.ProjectId,
             job.Id,
@@ -1003,8 +1008,8 @@ public sealed class ProjectImageJobService(
             job.MaskId,
             DeserializeIds(job.ReferenceImageIdsJson),
             job.TargetGeometryJson,
-            string.IsNullOrWhiteSpace(job.MainlineModel) ? options.Value.DefaultMainlineModel : job.MainlineModel,
-            string.IsNullOrWhiteSpace(job.ImageModel) ? options.Value.DefaultImageModel : job.ImageModel,
+            job.ImageProviderId,
+            job.ImageModel,
             job.Background);
 
     private static ProjectImageJobView ToView(ProjectImageGenerationJob job) =>
@@ -1134,14 +1139,15 @@ public sealed class ProjectImageJobService(
 
     private async Task<string> ResolveSizeAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         string? value,
         CancellationToken cancellationToken)
     {
         var normalized = Clean(value);
         if (normalized.Length > 0 && !normalized.Equals("auto", StringComparison.OrdinalIgnoreCase))
-            return normalized;
+            return LayoutImageSizeResolver.ParseValid(constraints, normalized).Size;
 
-        return (await defaultRasters.ResolveAsync(projectId, cancellationToken)).Size;
+        return (await defaultRasters.ResolveAsync(projectId, constraints, cancellationToken)).Size;
     }
 
     private static string CleanJson(string? value, string fallback)

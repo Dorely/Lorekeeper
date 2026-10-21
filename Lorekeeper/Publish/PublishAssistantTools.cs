@@ -122,18 +122,20 @@ public sealed class PublishAssistantTools(
     IDesignedPageService? compositions = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
     IProjectSearchService? projectSearch = null,
-    IReferenceVisualService? referenceVisuals = null) : IPublishAssistantTools
+    IReferenceVisualService? referenceVisuals = null,
+    IImageProviderService? imageProviders = null) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false,
     };
 
-    public Task<IList<AITool>> BuildAsync(
+    public async Task<IList<AITool>> BuildAsync(
         PublishAssistantContext context,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var imageGuidance = imageProviders is null ? string.Empty : await imageProviders.GetToolGuidanceAsync(cancellationToken);
         IList<AITool> tools =
         [
             AIFunctionFactory.Create(
@@ -375,12 +377,12 @@ public sealed class PublishAssistantTools(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
                     GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
                 name: "generate_project_image",
-                description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn." + imageGuidance),
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
                 name: "edit_project_image",
-                description: "Edit one project image and wait for a terminal result. Use the latest accepted source image for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: "Edit one project image and wait for a terminal result. Use the latest accepted source image for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source." + imageGuidance),
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
                 name: "read_project_image_job",
@@ -528,9 +530,9 @@ public sealed class PublishAssistantTools(
         foreach (var tool in citationTools.Build(context.ProjectId, context.TurnCancellationToken, allowMutations: true))
             tools.Add(tool);
         currentTools.UnionWith(["list_bibliography", "read_bibliographic_record", "save_bibliographic_record"]);
-        return Task.FromResult<IList<AITool>>(tools
+        return tools
             .Where(tool => tool is AIFunction function && currentTools.Contains(function.Name))
-            .ToList());
+            .ToList();
     }
 
     private async Task<string> ListSearchSourcesAsync(
@@ -2526,9 +2528,11 @@ public sealed class PublishAssistantTools(
                 && !targetKind.Trim().Equals("CoverSurface", StringComparison.OrdinalIgnoreCase)
                 && !targetKind.Trim().Equals("CoreCoverSurface", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("surfaceBounds requires a PageSurface, CoverSurface, or CoreCoverSurface target.");
+            var constraints = (await (imageProviders ?? throw new InvalidOperationException("Image provider configuration is unavailable."))
+                .ResolveAsync(cancellationToken: context.TurnCancellationToken)).Constraints;
             var descriptor = editionId is Guid releaseId
-                ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds)
-                : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds);
+                ? await service.DescribeGenerationTargetAsync(context.ProjectId, constraints, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds)
+                : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, constraints, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds);
             return Serialize(new
             {
                 ok = true,

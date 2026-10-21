@@ -95,6 +95,7 @@ public sealed class AgentProjectImageWorkflow(
     IProjectImageJobService jobs,
     IProjectImageGenerationRuntime runtime,
     IProjectImageService images,
+    IImageProviderService imageProviders,
     IOptions<ProjectImageGenerationOptions> options) : IAgentProjectImageWorkflow
 {
     public async Task<AgentProjectImageResult> GenerateAsync(
@@ -114,9 +115,11 @@ public sealed class AgentProjectImageWorkflow(
         string? background = null)
     {
         var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
-        var resolved = ProjectImageModelCatalog.Resolve(imageModel, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
+        var model = await imageProviders.ResolveAsync(modelId: imageModel, cancellationToken: cancellationToken);
+        var resolved = ProjectImageModelCatalog.Resolve(model, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileGenerationAsync(
             projectId,
+            model.Constraints,
             brief,
             references?.ToArray(),
             effectiveTarget,
@@ -139,7 +142,8 @@ public sealed class AgentProjectImageWorkflow(
                 compiled.ReferenceManifestJson,
                 compiled.TargetGeometryJson,
                 ImageModel: resolved.ImageModel,
-                Background: resolved.Background),
+                Background: resolved.Background,
+                ImageProviderId: model.ProviderId),
             cancellationToken);
         return await RunAsync(projectId, job.Id, onJobCreated, cancellationToken);
     }
@@ -165,9 +169,11 @@ public sealed class AgentProjectImageWorkflow(
         var effectiveTarget = WithDefaultMinimumDpi(
             geometryGuidance,
             regionalGuide is null ? defaultMinimumDpi : null);
-        var resolved = ProjectImageModelCatalog.Resolve(imageModel, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
+        var model = await imageProviders.ResolveAsync(modelId: imageModel, cancellationToken: cancellationToken);
+        var resolved = ProjectImageModelCatalog.Resolve(model, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileEditAsync(
             projectId,
+            model.Constraints,
             sourceImageId,
             brief,
             references?.ToArray(),
@@ -196,7 +202,8 @@ public sealed class AgentProjectImageWorkflow(
                 compiled.ReferenceManifestJson,
                 compiled.TargetGeometryJson,
                 ImageModel: resolved.ImageModel,
-                Background: resolved.Background),
+                Background: resolved.Background,
+                ImageProviderId: model.ProviderId),
             cancellationToken);
         return await RunAsync(projectId, job.Id, onJobCreated, cancellationToken);
     }

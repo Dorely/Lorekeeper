@@ -1,4 +1,3 @@
-using System.Globalization;
 using Lorekeeper.Models;
 using Microsoft.Extensions.Options;
 
@@ -248,6 +247,7 @@ public sealed class ProjectImageGenerationRuntime(
     {
         var maxAttempts = Math.Clamp(imageOptions.Value.MaxRequestAttempts, 1, 10);
         Exception? finalError = null;
+        IProjectImageProvider? adapter = null;
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -292,14 +292,18 @@ public sealed class ProjectImageGenerationRuntime(
                 Exception? requestError = null;
                 await using (var scope = scopeFactory.CreateAsyncScope())
                 {
-                    var provider = scope.ServiceProvider.GetRequiredService<IProjectImageProvider>();
                     var images = scope.ServiceProvider.GetRequiredService<IProjectImageService>();
                     var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
+                    var (provider, model) = await ResolveProviderAsync(
+                        workItem,
+                        scope.ServiceProvider.GetRequiredService<IImageProviderService>(),
+                        cancellationToken);
+                    adapter = scope.ServiceProvider.GetRequiredService<IImageProviderClientFactory>().Get(provider.Kind);
                     try
                     {
                         result = workItem.Kind == ProjectImageGenerationJobKind.Edit
-                            ? await provider.EditAsync(await BuildEditRequestAsync(workItem, images, jobs, cancellationToken), cancellationToken, progress)
-                            : await provider.GenerateAsync(await BuildGenerateRequestAsync(workItem, images, cancellationToken), cancellationToken, progress);
+                            ? await adapter.EditAsync(provider, await BuildEditRequestAsync(workItem, model, images, jobs, cancellationToken), cancellationToken, progress)
+                            : await adapter.GenerateAsync(provider, await BuildGenerateRequestAsync(workItem, model, images, cancellationToken), cancellationToken, progress);
                     }
                     catch (Exception ex)
                     {
@@ -331,7 +335,7 @@ public sealed class ProjectImageGenerationRuntime(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 finalError = ex;
-                if (attempt >= maxAttempts || !IsTransientImageGenerationError(ex))
+                if (attempt >= maxAttempts || adapter?.GetRetryDelay(ex, attempt) is not { } retryDelay)
                     break;
 
                 var message = $"Retrying after provider error, attempt {attempt + 1} of {maxAttempts}.";
@@ -344,20 +348,38 @@ public sealed class ProjectImageGenerationRuntime(
                     ErrorKind: TryReadErrorKind(ex),
                     UpdatedAt: DateTime.UtcNow));
                 UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Running, attempt, message, ex.Message, TryReadErrorKind(ex));
-                await Task.Delay(ImageGenerationRetryDelay(ex, attempt), cancellationToken);
+                await Task.Delay(retryDelay, cancellationToken);
             }
         }
 
         return finalError;
     }
 
+    /// <summary>
+    /// Loads the job's own provider. A job never falls back to another provider:
+    /// one whose provider was deleted or is not ready fails with the reason.
+    /// </summary>
+    private static async Task<(ImageProvider Provider, ResolvedImageModel Model)> ResolveProviderAsync(
+        ProjectImageGenerationWorkItem workItem,
+        IImageProviderService imageProviders,
+        CancellationToken cancellationToken)
+    {
+        if (workItem.ImageProviderId is not { } providerId)
+            throw new ImageProviderNotConfiguredException("This image job has no image provider. Queue it again after configuring one in Settings > Image providers.");
+        var provider = await imageProviders.GetByIdAsync(providerId, cancellationToken)
+            ?? throw new ImageProviderNotConfiguredException("The image provider for this job was deleted. Queue it again with another provider from Settings > Image providers.");
+        var model = await imageProviders.ResolveAsync(providerId, workItem.ImageModel, cancellationToken);
+        return (provider, model);
+    }
+
     private async Task<ProjectImageProviderGenerateRequest> BuildGenerateRequestAsync(
         ProjectImageGenerationWorkItem workItem,
+        ResolvedImageModel model,
         IProjectImageService images,
         CancellationToken cancellationToken)
     {
         var references = new List<ProjectImageProviderReference>();
-        foreach (var id in workItem.ReferenceImageIds.Take(Math.Max(0, imageOptions.Value.MaxReferenceImages)))
+        foreach (var id in workItem.ReferenceImageIds.Take(ProjectImageModelCatalog.ReferenceLimit(model, imageOptions.Value.MaxReferenceImages)))
         {
             var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: cancellationToken);
             if (data is not null)
@@ -368,8 +390,7 @@ public sealed class ProjectImageGenerationRuntime(
             workItem.Prompt,
             workItem.Size,
             Count: 1,
-            workItem.MainlineModel,
-            workItem.ImageModel,
+            model.ModelId,
             references,
             workItem.OutputFormat,
             workItem.Quality,
@@ -379,6 +400,7 @@ public sealed class ProjectImageGenerationRuntime(
 
     private async Task<ProjectImageProviderEditRequest> BuildEditRequestAsync(
         ProjectImageGenerationWorkItem workItem,
+        ResolvedImageModel model,
         IProjectImageService images,
         IProjectImageJobService jobs,
         CancellationToken cancellationToken)
@@ -408,7 +430,7 @@ public sealed class ProjectImageGenerationRuntime(
                 normalizedSource.Width,
                 normalizedSource.Height,
                 workItem.Size);
-            ProjectImageRegionalGuide.ValidateOutputSize(normalizedSource.Width, normalizedSource.Height, workItem.Size);
+            ProjectImageRegionalGuide.ValidateOutputSize(model.Constraints, normalizedSource.Width, normalizedSource.Height, workItem.Size);
             sourceReference = new ProjectImageProviderReference(
                 normalizedSource.FileName,
                 normalizedSource.ContentType,
@@ -420,7 +442,7 @@ public sealed class ProjectImageGenerationRuntime(
         }
 
         var references = new List<ProjectImageProviderReference>();
-        foreach (var id in workItem.ReferenceImageIds.Take(Math.Max(0, imageOptions.Value.MaxReferenceImages)))
+        foreach (var id in workItem.ReferenceImageIds.Take(ProjectImageModelCatalog.ReferenceLimit(model, imageOptions.Value.MaxReferenceImages)))
         {
             var data = await images.GetDataAsync(workItem.ProjectId, id, cancellationToken: cancellationToken);
             if (data is not null)
@@ -431,8 +453,7 @@ public sealed class ProjectImageGenerationRuntime(
             workItem.Prompt,
             workItem.Size,
             Count: 1,
-            workItem.MainlineModel,
-            workItem.ImageModel,
+            model.ModelId,
             sourceReference,
             mask,
             references,
@@ -682,94 +703,6 @@ public sealed class ProjectImageGenerationRuntime(
 
     private static string? TryReadErrorKind(Exception exception) =>
         exception is ProjectImageProviderException providerException ? providerException.ErrorKind : null;
-
-    private static bool IsTransientImageGenerationError(Exception exception)
-    {
-        for (Exception? current = exception; current is not null; current = current.InnerException)
-        {
-            if (current is ProjectImageProviderException provider)
-                return provider.ErrorKind is "rate_limit" or "codex_image_input_rate_limit" or "server_error" or "transport_error";
-        }
-
-        return false;
-    }
-
-    private static TimeSpan ImageGenerationRetryDelay(Exception exception, int failedAttempt)
-    {
-        for (Exception? current = exception; current is not null; current = current.InnerException)
-        {
-            if (current is ProjectImageProviderException { RetryAfter: { } retryAfter } && retryAfter > TimeSpan.Zero)
-                return retryAfter;
-            var providerDelay = TryReadProviderRetryDelay(current.Message);
-            if (providerDelay is { } delay && delay > TimeSpan.Zero)
-            {
-                var minimumDelay = IsImagePerMinuteRateLimit(current.Message)
-                    ? TimeSpan.FromSeconds(10)
-                    : TimeSpan.FromMilliseconds(500);
-                return delay < minimumDelay ? minimumDelay : delay;
-            }
-        }
-
-        if (ContainsImagePerMinuteRateLimit(exception))
-            return TimeSpan.FromSeconds(Math.Min(30, 10 * failedAttempt));
-
-        var backoffMilliseconds = Math.Min(5000, 250 * Math.Pow(2, Math.Max(0, failedAttempt - 1)));
-        return TimeSpan.FromMilliseconds(backoffMilliseconds);
-    }
-
-    private static TimeSpan? TryReadProviderRetryDelay(string message)
-    {
-        const string marker = "Please try again in ";
-        var markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
-            return null;
-
-        var valueStart = markerIndex + marker.Length;
-        while (valueStart < message.Length && char.IsWhiteSpace(message[valueStart]))
-            valueStart++;
-
-        var valueEnd = valueStart;
-        while (valueEnd < message.Length && (char.IsDigit(message[valueEnd]) || message[valueEnd] == '.'))
-            valueEnd++;
-
-        if (valueEnd == valueStart
-            || !double.TryParse(message[valueStart..valueEnd], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
-        {
-            return null;
-        }
-
-        var unit = message[valueEnd..].TrimStart();
-        if (unit.StartsWith("ms", StringComparison.OrdinalIgnoreCase)
-            || unit.StartsWith("millisecond", StringComparison.OrdinalIgnoreCase))
-        {
-            return TimeSpan.FromMilliseconds(value);
-        }
-
-        if (unit.StartsWith("s", StringComparison.OrdinalIgnoreCase)
-            || unit.StartsWith("second", StringComparison.OrdinalIgnoreCase))
-        {
-            return TimeSpan.FromSeconds(value);
-        }
-
-        return null;
-    }
-
-    private static bool ContainsImagePerMinuteRateLimit(Exception exception)
-    {
-        for (Exception? current = exception; current is not null; current = current.InnerException)
-        {
-            if (IsImagePerMinuteRateLimit(current.Message))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsImagePerMinuteRateLimit(string message) =>
-        message.Contains("per min", StringComparison.OrdinalIgnoreCase)
-        && (message.Contains("gpt-image", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("input-images", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("image", StringComparison.OrdinalIgnoreCase));
 
     private sealed class ActionProgress(Action<ProjectImageProviderProgress> report) : IProgress<ProjectImageProviderProgress>
     {

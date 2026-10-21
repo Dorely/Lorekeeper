@@ -52,7 +52,8 @@ IActService acts,
     EditorManuscriptApplyService manuscriptApplies,
     CitationAssistantTools citationTools,
     IOptions<EditorChatOptions> editorOptions,
-    IOptions<ProjectImageGenerationOptions> imageOptions)
+    IOptions<ProjectImageGenerationOptions> imageOptions,
+    IImageProviderService imageProviders)
 {
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
@@ -75,6 +76,7 @@ IActService acts,
         EditorChatToolMode mode = EditorChatToolMode.Normal,
         CancellationToken cancellationToken = default)
     {
+        var imageGuidance = await imageProviders.GetToolGuidanceAsync(cancellationToken);
         var tools = new List<AITool>();
         tools.AddRange(citationTools.Build(context.ProjectId, context.TurnCancellationToken,
             mode == EditorChatToolMode.Normal, context.OnMutated));
@@ -422,14 +424,14 @@ IActService acts,
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "generate_project_image",
             description:
-                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster and warningCodes before placement; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster and warningCodes before placement; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + imageGuidance));
 
         tools.Add(AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
                 EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster and warningCodes; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + ProjectImageModelCatalog.ToolParameterGuidance));
+                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster and warningCodes; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + imageGuidance));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
@@ -2246,20 +2248,22 @@ IActService acts,
                 await RequireVariantTargetAsync(ctx, selectedVariantId);
             if (surfaceBounds is not null && !SupportsDirectSurfacePartition(targetKind))
                 throw new ArgumentException("surfaceBounds requires a PageSurface, CoverSurface, or CoreCoverSurface target.");
+            var constraints = (await imageProviders.ResolveAsync(cancellationToken: ctx.TurnCancellationToken)).Constraints;
             LayoutGenerationTargetDescriptor descriptor;
             if (surfaceBounds is not null)
             {
                 var surface = ctx.ContentTarget.EditionId is Guid boundedEditionId
-                    ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, boundedEditionId, targetKind, targetId, variantId, ctx.TurnCancellationToken)
-                    : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId, ctx.TurnCancellationToken);
-                var boundedResolution = ResolveSurfaceBoundsMinimumDpi(surface, surfaceBounds, 300);
+                    ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, constraints, boundedEditionId, targetKind, targetId, variantId, ctx.TurnCancellationToken)
+                    : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, constraints, targetKind, targetId, variantId, ctx.TurnCancellationToken);
+                var boundedResolution = ResolveSurfaceBoundsMinimumDpi(constraints, surface, surfaceBounds, 300);
                 if (!boundedResolution.MeetsMinimumDpi)
                     return SerializeMinimumDpiPreflight(boundedResolution, targetKind, targetId, surface.EditionId, surface.VariantId, surfaceBounds);
             }
             descriptor = ctx.ContentTarget.EditionId is Guid editionId
-                ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, editionId, targetKind, targetId, variantId, ctx.TurnCancellationToken, surfaceBounds)
-                : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId, ctx.TurnCancellationToken, surfaceBounds);
+                ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, constraints, editionId, targetKind, targetId, variantId, ctx.TurnCancellationToken, surfaceBounds)
+                : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, constraints, targetKind, targetId, variantId, ctx.TurnCancellationToken, surfaceBounds);
             var dpiResolution = LayoutImageSizeResolver.ResolveMinimumDpi(
+                constraints,
                 descriptor.WidthInches,
                 descriptor.HeightInches,
                 300);
@@ -2286,17 +2290,8 @@ IActService acts,
                     maximumAchievableDpi = Math.Round(dpiResolution.MaximumAchievableDpi, 1),
                     splitSuggestions = dpiResolution.PanelSuggestions.Select(PanelSuggestionPayload),
                 },
-                providerConstraints = new
-                {
-                    rasterFormat = "WIDTHxHEIGHT",
-                    sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
-                    minimumPixels = LayoutImageSizeResolver.MinimumPixels,
-                    maximumPixels = LayoutImageSizeResolver.MaximumPixels,
-                    maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
-                    minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
-                    maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-                    minimumDpiRule = "Editor layout-bound generation defaults to 300 effective DPI. Use the target's resolved raster or an explicit MinimumDpi; do not manually calculate inch×DPI overrides.",
-                },
+                providerConstraints = constraints.ToToolPayload(),
+                minimumDpiRule = "Editor layout-bound generation defaults to 300 effective DPI. Use the target's resolved raster or an explicit MinimumDpi; do not manually calculate inch×DPI overrides.",
             }, ManuscriptCodec.JsonOptions);
         }
         catch (MinimumDpiUnachievableException ex)
@@ -2533,8 +2528,10 @@ IActService acts,
     {
         try
         {
+            var constraints = (await imageProviders.ResolveAsync(cancellationToken: ctx.TurnCancellationToken)).Constraints;
             var image = await projectImages.ResizeAsync(
                 ctx.ProjectId,
+                constraints,
                 sourceImageId,
                 new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
                 ctx.TurnCancellationToken);
@@ -2683,7 +2680,7 @@ IActService acts,
             largestCompatibleRaster = RasterPayload(exception.MaximumRaster),
             maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
             bindingProviderLimits = exception.Resolution.BindingProviderLimits,
-            providerConstraints = ProviderConstraintsPayload(),
+            providerConstraints = exception.Resolution.Constraints.ToToolPayload(),
             target = new
             {
                 targetKind = exception.TargetKind,
@@ -2739,7 +2736,7 @@ IActService acts,
             largestCompatibleRaster = RasterPayload(resolution.MaximumRaster),
             maximumAchievableDpi = Math.Round(resolution.MaximumAchievableDpi, 1),
             bindingProviderLimits = resolution.BindingProviderLimits,
-            providerConstraints = ProviderConstraintsPayload(),
+            providerConstraints = resolution.Constraints.ToToolPayload(),
             target = new { targetKind, targetId, editionId, variantId, surfaceBounds },
             splitSuggestions = SurfacePanelSuggestions(resolution.PanelSuggestions, targetKind, surfaceBounds).Select(PanelSuggestionPayload),
             partitioningSupported = SupportsDirectSurfacePartition(targetKind)
@@ -2769,6 +2766,7 @@ IActService acts,
     }
 
     private static LayoutImageDpiResolution ResolveSurfaceBoundsMinimumDpi(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor surface,
         CompositionBounds bounds,
         int minimumDpi)
@@ -2785,6 +2783,7 @@ IActService acts,
             || bounds.YPercent + bounds.HeightPercent > 100)
             throw new ArgumentException("surfaceBounds must use finite positive percentage dimensions inside the 0-100 surface.", nameof(bounds));
         return LayoutImageSizeResolver.ResolveMinimumDpi(
+            constraints,
             surface.WidthInches * bounds.WidthPercent / 100,
             surface.HeightInches * bounds.HeightPercent / 100,
             minimumDpi);
@@ -2811,17 +2810,6 @@ IActService acts,
 
     private static object RasterPayload(LayoutImageRequiredRaster raster) =>
         new { widthPixels = raster.Width, heightPixels = raster.Height, size = raster.Size };
-
-    private static object ProviderConstraintsPayload() => new
-    {
-        rasterFormat = "WIDTHxHEIGHT",
-        sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
-        minimumPixels = LayoutImageSizeResolver.MinimumPixels,
-        maximumPixels = LayoutImageSizeResolver.MaximumPixels,
-        maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
-        minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
-        maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-    };
 
     private static object PanelSuggestionPayload(LayoutImagePanelSuggestion suggestion) => new
     {

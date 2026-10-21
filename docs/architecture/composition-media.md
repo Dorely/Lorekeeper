@@ -38,7 +38,9 @@ and deletion guards. `IProjectImageJobService` owns durable generation/edit
 job records, prompt/audit metadata, received partial-image artifacts, and
 explicit partial promotion. `IProjectImageGenerationRuntime` owns FIFO
 execution, retry/cancellation propagation, ordered partial capture, and job
-notifications. Provider transport remains behind `IProjectImageProvider`;
+notifications. Provider configuration and resolution belong to
+`IImageProviderService` ([Providers and background work](providers-background.md));
+provider transport remains behind kind-keyed `IProjectImageProvider` adapters;
 the application never lets a provider-specific response become the asset or
 placement contract.
 
@@ -253,7 +255,8 @@ not a PNG with an alpha channel, does not exactly match the source raster,
 contains intermediate alpha, or has no editable pixel.
 
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
-`Resized` asset at an exact provider-valid raster using deterministic
+`Resized` asset at an exact raster valid for the default image provider's
+default model (its `ImageRasterConstraints`) using deterministic
 SkiaSharp sampling. It does not invent visual detail and records the source,
 target, interpolation, and raster storage in provenance. Same-aspect generative
 up-resolution instead uses the original image, preserves its complete framing
@@ -318,9 +321,12 @@ shadows, and background washes unless the brief explicitly asks for one;
 opaque output requests use an appropriate plain or scene-integrated background.
 The shared contract records model, background, quality, output format, and
 compression settings per job, while provider-reported values remain separate
-audit evidence. Flare is the default image model; Sunburst is explicit for
-demanding tasks, and xhigh/max quality is reserved for unmet concrete needs.
-Model/quality/background combinations are rejected before job creation when
+audit evidence. Each job resolves one image provider and model through
+`IImageProviderService`; the provider's default model serves ordinary work,
+another listed model is chosen explicitly for demanding tasks, and the highest
+qualities are reserved for unmet concrete needs. Model/quality/background
+combinations, regional guides, reference counts, and transparency are checked
+against the resolved model's capabilities and rejected before job creation when
 unsupported. Transparent JPEG is rejected; compression is sent only for JPEG or
 WebP, while layout-bound output remains PNG. Normalization preserves alpha,
 including WebP-to-PNG conversion. Fully opaque output requested as transparent

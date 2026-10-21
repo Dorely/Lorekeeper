@@ -41,7 +41,7 @@ public sealed record ProjectImageGenerationWorkItem(
     Guid? MaskId,
     IReadOnlyList<Guid> ReferenceImageIds,
     string TargetGeometryJson,
-    string MainlineModel,
+    int? ImageProviderId,
     string ImageModel,
     string Background = "auto");
 

@@ -4,7 +4,11 @@ namespace Lorekeeper.Images;
 
 public interface IProjectImageDefaultRasterResolver
 {
-    Task<LayoutImageSize> ResolveAsync(Guid projectId, CancellationToken cancellationToken = default);
+    /// <summary>The raster within <paramref name="constraints"/> nearest the project's Core Book page.</summary>
+    Task<LayoutImageSize> ResolveAsync(
+        Guid projectId,
+        ImageRasterConstraints constraints,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class ProjectImageDefaultRasterResolver(
@@ -12,9 +16,10 @@ public sealed class ProjectImageDefaultRasterResolver(
 {
     public async Task<LayoutImageSize> ResolveAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         CancellationToken cancellationToken = default)
     {
         var setup = await pageSetups.GetOrCreateAsync(projectId, cancellationToken);
-        return LayoutImageSizeResolver.Resolve(setup.PageWidthInches, setup.PageHeightInches);
+        return LayoutImageSizeResolver.Resolve(constraints, setup.PageWidthInches, setup.PageHeightInches);
     }
 }

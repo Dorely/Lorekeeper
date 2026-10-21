@@ -228,11 +228,12 @@ public sealed class ProjectImageService(
 
     public async Task<ProjectImageView> ResizeAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         Guid sourceImageId,
         ProjectImageResizeRequest request,
         CancellationToken cancellationToken = default)
     {
-        LayoutImageSizeResolver.Validate(request.Width, request.Height);
+        LayoutImageSizeResolver.Validate(constraints, request.Width, request.Height);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;

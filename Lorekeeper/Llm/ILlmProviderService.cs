@@ -18,7 +18,6 @@ public interface ILlmProviderService
     Task<List<LlmProvider>> ListWorkingVisionProvidersAsync(CancellationToken cancellationToken = default);
     Task<bool> IsChatProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default);
     Task<bool> IsVisionProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default);
-    Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default);
     Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default);
     Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default);
     Task UpdateConnectionAsync(LlmConnectionUpdate update, CancellationToken cancellationToken = default);

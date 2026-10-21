@@ -21,6 +21,8 @@ public class AppDbContext(
     public DbSet<OpenAiAccount> OpenAiAccounts => Set<OpenAiAccount>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
+    public DbSet<ImageProvider> ImageProviders => Set<ImageProvider>();
+    public DbSet<ImageProviderModel> ImageProviderModels => Set<ImageProviderModel>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProjectReference> ProjectReferences => Set<ProjectReference>();
@@ -1017,6 +1019,29 @@ public class AppDbContext(
             entity.Property(e => e.ProviderKind).HasConversion<string>();
         });
 
+        modelBuilder.Entity<ImageProvider>(entity =>
+        {
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.HasIndex(e => e.IsDefault);
+            entity.Property(e => e.Kind).HasConversion<string>();
+
+            entity.HasOne(e => e.OpenAiAccount)
+                .WithMany()
+                .HasForeignKey(e => e.OpenAiAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ImageProviderModel>(entity =>
+        {
+            entity.HasIndex(e => new { e.ImageProviderId, e.ModelId }).IsUnique();
+            entity.Property(e => e.Origin).HasConversion<string>();
+
+            entity.HasOne(e => e.ImageProvider)
+                .WithMany(e => e.Models)
+                .HasForeignKey(e => e.ImageProviderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<OAuthToken>(entity =>
         {
             entity.HasOne(e => e.OpenAiAccount)
@@ -1643,6 +1668,7 @@ public class AppDbContext(
             entity.Property(e => e.Kind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Background).HasDefaultValue("auto");
+            entity.HasIndex(e => e.ImageProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.ProjectImageGenerationJobs)

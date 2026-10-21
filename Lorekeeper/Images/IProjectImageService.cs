@@ -1,3 +1,5 @@
+using Lorekeeper.Composition;
+
 namespace Lorekeeper.Images;
 
 public interface IProjectImageService
@@ -14,7 +16,8 @@ public interface IProjectImageService
     Task<ProjectImageData?> GetDataAsync(Guid projectId, Guid imageId, int? maxEdge = null, CancellationToken cancellationToken = default);
     Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default);
     Task<ProjectImageView> CropAsync(Guid projectId, Guid sourceImageId, ProjectImageCropRequest request, CancellationToken cancellationToken = default);
-    Task<ProjectImageView> ResizeAsync(Guid projectId, Guid sourceImageId, ProjectImageResizeRequest request, CancellationToken cancellationToken = default);
+    /// <param name="constraints">Raster limits the resized image must satisfy, from the image model it is prepared for.</param>
+    Task<ProjectImageView> ResizeAsync(Guid projectId, ImageRasterConstraints constraints, Guid sourceImageId, ProjectImageResizeRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImagePrintUpscaleResult> EnsurePrintUpscaleAsync(
         Guid projectId,
         Guid sourceImageId,

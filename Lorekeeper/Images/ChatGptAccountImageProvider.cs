@@ -9,21 +9,28 @@ using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Images;
 
-public sealed class CodexProjectImageProvider(
+/// <summary>
+/// Generates images through a signed-in ChatGPT (Codex) account: a Responses
+/// request on the Codex backend whose chat model calls the image_generation
+/// tool. ChatGPT plan sign-in cannot serve this route.
+/// </summary>
+public sealed class ChatGptAccountImageProvider(
     ILlmProviderService providerService,
-    IOpenAiAccountService accountService,
     IHttpClientFactory httpClientFactory,
     IOptions<ProjectImageGenerationOptions> options,
-    ILogger<CodexProjectImageProvider> logger) : IProjectImageProvider
+    ILogger<ChatGptAccountImageProvider> logger) : IProjectImageProvider
 {
+    public ImageProviderKind Kind => ImageProviderKind.ChatGptAccount;
+
     public async Task<ProjectImageProviderResult> GenerateAsync(
+        ImageProvider provider,
         ProjectImageProviderGenerateRequest request,
         CancellationToken cancellationToken = default,
         IProgress<ProjectImageProviderProgress>? progress = null)
     {
-        var connection = await ResolveConnectionAsync(cancellationToken);
-        var mainlineModel = CleanModel(request.MainlineModel, options.Value.DefaultMainlineModel);
-        var imageModel = CleanModel(request.ImageModel, options.Value.DefaultImageModel);
+        var connection = await ResolveConnectionAsync(provider, cancellationToken);
+        var mainlineModel = await ResolveMainlineModelAsync(provider, connection.AccountRowId, cancellationToken);
+        var imageModel = RequireImageModel(request.ImageModel);
         var images = new List<ProjectImageProviderImage>();
         var metadata = new List<object?>();
 
@@ -43,20 +50,21 @@ public sealed class CodexProjectImageProvider(
 
         return new ProjectImageProviderResult(
             images,
-            CodexProvider.AccountProviderKey,
+            provider.Name,
             mainlineModel,
             imageModel,
             JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
     }
 
     public async Task<ProjectImageProviderResult> EditAsync(
+        ImageProvider provider,
         ProjectImageProviderEditRequest request,
         CancellationToken cancellationToken = default,
         IProgress<ProjectImageProviderProgress>? progress = null)
     {
-        var connection = await ResolveConnectionAsync(cancellationToken);
-        var mainlineModel = CleanModel(request.MainlineModel, options.Value.DefaultMainlineModel);
-        var imageModel = CleanModel(request.ImageModel, options.Value.DefaultImageModel);
+        var connection = await ResolveConnectionAsync(provider, cancellationToken);
+        var mainlineModel = await ResolveMainlineModelAsync(provider, connection.AccountRowId, cancellationToken);
+        var imageModel = RequireImageModel(request.ImageModel);
         var images = new List<ProjectImageProviderImage>();
         var metadata = new List<object?>();
 
@@ -76,26 +84,146 @@ public sealed class CodexProjectImageProvider(
 
         return new ProjectImageProviderResult(
             images,
-            CodexProvider.AccountProviderKey,
+            provider.Name,
             mainlineModel,
             imageModel,
             JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
     }
 
-    private async Task<CodexImageConnection> ResolveConnectionAsync(CancellationToken cancellationToken)
+    public async Task<ImageProviderTestResult> TestAsync(ImageProvider provider, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var connection = await ResolveConnectionAsync(provider, cancellationToken);
+            var mainlineModel = await ResolveMainlineModelAsync(provider, connection.AccountRowId, cancellationToken);
+            return new ImageProviderTestResult(true, $"The ChatGPT account is signed in. Image requests will run through {mainlineModel}.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ImageProviderTestResult(false, ex.Message);
+        }
+    }
+
+    public Task<IReadOnlyList<DiscoveredImageModel>> DiscoverModelsAsync(
+        ImageProvider provider,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(ProjectImageModelCatalog.GptImageModels);
+
+    public TimeSpan? GetRetryDelay(Exception error, int attempt)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            if (current is not ProjectImageProviderException providerError)
+                continue;
+            var imageInputLimit = providerError.ErrorKind == "codex_image_input_rate_limit";
+            if (!imageInputLimit && !ImageProviderRetryPolicy.IsTransient(providerError))
+                return null;
+            if (providerError.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero)
+                return retryAfter;
+            if (ReadMessageRetryDelay(providerError) is { } hinted)
+                return hinted;
+            return imageInputLimit || IsPerMinuteImageLimit(providerError.Message)
+                ? TimeSpan.FromSeconds(Math.Min(30, 10 * attempt))
+                : ImageProviderRetryPolicy.Backoff(attempt);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the backend's "Please try again in N s/ms" hint. Per-minute image
+    /// limits get at least ten seconds, since a shorter wait fails again.
+    /// </summary>
+    private static TimeSpan? ReadMessageRetryDelay(ProjectImageProviderException error)
+    {
+        const string marker = "Please try again in ";
+        var message = error.Message;
+        var markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        var valueStart = markerIndex + marker.Length;
+        while (valueStart < message.Length && char.IsWhiteSpace(message[valueStart]))
+            valueStart++;
+
+        var valueEnd = valueStart;
+        while (valueEnd < message.Length && (char.IsDigit(message[valueEnd]) || message[valueEnd] == '.'))
+            valueEnd++;
+
+        if (valueEnd == valueStart
+            || !double.TryParse(message[valueStart..valueEnd], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
+        {
+            return null;
+        }
+
+        var unit = message[valueEnd..].TrimStart();
+        TimeSpan delay;
+        if (unit.StartsWith("ms", StringComparison.OrdinalIgnoreCase)
+            || unit.StartsWith("millisecond", StringComparison.OrdinalIgnoreCase))
+            delay = TimeSpan.FromMilliseconds(value);
+        else if (unit.StartsWith("s", StringComparison.OrdinalIgnoreCase))
+            delay = TimeSpan.FromSeconds(value);
+        else
+            return null;
+
+        if (delay <= TimeSpan.Zero)
+            return null;
+        var minimum = IsPerMinuteImageLimit(message) ? TimeSpan.FromSeconds(10) : TimeSpan.FromMilliseconds(500);
+        return delay < minimum ? minimum : delay;
+    }
+
+    private static bool IsPerMinuteImageLimit(string message) =>
+        message.Contains("per min", StringComparison.OrdinalIgnoreCase)
+        && message.Contains("image", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<CodexImageConnection> ResolveConnectionAsync(ImageProvider provider, CancellationToken cancellationToken)
     {
         // ChatGPT plan sign-in does not permit image generation; only a Codex account can serve it.
-        var codexAccount = (await accountService.GetAllAsync(cancellationToken))
-            .FirstOrDefault(account => account.Kind == OpenAiAccountKind.Codex);
-        if (codexAccount is null)
-            throw new InvalidOperationException("No ChatGPT (Codex) account is configured. Connect it in Settings first.");
+        if (provider.OpenAiAccountId is not { } accountId)
+            throw new InvalidOperationException($"Image provider '{provider.DisplayName ?? provider.Name}' has no ChatGPT account. Choose one in Settings > Image providers.");
 
-        var access = await providerService.GetOpenAiAccountAccessAsync(codexAccount.Id, cancellationToken);
-        if (access is not { Kind: OpenAiAccountKind.Codex })
-            throw new InvalidOperationException("Connect or reauthenticate the ChatGPT (Codex) account in Settings before generating images.");
+        var access = await providerService.GetOpenAiAccountAccessAsync(accountId, cancellationToken);
+        if (access is null)
+            throw new InvalidOperationException("Connect or reauthenticate the ChatGPT (Codex) account in Settings > Providers before generating images.");
+        if (access.Kind != OpenAiAccountKind.Codex)
+            throw new InvalidOperationException("ChatGPT plan sign-in cannot generate images. Choose the ChatGPT (Codex) account in Settings > Image providers.");
 
-        return new CodexImageConnection(access.AccessToken, access.ExternalAccountId);
+        return new CodexImageConnection(accountId, access.AccessToken, access.ExternalAccountId);
     }
+
+    /// <summary>
+    /// The chat model that hosts the image tool: the provider's explicit choice,
+    /// else the account's best model that its plan offers. A Go plan, for
+    /// example, lacks Sol, so a fixed default would fail there.
+    /// </summary>
+    private async Task<string> ResolveMainlineModelAsync(ImageProvider provider, int accountId, CancellationToken cancellationToken)
+    {
+        var accountModels = (await providerService.GetAllAsync(cancellationToken))
+            .Where(model => model.OpenAiAccountId == accountId)
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(provider.MainlineModelId))
+        {
+            var chosen = provider.MainlineModelId.Trim();
+            if (accountModels.Any(model => model.ModelId == chosen && model.AccountAvailability == LlmAccountModelAvailability.Unavailable))
+                throw new InvalidOperationException($"The image host model {chosen} isn't available on this ChatGPT plan. Choose another model in Settings > Image providers.");
+            return chosen;
+        }
+
+        var best = OpenAiAccountModelCatalog.BestAvailable(accountModels)
+            ?? accountModels
+                .Where(OpenAiAccountModelCatalog.IsAccountListed)
+                .Where(model => model.AccountAvailability != LlmAccountModelAvailability.Unavailable)
+                .OrderByDescending(model => model.IsDefault)
+                .ThenBy(model => model.Id)
+                .FirstOrDefault();
+        return best?.ModelId
+            ?? throw new InvalidOperationException("No chat model on this ChatGPT account can host image generation. Refresh models in Settings > Providers.");
+    }
+
+    private static string RequireImageModel(string imageModel) =>
+        string.IsNullOrWhiteSpace(imageModel)
+            ? throw new ArgumentException("An image model is required.", nameof(imageModel))
+            : imageModel.Trim();
 
     private async Task<CodexImageReadResult> SendImageRequestAsync(
         CodexImageConnection connection,
@@ -555,9 +683,6 @@ public sealed class CodexProjectImageProvider(
     private static string ToDataUrl(ProjectImageProviderReference reference) =>
         DataUrl.ToDataUrl(reference.ContentType, reference.Data);
 
-    private static string CleanModel(string? requested, string fallback) =>
-        string.IsNullOrWhiteSpace(requested) ? fallback : requested.Trim();
-
     private static string NormalizeOutputFormat(string value) =>
         value.Trim().ToLowerInvariant() switch
         {
@@ -761,7 +886,7 @@ public sealed class CodexProjectImageProvider(
 
     private sealed record ImageProviderError(string Message, string? Code, string? Type);
 
-    private sealed record CodexImageConnection(string Token, string AccountId);
+    private sealed record CodexImageConnection(int AccountRowId, string Token, string AccountId);
 
     private sealed record CodexImageReadResult(ProjectImageProviderImage Image, object Metadata);
 }

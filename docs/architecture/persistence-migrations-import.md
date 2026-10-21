@@ -181,6 +181,15 @@ migrated credential lacking that identity from transient refresh failure. A
 reconnect does not overwrite the current `OAuthToken` row until its single-use
 flow commits; terminal refresh failures retain the row, while explicit
 disconnect removes it.
+`ImageProvider` and `ImageProviderModel` rows are provider configuration under
+the same boundary: an image provider's API key stays on its row, and the ChatGPT
+account kind references its `OpenAiAccount` (restrict on delete) instead of
+copying tokens. They are never exported or versioned. The image-providers
+forward migration creates a default `chatgpt-account` provider with the bundled
+GPT Image models only when a Codex account already holds a token, and points
+every existing image job at it; otherwise no provider is created and image work
+waits for explicit configuration. Its downgrade drops the provider tables and
+the job column.
 The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into
@@ -564,6 +573,9 @@ Image-generation jobs now persist normalized model, quality, output format,
 compression, and `Background` settings before provider dispatch. The forward
 background migration assigns existing jobs `auto` and preserves their audit
 history; provider-reported model and quality remain separate result provenance.
+Jobs also keep a soft `ImageProviderId` (no foreign key or cascade) beside the
+non-secret `Provider` label, so deleting a provider leaves history intact and
+fails only its unfinished jobs.
 
 The cover-description forward migration rewrites persisted primary and
 exact-surface scene bindings to `description`, then drops the obsolete

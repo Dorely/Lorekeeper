@@ -42,8 +42,10 @@ public interface IDesignedPageService
     Task<DesignedPageWorkspaceMutationResult> ApplyWorkspaceStageAsync(EditorContentTarget target, Guid projectId, Guid conversationId, Guid stageId, long expectedContentRevision, CancellationToken cancellationToken = default);
     Task<CompositionEditionGeometry> GetEditionGeometryAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<CompositionEditionGeometry> GetAuthoringGeometryAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(Guid projectId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
-    Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
+    /// <param name="constraints">Raster limits of the image model the target is described for.</param>
+    Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(Guid projectId, ImageRasterConstraints constraints, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
+    /// <param name="constraints">Raster limits of the image model the target is described for.</param>
+    Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(Guid projectId, ImageRasterConstraints constraints, Guid editionId, string targetKind, Guid targetId, Guid? variantId = null, CancellationToken cancellationToken = default, CompositionBounds? surfaceBounds = null);
     Task<LayoutValidationView> ValidateAuthoringVariantAsync(Guid projectId, Guid variantId, CancellationToken cancellationToken = default);
     Task<LayoutValidationView> ValidateVariantAsync(Guid projectId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
     Task<DesignedPagePlacementMutationResult> PlaceAsync(EditorContentTarget target, Guid projectId, Guid pageId, DesignedPageContainer container, int blockIndex, long expectedRevision, string? placementId = null, CancellationToken cancellationToken = default);
@@ -1832,6 +1834,7 @@ public sealed class DesignedPageService(
 
     public async Task<LayoutGenerationTargetDescriptor> DescribeGenerationTargetAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         Guid editionId,
         string targetKind,
         Guid targetId,
@@ -1857,8 +1860,8 @@ public sealed class DesignedPageService(
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var pixelsPerInch = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? 300 : 180;
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var requestedRaster = ResolveRasterOrUnsupported(width, height);
-        var recommendedRaster = ResolveNearestRasterOrUnsupported(width * pixelsPerInch, height * pixelsPerInch);
+        var requestedRaster = ResolveRasterOrUnsupported(constraints, width, height);
+        var recommendedRaster = ResolveNearestRasterOrUnsupported(constraints, width * pixelsPerInch, height * pixelsPerInch);
         var geometryFingerprint = TargetGeometryFingerprint(
             edition,
             normalizedKind,
@@ -1885,11 +1888,12 @@ public sealed class DesignedPageService(
             pixelsPerInch,
             regions,
             diagnostics);
-        return ApplySurfaceBounds(descriptor, normalizedKind, surfaceBounds);
+        return ApplySurfaceBounds(constraints, descriptor, normalizedKind, surfaceBounds);
     }
 
     public async Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         string targetKind,
         Guid targetId,
         Guid? variantId = null,
@@ -1920,8 +1924,8 @@ public sealed class DesignedPageService(
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var requestedRaster = ResolveRasterOrUnsupported(width, height);
-        var recommendedRaster = ResolveNearestRasterOrUnsupported(width * 300, height * 300);
+        var requestedRaster = ResolveRasterOrUnsupported(constraints, width, height);
+        var recommendedRaster = ResolveNearestRasterOrUnsupported(constraints, width * 300, height * 300);
         var fingerprint = TargetGeometryFingerprint(
             $"project:{setup.Revision}:{setup.PageWidthInches:F4}:{setup.PageHeightInches:F4}:{setup.PageMarginInches:F4}",
             normalizedKind,
@@ -1948,7 +1952,7 @@ public sealed class DesignedPageService(
             300,
             regions,
             diagnostics);
-        return ApplySurfaceBounds(descriptor, normalizedKind, surfaceBounds);
+        return ApplySurfaceBounds(constraints, descriptor, normalizedKind, surfaceBounds);
     }
 
     public async Task<CompositionEditionGeometry> GetEditionGeometryAsync(
@@ -2366,6 +2370,7 @@ public sealed class DesignedPageService(
     }
 
     private static LayoutGenerationTargetDescriptor ApplySurfaceBounds(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor descriptor,
         string normalizedTargetKind,
         CompositionBounds? surfaceBounds)
@@ -2378,8 +2383,9 @@ public sealed class DesignedPageService(
         ValidateSurfaceBounds(surfaceBounds);
         var width = descriptor.WidthInches * surfaceBounds.WidthPercent / 100;
         var height = descriptor.HeightInches * surfaceBounds.HeightPercent / 100;
-        var requestedRaster = ResolveRasterOrUnsupported(width, height);
+        var requestedRaster = ResolveRasterOrUnsupported(constraints, width, height);
         var recommendedRaster = ResolveNearestRasterOrUnsupported(
+            constraints,
             width * descriptor.EffectiveDpiExpectation,
             height * descriptor.EffectiveDpiExpectation);
         var regions = descriptor.Regions
@@ -2412,15 +2418,15 @@ public sealed class DesignedPageService(
         };
     }
 
-    private static LayoutImageSize ResolveRasterOrUnsupported(double width, double height)
+    private static LayoutImageSize ResolveRasterOrUnsupported(ImageRasterConstraints constraints, double width, double height)
     {
-        try { return LayoutImageSizeResolver.Resolve(width, height); }
+        try { return LayoutImageSizeResolver.Resolve(constraints, width, height); }
         catch (ArgumentException) { return new LayoutImageSize(0, 0); }
     }
 
-    private static LayoutImageSize ResolveNearestRasterOrUnsupported(double widthPixels, double heightPixels)
+    private static LayoutImageSize ResolveNearestRasterOrUnsupported(ImageRasterConstraints constraints, double widthPixels, double heightPixels)
     {
-        try { return LayoutImageSizeResolver.ResolveNearest(widthPixels, heightPixels); }
+        try { return LayoutImageSizeResolver.ResolveNearest(constraints, widthPixels, heightPixels); }
         catch (ArgumentException) { return new LayoutImageSize(0, 0); }
     }
 

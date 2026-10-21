@@ -156,7 +156,8 @@ public sealed record ProjectImageGenerateJobRequest(
     string? ReferenceManifestJson = null,
     string? TargetGeometryJson = null,
     string? ImageModel = null,
-    string Background = "auto");
+    string Background = "auto",
+    int? ImageProviderId = null);
 
 public sealed record ProjectImageEditJobRequest(
     Guid SourceImageId,
@@ -177,7 +178,8 @@ public sealed record ProjectImageEditJobRequest(
     string? ReferenceManifestJson = null,
     string? TargetGeometryJson = null,
     string? ImageModel = null,
-    string Background = "auto");
+    string Background = "auto",
+    int? ImageProviderId = null);
 
 public sealed record ProjectImageJobView(
     Guid Id,
@@ -254,7 +256,6 @@ public sealed record ProjectImageProviderGenerateRequest(
     string Prompt,
     string Size,
     int Count,
-    string MainlineModel,
     string ImageModel,
     IReadOnlyList<ProjectImageProviderReference> ReferenceImages,
     string OutputFormat,
@@ -266,7 +267,6 @@ public sealed record ProjectImageProviderEditRequest(
     string Prompt,
     string Size,
     int Count,
-    string MainlineModel,
     string ImageModel,
     ProjectImageProviderReference SourceImage,
     ProjectImageProviderReference? Mask,

@@ -338,25 +338,6 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         return provider is not null && await IsVisionProviderWorkingAsync(provider, cancellationToken);
     }
 
-    public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
-    {
-        var accountKinds = await GetAccountKindsAsync(cancellationToken);
-        var provider = (await GetAllAsync(cancellationToken)).FirstOrDefault(candidate =>
-            candidate.OpenAiAccountId is int candidateAccountId
-            && accountKinds.GetValueOrDefault(candidateAccountId) == OpenAiAccountKind.Codex);
-        if (provider?.OpenAiAccountId is not int accountId)
-            return false;
-
-        try
-        {
-            return await accountTokens.GetValidAccessAsync(accountId, cancellationToken) is not null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     public async Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
         ValidateProvider(provider);

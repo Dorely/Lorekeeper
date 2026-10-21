@@ -30,15 +30,17 @@ public sealed class ImagesChatTools(
     IChapterSemanticProjectionService semanticProjection,
     IBookBriefService bookBriefs,
     IOptions<ProjectImageGenerationOptions> imageOptions,
-    IOptions<EditorChatOptions> editorOptions)
+    IOptions<EditorChatOptions> editorOptions,
+    IImageProviderService imageProviders)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false,
     };
 
-    public Task<IList<AITool>> BuildAsync(ImagesChatToolContext context, CancellationToken cancellationToken = default)
+    public async Task<IList<AITool>> BuildAsync(ImagesChatToolContext context, CancellationToken cancellationToken = default)
     {
+        var imageGuidance = await imageProviders.GetToolGuidanceAsync(cancellationToken);
         IList<AITool> tools =
         [
             AIFunctionFactory.Create(
@@ -146,13 +148,13 @@ public sealed class ImagesChatTools(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
                     GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
                 name: "generate_project_image",
-                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect the result before promoting it; publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect the result before promoting it; publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + imageGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
                     EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content; use the latest accepted source image and reconstruct credible detail without cropping, zooming out, or inventing surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect it before promoting it. Publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + ProjectImageModelCatalog.ToolParameterGuidance),
+                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content; use the latest accepted source image and reconstruct credible detail without cropping, zooming out, or inventing surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect it before promoting it. Publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + imageGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -170,7 +172,7 @@ public sealed class ImagesChatTools(
                 description: "Cancel a previously started project-image generation or edit job."),
         ];
 
-        return Task.FromResult(tools);
+        return tools;
     }
 
     private async Task<string> ListSearchSourcesAsync(ImagesChatToolContext ctx, string? query, string[]? sourceTypes, int topK)
@@ -642,8 +644,10 @@ public sealed class ImagesChatTools(
     {
         try
         {
+            var constraints = (await imageProviders.ResolveAsync(cancellationToken: ctx.TurnCancellationToken)).Constraints;
             var image = await projectImages.ResizeAsync(
                 ctx.ProjectId,
+                constraints,
                 sourceImageId,
                 new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
                 ctx.TurnCancellationToken);
@@ -702,15 +706,7 @@ public sealed class ImagesChatTools(
                 : new { widthPixels = (int?)exception.MaximumRaster.Width, heightPixels = (int?)exception.MaximumRaster.Height, size = exception.MaximumRaster.Size },
             maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
             bindingProviderLimits = exception.Resolution.BindingProviderLimits,
-            providerConstraints = new
-            {
-                sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
-                minimumPixels = LayoutImageSizeResolver.MinimumPixels,
-                maximumPixels = LayoutImageSizeResolver.MaximumPixels,
-                maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
-                minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
-                maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-            },
+            providerConstraints = exception.Resolution.Constraints.ToToolPayload(),
             splitSuggestions = exception.SplitSuggestions.Select(suggestion => new
             {
                 rows = suggestion.Rows,

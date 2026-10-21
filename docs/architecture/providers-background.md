@@ -116,9 +116,11 @@ output budget and, after chat succeeds, a non-blocking vision probe. Saving is
 gated on chat success only. A failed vision probe persists or presents a warning
 without converting a working chat connection into a failure. Shared error helpers
 extract concise provider detail rather than exposing raw response bodies.
-Direct OpenAI presets and OpenAI-account chat, vision, and image-mainline
-fallbacks use `gpt-6-sol` as the code-owned default; existing persisted model
-selections remain authoritative until the user changes them.
+Direct OpenAI presets and OpenAI-account chat and vision fallbacks use
+`gpt-6-sol` as the code-owned default; existing persisted model selections
+remain authoritative until the user changes them. The ChatGPT-account image
+route never assumes that default: it uses the image provider's chosen host model
+or the account's best model its plan offers.
 
 Bundled account rows need valid account credentials and catalog-valid settings,
 but they do not require a manual chat or vision Test. Manual account rows retain
@@ -411,11 +413,38 @@ private-network blocking, four-second host delay plus jitter, robots enforcement
 retry/cooldown behavior, and model-visible link/page limits. Relaxing those values
 is a security and external-service behavior change, not a UI-only adjustment.
 
+### Image providers
+
+Image connections are configured separately from chat providers, under
+Settings > Image providers. `ImageProvider` rows hold any number of connections
+with exactly one default; each owns `ImageProviderModel` rows carrying the
+model's qualities, output formats, capability flags (generate, edit, regional
+guide, reference limit, transparency, streaming), and `ImageRasterConstraints`.
+Kinds are the ChatGPT (Codex) account, which borrows that account's OAuth tokens
+through `OpenAiAccountId` and never copies them onto the row; OpenRouter; and an
+OpenAI Images-compatible endpoint. ChatGPT plan sign-in is never offered for
+images because that route rejects image generation. API keys stay on the
+provider row and never enter tool payloads, job provenance, or logs.
+Settings offers only kinds whose adapter is registered with
+`IImageProviderClientFactory`.
+
+`IImageProviderService.ResolveAsync(providerId?, modelId?)` is the single
+resolution boundary: a null provider means the default, a null model means that
+provider's default model, and readiness is decided from stored state without a
+network call. Pickers list every ready provider's models; assistant tools always
+use the default provider and may name one of its models. Capability errors (a
+regional guide on a model without one, too many references, transparency
+without support) fail before any durable job. A job stamps its
+`ImageProviderId` and never falls back to another provider; a deleted or
+unready provider fails the job with the reason. `TestAsync` checks an unsaved
+provider through account access or a model listing, never a billed generation.
+
 ### Image provider transport
 
-Project image generation and editing use `IProjectImageProvider`; the current
-Codex implementation supports account-backed Responses image generation,
-source-driven edits, optional soft regional guides for narrowly localized or
+Project image generation and editing use `IProjectImageProvider` adapters keyed
+by kind; each adapter receives the resolved provider row and owns its retry
+policy. The ChatGPT account adapter supports account-backed Responses image
+generation, source-driven edits, optional soft regional guides for narrowly localized or
 otherwise hard-to-describe work, streamed partial images, explicit generate/edit
 actions, continuity references, and source-image edit semantics. A guide is
 prompt guidance rather than a provider-enforced pixel boundary, so the provider
@@ -425,8 +454,8 @@ images, geometry targets, assets, and deletion guards belongs to
 [Composition and media](composition-media.md).
 The provider transport accepts pixel dimensions, not physical DPI. Lorekeeper
 resolves effective-DPI requests against server-owned physical geometry before
-dispatch, enforcing the provider's 16-pixel alignment, edge, megapixel, and
-aspect limits. An infeasible request fails before any durable job or provider
+dispatch, enforcing the selected model's raster constraints (for the GPT Image
+models: 16-pixel alignment, edge, megapixel, and aspect limits). An infeasible request fails before any durable job or provider
 call; no density metadata is fabricated in the image file.
 
 Regional-guided dispatch revalidates the source, compiled geometry, and mask
@@ -596,8 +625,9 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`Lorekeeper/Llm/EmbeddingRebuild*`](../../Lorekeeper/Llm/) | Versioned/coalesced rebuild queue, hosted worker, scoped bulk index rebuild, throttling, retry, and cancellation. |
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
-| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`CodexProjectImageProvider.cs`](../../Lorekeeper/Images/CodexProjectImageProvider.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Image provider abstraction/adapter and singleton FIFO execution with regional-guide input normalization, previews, cancellation, and terminal waiters. |
-| [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | Code-owned image model IDs, supported quality levels, and request normalization for model, background, output format, and compression. |
+| [`Lorekeeper/Images/IImageProviderService.cs`](../../Lorekeeper/Images/IImageProviderService.cs), [`ImageProviderService.cs`](../../Lorekeeper/Images/ImageProviderService.cs), and [`Lorekeeper/Composition/ImageRasterConstraints.cs`](../../Lorekeeper/Composition/ImageRasterConstraints.cs) | Image-provider configuration, single-default invariants, stored-state readiness, provider/model resolution, assistant tool guidance, and per-model raster limits. |
+| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account adapter, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | The bundled GPT Image model set and request normalization of quality, background, output format, and compression against the resolved model's capabilities. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 
 ## Related chapters

@@ -23,6 +23,7 @@ public sealed record LayoutImageDpiResolution(
     LayoutImageSize? MaximumRaster,
     IReadOnlyList<string> BindingProviderLimits,
     IReadOnlyList<LayoutImagePanelSuggestion> PanelSuggestions,
+    [property: System.Text.Json.Serialization.JsonIgnore] ImageRasterConstraints Constraints,
     LayoutPrintUpscalePlan? PrintUpscalePlan = null)
 {
     public bool MeetsMinimumDpi => Raster is not null;
@@ -55,15 +56,13 @@ public sealed record LayoutImagePanel(
     LayoutImageSize Raster,
     double EffectiveDpi);
 
+/// <summary>
+/// Derives provider-valid output rasters for physical targets. Every provider
+/// rule (alignment, pixel window, edge and aspect caps) comes from the
+/// <see cref="ImageRasterConstraints"/> of the image model that will run.
+/// </summary>
 public static class LayoutImageSizeResolver
 {
-    public const int SizeMultiple = 16;
-    public const int MinimumPixels = 655_360;
-    public const int MaximumPixels = 8_294_400;
-    public const int MaximumEdge = 3840;
-    public const int TargetPixels = 1_572_864;
-    public const double MaximumAspectRatio = 3d;
-
     public const double PreferredAspectError = .001d;
     private const double ExactAspectError = 1e-10;
     private const double RasterIntegerTolerance = 1e-9;
@@ -98,16 +97,20 @@ public static class LayoutImageSizeResolver
         return (width, height);
     }
 
-    public static LayoutImageSize Resolve(double width, double height)
+    public static LayoutImageSize Resolve(ImageRasterConstraints constraints, double width, double height)
     {
         if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
             throw new ArgumentException("Image target dimensions must be finite positive values.");
 
-        return ResolveAspect(width / height);
+        return ResolveAspect(constraints, width / height);
     }
 
-    public static LayoutImageSize ResolveNearest(double desiredWidthPixels, double desiredHeightPixels)
+    public static LayoutImageSize ResolveNearest(
+        ImageRasterConstraints constraints,
+        double desiredWidthPixels,
+        double desiredHeightPixels)
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         if (!double.IsFinite(desiredWidthPixels)
             || !double.IsFinite(desiredHeightPixels)
             || desiredWidthPixels <= 0
@@ -115,34 +118,21 @@ public static class LayoutImageSizeResolver
             throw new ArgumentException("Desired image pixels must be finite positive values.");
 
         var aspect = desiredWidthPixels / desiredHeightPixels;
-        if (aspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
-            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.", nameof(desiredWidthPixels));
+        if (!constraints.AspectInRange(aspect))
+            throw new ArgumentException($"Image aspect ratio must be between {constraints.AspectRangeLabel}.", nameof(desiredWidthPixels));
 
         var candidates = new List<Candidate>();
-        for (var width = SizeMultiple; width <= MaximumEdge; width += SizeMultiple)
+        foreach (var (width, height) in EnumerateRasters(constraints, aspect))
         {
-            var idealHeight = width / aspect;
-            var nearestHeight = (int)Math.Round(idealHeight / SizeMultiple) * SizeMultiple;
-            for (var offset = -1; offset <= 1; offset++)
-            {
-                var height = nearestHeight + offset * SizeMultiple;
-                if (height is <= 0 or > MaximumEdge)
-                    continue;
+            var actualAspect = (double)width / height;
+            var aspectError = Math.Abs(Math.Log(actualAspect / aspect));
+            if (aspectError > PreferredAspectError)
+                continue;
 
-                var pixels = (long)width * height;
-                if (pixels is < MinimumPixels or > MaximumPixels)
-                    continue;
-
-                var actualAspect = (double)width / height;
-                var aspectError = Math.Abs(Math.Log(actualAspect / aspect));
-                if (aspectError > PreferredAspectError)
-                    continue;
-
-                var distance = (long)Math.Round(
-                    Math.Pow(width - desiredWidthPixels, 2)
-                    + Math.Pow(height - desiredHeightPixels, 2));
-                candidates.Add(new Candidate(width, height, aspectError, distance));
-            }
+            var distance = (long)Math.Round(
+                Math.Pow(width - desiredWidthPixels, 2)
+                + Math.Pow(height - desiredHeightPixels, 2));
+            candidates.Add(new Candidate(width, height, aspectError, distance));
         }
 
         if (candidates.Count == 0)
@@ -164,38 +154,24 @@ public static class LayoutImageSizeResolver
         && targetAspect > 0
         && Math.Abs(Math.Log(actualAspect / targetAspect)) <= PreferredAspectError;
 
-    public static LayoutImageSize ResolveAspect(double aspect)
+    public static LayoutImageSize ResolveAspect(ImageRasterConstraints constraints, double aspect)
     {
-        if (!double.IsFinite(aspect)
-            || aspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
-        {
-            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.", nameof(aspect));
-        }
+        ArgumentNullException.ThrowIfNull(constraints);
+        if (!constraints.AspectInRange(aspect))
+            throw new ArgumentException($"Image aspect ratio must be between {constraints.AspectRangeLabel}.", nameof(aspect));
 
         var candidates = new List<Candidate>();
-        for (var width = SizeMultiple; width <= MaximumEdge; width += SizeMultiple)
+        foreach (var (width, height) in EnumerateRasters(constraints, aspect))
         {
-            var idealHeight = width / aspect;
-            var nearestHeight = (int)Math.Round(idealHeight / SizeMultiple) * SizeMultiple;
-            for (var offset = -1; offset <= 1; offset++)
-            {
-                var height = nearestHeight + offset * SizeMultiple;
-                if (height is <= 0 or > MaximumEdge)
-                    continue;
+            var actualAspect = (double)width / height;
+            if (!constraints.AspectInRange(actualAspect))
+                continue;
 
-                var pixels = (long)width * height;
-                if (pixels is < MinimumPixels or > MaximumPixels)
-                    continue;
-                var actualAspect = (double)width / height;
-                if (actualAspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
-                    continue;
-
-                candidates.Add(new Candidate(
-                    width,
-                    height,
-                    Math.Abs(Math.Log(actualAspect / aspect)),
-                    Math.Abs(pixels - TargetPixels)));
-            }
+            candidates.Add(new Candidate(
+                width,
+                height,
+                Math.Abs(Math.Log(actualAspect / aspect)),
+                Math.Abs((long)width * height - constraints.TargetPixels)));
         }
 
         if (candidates.Count == 0)
@@ -214,40 +190,44 @@ public static class LayoutImageSizeResolver
     }
 
     public static LayoutImageDpiResolution ResolveMinimumDpi(
+        ImageRasterConstraints constraints,
         double widthInches,
         double heightInches,
         double minimumDpi)
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         ValidatePhysicalDimensions(widthInches, heightInches);
         ValidateMinimumDpi(minimumDpi);
 
-        var full = ResolveMinimumDpiCore(widthInches, heightInches, minimumDpi);
+        var full = ResolveMinimumDpiCore(constraints, widthInches, heightInches, minimumDpi);
         if (full.Raster is not null)
             return full with { PanelSuggestions = [] };
 
-        var suggestions = BuildPanelSuggestions(widthInches, heightInches, minimumDpi);
+        var suggestions = BuildPanelSuggestions(constraints, widthInches, heightInches, minimumDpi);
         return full with { PanelSuggestions = suggestions };
     }
 
     public static LayoutImageDpiResolution ResolveFillMinimumDpi(
+        ImageRasterConstraints constraints,
         double widthInches,
         double heightInches,
         double minimumDpi)
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         ValidatePhysicalDimensions(widthInches, heightInches);
         ValidateMinimumDpi(minimumDpi);
 
         var targetAspect = widthInches / heightInches;
-        var providerAspect = Math.Clamp(targetAspect, 1d / MaximumAspectRatio, MaximumAspectRatio);
-        var compatible = BuildAspectCompatibleSizes(providerAspect, useNearestAspectFallback: true)
+        var providerAspect = Math.Clamp(targetAspect, constraints.MinimumAspectRatio, constraints.MaximumAspectRatio);
+        var compatible = BuildAspectCompatibleSizes(constraints, providerAspect, useNearestAspectFallback: true)
             .Select(size => new CandidateWithDpi(
                 size,
                 Math.Min(size.Width / widthInches, size.Height / heightInches),
                 Math.Abs(Math.Log(((double)size.Width / size.Height) / providerAspect))))
             .ToList();
         var requiredRaster = new LayoutImageRequiredRaster(
-            RoundUpToMultiple(widthInches * minimumDpi),
-            RoundUpToMultiple(heightInches * minimumDpi));
+            RoundUpToMultiple(widthInches * minimumDpi, constraints.SizeMultiple),
+            RoundUpToMultiple(heightInches * minimumDpi, constraints.SizeMultiple));
         var maximum = compatible
             .OrderByDescending(candidate => candidate.EffectiveDpi)
             .ThenBy(candidate => candidate.AspectError)
@@ -291,8 +271,9 @@ public static class LayoutImageSizeResolver
             raster,
             maximum?.EffectiveDpi ?? 0,
             maximum?.Size,
-            ResolveBindingProviderLimits(targetAspect, requiredRaster, raster, maximum),
+            ResolveBindingProviderLimits(constraints, targetAspect, requiredRaster, raster, maximum),
             [],
+            constraints,
             printUpscalePlan);
     }
 
@@ -300,7 +281,7 @@ public static class LayoutImageSizeResolver
     {
         ValidatePhysicalDimensions(widthInches, heightInches);
         ArgumentNullException.ThrowIfNull(raster);
-        Validate(raster.Width, raster.Height);
+        ValidatePositiveRaster(raster);
         return Math.Min(raster.Width / widthInches, raster.Height / heightInches);
     }
 
@@ -396,13 +377,24 @@ public static class LayoutImageSizeResolver
             }).ToList(),
         }).ToList();
 
+    /// <summary>Parses a WIDTHxHEIGHT raster with positive edges; provider limits are checked by <see cref="Validate"/>.</summary>
     public static LayoutImageSize Parse(string size)
     {
         var parts = size.Trim().ToLowerInvariant().Split('x', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 || !int.TryParse(parts[0], out var width) || !int.TryParse(parts[1], out var height))
-            throw new ArgumentException("Image size must be WIDTHxHEIGHT.", nameof(size));
-        Validate(width, height);
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var width)
+            || !int.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var height)
+            || width <= 0
+            || height <= 0)
+            throw new ArgumentException("Image size must be WIDTHxHEIGHT with positive pixel edges.", nameof(size));
         return new LayoutImageSize(width, height);
+    }
+
+    public static LayoutImageSize ParseValid(ImageRasterConstraints constraints, string size)
+    {
+        var parsed = Parse(size);
+        Validate(constraints, parsed.Width, parsed.Height);
+        return parsed;
     }
 
     public static bool TryParse(string? size, out LayoutImageSize result)
@@ -419,18 +411,19 @@ public static class LayoutImageSizeResolver
         }
     }
 
-    public static void Validate(int width, int height)
+    public static void Validate(ImageRasterConstraints constraints, int width, int height)
     {
-        if (width <= 0 || height <= 0 || width % SizeMultiple != 0 || height % SizeMultiple != 0)
-            throw new ArgumentException($"Image width and height must be positive and divisible by {SizeMultiple}.");
-        if (width > MaximumEdge || height > MaximumEdge)
-            throw new ArgumentException($"Image edges cannot exceed {MaximumEdge} pixels.");
+        ArgumentNullException.ThrowIfNull(constraints);
+        var multiple = constraints.SizeMultiple;
+        if (width <= 0 || height <= 0 || width % multiple != 0 || height % multiple != 0)
+            throw new ArgumentException($"Image width and height must be positive and divisible by {multiple}.");
+        if (width > constraints.MaximumEdge || height > constraints.MaximumEdge)
+            throw new ArgumentException($"Image edges cannot exceed {constraints.MaximumEdge} pixels.");
         var pixels = (long)width * height;
-        if (pixels is < MinimumPixels or > MaximumPixels)
-            throw new ArgumentException($"Image size must contain {MinimumPixels:N0}-{MaximumPixels:N0} pixels.");
-        var aspect = (double)width / height;
-        if (aspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
-            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.");
+        if (pixels < constraints.MinimumPixels || pixels > constraints.MaximumPixels)
+            throw new ArgumentException($"Image size must contain {constraints.MinimumPixels:N0}-{constraints.MaximumPixels:N0} pixels.");
+        if (!constraints.AspectInRange((double)width / height))
+            throw new ArgumentException($"Image aspect ratio must be between {constraints.AspectRangeLabel}.");
     }
 
     public static void ValidatePhysicalDimensions(double widthInches, double heightInches)
@@ -447,20 +440,21 @@ public static class LayoutImageSizeResolver
     }
 
     private static LayoutImageDpiResolution ResolveMinimumDpiCore(
+        ImageRasterConstraints constraints,
         double widthInches,
         double heightInches,
         double minimumDpi)
     {
         var aspect = widthInches / heightInches;
-        var compatible = BuildAspectCompatibleSizes(aspect)
+        var compatible = BuildAspectCompatibleSizes(constraints, aspect)
             .Select(size => new CandidateWithDpi(
                 size,
                 Math.Min(size.Width / widthInches, size.Height / heightInches),
                 Math.Abs(Math.Log(((double)size.Width / size.Height) / aspect))))
             .ToList();
         var requiredRaster = new LayoutImageRequiredRaster(
-            RoundUpToMultiple(widthInches * minimumDpi),
-            RoundUpToMultiple(heightInches * minimumDpi));
+            RoundUpToMultiple(widthInches * minimumDpi, constraints.SizeMultiple),
+            RoundUpToMultiple(heightInches * minimumDpi, constraints.SizeMultiple));
         var maximum = compatible
             .OrderByDescending(candidate => candidate.EffectiveDpi)
             .ThenBy(candidate => candidate.AspectError)
@@ -477,7 +471,7 @@ public static class LayoutImageSizeResolver
             .ThenBy(candidate => candidate.Size.Height)
             .Select(candidate => candidate.Size)
             .FirstOrDefault();
-        var bindingProviderLimits = ResolveBindingProviderLimits(aspect, requiredRaster, raster, maximum);
+        var bindingProviderLimits = ResolveBindingProviderLimits(constraints, aspect, requiredRaster, raster, maximum);
         LayoutPrintUpscalePlan? printUpscalePlan = null;
         if (raster is null && maximum is not null)
         {
@@ -505,10 +499,12 @@ public static class LayoutImageSizeResolver
             maximum?.Size,
             bindingProviderLimits,
             [],
+            constraints,
             printUpscalePlan);
     }
 
     private static IReadOnlyList<string> ResolveBindingProviderLimits(
+        ImageRasterConstraints constraints,
         double aspect,
         LayoutImageRequiredRaster requiredRaster,
         LayoutImageSize? raster,
@@ -518,11 +514,11 @@ public static class LayoutImageSizeResolver
             return [];
 
         var limits = new List<string>();
-        if (aspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
+        if (!constraints.AspectInRange(aspect))
             limits.Add("aspect_ratio");
-        if (requiredRaster.Width > MaximumEdge || requiredRaster.Height > MaximumEdge)
+        if (requiredRaster.Width > constraints.MaximumEdge || requiredRaster.Height > constraints.MaximumEdge)
             limits.Add("maximum_edge");
-        if (requiredRaster.Width > MaximumPixels / requiredRaster.Height)
+        if (requiredRaster.Width > constraints.MaximumPixels / requiredRaster.Height)
             limits.Add("maximum_pixels");
         if (limits.Count == 0 && maximum is null)
             limits.Add("size_alignment_or_aspect_tolerance");
@@ -530,6 +526,7 @@ public static class LayoutImageSizeResolver
     }
 
     private static IReadOnlyList<LayoutImagePanelSuggestion> BuildPanelSuggestions(
+        ImageRasterConstraints constraints,
         double widthInches,
         double heightInches,
         double minimumDpi)
@@ -541,7 +538,7 @@ public static class LayoutImageSizeResolver
             {
                 var panelWidth = widthInches / columns;
                 var panelHeight = heightInches / rows;
-                var panel = ResolveMinimumDpiCore(panelWidth, panelHeight, minimumDpi);
+                var panel = ResolveMinimumDpiCore(constraints, panelWidth, panelHeight, minimumDpi);
                 if (panel.Raster is null)
                     continue;
 
@@ -583,28 +580,19 @@ public static class LayoutImageSizeResolver
     }
 
     private static IReadOnlyList<LayoutImageSize> BuildAspectCompatibleSizes(
+        ImageRasterConstraints constraints,
         double aspect,
         bool useNearestAspectFallback = false)
     {
         var candidates = new List<(LayoutImageSize Size, double AspectError)>();
-        for (var width = SizeMultiple; width <= MaximumEdge; width += SizeMultiple)
+        foreach (var (width, height) in EnumerateRasters(constraints, aspect))
         {
-            var nearestHeight = (int)Math.Round(width / aspect / SizeMultiple) * SizeMultiple;
-            for (var offset = -1; offset <= 1; offset++)
-            {
-                var height = nearestHeight + offset * SizeMultiple;
-                if (height is <= 0 or > MaximumEdge)
-                    continue;
-                var pixels = (long)width * height;
-                if (pixels is < MinimumPixels or > MaximumPixels)
-                    continue;
-                var actualAspect = (double)width / height;
-                if (actualAspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
-                    continue;
-                candidates.Add((
-                    new LayoutImageSize(width, height),
-                    Math.Abs(Math.Log(actualAspect / aspect))));
-            }
+            var actualAspect = (double)width / height;
+            if (!constraints.AspectInRange(actualAspect))
+                continue;
+            candidates.Add((
+                new LayoutImageSize(width, height),
+                Math.Abs(Math.Log(actualAspect / aspect))));
         }
 
         var compatible = candidates
@@ -621,18 +609,41 @@ public static class LayoutImageSizeResolver
             .ToList();
     }
 
+    /// <summary>
+    /// Yields every aligned raster within the edge and pixel limits whose height
+    /// is one of the three aligned heights nearest the requested aspect at each width.
+    /// </summary>
+    private static IEnumerable<(int Width, int Height)> EnumerateRasters(ImageRasterConstraints constraints, double aspect)
+    {
+        var multiple = constraints.SizeMultiple;
+        for (var width = multiple; width <= constraints.MaximumEdge; width += multiple)
+        {
+            var nearestHeight = (int)Math.Round(width / aspect / multiple) * multiple;
+            for (var offset = -1; offset <= 1; offset++)
+            {
+                var height = nearestHeight + offset * multiple;
+                if (height <= 0 || height > constraints.MaximumEdge)
+                    continue;
+                var pixels = (long)width * height;
+                if (pixels < constraints.MinimumPixels || pixels > constraints.MaximumPixels)
+                    continue;
+                yield return (width, height);
+            }
+        }
+    }
+
     private static void ValidatePositiveRaster(LayoutImageSize raster)
     {
         if (raster.Width <= 0 || raster.Height <= 0)
             throw new ArgumentException("Image raster dimensions must be positive.", nameof(raster));
     }
 
-    private static long RoundUpToMultiple(double value)
+    private static long RoundUpToMultiple(double value, int multiple)
     {
-        var multiples = Math.Ceiling(value / SizeMultiple);
-        if (!double.IsFinite(multiples) || multiples > long.MaxValue / SizeMultiple)
+        var multiples = Math.Ceiling(value / multiple);
+        if (!double.IsFinite(multiples) || multiples > long.MaxValue / multiple)
             return long.MaxValue;
-        return checked((long)multiples * SizeMultiple);
+        return checked((long)multiples * multiple);
     }
 
     private static string AspectLabel(double width, double height)

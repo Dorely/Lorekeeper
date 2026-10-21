@@ -1,0 +1,942 @@
+@page "/settings/image-providers"
+@using Lorekeeper.Composition
+@using Lorekeeper.Images
+@using Lorekeeper.Llm
+@using Lorekeeper.Models
+@rendermode InteractiveServer
+@inject IImageProviderService ImageProviderService
+@inject IImageProviderClientFactory ImageClients
+@inject IOpenAiAccountService Accounts
+@inject ILlmProviderService LlmProviders
+
+<PageTitle>Image Providers</PageTitle>
+
+<ConfigurationShell Title="Image providers" Description="Image generation and editing use the default provider unless a request picks another.">
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">
+            @_statusMessage
+            <button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button>
+        </div>
+    }
+
+    @if (_readiness is not null)
+    {
+        @if (_readiness.IsReady && _readiness.Default is { } readyModel)
+        {
+            <div class="alert alert-success" role="status">Image work uses @readyModel.ProviderLabel · @readyModel.ModelLabel.</div>
+        }
+        else
+        {
+            <div class="alert alert-warning" role="status">@_readiness.Message</div>
+        }
+    }
+
+    <section class="image-provider-toolbar" aria-label="Image provider summary">
+        <div>
+            <span class="lk-section-kicker">Image generation</span>
+            <strong>@DefaultProviderLabel</strong>
+            <small>@ProviderSummary</small>
+        </div>
+        <button type="button" class="btn btn-primary" @onclick="ToggleAdd">@(_adding ? "Close form" : "Add provider")</button>
+    </section>
+
+    @if (_adding)
+    {
+        <section class="lk-section-card provider-add-card" aria-labelledby="add-image-provider-title">
+            <div class="lk-section-heading">
+                <div>
+                    <span class="lk-section-kicker">New connection</span>
+                    <h2 id="add-image-provider-title">Add a provider</h2>
+                    <p>Only provider kinds with a registered transport are offered. Test verifies access without generating an image.</p>
+                </div>
+            </div>
+            <div class="connection-form-grid">
+                <label class="field-wide">
+                    <span>Provider kind</span>
+                    <select class="form-select" value="@_newDraft.Kind" @onchange="OnNewKindChanged">
+                        @foreach (var kind in _supportedKinds)
+                        {
+                            <option value="@kind">@KindLabel(kind)</option>
+                        }
+                    </select>
+                </label>
+                @RenderCommonFields(_newDraft)
+                @RenderKindFields(_newDraft)
+            </div>
+            <div class="provider-form-actions">
+                <button type="button" class="btn btn-outline-info" disabled="@(_testingNew || _savingNew)" @onclick="TestNewAsync">@(_testingNew ? "Testing…" : "Test")</button>
+                <button type="button" class="btn btn-primary" disabled="@(!CanSaveNew)" @onclick="SaveNewAsync">@(_savingNew ? "Saving…" : "Save")</button>
+            </div>
+        </section>
+    }
+
+    @if (_loading)
+    {
+        <div class="lk-empty-state" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading image providers…</span></div>
+    }
+    else if (_providers.Count == 0)
+    {
+        <div class="lk-empty-state">
+            <h2>No image providers yet</h2>
+            <p>Connect a ChatGPT account, OpenRouter, or an OpenAI Images-compatible endpoint to generate and edit project images.</p>
+            <button type="button" class="btn btn-primary" @onclick="ToggleAdd">Add provider</button>
+        </div>
+    }
+    else
+    {
+        <section class="provider-list" aria-label="Configured image providers">
+            @foreach (var provider in _providers)
+            {
+                var expanded = IsSectionExpanded(provider.Id);
+                var bodyId = $"image-provider-{provider.Id}-body";
+                <article class="connection-section @(provider.IsDefault ? "is-default" : null)">
+                    <header class="connection-header">
+                        <button type="button" class="connection-toggle" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@bodyId" @onclick="() => ToggleSection(provider.Id)">
+                            <span class="connection-chevron" aria-hidden="true"></span>
+                            <div class="connection-identity">
+                                <span class="connection-mark">@ProviderInitial(provider)</span>
+                                <div>
+                                    <span class="lk-section-kicker">@KindLabel(provider.Kind)</span>
+                                    <h2>@Label(provider)</h2>
+                                    <p><span class="provider-slug">@provider.Name</span></p>
+                                </div>
+                            </div>
+                        </button>
+                        <span class="connection-summary">@($"{provider.Models.Count} model{(provider.Models.Count == 1 ? string.Empty : "s")}")</span>
+                        <div class="connection-actions">
+                            @if (provider.IsDefault)
+                            {
+                                <span class="lk-status-pill is-accent">Default</span>
+                            }
+                            <span class="lk-status-pill @LastTestPillClass(provider)" title="@provider.LastTestMessage">@LastTestPillLabel(provider)</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleEdit(provider)">@(_editingProviderId == provider.Id ? "Close edit" : "Edit")</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId == provider.Id)" @onclick="() => TestProviderAsync(provider)">@(_testingProviderId == provider.Id ? "Testing…" : "Test")</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_refreshingProviderId == provider.Id)" @onclick="() => RefreshProviderModelsAsync(provider)">@(_refreshingProviderId == provider.Id ? "Refreshing…" : "Refresh models")</button>
+                            @if (!provider.IsDefault)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_defaultingProviderId == provider.Id)" @onclick="() => SetDefaultProviderAsync(provider)">@(_defaultingProviderId == provider.Id ? "Setting…" : "Make default")</button>
+                            }
+                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_deleting" @onclick="() => RequestDeleteProvider(provider)">Delete</button>
+                        </div>
+                    </header>
+
+                    @if (expanded)
+                    {
+                        <div class="connection-body" id="@bodyId">
+                            @if (_editingProviderId == provider.Id && _editDrafts.TryGetValue(provider.Id, out var editDraft))
+                            {
+                                <div class="connection-edit-panel">
+                                    @RenderCommonFields(editDraft)
+                                    <div class="kind-readonly field-wide">
+                                        <span>Provider kind</span>
+                                        <strong>@KindLabel(provider.Kind)</strong>
+                                        <small class="field-note">The kind cannot change. Add a new provider instead.</small>
+                                    </div>
+                                    @RenderKindFields(editDraft)
+                                    <div class="provider-form-actions field-wide">
+                                        <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingProviderId == provider.Id)" @onclick="() => SaveEditAsync(provider)">@(_savingProviderId == provider.Id ? "Saving…" : "Save changes")</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_savingProviderId == provider.Id)" @onclick="CancelEdit">Cancel</button>
+                                    </div>
+                                </div>
+                            }
+
+                            @RenderModels(provider)
+                        </div>
+                    }
+                </article>
+            }
+        </section>
+    }
+</ConfigurationShell>
+
+<ConfirmationDialog IsOpen="@(_deleteProvider is not null)"
+                    Title="Delete image provider"
+                    Message="@ProviderDeleteMessage"
+                    ConfirmLabel="Delete provider"
+                    CancelLabel="Keep provider"
+                    Destructive="true"
+                    Busy="_deleting"
+                    OnConfirm="DeleteProviderConfirmedAsync"
+                    OnCancel="CancelDeleteProvider" />
+
+<ConfirmationDialog IsOpen="@(_deleteModel is not null)"
+                    Title="Delete image model"
+                    Message="@ModelDeleteMessage"
+                    ConfirmLabel="Delete model"
+                    CancelLabel="Keep model"
+                    Destructive="true"
+                    Busy="_deleting"
+                    OnConfirm="DeleteModelConfirmedAsync"
+                    OnCancel="CancelDeleteModel" />
+
+@code {
+    private List<ImageProvider> _providers = [];
+    private List<OpenAiAccount> _accounts = [];
+    private List<LlmProvider> _llmProviders = [];
+    private List<ImageProviderKind> _supportedKinds = [];
+    private ImageProviderReadiness? _readiness;
+    private ProviderDraft _newDraft = new();
+    private readonly Dictionary<int, ProviderDraft> _editDrafts = [];
+    private readonly Dictionary<int, ModelDraft> _modelForms = [];
+    private readonly Dictionary<int, bool> _collapsedProviders = [];
+    private int? _editingProviderId;
+    private bool _loading = true;
+    private bool _adding;
+    private bool _testingNew;
+    private bool _savingNew;
+    private int? _savingProviderId;
+    private int? _testingProviderId;
+    private int? _refreshingProviderId;
+    private int? _defaultingProviderId;
+    private int? _savingModelProviderId;
+    private int? _defaultingModelId;
+    private ImageProvider? _deleteProvider;
+    private ImageProviderModel? _deleteModel;
+    private bool _deleting;
+    private string? _statusMessage;
+    private string _statusKind = "success";
+
+    private IEnumerable<OpenAiAccount> CodexAccounts =>
+        _accounts.Where(account => account.Kind == OpenAiAccountKind.Codex);
+
+    private string DefaultProviderLabel =>
+        _providers.FirstOrDefault(provider => provider.IsDefault) is { } provider
+            ? Label(provider)
+            : "No default provider";
+
+    private string ProviderSummary =>
+        $"{_providers.Count} provider{(_providers.Count == 1 ? string.Empty : "s")} · {_providers.Sum(provider => provider.Models.Count)} models";
+
+    private bool CanSaveNew =>
+        !_savingNew
+        && !_testingNew
+        && _supportedKinds.Count > 0
+        && !string.IsNullOrWhiteSpace(_newDraft.Name)
+        && !(_newDraft.Kind == ImageProviderKind.ChatGptAccount
+            && (_newDraft.OpenAiAccountId is null || !CodexAccounts.Any()));
+
+    private string ProviderDeleteMessage =>
+        _deleteProvider is { } provider
+            ? $"Delete {Label(provider)}? Image jobs already queued with it will fail; finished images are kept."
+            : string.Empty;
+
+    private string ModelDeleteMessage =>
+        _deleteModel is { } model
+            ? $"Delete {Label(model)}? Image jobs already queued for it will fail; finished images are kept."
+            : string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _supportedKinds = Enum.GetValues<ImageProviderKind>()
+            .Where(kind => ImageClients.Supports(kind))
+            .ToList();
+        await LoadReferenceDataAsync();
+        ResetNewDraft();
+        await ReloadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadReferenceDataAsync()
+    {
+        try
+        {
+            _accounts = (await Accounts.GetAllAsync()).ToList();
+            _llmProviders = await LlmProviders.GetAllAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not load accounts or chat models: {ex.Message}", "danger");
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _providers = await ImageProviderService.GetAllAsync();
+            _readiness = await ImageProviderService.GetReadinessAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not load image providers: {ex.Message}", "danger");
+        }
+    }
+
+    private void ResetNewDraft()
+    {
+        _newDraft = _supportedKinds.Count > 0 ? CreateDraft(_supportedKinds[0]) : new ProviderDraft();
+        if (_newDraft.Kind == ImageProviderKind.ChatGptAccount)
+            _newDraft.OpenAiAccountId = CodexAccounts.FirstOrDefault()?.Id;
+    }
+
+    private void ToggleAdd()
+    {
+        _adding = !_adding;
+        if (_adding && _supportedKinds.Count > 0 && _newDraft.Name.Length == 0)
+            ResetNewDraft();
+    }
+
+    private void OnNewKindChanged(ChangeEventArgs args)
+    {
+        if (args.Value is not string value || !Enum.TryParse<ImageProviderKind>(value, out var kind))
+            return;
+
+        _newDraft.Kind = kind;
+        ApplyKindDefaults(_newDraft);
+        _newDraft.OpenAiAccountId = kind == ImageProviderKind.ChatGptAccount
+            ? CodexAccounts.FirstOrDefault()?.Id
+            : null;
+    }
+
+    private async Task TestNewAsync()
+    {
+        _testingNew = true;
+        try
+        {
+            var result = await ImageProviderService.TestAsync(BuildProvider(_newDraft, 0));
+            SetStatus(result.Message, result.Success ? "success" : "danger");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
+        {
+            SetStatus($"Test failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _testingNew = false;
+        }
+    }
+
+    private async Task SaveNewAsync()
+    {
+        if (!CanSaveNew)
+            return;
+
+        _savingNew = true;
+        try
+        {
+            var created = await ImageProviderService.CreateAsync(BuildProvider(_newDraft, 0));
+            try
+            {
+                var refreshed = await ImageProviderService.RefreshModelsAsync(created.Id);
+                SetStatus($"Image provider '{Label(created)}' created and {refreshed} models discovered.", "success");
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
+            {
+                SetStatus($"Image provider '{Label(created)}' was created, but its models could not be refreshed: {ex.Message}", "warning");
+            }
+
+            _adding = false;
+            ResetNewDraft();
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Create failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _savingNew = false;
+        }
+    }
+
+    private void ToggleEdit(ImageProvider provider)
+    {
+        if (_editingProviderId == provider.Id)
+        {
+            CancelEdit();
+            return;
+        }
+
+        _editDrafts[provider.Id] = ProviderDraft.From(provider);
+        _editingProviderId = provider.Id;
+        _collapsedProviders[provider.Id] = false;
+    }
+
+    private void CancelEdit()
+    {
+        if (_editingProviderId is { } id)
+            _editDrafts.Remove(id);
+        _editingProviderId = null;
+    }
+
+    private async Task SaveEditAsync(ImageProvider provider)
+    {
+        if (!_editDrafts.TryGetValue(provider.Id, out var draft))
+            return;
+
+        _savingProviderId = provider.Id;
+        try
+        {
+            var updated = BuildProvider(draft, provider.Id);
+            updated.ConfigurationJson = provider.ConfigurationJson;
+            updated.LastTestedAt = provider.LastTestedAt;
+            updated.LastTestSucceeded = provider.LastTestSucceeded;
+            updated.LastTestMessage = provider.LastTestMessage;
+            await ImageProviderService.UpdateAsync(updated);
+            SetStatus($"Image provider '{Label(provider)}' updated.", "success");
+            CancelEdit();
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Save failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _savingProviderId = null;
+        }
+    }
+
+    private async Task TestProviderAsync(ImageProvider provider)
+    {
+        _testingProviderId = provider.Id;
+        try
+        {
+            var result = await ImageProviderService.TestAsync(provider);
+            SetStatus(result.Message, result.Success ? "success" : "danger");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
+        {
+            SetStatus($"Test failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _testingProviderId = null;
+        }
+    }
+
+    private async Task RefreshProviderModelsAsync(ImageProvider provider)
+    {
+        _refreshingProviderId = provider.Id;
+        try
+        {
+            var refreshed = await ImageProviderService.RefreshModelsAsync(provider.Id);
+            SetStatus($"Refreshed {refreshed} models.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
+        {
+            SetStatus($"Model refresh failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _refreshingProviderId = null;
+        }
+    }
+
+    private async Task SetDefaultProviderAsync(ImageProvider provider)
+    {
+        _defaultingProviderId = provider.Id;
+        try
+        {
+            await ImageProviderService.SetDefaultAsync(provider.Id);
+            SetStatus($"'{Label(provider)}' is now the default image provider.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not set the default provider: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _defaultingProviderId = null;
+        }
+    }
+
+    private void RequestDeleteProvider(ImageProvider provider) => _deleteProvider = provider;
+
+    private void CancelDeleteProvider()
+    {
+        if (!_deleting)
+            _deleteProvider = null;
+    }
+
+    private async Task DeleteProviderConfirmedAsync()
+    {
+        if (_deleteProvider is not { } provider || _deleting)
+            return;
+
+        _deleting = true;
+        try
+        {
+            await ImageProviderService.DeleteAsync(provider.Id);
+            if (_editingProviderId == provider.Id)
+                CancelEdit();
+            _editDrafts.Remove(provider.Id);
+            _modelForms.Remove(provider.Id);
+            _deleteProvider = null;
+            SetStatus($"Image provider '{Label(provider)}' deleted.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _deleteProvider = null;
+            SetStatus($"Delete failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+
+    private async Task SetDefaultModelAsync(ImageProviderModel model)
+    {
+        _defaultingModelId = model.Id;
+        try
+        {
+            await ImageProviderService.SetDefaultModelAsync(model.Id);
+            SetStatus($"'{Label(model)}' is now the default image model.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not set the default model: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _defaultingModelId = null;
+        }
+    }
+
+    private void RequestDeleteModel(ImageProviderModel model) => _deleteModel = model;
+
+    private void CancelDeleteModel()
+    {
+        if (!_deleting)
+            _deleteModel = null;
+    }
+
+    private async Task DeleteModelConfirmedAsync()
+    {
+        if (_deleteModel is not { } model || _deleting)
+            return;
+
+        _deleting = true;
+        try
+        {
+            await ImageProviderService.DeleteModelAsync(model.Id);
+            _deleteModel = null;
+            SetStatus($"Image model '{Label(model)}' deleted.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _deleteModel = null;
+            SetStatus($"Delete failed: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+
+    private void ToggleAddModel(int providerId)
+    {
+        if (!_modelForms.Remove(providerId))
+            _modelForms[providerId] = new ModelDraft();
+    }
+
+    private async Task SaveModelAsync(ImageProvider provider)
+    {
+        if (!_modelForms.TryGetValue(provider.Id, out var draft))
+            return;
+
+        _savingModelProviderId = provider.Id;
+        try
+        {
+            var model = new ImageProviderModel
+            {
+                ModelId = draft.ModelId.Trim(),
+                DisplayName = Clean(draft.DisplayName),
+                Origin = ImageProviderModelOrigin.Manual,
+                QualitiesJson = ImageModelCapabilities.ToJson(ParseList(draft.Qualities, "auto")),
+                OutputFormatsJson = ImageModelCapabilities.ToJson(SelectedOutputFormats(draft)),
+                SupportsGenerate = draft.SupportsGenerate,
+                SupportsEdit = draft.SupportsEdit,
+                SupportsRegionalGuide = draft.SupportsRegionalGuide,
+                SupportsTransparentBackground = draft.SupportsTransparentBackground,
+                SupportsStreaming = draft.SupportsStreaming,
+                MaxReferenceImages = draft.MaxReferenceImages,
+                RasterConstraintsJson = ImageRasterConstraints.GptImage.ToJson(),
+            };
+            await ImageProviderService.SaveModelAsync(provider.Id, model);
+            _modelForms.Remove(provider.Id);
+            SetStatus($"Image model '{Label(model)}' added to {Label(provider)}.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not add the model: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _savingModelProviderId = null;
+        }
+    }
+
+    private RenderFragment RenderCommonFields(ProviderDraft draft) => __builder =>
+    {
+        <label>
+            <span>Display name</span>
+            <input class="form-control" @bind="draft.DisplayName" />
+        </label>
+        <label>
+            <span>Name (slug)</span>
+            <input class="form-control" @bind="draft.Name" />
+            <small class="field-note">Lowercase letters, digits, and hyphens.</small>
+        </label>
+    };
+
+    private RenderFragment RenderKindFields(ProviderDraft draft) => __builder =>
+    {
+        if (draft.Kind == ImageProviderKind.ChatGptAccount)
+        {
+            if (CodexAccounts.Any())
+            {
+                <label>
+                    <span>ChatGPT account</span>
+                    <select class="form-select" @bind="draft.OpenAiAccountId">
+                        @foreach (var account in CodexAccounts)
+                        {
+                            <option value="@account.Id">@account.DisplayName</option>
+                        }
+                    </select>
+                </label>
+            }
+            else
+            {
+                <div class="account-missing field-wide">
+                    Sign in with the ChatGPT (Codex) account in <a href="/settings/providers">Settings &gt; Providers</a> first.
+                </div>
+            }
+            <label class="field-wide">
+                <span>Host chat model</span>
+                <select class="form-select" @bind="draft.MainlineModelId">
+                    <option value="">Best available on the plan (recommended)</option>
+                    @foreach (var model in HostModelOptions(draft.OpenAiAccountId))
+                    {
+                        <option value="@model.ModelId">@(model.DisplayName ?? model.ModelId)</option>
+                    }
+                </select>
+            </label>
+        }
+        else if (draft.Kind == ImageProviderKind.OpenRouter)
+        {
+            <label class="field-wide">
+                <span>API key</span>
+                <input type="password" class="form-control" autocomplete="off"
+                       placeholder="@(draft.HasStoredApiKey ? "Stored — leave blank to keep" : null)"
+                       @bind="draft.ApiKey" />
+            </label>
+        }
+        else if (draft.Kind == ImageProviderKind.OpenAiImagesCompatible)
+        {
+            <label class="field-wide">
+                <span>Endpoint URL</span>
+                <input class="form-control" placeholder="https://api.openai.com/v1" @bind="draft.EndpointUrl" />
+            </label>
+            <label class="field-wide">
+                <span>API key (optional)</span>
+                <input type="password" class="form-control" autocomplete="off"
+                       placeholder="@(draft.HasStoredApiKey ? "Stored — leave blank to keep" : null)"
+                       @bind="draft.ApiKey" />
+            </label>
+        }
+    };
+
+    private RenderFragment RenderModels(ImageProvider provider) => __builder =>
+    {
+        var models = provider.Models
+            .OrderBy(model => model.SortOrder)
+            .ThenBy(model => model.ModelId, StringComparer.Ordinal)
+            .ToList();
+        <div class="model-grid" role="table" aria-label="Image models">
+            <div class="model-grid-head" role="row">
+                <span role="columnheader">Display name</span>
+                <span role="columnheader">Model ID</span>
+                <span role="columnheader">Origin</span>
+                <span role="columnheader">Capabilities</span>
+                <span role="columnheader">Qualities</span>
+                <span role="columnheader">Default</span>
+                <span role="columnheader" class="model-grid-actions-head">Actions</span>
+            </div>
+            @if (models.Count == 0)
+            {
+                <div class="model-grid-empty">No models yet. Use Refresh models or add one.</div>
+            }
+            @foreach (var model in models)
+            {
+                var capabilities = ImageModelCapabilities.From(model);
+                var chips = CapabilityChips(capabilities);
+                <div class="model-grid-item" role="rowgroup">
+                    <div class="model-grid-row" role="row">
+                        <div class="model-grid-cell" role="cell" data-label="Display name">
+                            <span class="model-name">@(model.DisplayName ?? model.ModelId)</span>
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Model ID">
+                            <span class="model-id">@model.ModelId</span>
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Origin">
+                            <span class="model-origin">@model.Origin</span>
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Capabilities">
+                            @if (chips.Count == 0)
+                            {
+                                <span class="model-id">—</span>
+                            }
+                            else
+                            {
+                                <div class="capability-chips">
+                                    @foreach (var chip in chips)
+                                    {
+                                        <span class="capability-chip">@chip</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Qualities">
+                            <span class="model-qualities">@string.Join(", ", capabilities.Qualities)</span>
+                        </div>
+                        <div class="model-grid-cell" role="cell" data-label="Default">
+                            @if (model.IsDefault)
+                            {
+                                <span class="lk-status-pill is-accent">Default</span>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_defaultingModelId == model.Id)" @onclick="() => SetDefaultModelAsync(model)">@(_defaultingModelId == model.Id ? "Setting…" : "Make default")</button>
+                            }
+                        </div>
+                        <div class="model-grid-cell model-grid-actions" role="cell" data-label="Actions">
+                            @if (!model.IsDefault)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_deleting" @onclick="() => RequestDeleteModel(model)">Delete</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="model-add-toolbar">
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddModel(provider.Id)">@(_modelForms.ContainsKey(provider.Id) ? "Cancel add model" : "Add model")</button>
+        </div>
+
+        @if (_modelForms.TryGetValue(provider.Id, out var draft))
+        {
+            <div class="child-model-form">
+                <div class="child-model-header">
+                    <div class="child-model-heading">
+                        <span class="lk-section-kicker">Manual model</span>
+                        <strong>Add a model</strong>
+                        <small>Manual rows are kept when the provider's model list is refreshed.</small>
+                    </div>
+                    <div class="lk-toolbar child-model-actions">
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingModelProviderId == provider.Id)" @onclick="() => SaveModelAsync(provider)">@(_savingModelProviderId == provider.Id ? "Saving…" : "Save model")</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_savingModelProviderId == provider.Id)" @onclick="() => ToggleAddModel(provider.Id)">Cancel</button>
+                    </div>
+                </div>
+                <div class="model-fields child-model-fields">
+                    <label><span>Model ID</span><input class="form-control form-control-sm" placeholder="gpt-image-2" @bind="draft.ModelId" /></label>
+                    <label><span>Display name</span><input class="form-control form-control-sm" @bind="draft.DisplayName" /></label>
+                    <label><span>Max reference images</span><input type="number" min="0" max="64" step="1" class="form-control form-control-sm" @bind="draft.MaxReferenceImages" /></label>
+                    <label><span>Qualities</span><input class="form-control form-control-sm" placeholder="auto, low, high" @bind="draft.Qualities" /><small class="field-note">Comma-separated quality values. The first is the default.</small></label>
+                    <fieldset class="model-check-group field-wide">
+                        <legend>Capabilities</legend>
+                        <div class="model-check-row">
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsGenerate" /><span>Generate</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsEdit" /><span>Edit</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsRegionalGuide" /><span>Regional guide</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsTransparentBackground" /><span>Transparent background</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsStreaming" /><span>Streaming</span></label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="model-check-group field-wide">
+                        <legend>Output formats</legend>
+                        <div class="model-check-row">
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.OutputPng" /><span>png</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.OutputJpeg" /><span>jpeg</span></label>
+                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.OutputWebp" /><span>webp</span></label>
+                        </div>
+                    </fieldset>
+                </div>
+            </div>
+        }
+    };
+
+    private bool IsSectionExpanded(int providerId) =>
+        !_collapsedProviders.TryGetValue(providerId, out var collapsed) || !collapsed;
+
+    private void ToggleSection(int providerId) =>
+        _collapsedProviders[providerId] = !IsSectionExpanded(providerId);
+
+    private IEnumerable<LlmProvider> HostModelOptions(int? accountId) =>
+        accountId is not { } id
+            ? Enumerable.Empty<LlmProvider>()
+            : _llmProviders
+                .Where(provider => provider.OpenAiAccountId == id
+                    && provider.AccountAvailability != LlmAccountModelAvailability.Unavailable)
+                .OrderBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(provider => provider.ModelId, StringComparer.Ordinal);
+
+    private static IReadOnlyList<string> CapabilityChips(ImageModelCapabilities capabilities)
+    {
+        var chips = new List<string>();
+        if (capabilities.Generate)
+            chips.Add("Generate");
+        if (capabilities.Edit)
+            chips.Add("Edit");
+        if (capabilities.RegionalGuide)
+            chips.Add("Regional guide");
+        if (capabilities.TransparentBackground)
+            chips.Add("Transparent");
+        if (capabilities.Streaming)
+            chips.Add("Streaming");
+        if (capabilities.MaxReferenceImages > 0)
+            chips.Add($"Refs ≤ {capabilities.MaxReferenceImages}");
+        return chips;
+    }
+
+    private static IReadOnlyList<string> ParseList(string? value, string fallback)
+    {
+        var items = (value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        return items.Count > 0 ? items : [fallback];
+    }
+
+    private static IReadOnlyList<string> SelectedOutputFormats(ModelDraft draft)
+    {
+        var formats = new List<string>();
+        if (draft.OutputPng)
+            formats.Add("png");
+        if (draft.OutputJpeg)
+            formats.Add("jpeg");
+        if (draft.OutputWebp)
+            formats.Add("webp");
+        return formats.Count > 0 ? formats : ["png"];
+    }
+
+    private static ImageProvider BuildProvider(ProviderDraft draft, int id) => new()
+    {
+        Id = id,
+        Name = draft.Name.Trim(),
+        DisplayName = Clean(draft.DisplayName),
+        Kind = draft.Kind,
+        EndpointUrl = draft.Kind == ImageProviderKind.OpenAiImagesCompatible ? Clean(draft.EndpointUrl) : null,
+        ApiKey = draft.Kind == ImageProviderKind.ChatGptAccount
+            ? null
+            : Clean(draft.ApiKey) ?? Clean(draft.StoredApiKey),
+        OpenAiAccountId = draft.Kind == ImageProviderKind.ChatGptAccount ? draft.OpenAiAccountId : null,
+        MainlineModelId = draft.Kind == ImageProviderKind.ChatGptAccount ? Clean(draft.MainlineModelId) : null,
+        IsDefault = draft.IsDefault,
+    };
+
+    private static string? Clean(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static ProviderDraft CreateDraft(ImageProviderKind kind)
+    {
+        var draft = new ProviderDraft { Kind = kind };
+        ApplyKindDefaults(draft);
+        return draft;
+    }
+
+    private static void ApplyKindDefaults(ProviderDraft draft)
+    {
+        draft.Name = KindSlug(draft.Kind);
+        draft.DisplayName = KindLabel(draft.Kind);
+    }
+
+    private static string KindLabel(ImageProviderKind kind) => kind switch
+    {
+        ImageProviderKind.ChatGptAccount => "ChatGPT account (Codex sign-in)",
+        ImageProviderKind.OpenRouter => "OpenRouter",
+        ImageProviderKind.OpenAiImagesCompatible => "OpenAI Images-compatible endpoint",
+        _ => kind.ToString(),
+    };
+
+    private static string KindSlug(ImageProviderKind kind) => kind switch
+    {
+        ImageProviderKind.ChatGptAccount => "chatgpt-account",
+        ImageProviderKind.OpenRouter => "openrouter",
+        ImageProviderKind.OpenAiImagesCompatible => "openai-images",
+        _ => kind.ToString().ToLowerInvariant(),
+    };
+
+    private static string Label(ImageProvider provider) =>
+        string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Name : provider.DisplayName;
+
+    private static string Label(ImageProviderModel model) =>
+        string.IsNullOrWhiteSpace(model.DisplayName) ? model.ModelId : model.DisplayName;
+
+    private static string LastTestPillClass(ImageProvider provider) => provider.LastTestSucceeded switch
+    {
+        true => "is-success",
+        false => "is-danger",
+        _ => string.Empty,
+    };
+
+    private static string LastTestPillLabel(ImageProvider provider) => provider.LastTestSucceeded switch
+    {
+        true => "Test passed",
+        false => "Test failed",
+        _ => "Not tested",
+    };
+
+    private static string ProviderInitial(ImageProvider provider) =>
+        Label(provider).Trim().FirstOrDefault().ToString().ToUpperInvariant();
+
+    private void SetStatus(string message, string kind)
+    {
+        _statusMessage = message;
+        _statusKind = kind;
+    }
+
+    private void ClearStatus() => _statusMessage = null;
+
+    private sealed class ProviderDraft
+    {
+        public string Name { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public ImageProviderKind Kind { get; set; }
+        public string EndpointUrl { get; set; } = string.Empty;
+        public string ApiKey { get; set; } = string.Empty;
+        public string? StoredApiKey { get; set; }
+        public int? OpenAiAccountId { get; set; }
+        public string MainlineModelId { get; set; } = string.Empty;
+        public bool IsDefault { get; set; }
+
+        public bool HasStoredApiKey => !string.IsNullOrWhiteSpace(StoredApiKey);
+
+        public static ProviderDraft From(ImageProvider provider) => new()
+        {
+            Name = provider.Name,
+            DisplayName = provider.DisplayName ?? string.Empty,
+            Kind = provider.Kind,
+            EndpointUrl = provider.EndpointUrl ?? string.Empty,
+            StoredApiKey = provider.ApiKey,
+            OpenAiAccountId = provider.OpenAiAccountId,
+            MainlineModelId = provider.MainlineModelId ?? string.Empty,
+            IsDefault = provider.IsDefault,
+        };
+    }
+
+    private sealed class ModelDraft
+    {
+        public string ModelId { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public bool SupportsGenerate { get; set; } = true;
+        public bool SupportsEdit { get; set; }
+        public bool SupportsRegionalGuide { get; set; }
+        public bool SupportsTransparentBackground { get; set; }
+        public bool SupportsStreaming { get; set; }
+        public int MaxReferenceImages { get; set; }
+        public string Qualities { get; set; } = "auto";
+        public bool OutputPng { get; set; } = true;
+        public bool OutputJpeg { get; set; }
+        public bool OutputWebp { get; set; }
+    }
+}

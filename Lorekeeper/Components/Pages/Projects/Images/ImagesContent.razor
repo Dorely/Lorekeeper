@@ -13,7 +13,7 @@
 @inject IProjectImageDefaultRasterResolver DefaultImageRasters
 @inject IImagesChatService ImagesChat
 @inject IEntityVisualExampleService EntityVisuals
-@inject ILlmProviderService Providers
+@inject IImageProviderService ImageProviders
 @inject IOptions<ProjectImageGenerationOptions> ImageOptions
 @inject IJSRuntime JS
 
@@ -155,9 +155,9 @@ else
                         <div>The target guides composition and reserved regions. The generated raster stays intact; its frame fit and crop position control placement.</div>
                     </div>
                 }
-                @if (!_codexConnected)
+                @if (CurrentImageModel is null)
                 {
-                    <p class="text-muted small mb-0">Connect Codex in Providers to generate images.</p>
+                    <p class="text-muted small mb-0">@ImageReadinessMessage <a href="/settings/image-providers">Image providers</a></p>
                 }
                 else
                 {
@@ -172,9 +172,10 @@ else
                                 <span>Size</span>
                                 <select class="form-select form-select-sm" @bind="_imageSize">
                                     <option value="auto">Core Book page (@_defaultImageRaster)</option>
-                                    <option value="1024x1024">Square</option>
-                                    <option value="1024x1536">Portrait</option>
-                                    <option value="1536x1024">Landscape</option>
+                                    @foreach (var preset in SizePresets)
+                                    {
+                                        <option value="@preset.Size">@preset.Label (@preset.Size)</option>
+                                    }
                                 </select>
                             </label>
                         }
@@ -191,21 +192,26 @@ else
                         </label>
                         <label class="image-form-wide">
                             <span>Image model</span>
-                            <select class="form-select form-select-sm" @bind="_imageModel">
-                                @foreach (var model in ProjectImageModelCatalog.Models)
+                            <select class="form-select form-select-sm" @bind="_imageModelKey" @bind:after="OnImageModelChangedAsync">
+                                @foreach (var group in _imageModels.GroupBy(model => model.ProviderId))
                                 {
-                                    <option value="@model.Id">@model.Label</option>
+                                    <optgroup label="@ProviderGroupLabel(group.First())">
+                                        @foreach (var model in group)
+                                        {
+                                            <option value="@ImageModelKey(model)">@model.ModelLabel</option>
+                                        }
+                                    </optgroup>
                                 }
                             </select>
                         </label>
                         <label>
                             <span>Quality</span>
                             <select class="form-select form-select-sm" @bind="_imageQuality">
-                                @if (!CurrentImageModel.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+                                @if (!CurrentImageModel.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
                                 {
                                     <option value="@_imageQuality">@_imageQuality (currently configured)</option>
                                 }
-                                @foreach (var quality in CurrentImageModel.Qualities)
+                                @foreach (var quality in CurrentImageModel.Capabilities.Qualities)
                                 {
                                     <option value="@quality">@quality</option>
                                 }
@@ -462,26 +468,42 @@ else
                     </label>
                     <label>
                         <span>Image model</span>
-                        <select class="form-select form-select-sm" @bind="_imageModel">
-                            @foreach (var model in ProjectImageModelCatalog.Models)
+                        <select class="form-select form-select-sm" @bind="_imageModelKey" @bind:after="OnImageModelChangedAsync">
+                            @foreach (var group in _imageModels.Where(model => model.Capabilities.RegionalGuide).GroupBy(model => model.ProviderId))
                             {
-                                <option value="@model.Id">@model.Label</option>
+                                <optgroup label="@group.First().ProviderLabel">
+                                    @foreach (var model in group)
+                                    {
+                                        <option value="@ImageModelKey(model)">@model.ModelLabel</option>
+                                    }
+                                </optgroup>
                             }
                         </select>
                     </label>
-                    <label>
-                        <span>Quality</span>
-                        <select class="form-select form-select-sm" @bind="_imageQuality">
-                            @if (!CurrentImageModel.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
-                            {
-                                <option value="@_imageQuality">@_imageQuality (currently configured)</option>
-                            }
-                            @foreach (var quality in CurrentImageModel.Qualities)
-                            {
-                                <option value="@quality">@quality</option>
-                            }
-                        </select>
-                    </label>
+                    @if (CurrentImageModel is { } maskModel)
+                    {
+                        @if (!maskModel.Capabilities.RegionalGuide)
+                        {
+                            <p class="text-danger small mb-0">@maskModel.ModelLabel on @maskModel.ProviderLabel cannot apply a painted mask. Choose a model that supports regional guides.</p>
+                        }
+                        <label>
+                            <span>Quality</span>
+                            <select class="form-select form-select-sm" @bind="_imageQuality">
+                                @if (!maskModel.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <option value="@_imageQuality">@_imageQuality (currently configured)</option>
+                                }
+                                @foreach (var quality in maskModel.Capabilities.Qualities)
+                                {
+                                    <option value="@quality">@quality</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">@ImageReadinessMessage <a href="/settings/image-providers">Image providers</a></p>
+                    }
                     <label>
                         <span>Background</span>
                         <select class="form-select form-select-sm" @bind="_imageBackground">
@@ -508,7 +530,7 @@ else
                         <input class="form-check-input" type="checkbox" @bind="_inheritEditEntityTargets" />
                         <span class="form-check-label">Inherit source image entity associations</span>
                     </label>
-                    <button type="button" class="btn btn-sm btn-primary" disabled="@_sendingMaskEdit" @onclick="SendMaskEditAsync">
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_sendingMaskEdit || CurrentImageModel is not { Capabilities.RegionalGuide: true })" @onclick="SendMaskEditAsync">
                         @(_sendingMaskEdit ? "Sending..." : "Send edit")
                     </button>
                 </aside>
@@ -566,7 +588,9 @@ else
     private int? _minimumDpi;
     private string _defaultImageRaster = string.Empty;
     private string _imageQuality = "auto";
-    private string _imageModel = string.Empty;
+    private string _imageModelKey = string.Empty;
+    private IReadOnlyList<ResolvedImageModel> _imageModels = [];
+    private string? _imageReadinessMessage;
     private string _imageBackground = "auto";
     private string _imageFormat = "png";
     private int? _imageCompression;
@@ -577,7 +601,6 @@ else
     private string? _error;
     private string? _status;
     private bool _loading = true;
-    private bool _codexConnected;
     private bool _queueingGenerate;
     private bool _maskModalOpen;
     private bool _maskCanvasNeedsInit;
@@ -592,16 +615,50 @@ else
     [Parameter] public Guid? LayoutVariantId { get; set; }
     private LayoutGenerationTargetDescriptor? _layoutTarget;
 
-    private int MaxReferenceImages => Math.Max(0, ImageOptions.Value.MaxReferenceImages);
+    private int MaxReferenceImages => CurrentImageModel is { } model
+        ? ProjectImageModelCatalog.ReferenceLimit(model, ImageOptions.Value.MaxReferenceImages)
+        : 0;
+
+    private string ImageReadinessMessage => _imageReadinessMessage ?? ImageProviderNotConfiguredException.DefaultMessage;
+
+    private static string ImageModelKey(ResolvedImageModel model) => $"{model.ProviderId}:{model.ModelId}";
+
+    private static string ProviderGroupLabel(ResolvedImageModel model) =>
+        model.IsDefaultProvider ? $"{model.ProviderLabel} (default)" : model.ProviderLabel;
+
+    /// <summary>Square, portrait, and landscape rasters the selected model accepts.</summary>
+    private IReadOnlyList<(string Label, string Size)> SizePresets
+    {
+        get
+        {
+            if (CurrentImageModel is not { } model)
+                return [];
+            var presets = new List<(string Label, string Size)>();
+            foreach (var (label, aspect) in new[] { ("Square", 1d), ("Portrait", 2d / 3), ("Landscape", 1.5d) })
+            {
+                try
+                {
+                    var size = LayoutImageSizeResolver.ResolveAspect(model.Constraints, aspect).Size;
+                    if (presets.All(preset => preset.Size != size))
+                        presets.Add((label, size));
+                }
+                catch (ArgumentException)
+                {
+                    // The model cannot represent this aspect; offer the others.
+                }
+            }
+            return presets;
+        }
+    }
 
     private bool HasConcreteImageSize =>
         _layoutTarget is null
         && !string.IsNullOrWhiteSpace(_imageSize)
         && !_imageSize.Equals("auto", StringComparison.OrdinalIgnoreCase);
 
-    private ProjectImageModelDefinition CurrentImageModel =>
-        ProjectImageModelCatalog.Models.FirstOrDefault(model => model.Id.Equals(_imageModel, StringComparison.OrdinalIgnoreCase))
-        ?? ProjectImageModelCatalog.Models[0];
+    private ResolvedImageModel? CurrentImageModel =>
+        _imageModels.FirstOrDefault(model => ImageModelKey(model) == _imageModelKey)
+        ?? _imageModels.FirstOrDefault();
 
     private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
         _generationReferences.Select(reference => reference.Image.Id).ToList();
@@ -645,32 +702,16 @@ else
     protected override async Task OnParametersSetAsync()
     {
         if (Project is null) return;
-        if (LayoutTargetId is Guid targetId && !string.IsNullOrWhiteSpace(LayoutTargetKind))
-        {
-            try
-            {
-                _layoutTarget = LayoutTargetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
-                    ? await Compositions.DescribeGenerationTargetAsync(
-                        Project.Id,
-                        LayoutEditionId ?? throw new ArgumentException("Publication cover artwork requires a release."),
-                        LayoutTargetKind,
-                        targetId,
-                        LayoutVariantId)
-                    : await Compositions.DescribeAuthoringGenerationTargetAsync(
-                        Project.Id,
-                        LayoutTargetKind,
-                        targetId,
-                        LayoutVariantId);
-            }
-            catch (Exception ex) { _layoutTarget = null; _error = ex.Message; }
-        }
-        else _layoutTarget = null;
-        if (_loadedProjectId == Project.Id) return;
+        var projectChanged = _loadedProjectId != Project.Id;
+        if (projectChanged)
+            _imageModelKey = string.Empty;
+        await LoadImageModelsAsync();
+        await DescribeLayoutTargetAsync();
+        if (!projectChanged) return;
         _generationReferences.Clear();
         _generationReferencePickerOpen = false;
         _imageSize = "auto";
         _minimumDpi = null;
-        _imageModel = ImageOptions.Value.DefaultImageModel;
         _imageBackground = "auto";
         _imageQuality = ImageOptions.Value.DefaultQuality;
         _loadedProjectId = Project.Id;
@@ -725,6 +766,83 @@ else
         }
     }
 
+    private async Task LoadImageModelsAsync()
+    {
+        try
+        {
+            _imageModels = await ImageProviders.ListReadyModelsAsync();
+            _imageReadinessMessage = _imageModels.Count == 0
+                ? (await ImageProviders.GetReadinessAsync()).Message
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _imageModels = [];
+            _imageReadinessMessage = ex.Message;
+        }
+        if (_imageModels.All(model => ImageModelKey(model) != _imageModelKey))
+        {
+            var fallback = _imageModels.FirstOrDefault(model => model.IsDefaultProvider && model.IsDefaultModel)
+                ?? _imageModels.FirstOrDefault();
+            _imageModelKey = fallback is null ? string.Empty : ImageModelKey(fallback);
+        }
+    }
+
+    private async Task OnImageModelChangedAsync()
+    {
+        if (CurrentImageModel is { } model && !model.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+            _imageQuality = model.Capabilities.Qualities[0];
+        if (_imageSize != "auto" && SizePresets.All(preset => preset.Size != _imageSize))
+            _imageSize = "auto";
+        await DescribeLayoutTargetAsync();
+        await ResolveDefaultImageRasterAsync();
+    }
+
+    private async Task DescribeLayoutTargetAsync()
+    {
+        if (Project is null || LayoutTargetId is not Guid targetId || string.IsNullOrWhiteSpace(LayoutTargetKind)
+            || CurrentImageModel is not { } model)
+        {
+            _layoutTarget = null;
+            return;
+        }
+        try
+        {
+            _layoutTarget = LayoutTargetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
+                ? await Compositions.DescribeGenerationTargetAsync(
+                    Project.Id,
+                    model.Constraints,
+                    LayoutEditionId ?? throw new ArgumentException("Publication cover artwork requires a release."),
+                    LayoutTargetKind,
+                    targetId,
+                    LayoutVariantId)
+                : await Compositions.DescribeAuthoringGenerationTargetAsync(
+                    Project.Id,
+                    model.Constraints,
+                    LayoutTargetKind,
+                    targetId,
+                    LayoutVariantId);
+        }
+        catch (Exception ex) { _layoutTarget = null; _error = ex.Message; }
+    }
+
+    private async Task ResolveDefaultImageRasterAsync()
+    {
+        if (Project is null || CurrentImageModel is not { } model)
+        {
+            _defaultImageRaster = string.Empty;
+            return;
+        }
+        try
+        {
+            _defaultImageRaster = (await DefaultImageRasters.ResolveAsync(Project.Id, model.Constraints)).Size;
+        }
+        catch (ArgumentException)
+        {
+            _defaultImageRaster = "unsupported page aspect";
+        }
+    }
+
     public async Task ReloadAsync()
     {
         if (Project is null) return;
@@ -732,15 +850,8 @@ else
         _error = null;
         try
         {
-            _codexConnected = await Providers.IsCodexConnectedAsync();
-            try
-            {
-                _defaultImageRaster = (await DefaultImageRasters.ResolveAsync(Project.Id)).Size;
-            }
-            catch (ArgumentException)
-            {
-                _defaultImageRaster = "unsupported page aspect";
-            }
+            await LoadImageModelsAsync();
+            await ResolveDefaultImageRasterAsync();
             await ReloadImageLibraryAsync();
             await ReloadJobsAndPartialsAsync();
             _runtimeSnapshot = ImageRuntime.GetSnapshot();
@@ -814,6 +925,11 @@ else
     private async Task GenerateAsync()
     {
         if (Project is null) return;
+        if (CurrentImageModel is not { } model)
+        {
+            _error = ImageReadinessMessage;
+            return;
+        }
         _queueingGenerate = true;
         _error = null;
         _status = null;
@@ -828,6 +944,7 @@ else
                 .ToArray();
             var compiled = await ImagePrompts.CompileGenerationAsync(
                 Project.Id,
+                model.Constraints,
                 new ImageGenerationBrief
                 {
                     IntendedUse = "Standalone project-library image requested through the manual Images panel.",
@@ -854,8 +971,9 @@ else
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson,
-                ImageModel: _imageModel,
-                Background: _imageBackground));
+                ImageModel: model.ModelId,
+                Background: _imageBackground,
+                ImageProviderId: model.ProviderId));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             var printPlan = ReadPrintUpscalePlan(compiled.TargetGeometryJson);
             _status = printPlan is { } queuedPlan
@@ -1329,6 +1447,11 @@ else
         if (Project is null || _editingImage is null || _maskModule is null) return;
         _error = null;
         _status = null;
+        if (CurrentImageModel is not { } model)
+        {
+            _error = ImageReadinessMessage;
+            return;
+        }
         if (string.IsNullOrWhiteSpace(_maskPrompt))
         {
             _error = "Edit prompt is required.";
@@ -1348,6 +1471,7 @@ else
             var maskDataUrl = await _maskModule.InvokeAsync<string>("exportMaskPng", _maskCanvas);
             var compiled = await ImagePrompts.CompileEditAsync(
                 Project.Id,
+                model.Constraints,
                 _editingImage.Id,
                 new ImageEditBrief
                 {
@@ -1377,8 +1501,9 @@ else
                 BriefJson: compiled.BriefJson,
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson,
-                ImageModel: _imageModel,
-                Background: _imageBackground));
+                ImageModel: model.ModelId,
+                Background: _imageBackground,
+                ImageProviderId: model.ProviderId));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _maskModalOpen = false;
             _status = "Edit job queued.";

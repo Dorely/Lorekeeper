@@ -53,6 +53,13 @@ public class ProjectImageGenerationJob
 
     public string OutputErrorsJson { get; set; } = "[]";
 
+    /// <summary>
+    /// The image provider that serves this job. A soft reference: deleting the
+    /// provider keeps the job and its history, and a queued job then fails clearly.
+    /// </summary>
+    public int? ImageProviderId { get; set; }
+
+    /// <summary>Non-secret provider label recorded for history.</summary>
     public string Provider { get; set; } = string.Empty;
 
     public string MainlineModel { get; set; } = string.Empty;

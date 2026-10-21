@@ -178,16 +178,20 @@ public sealed record CompiledImagePrompt(
 
 public interface IImagePromptComposer
 {
+    /// <param name="constraints">Raster limits of the image model that will serve the request.</param>
     Task<CompiledImagePrompt> CompileGenerationAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         ImageGenerationBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
         CancellationToken cancellationToken = default,
         string background = "auto");
 
+    /// <param name="constraints">Raster limits of the image model that will serve the request.</param>
     Task<CompiledImagePrompt> CompileEditAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         Guid sourceImageId,
         ImageEditBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
@@ -214,19 +218,21 @@ public sealed class ImagePromptComposer(
 
     public async Task<CompiledImagePrompt> CompileGenerationAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         ImageGenerationBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
         CancellationToken cancellationToken = default,
         string background = "auto")
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         ArgumentNullException.ThrowIfNull(brief);
         Require(brief.IntendedUse, "intendedUse");
         Require(brief.Scene, "scene");
         ValidateRenderedText(brief.AllowRenderedText, brief.RenderedText);
 
         background = ProjectImageModelCatalog.NormalizeBackground(background);
-        var targetResolution = await ResolveTargetAsync(projectId, target, background, cancellationToken);
+        var targetResolution = await ResolveTargetAsync(projectId, constraints, target, background, cancellationToken);
         var manifest = await BuildReferenceManifestAsync(projectId, references, firstProviderInputOrder: 1, cancellationToken);
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
@@ -260,6 +266,7 @@ public sealed class ImagePromptComposer(
 
     public async Task<CompiledImagePrompt> CompileEditAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         Guid sourceImageId,
         ImageEditBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
@@ -268,6 +275,7 @@ public sealed class ImagePromptComposer(
         CancellationToken cancellationToken = default,
         string background = "auto")
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         if (sourceImageId == Guid.Empty)
             throw new ArgumentException("sourceImageId is required.", nameof(sourceImageId));
         ArgumentNullException.ThrowIfNull(brief);
@@ -282,8 +290,8 @@ public sealed class ImagePromptComposer(
         if ((references ?? []).Any(reference => reference.ImageId == sourceImageId))
             throw new ArgumentException("The edit source is already provider input image 1 and must not also appear in references.", nameof(references));
         var targetResolution = guidanceMode == ImageEditGuidanceMode.RegionalGuide
-            ? await ResolveRegionalGuideTargetAsync(projectId, sourceImageId, target, cancellationToken)
-            : await ResolveTargetAsync(projectId, target, background, cancellationToken);
+            ? await ResolveRegionalGuideTargetAsync(projectId, constraints, sourceImageId, target, cancellationToken)
+            : await ResolveTargetAsync(projectId, constraints, target, background, cancellationToken);
         var manifest = await BuildReferenceManifestAsync(projectId, references, firstProviderInputOrder: 2, cancellationToken);
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
@@ -321,6 +329,7 @@ public sealed class ImagePromptComposer(
 
     private async Task<TargetResolution> ResolveRegionalGuideTargetAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         Guid sourceImageId,
         ImageGenerationTarget? target,
         CancellationToken cancellationToken)
@@ -358,14 +367,14 @@ public sealed class ImagePromptComposer(
         var sourcePng = ProjectImageBinary.EncodePng(source.Data, source.FileName);
         var sourceAspect = (double)sourcePng.Width / sourcePng.Height;
         if (!string.IsNullOrWhiteSpace(target?.AspectRatio)
-            && !LayoutImageSizeResolver.AspectMatches(ParseAspectRatio(target.AspectRatio), sourceAspect))
+            && !LayoutImageSizeResolver.AspectMatches(ParseAspectRatio(constraints, target.AspectRatio), sourceAspect))
         {
             throw new ArgumentException(
                 $"Regional-guide aspect ratio {target.AspectRatio} must preserve the source image aspect {sourcePng.Width}:{sourcePng.Height}. Use an unmasked edit for reframing.",
                 nameof(target));
         }
 
-        var output = ProjectImageRegionalGuide.ResolveOutputSize(sourcePng.Width, sourcePng.Height, target?.Size);
+        var output = ProjectImageRegionalGuide.ResolveOutputSize(constraints, sourcePng.Width, sourcePng.Height, target?.Size);
         var aspectLabel = AspectLabel(output.Width, output.Height);
         return new TargetResolution(
             output.Size,
@@ -426,6 +435,7 @@ public sealed class ImagePromptComposer(
 
     private async Task<TargetResolution> ResolveTargetAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         ImageGenerationTarget? target,
         string background,
         CancellationToken cancellationToken)
@@ -450,11 +460,11 @@ public sealed class ImagePromptComposer(
                 if (target is { MinimumDpi: { } boundedMinimumDpi, SurfaceBounds: { } coverBounds })
                 {
                     var surface = await compositions.DescribeGenerationTargetAsync(
-                        projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
-                    RejectUnachievableSurfaceBounds(surface, coverBounds, boundedMinimumDpi, target);
+                        projectId, constraints, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    RejectUnachievableSurfaceBounds(constraints, surface, coverBounds, boundedMinimumDpi, target);
                 }
                 descriptor = await compositions.DescribeGenerationTargetAsync(
-                    projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
+                    projectId, constraints, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
             }
             else
             {
@@ -463,15 +473,15 @@ public sealed class ImagePromptComposer(
                 if (target is { MinimumDpi: { } boundedMinimumDpi, SurfaceBounds: { } authoringBounds })
                 {
                     var surface = await compositions.DescribeAuthoringGenerationTargetAsync(
-                        projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
-                    RejectUnachievableSurfaceBounds(surface, authoringBounds, boundedMinimumDpi, target);
+                        projectId, constraints, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    RejectUnachievableSurfaceBounds(constraints, surface, authoringBounds, boundedMinimumDpi, target);
                 }
                 descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
-                    projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
+                    projectId, constraints, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
             }
             descriptor = target.UseApplicationResolutionPolicy
-                ? ApplyApplicationResolutionPolicy(descriptor, target)
-                : ApplyMinimumDpi(ApplyLayoutRasterOverride(descriptor, target.Size), target, target.Size);
+                ? ApplyApplicationResolutionPolicy(constraints, descriptor, target)
+                : ApplyMinimumDpi(constraints, ApplyLayoutRasterOverride(constraints, descriptor, target.Size), target, target.Size);
             if (descriptor.RequestedWidthPixels <= 0 || descriptor.RequestedHeightPixels <= 0)
                 throw new ArgumentException("The physical target aspect cannot be represented by one provider-compatible raster. Use a minimum-DPI preflight and its multi-image surface plan, reduce the placement, or choose a compatible frame aspect.", nameof(target));
             var appendix = BuildLayoutTargetAppendix(descriptor, target.FillTarget, background);
@@ -497,6 +507,7 @@ public sealed class ImagePromptComposer(
                 : (double?)null;
             var physicalBasis = await ResolveCoreBookPhysicalBasisAsync(projectId, intendedAspect, cancellationToken);
             var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(
+                constraints,
                 physicalBasis.WidthInches,
                 physicalBasis.HeightInches,
                 minimumDpi);
@@ -533,14 +544,15 @@ public sealed class ImagePromptComposer(
 
         var resolvedSize = await ResolveExplicitSizeAsync(
             projectId,
+            constraints,
             requestedSize,
             requestedAspect,
             cancellationToken);
-        var (width, height) = ParseAndValidateSize(resolvedSize);
+        var (width, height) = ParseAndValidateSize(constraints, resolvedSize);
         var actualAspect = (double)width / height;
         if (requestedAspect.Length > 0)
         {
-            var expectedAspect = ParseAspectRatio(requestedAspect);
+            var expectedAspect = ParseAspectRatio(constraints, requestedAspect);
             if (!Approximately(actualAspect, expectedAspect))
                 throw new ArgumentException($"size {resolvedSize} conflicts with aspectRatio {requestedAspect}.", nameof(target));
         }
@@ -576,6 +588,7 @@ public sealed class ImagePromptComposer(
     }
 
     private static LayoutGenerationTargetDescriptor ApplyLayoutRasterOverride(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor descriptor,
         string? requestedSize)
     {
@@ -583,7 +596,7 @@ public sealed class ImagePromptComposer(
         if (normalizedSize.Length == 0 || normalizedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
             return descriptor;
 
-        var (width, height) = ParseAndValidateSize(normalizedSize);
+        var (width, height) = ParseAndValidateSize(constraints, normalizedSize);
         var requestedAspect = (double)width / height;
         var targetAspect = descriptor.WidthInches / descriptor.HeightInches;
         if (!LayoutImageSizeResolver.AspectMatches(requestedAspect, targetAspect))
@@ -602,6 +615,7 @@ public sealed class ImagePromptComposer(
     }
 
     private LayoutGenerationTargetDescriptor ApplyMinimumDpi(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor descriptor,
         ImageGenerationTarget target,
         string? requestedSize)
@@ -610,13 +624,14 @@ public sealed class ImagePromptComposer(
             return descriptor;
 
         var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(
+            constraints,
             descriptor.WidthInches,
             descriptor.HeightInches,
             minimumDpi);
         var normalizedSize = Clean(requestedSize);
         if (normalizedSize.Length > 0 && !normalizedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
-            var requested = ParseAndValidateSize(normalizedSize);
+            var requested = ParseAndValidateSize(constraints, normalizedSize);
             var requestedDpi = LayoutImageSizeResolver.EffectiveDpi(
                 new LayoutImageSize(requested.Width, requested.Height),
                 descriptor.WidthInches,
@@ -675,16 +690,19 @@ public sealed class ImagePromptComposer(
     }
 
     private LayoutGenerationTargetDescriptor ApplyApplicationResolutionPolicy(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor descriptor,
         ImageGenerationTarget target)
     {
         var targetDpi = descriptor.EffectiveDpiExpectation;
         var resolution = target.FillTarget
             ? LayoutImageSizeResolver.ResolveFillMinimumDpi(
+                constraints,
                 descriptor.WidthInches,
                 descriptor.HeightInches,
                 targetDpi)
             : LayoutImageSizeResolver.ResolveMinimumDpi(
+                constraints,
                 descriptor.WidthInches,
                 descriptor.HeightInches,
                 targetDpi);
@@ -751,6 +769,7 @@ public sealed class ImagePromptComposer(
             target.SurfaceBounds);
 
     private void RejectUnachievableSurfaceBounds(
+        ImageRasterConstraints constraints,
         LayoutGenerationTargetDescriptor surface,
         CompositionBounds bounds,
         int minimumDpi,
@@ -759,7 +778,7 @@ public sealed class ImagePromptComposer(
         ValidateSurfaceBounds(bounds);
         var widthInches = surface.WidthInches * bounds.WidthPercent / 100;
         var heightInches = surface.HeightInches * bounds.HeightPercent / 100;
-        var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(widthInches, heightInches, minimumDpi);
+        var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(constraints, widthInches, heightInches, minimumDpi);
         if (resolution.MeetsMinimumDpi)
             return;
         if (resolution.PrintUpscalePlan is not null && options.Value.PrintUpscale)
@@ -862,27 +881,23 @@ public sealed class ImagePromptComposer(
 
     private async Task<string> ResolveExplicitSizeAsync(
         Guid projectId,
+        ImageRasterConstraints constraints,
         string requestedSize,
         string requestedAspect,
         CancellationToken cancellationToken)
     {
         if (requestedSize.Length > 0 && !requestedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
-            _ = ParseAndValidateSize(requestedSize);
+            _ = ParseAndValidateSize(constraints, requestedSize);
             return requestedSize.ToLowerInvariant();
         }
         if (requestedAspect.Length > 0)
-            return DeriveSize(ParseAspectRatio(requestedAspect));
+            return LayoutImageSizeResolver.ResolveAspect(constraints, ParseAspectRatio(constraints, requestedAspect)).Size;
 
-        return (await defaultRasters.ResolveAsync(projectId, cancellationToken)).Size;
+        return (await defaultRasters.ResolveAsync(projectId, constraints, cancellationToken)).Size;
     }
 
-    private static string DeriveSize(double aspect)
-    {
-        return LayoutImageSizeResolver.ResolveAspect(aspect).Size;
-    }
-
-    private static (int Width, int Height) ParseAndValidateSize(string size)
+    private static (int Width, int Height) ParseAndValidateSize(ImageRasterConstraints constraints, string size)
     {
         var parts = size.Trim().ToLowerInvariant().Split('x', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 2
@@ -891,11 +906,11 @@ public sealed class ImagePromptComposer(
         {
             throw new ArgumentException("Image size must be WIDTHxHEIGHT.", nameof(size));
         }
-        LayoutImageSizeResolver.Validate(width, height);
+        LayoutImageSizeResolver.Validate(constraints, width, height);
         return (width, height);
     }
 
-    private static double ParseAspectRatio(string value)
+    private static double ParseAspectRatio(ImageRasterConstraints constraints, string value)
     {
         var normalized = value.Trim().Replace('/', ':');
         if (normalized.Contains(':'))
@@ -906,11 +921,11 @@ public sealed class ImagePromptComposer(
                 && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var height)
                 && width > 0 && height > 0)
             {
-                return ValidateAspect(width / height);
+                return ValidateAspect(constraints, width / height);
             }
         }
         if (double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio) && ratio > 0)
-            return ValidateAspect(ratio);
+            return ValidateAspect(constraints, ratio);
         throw new ArgumentException($"Invalid aspect ratio '{value}'. Use W:H, W/H, or a positive decimal.", nameof(value));
     }
 
@@ -942,10 +957,10 @@ public sealed class ImagePromptComposer(
         throw new ArgumentException($"Invalid aspect ratio '{value}'. Use W:H, W/H, or a positive decimal.", nameof(value));
     }
 
-    private static double ValidateAspect(double aspect)
+    private static double ValidateAspect(ImageRasterConstraints constraints, double aspect)
     {
-        if (aspect is < (1d / LayoutImageSizeResolver.MaximumAspectRatio) or > LayoutImageSizeResolver.MaximumAspectRatio)
-            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.");
+        if (!constraints.AspectInRange(aspect))
+            throw new ArgumentException($"Image aspect ratio must be between {constraints.AspectRangeLabel}.");
         return aspect;
     }
 

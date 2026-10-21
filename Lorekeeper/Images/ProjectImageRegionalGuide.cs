@@ -8,19 +8,24 @@ public static class ProjectImageRegionalGuide
     public const string PromptInstruction =
         "Treat the supplied alpha mask as approximate visual guidance for the location of the requested change, not as a hard pixel boundary. Focus the edit in the transparent region and preserve unmentioned content outside it as closely as possible. Minor boundary or surrounding adjustments may occur when they are needed for one coherent complete image. Preserve the source framing, do not broadly restyle or recompose the image, and inspect the complete result rather than assuming pixels outside the guide are unchanged.";
 
-    public static LayoutImageSize ResolveOutputSize(int sourceWidth, int sourceHeight, string? requestedSize)
+    public static LayoutImageSize ResolveOutputSize(
+        ImageRasterConstraints constraints,
+        int sourceWidth,
+        int sourceHeight,
+        string? requestedSize)
     {
+        ArgumentNullException.ThrowIfNull(constraints);
         if (sourceWidth <= 0 || sourceHeight <= 0)
             throw new InvalidOperationException("Regional-guide source dimensions are invalid.");
 
         var sourceAspect = (double)sourceWidth / sourceHeight;
-        if (sourceAspect is < (1d / LayoutImageSizeResolver.MaximumAspectRatio) or > LayoutImageSizeResolver.MaximumAspectRatio)
-            throw new InvalidOperationException("Regional-guide edits require a source aspect ratio between 1:3 and 3:1.");
+        if (!constraints.AspectInRange(sourceAspect))
+            throw new InvalidOperationException($"Regional-guide edits require a source aspect ratio between {constraints.AspectRangeLabel}.");
 
         var normalized = requestedSize?.Trim() ?? string.Empty;
         var output = normalized.Length == 0 || normalized.Equals("auto", StringComparison.OrdinalIgnoreCase)
-            ? LayoutImageSizeResolver.ResolveNearest(sourceWidth, sourceHeight)
-            : LayoutImageSizeResolver.Parse(normalized);
+            ? LayoutImageSizeResolver.ResolveNearest(constraints, sourceWidth, sourceHeight)
+            : LayoutImageSizeResolver.ParseValid(constraints, normalized);
 
         if (!LayoutImageSizeResolver.AspectMatches((double)output.Width / output.Height, sourceAspect))
         {
@@ -31,8 +36,12 @@ public static class ProjectImageRegionalGuide
         return output;
     }
 
-    public static void ValidateOutputSize(int sourceWidth, int sourceHeight, string requestedSize) =>
-        _ = ResolveOutputSize(sourceWidth, sourceHeight, requestedSize);
+    public static void ValidateOutputSize(
+        ImageRasterConstraints constraints,
+        int sourceWidth,
+        int sourceHeight,
+        string requestedSize) =>
+        _ = ResolveOutputSize(constraints, sourceWidth, sourceHeight, requestedSize);
 
     public static void ValidateTargetGeometry(
         string? value,
