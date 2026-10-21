@@ -446,8 +446,29 @@ by kind; each adapter receives the resolved provider row and owns its retry
 policy. The ChatGPT account adapter supports account-backed Responses image
 generation, source-driven edits, optional soft regional guides for narrowly localized or
 otherwise hard-to-describe work, streamed partial images, explicit generate/edit
-actions, continuity references, and source-image edit semantics. A guide is
-prompt guidance rather than a provider-enforced pixel boundary, so the provider
+actions, continuity references, and source-image edit semantics.
+
+The OpenRouter adapter uses OpenRouter's dedicated Image API with the
+provider row's API key and an `X-Title` header. `GET /images/models` maps each
+image model's `supported_parameters` (quality, output format, background,
+reference limit) and `supports_streaming` onto capabilities. Generation and
+edits post to `POST /images`; an edit sends the source as the first
+`input_references` entry, and because the API has no mask input, OpenRouter
+models never offer regional guides. Streaming models report
+`image_generation.partial_image` events as previews and finish on
+`image_generation.completed`. Errors map 401/403, 402 (credits), 429, and 5xx
+(502 for a failed generation) onto the shared kinds, honoring `Retry-After`.
+Response bodies are capped by the configured provider output limit.
+
+A model that takes `aspect_ratio` and `resolution` instead of pixels stores
+aspect-tier raster constraints: its ratio and tier lists plus pixel limits
+derived from them. Lorekeeper still plans a pixel raster against those limits,
+then the adapter sends the nearest listed ratio and the smallest tier holding
+that pixel count. The delivered raster can differ from the plan; decoded
+dimensions stay authoritative, raster mismatches remain visible in provenance,
+and print preparation upscales as for any other undersized placement.
+
+A guide is prompt guidance rather than a provider-enforced pixel boundary, so the provider
 contract never represents it as protecting unmasked pixels. `ImagePromptComposer`
 supplies the shared structured prompt contract. Feature-specific use of generated
 images, geometry targets, assets, and deletion guards belongs to
@@ -455,7 +476,8 @@ images, geometry targets, assets, and deletion guards belongs to
 The provider transport accepts pixel dimensions, not physical DPI. Lorekeeper
 resolves effective-DPI requests against server-owned physical geometry before
 dispatch, enforcing the selected model's raster constraints (for the GPT Image
-models: 16-pixel alignment, edge, megapixel, and aspect limits). An infeasible request fails before any durable job or provider
+models: 16-pixel alignment, edge, megapixel, and aspect limits; for aspect-tier
+models, the approximate limits described above). An infeasible request fails before any durable job or provider
 call; no density metadata is fabricated in the image file.
 
 Regional-guided dispatch revalidates the source, compiled geometry, and mask
@@ -626,7 +648,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
 | [`Lorekeeper/Images/IImageProviderService.cs`](../../Lorekeeper/Images/IImageProviderService.cs), [`ImageProviderService.cs`](../../Lorekeeper/Images/ImageProviderService.cs), and [`Lorekeeper/Composition/ImageRasterConstraints.cs`](../../Lorekeeper/Composition/ImageRasterConstraints.cs) | Image-provider configuration, single-default invariants, stored-state readiness, provider/model resolution, assistant tool guidance, and per-model raster limits. |
-| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account adapter, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`OpenRouterImageProvider.cs`](../../Lorekeeper/Images/OpenRouterImageProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account and OpenRouter image adapters, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
 | [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | The bundled GPT Image model set and request normalization of quality, background, output format, and compression against the resolved model's capabilities. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 

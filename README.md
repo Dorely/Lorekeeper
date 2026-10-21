@@ -34,8 +34,9 @@ provenance, and a reproducible export recipe.
   usage-limit states from ChatGPT. OpenAI-compatible providers and local model
   servers also work, and semantic search uses a local Ollama or LM Studio
   embedding model (or any API-key embeddings endpoint).
-- **Image providers:** pick the default image service in Settings > Image
-  providers, and switch provider or model per request in the Images workspace.
+- **Image providers:** generate images with your ChatGPT (Codex) account or an
+  OpenRouter API key. Pick the default in Settings > Image providers, and
+  switch provider or model per request in the Images workspace.
 - **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
   EPUB, and PDF ebook releases, with covers sized to the calculated spine and
   print profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu, or

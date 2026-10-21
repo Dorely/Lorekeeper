@@ -276,6 +276,7 @@ builder.Services.AddOptions<ProjectImageGenerationOptions>()
     .Validate(options => options.MaxProviderOutputBytes > 0, "Images:MaxProviderOutputBytes must be greater than zero.")
     .ValidateOnStart();
 builder.Services.AddScoped<IProjectImageProvider, ChatGptAccountImageProvider>();
+builder.Services.AddScoped<IProjectImageProvider, OpenRouterImageProvider>();
 builder.Services.AddScoped<IImageProviderClientFactory, ImageProviderClientFactory>();
 builder.Services.AddScoped<IImageProviderService, ImageProviderService>();
 builder.Services.AddScoped<IProjectImageDefaultRasterResolver, ProjectImageDefaultRasterResolver>();
