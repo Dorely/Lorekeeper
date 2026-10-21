@@ -277,6 +277,7 @@ builder.Services.AddOptions<ProjectImageGenerationOptions>()
     .ValidateOnStart();
 builder.Services.AddScoped<IProjectImageProvider, ChatGptAccountImageProvider>();
 builder.Services.AddScoped<IProjectImageProvider, OpenRouterImageProvider>();
+builder.Services.AddScoped<IProjectImageProvider, OpenAiImagesCompatibleProvider>();
 builder.Services.AddScoped<IImageProviderClientFactory, ImageProviderClientFactory>();
 builder.Services.AddScoped<IImageProviderService, ImageProviderService>();
 builder.Services.AddScoped<IProjectImageDefaultRasterResolver, ProjectImageDefaultRasterResolver>();

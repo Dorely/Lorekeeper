@@ -62,7 +62,7 @@
                     </select>
                 </label>
                 @RenderCommonFields(_newDraft)
-                @RenderKindFields(_newDraft)
+                @RenderKindFields(_newDraft, offerPreset: true)
             </div>
             <div class="provider-form-actions">
                 <button type="button" class="btn btn-outline-info" disabled="@(_testingNew || _savingNew)" @onclick="TestNewAsync">@(_testingNew ? "Testing…" : "Test")</button>
@@ -177,6 +177,7 @@
     private List<ImageProviderKind> _supportedKinds = [];
     private ImageProviderReadiness? _readiness;
     private ProviderDraft _newDraft = new();
+    private string _newPreset = "custom";
     private readonly Dictionary<int, ProviderDraft> _editDrafts = [];
     private readonly Dictionary<int, ModelDraft> _modelForms = [];
     private readonly Dictionary<int, bool> _collapsedProviders = [];
@@ -265,6 +266,7 @@
 
     private void ResetNewDraft()
     {
+        _newPreset = "custom";
         _newDraft = _supportedKinds.Count > 0 ? CreateDraft(_supportedKinds[0]) : new ProviderDraft();
         if (_newDraft.Kind == ImageProviderKind.ChatGptAccount)
             _newDraft.OpenAiAccountId = CodexAccounts.FirstOrDefault()?.Id;
@@ -283,10 +285,28 @@
             return;
 
         _newDraft.Kind = kind;
+        _newPreset = "custom";
         ApplyKindDefaults(_newDraft);
         _newDraft.OpenAiAccountId = kind == ImageProviderKind.ChatGptAccount
             ? CodexAccounts.FirstOrDefault()?.Id
             : null;
+    }
+
+    private void OnNewPresetChanged(ChangeEventArgs args)
+    {
+        _newPreset = args.Value is string value && value == "openai" ? "openai" : "custom";
+        if (_newPreset == "openai")
+        {
+            _newDraft.EndpointUrl = "https://api.openai.com/v1";
+            _newDraft.Name = "openai-images";
+            _newDraft.DisplayName = "OpenAI API";
+        }
+        else
+        {
+            _newDraft.EndpointUrl = string.Empty;
+            _newDraft.Name = string.Empty;
+            _newDraft.DisplayName = string.Empty;
+        }
     }
 
     private async Task TestNewAsync()
@@ -546,6 +566,13 @@
         _savingModelProviderId = provider.Id;
         try
         {
+            var rasterConstraints = new ImageRasterConstraints(
+                draft.SizeMultiple,
+                draft.MinimumPixels,
+                draft.MaximumPixels,
+                draft.MaximumEdge,
+                draft.MaximumAspectRatio,
+                draft.TargetPixels).Validated();
             var model = new ImageProviderModel
             {
                 ModelId = draft.ModelId.Trim(),
@@ -559,7 +586,7 @@
                 SupportsTransparentBackground = draft.SupportsTransparentBackground,
                 SupportsStreaming = draft.SupportsStreaming,
                 MaxReferenceImages = draft.MaxReferenceImages,
-                RasterConstraintsJson = ImageRasterConstraints.GptImage.ToJson(),
+                RasterConstraintsJson = rasterConstraints.ToJson(),
             };
             await ImageProviderService.SaveModelAsync(provider.Id, model);
             _modelForms.Remove(provider.Id);
@@ -589,7 +616,7 @@
         </label>
     };
 
-    private RenderFragment RenderKindFields(ProviderDraft draft) => __builder =>
+    private RenderFragment RenderKindFields(ProviderDraft draft, bool offerPreset = false) => __builder =>
     {
         if (draft.Kind == ImageProviderKind.ChatGptAccount)
         {
@@ -633,6 +660,16 @@
         }
         else if (draft.Kind == ImageProviderKind.OpenAiImagesCompatible)
         {
+            @if (offerPreset)
+            {
+                <label class="field-wide">
+                    <span>Preset</span>
+                    <select class="form-select" value="@_newPreset" @onchange="OnNewPresetChanged">
+                        <option value="openai">OpenAI API</option>
+                        <option value="custom">Custom endpoint</option>
+                    </select>
+                </label>
+            }
             <label class="field-wide">
                 <span>Endpoint URL</span>
                 <input class="form-control" placeholder="https://api.openai.com/v1" @bind="draft.EndpointUrl" />
@@ -761,6 +798,17 @@
                             <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.OutputWebp" /><span>webp</span></label>
                         </div>
                     </fieldset>
+                    <details class="raster-limits field-wide">
+                        <summary>Raster limits</summary>
+                        <div class="model-fields">
+                            <label><span>Size multiple</span><input type="number" min="1" max="512" step="1" class="form-control form-control-sm" @bind="draft.SizeMultiple" /></label>
+                            <label><span>Minimum pixels</span><input type="number" min="1" step="1" class="form-control form-control-sm" @bind="draft.MinimumPixels" /></label>
+                            <label><span>Maximum pixels</span><input type="number" min="1" step="1" class="form-control form-control-sm" @bind="draft.MaximumPixels" /></label>
+                            <label><span>Maximum edge</span><input type="number" min="1" max="16384" step="1" class="form-control form-control-sm" @bind="draft.MaximumEdge" /></label>
+                            <label><span>Maximum aspect ratio</span><input type="number" min="1" max="32" step="0.01" class="form-control form-control-sm" @bind="draft.MaximumAspectRatio" /></label>
+                            <label><span>Target pixels</span><input type="number" min="1" step="1" class="form-control form-control-sm" @bind="draft.TargetPixels" /></label>
+                        </div>
+                    </details>
                 </div>
             </div>
         }
@@ -938,5 +986,11 @@
         public bool OutputPng { get; set; } = true;
         public bool OutputJpeg { get; set; }
         public bool OutputWebp { get; set; }
+        public int SizeMultiple { get; set; } = ImageRasterConstraints.GptImage.SizeMultiple;
+        public long MinimumPixels { get; set; } = ImageRasterConstraints.GptImage.MinimumPixels;
+        public long MaximumPixels { get; set; } = ImageRasterConstraints.GptImage.MaximumPixels;
+        public int MaximumEdge { get; set; } = ImageRasterConstraints.GptImage.MaximumEdge;
+        public double MaximumAspectRatio { get; set; } = ImageRasterConstraints.GptImage.MaximumAspectRatio;
+        public long TargetPixels { get; set; } = ImageRasterConstraints.GptImage.TargetPixels;
     }
 }

@@ -460,6 +460,22 @@ models never offer regional guides. Streaming models report
 (502 for a failed generation) onto the shared kinds, honoring `Retry-After`.
 Response bodies are capped by the configured provider output limit.
 
+The OpenAI Images-compatible adapter posts JSON to
+`POST {endpoint}/images/generations` and multipart form data to
+`POST {endpoint}/images/edits`. A generation that carries reference images is
+sent to the edit route as `image[]` parts, because the generations route accepts
+no references. `size` is always the planned `WIDTHxHEIGHT`; quality and
+background are omitted when `auto`; compression is sent only for JPEG or WebP.
+`GET {endpoint}/models` discovers image models, returns the bundled GPT Image
+rows unchanged, and marks other `gpt-image` or `image` ids with the compatible
+default capabilities; a 404 or non-JSON list means the user adds models
+manually, not a failed test. `TestAsync` lists models and never bills a
+generation. Streaming models consume `image_generation`/`image_edit` partial and
+completed events; a non-streaming response may return base64 or an
+https/loopback download URL capped at 64 MiB. Errors map 401/403, 400/404/422,
+429, and 5xx onto the shared kinds, honor `Retry-After`, and cap the parsed
+error body at 64 KiB.
+
 A model that takes `aspect_ratio` and `resolution` instead of pixels stores
 aspect-tier raster constraints: its ratio and tier lists plus pixel limits
 derived from them. Lorekeeper still plans a pixel raster against those limits,
@@ -648,7 +664,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
 | [`Lorekeeper/Images/IImageProviderService.cs`](../../Lorekeeper/Images/IImageProviderService.cs), [`ImageProviderService.cs`](../../Lorekeeper/Images/ImageProviderService.cs), and [`Lorekeeper/Composition/ImageRasterConstraints.cs`](../../Lorekeeper/Composition/ImageRasterConstraints.cs) | Image-provider configuration, single-default invariants, stored-state readiness, provider/model resolution, assistant tool guidance, and per-model raster limits. |
-| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`OpenRouterImageProvider.cs`](../../Lorekeeper/Images/OpenRouterImageProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account and OpenRouter image adapters, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`OpenRouterImageProvider.cs`](../../Lorekeeper/Images/OpenRouterImageProvider.cs), [`OpenAiImagesCompatibleProvider.cs`](../../Lorekeeper/Images/OpenAiImagesCompatibleProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account, OpenRouter, and OpenAI Images-compatible image adapters, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
 | [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | The bundled GPT Image model set and request normalization of quality, background, output format, and compression against the resolved model's capabilities. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 

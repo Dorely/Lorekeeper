@@ -67,6 +67,9 @@
 .model-fields .model-check { align-items: center; display: flex; gap: 0.35rem; }
 .model-fields .model-check > span { color: inherit; font-size: 0.76rem; font-weight: 600; }
 .model-check input { margin-top: 0; }
+.raster-limits { border-top: 1px solid var(--lk-line); padding-top: 0.6rem; }
+.raster-limits summary { color: var(--lk-muted); cursor: pointer; font-size: 0.72rem; font-weight: 750; }
+.raster-limits[open] summary { margin-bottom: 0.55rem; }
 
 @container model-grid (max-width: 64rem) {
     .model-grid-head,.model-grid-row { grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 1fr) 5rem minmax(9rem, 1.3fr) minmax(6.5rem, 1fr) 5.5rem; }
