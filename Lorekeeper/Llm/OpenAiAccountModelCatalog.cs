@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Lorekeeper.Models;
 
 namespace Lorekeeper.Llm;
@@ -11,12 +13,29 @@ public sealed record OpenAiAccountModelCatalogEntry(
     LlmModelCapabilities Capabilities,
     int UsableInputBudgetTokens);
 
+/// <summary>
+/// Account-reported metadata persisted for <see cref="LlmModelOrigin.AccountDiscovered"/>
+/// rows. It never contains credentials.
+/// </summary>
+public sealed record OpenAiAccountDiscoveredModelMetadata(
+    IReadOnlyList<LlmReasoningEffort> SupportedEfforts,
+    LlmReasoningEffort? DefaultEffort,
+    LlmModelCapabilities Capabilities,
+    int? UsableInputBudgetTokens,
+    int Priority);
+
 public static class OpenAiAccountModelCatalog
 {
     public const int SchemaVersion = 3;
     public const string Source = "https://learn.chatgpt.com/docs/models";
     public const int UsableInputBudgetTokens = 272_000;
     public static readonly DateOnly ValidationDate = new(2026, 9, 29);
+    public const string DiscoverySource = "chatgpt-account-model-list";
+
+    private static readonly JsonSerializerOptions MetadataJsonOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     private static readonly IReadOnlyList<LlmReasoningEffort> SupportedEfforts =
     [
@@ -65,6 +84,22 @@ public static class OpenAiAccountModelCatalog
                 ValidationDate);
         }
 
+        if (provider.OpenAiAccountId is int discoveredAccountId
+            && provider.ModelOrigin == LlmModelOrigin.AccountDiscovered
+            && ReadDiscoveredMetadata(provider) is { } discovered)
+        {
+            return new LlmProviderResolvedMetadata(
+                discoveredAccountId,
+                provider.ModelOrigin,
+                discovered.SupportedEfforts,
+                discovered.Capabilities,
+                provider.MaxInputTokens ?? discovered.UsableInputBudgetTokens,
+                provider.ReasoningEffort ?? discovered.DefaultEffort,
+                null,
+                DiscoverySource,
+                provider.AccountAvailabilityCheckedAt is { } checkedAt ? DateOnly.FromDateTime(checkedAt) : null);
+        }
+
         return new LlmProviderResolvedMetadata(
             provider.OpenAiAccountId,
             provider.ModelOrigin,
@@ -77,8 +112,76 @@ public static class OpenAiAccountModelCatalog
             null);
     }
 
+    public static bool IsAccountListed(LlmProvider provider) =>
+        provider.ModelOrigin is LlmModelOrigin.BundledCatalog or LlmModelOrigin.AccountDiscovered;
+
+    /// <summary>
+    /// The best usable account model: the catalog's preferred model when the
+    /// account offers it, then the account's own ordering, then catalog order.
+    /// </summary>
+    public static LlmProvider? BestAvailable(
+        IEnumerable<LlmProvider> accountModels,
+        IReadOnlyDictionary<string, int>? listedPriorities = null) =>
+        accountModels
+            .Where(IsAccountListed)
+            .Where(row => row.AccountAvailability == LlmAccountModelAvailability.Available)
+            .Where(row => TryValidateEffort(row, out _))
+            .Where(row => Resolve(row).Capabilities.HasFlag(LlmModelCapabilities.TextInput))
+            .OrderByDescending(row => row.ModelOrigin == LlmModelOrigin.BundledCatalog
+                && Find(row.ModelId)?.IsPreferred == true)
+            .ThenBy(row => listedPriorities is not null && listedPriorities.TryGetValue(row.ModelId, out var priority)
+                ? priority
+                : ReadDiscoveredMetadata(row)?.Priority ?? int.MaxValue)
+            .ThenBy(row => CatalogIndex(row.ModelId))
+            .ThenBy(row => row.Id)
+            .FirstOrDefault();
+
+    private static int CatalogIndex(string modelId)
+    {
+        for (var index = 0; index < Entries.Count; index++)
+        {
+            if (string.Equals(Entries[index].ModelId, modelId, StringComparison.Ordinal))
+                return index;
+        }
+
+        return int.MaxValue;
+    }
+
+    public static string SerializeDiscoveredMetadata(OpenAiAccountDiscoveredModelMetadata metadata) =>
+        JsonSerializer.Serialize(metadata, MetadataJsonOptions);
+
+    public static OpenAiAccountDiscoveredModelMetadata? ReadDiscoveredMetadata(LlmProvider provider)
+    {
+        if (string.IsNullOrWhiteSpace(provider.AccountModelMetadataJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<OpenAiAccountDiscoveredModelMetadata>(provider.AccountModelMetadataJson, MetadataJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static bool TryValidateEffort(LlmProvider provider, out string? error)
     {
+        if (provider.ModelOrigin == LlmModelOrigin.AccountDiscovered)
+        {
+            var discovered = ReadDiscoveredMetadata(provider);
+            if (provider.ReasoningEffort is { } discoveredEffort
+                && discovered is { SupportedEfforts.Count: > 0 }
+                && !discovered.SupportedEfforts.Contains(discoveredEffort))
+            {
+                error = $"{provider.DisplayName ?? provider.ModelId} does not support the saved {discoveredEffort} thinking effort on this account. Choose a listed effort or the account default.";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
         if (provider.ModelOrigin != LlmModelOrigin.BundledCatalog)
         {
             error = null;

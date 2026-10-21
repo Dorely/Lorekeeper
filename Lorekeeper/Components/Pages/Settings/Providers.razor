@@ -172,6 +172,7 @@
                     @if (_codexConnected)
                     {
                         <span class="lk-status-pill is-success">Connected</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_refreshingOpenAiModels" @onclick="() => RefreshOpenAiModelsAsync()">@(_refreshingOpenAiModels ? "Refreshing…" : "Refresh models")</button>
                         <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Reconnect</button>
                         <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
                     }
@@ -186,9 +187,31 @@
                     }
                 </div>
             </header>
+            @if (!openAiExpanded)
+            {
+                @RenderPlanDefaultBanner()
+            }
             @if (openAiExpanded)
             {
                 <div class="connection-body" id="@openAiBodyId">
+                    @if (_openAiAccount is not null)
+                    {
+                        <p class="model-refresh-note">
+                            @if (_openAiAccount.LastModelRefreshAt is { } lastModelRefresh)
+                            {
+                                @($"Models checked {lastModelRefresh.ToLocalTime():g}")
+                            }
+                            else
+                            {
+                                @("Models have not been checked against your plan yet.")
+                            }
+                        </p>
+                        @if (!string.IsNullOrWhiteSpace(_openAiAccount.LastModelRefreshError))
+                        {
+                            <div class="alert alert-warning">@_openAiAccount.LastModelRefreshError</div>
+                        }
+                    }
+                    @RenderPlanDefaultBanner()
                     @if (_callbackOrigin is { IsValid: false })
                     {
                         <div class="alert alert-warning">@_callbackOrigin.Message</div>
@@ -285,6 +308,8 @@
     private LlmProvider? _codexProvider;
     private OpenAiAccount? _openAiAccount;
     private bool _codexConnected;
+    private bool _refreshingOpenAiModels;
+    private bool _autoRefreshAttempted;
     private bool _hasWorkingChatProvider;
     private OpenAiCallbackOriginValidation? _callbackOrigin;
     private OpenAiAuthorizationFlowSnapshot? _authorizationFlow;
@@ -347,12 +372,20 @@
         ? []
         : _parents
             .Where(provider => provider.OpenAiAccountId == _openAiAccount.Id)
-            .OrderByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+            .OrderBy(provider => provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+            .ThenByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog
                 && OpenAiAccountModelCatalog.Find(provider.ModelId)?.IsPreferred == true)
             .ThenByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
             .ThenBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(provider => provider.Id)
             .ToList();
+
+    private LlmProvider? UnavailableDefault =>
+        CodexModels.FirstOrDefault(provider => provider.IsDefault
+            && IsAccountListed(provider)
+            && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable);
+
+    private LlmProvider? BestAvailableAccountModel => OpenAiAccountModelCatalog.BestAvailable(CodexModels);
 
     private bool CanAddNewProvider =>
         !_isTestingNewProvider
@@ -366,6 +399,12 @@
         ConsumeStatusFromQuery();
         _callbackOrigin = CallbackOrigin.Validate();
         await ReloadAsync();
+
+        if (_codexConnected && _openAiAccount is { LastModelRefreshAt: null } neverChecked && !_autoRefreshAttempted)
+        {
+            _autoRefreshAttempted = true;
+            await RefreshOpenAiModelsAsync(neverChecked.Id, automatic: true);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -906,7 +945,44 @@
     private async Task FinishOpenAiConnectionAsync(int accountId, CancellationToken cancellationToken)
     {
         await OpenAiCatalog.EnsureCatalogAsync(accountId, cancellationToken);
+        // A refresh failure replaces this status, which keeps the warning visible.
         SetStatus("OpenAI account connected.", "success");
+        await RefreshOpenAiModelsAsync(accountId, automatic: true);
+    }
+
+    private Task RefreshOpenAiModelsAsync() =>
+        _openAiAccount is null ? Task.CompletedTask : RefreshOpenAiModelsAsync(_openAiAccount.Id, automatic: false);
+
+    private async Task RefreshOpenAiModelsAsync(int accountId, bool automatic)
+    {
+        if (_refreshingOpenAiModels)
+            return;
+
+        _refreshingOpenAiModels = true;
+        if (!_disposed)
+            await InvokeAsync(StateHasChanged);
+        try
+        {
+            var result = await OpenAiCatalog.RefreshAvailabilityAsync(accountId);
+            if (!result.Succeeded)
+                SetStatus(result.Error ?? "Model refresh failed.", "warning");
+            else if (!automatic)
+                SetStatus($"Models refreshed: {result.AvailableCount} available, {result.UnavailableCount} not on your plan.", "success");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("OpenAI account {AccountId} model refresh failed: {ErrorType}", accountId, ex.GetType().Name);
+            SetStatus("Model refresh failed. Try again.", "warning");
+        }
+        finally
+        {
+            _refreshingOpenAiModels = false;
+        }
+
         await ReloadAsync();
     }
 
@@ -932,22 +1008,27 @@
 
 
 
+    private static bool IsAccountListed(LlmProvider provider) =>
+        provider.ModelOrigin is LlmModelOrigin.BundledCatalog or LlmModelOrigin.AccountDiscovered;
+
     private bool IsChatReady(LlmProvider provider) =>
-        (provider.ModelOrigin == LlmModelOrigin.BundledCatalog || provider.HasCurrentChatTestSnapshot)
+        (IsAccountListed(provider) || provider.HasCurrentChatTestSnapshot)
         && _chatReadyStatus.TryGetValue(provider.Id, out var ready)
         && ready;
 
     private bool IsVisionReady(LlmProvider provider) =>
-        (provider.ModelOrigin == LlmModelOrigin.BundledCatalog || provider.HasCurrentVisionTestSnapshot)
+        (IsAccountListed(provider) || provider.HasCurrentVisionTestSnapshot)
         && _visionReadyStatus.TryGetValue(provider.Id, out var ready)
         && ready;
 
     private string DefaultButtonTitle(LlmProvider provider) =>
         IsChatReady(provider)
             ? "Set as the default chat provider"
-            : provider.ModelOrigin == LlmModelOrigin.BundledCatalog
-                ? "Connect the OpenAI account before setting this model as default."
-                : "Run Test successfully before setting this provider as default.";
+            : IsAccountListed(provider) && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable
+                ? "This model isn't available on your ChatGPT plan."
+                : IsAccountListed(provider)
+                    ? "Connect the OpenAI account before setting this model as default."
+                    : "Run Test successfully before setting this provider as default.";
 
     private RenderFragment RenderChatStatus(LlmProvider provider) => __builder =>
     {
@@ -957,7 +1038,13 @@
             return;
         }
 
-        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+        if (IsAccountListed(provider) && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+        {
+            <span class="lk-status-pill is-warning" title="Your ChatGPT plan doesn't offer this model. Use Refresh models after changing plans.">Not on your plan</span>
+            return;
+        }
+
+        if (IsAccountListed(provider))
         {
             <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
             return;
@@ -986,7 +1073,13 @@
             return;
         }
 
-        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
+        if (IsAccountListed(provider) && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+        {
+            <span class="lk-status-pill is-warning" title="Your ChatGPT plan doesn't offer this model. Use Refresh models after changing plans.">Not on your plan</span>
+            return;
+        }
+
+        if (IsAccountListed(provider))
         {
             <span class="lk-status-pill is-warning" title="Connect the OpenAI account to use this catalog model.">Needs account</span>
             return;
@@ -1005,6 +1098,19 @@
         }
 
         <span class="lk-status-pill is-danger" title="@provider.LastVisionTestError">Failed</span>
+    };
+
+    private RenderFragment RenderPlanDefaultBanner() => __builder =>
+    {
+        if (UnavailableDefault is { } unavailable
+            && BestAvailableAccountModel is { } best
+            && best.Id != unavailable.Id)
+        {
+            <div class="alert alert-warning plan-default-banner">
+                <span>Your default model, @(unavailable.DisplayName ?? unavailable.ModelId), isn't available on your ChatGPT plan.</span>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="() => SetDefaultAsync(best.Id)">Use @(best.DisplayName ?? best.ModelId)</button>
+            </div>
+        }
     };
 
     private List<LlmProvider> ModelsFor(LlmProvider connection)
@@ -1034,14 +1140,14 @@
                 <div class="model-grid-item" role="rowgroup">
                     <div class="model-grid-row" role="row">
                         <div class="model-grid-cell" role="cell" data-label="Display name">
-                            <input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(accountBacked && model.ModelOrigin == LlmModelOrigin.BundledCatalog)" aria-label="Display name" />
+                            <input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(accountBacked && IsAccountListed(model))" aria-label="Display name" />
                             @if (accountBacked)
                             {
-                                <span class="model-origin">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog" : "Manual")</span>
+                                <span class="model-origin">@OriginLabel(model)</span>
                             }
                         </div>
                         <div class="model-grid-cell" role="cell" data-label="Model ID">
-                            <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(accountBacked && model.ModelOrigin == LlmModelOrigin.BundledCatalog)" aria-label="Model ID" />
+                            <input class="form-control form-control-sm" @bind="model.ModelId" disabled="@(accountBacked && IsAccountListed(model))" aria-label="Model ID" />
                         </div>
                         <div class="model-grid-cell" role="cell" data-label="Thinking effort">
                             @if (accountBacked)
@@ -1119,7 +1225,7 @@
                                 <div class="model-detail field-wide">Enter an exact model ID, then use Test before saving it as the default.</div>
                             }
                             <div class="field-wide">
-                                <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Only efforts supported by this catalog model are offered." : "Higher levels use more time and tokens; model support varies.")</small>
+                                <small class="field-note">@(IsAccountListed(model) ? "Only efforts supported by this model are offered." : "Higher levels use more time and tokens; model support varies.")</small>
                             </div>
                             @RenderMaxTokenControls(model)
                         </div>
@@ -1135,6 +1241,26 @@
 
     private RenderFragment RenderMaxTokenControls(LlmProvider model) => __builder =>
     {
+        var accountDefaultBudget = model.ModelOrigin == LlmModelOrigin.AccountDiscovered
+            ? model.ResolvedMetadata?.UsableInputBudgetTokens
+            : null;
+        var inputPlaceholder = model.ModelOrigin switch
+        {
+            LlmModelOrigin.BundledCatalog => "Catalog default (272,000)",
+            LlmModelOrigin.AccountDiscovered => accountDefaultBudget is { } budget
+                ? $"Account default ({budget:N0})"
+                : "Account default",
+            _ => "Auto (model/default)",
+        };
+        var inputNote = model.ModelOrigin switch
+        {
+            LlmModelOrigin.BundledCatalog => "Blank uses the catalog's 272,000-token usable input budget.",
+            LlmModelOrigin.AccountDiscovered => accountDefaultBudget is { } budget
+                ? $"Blank uses the account's {budget:N0}-token usable input budget."
+                : "Blank uses the account-reported usable input budget.",
+            _ => "Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.",
+        };
+
         <label>
             <span>Max output tokens</span>
             <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Provider default" @bind="model.MaxOutputTokens" />
@@ -1142,8 +1268,8 @@
         </label>
         <label>
             <span>Max input tokens</span>
-            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Catalog default (272,000)" : "Auto (model/default)")" @bind="model.MaxInputTokens" />
-            <small class="field-note">@(model.ModelOrigin == LlmModelOrigin.BundledCatalog ? "Blank uses the catalog's 272,000-token usable input budget." : "Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.")</small>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="@inputPlaceholder" @bind="model.MaxInputTokens" />
+            <small class="field-note">@inputNote</small>
         </label>
         <label>
             <span>Max tokens field</span>
@@ -1229,6 +1355,16 @@
 
     private string? ModelReadinessDetail(LlmProvider provider)
     {
+        if (IsAccountListed(provider) && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+            return "Not offered on your ChatGPT plan at the last refresh.";
+
+        if (provider.ModelOrigin == LlmModelOrigin.AccountDiscovered)
+        {
+            return provider.EffectiveMaxInputTokens is { } budget
+                ? $"Listed by your ChatGPT account; usable input budget {budget:N0} tokens."
+                : "Listed by your ChatGPT account.";
+        }
+
         if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog)
             return $"Bundled catalog v{OpenAiAccountModelCatalog.SchemaVersion}; usable input budget {provider.EffectiveMaxInputTokens:N0} tokens.";
 
@@ -1247,13 +1383,21 @@
     private static IEnumerable<(LlmReasoningEffort Value, string Label)> ReasoningChoicesFor(LlmProvider provider)
     {
         var supported = provider.ResolvedMetadata?.SupportedEfforts;
-        return provider.ModelOrigin == LlmModelOrigin.BundledCatalog && supported is { Count: > 0 }
+        return IsAccountListed(provider) && supported is { Count: > 0 }
             ? ReasoningEffortChoices.Where(choice => supported.Contains(choice.Value))
             : ReasoningEffortChoices;
     }
 
     private static string ReasoningDefaultLabel(LlmProvider provider)
     {
+        if (provider.ModelOrigin == LlmModelOrigin.AccountDiscovered)
+        {
+            var defaultEffort = OpenAiAccountModelCatalog.ReadDiscoveredMetadata(provider)?.DefaultEffort;
+            return defaultEffort is { } effort
+                ? $"Account default ({ReasoningLabel(effort)})"
+                : "Account default";
+        }
+
         var entry = provider.ModelOrigin == LlmModelOrigin.BundledCatalog
             ? OpenAiAccountModelCatalog.Find(provider.ModelId)
             : null;
@@ -1261,6 +1405,13 @@
             ? "Provider default"
             : $"Catalog default ({ReasoningLabel(entry.DefaultEffort)})";
     }
+
+    private static string OriginLabel(LlmProvider provider) => provider.ModelOrigin switch
+    {
+        LlmModelOrigin.BundledCatalog => "Catalog",
+        LlmModelOrigin.AccountDiscovered => "From account",
+        _ => "Manual",
+    };
 
     private static string ReasoningLabel(LlmReasoningEffort effort) => effort switch
     {

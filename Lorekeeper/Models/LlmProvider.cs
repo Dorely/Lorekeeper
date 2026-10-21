@@ -37,6 +37,19 @@ public class LlmProvider
     public int? OpenAiAccountId { get; set; }
     public OpenAiAccount? OpenAiAccount { get; set; }
     public LlmModelOrigin ModelOrigin { get; set; } = LlmModelOrigin.Manual;
+
+    /// <summary>
+    /// Account-reported availability for catalog and discovered account rows.
+    /// Manual rows stay <see cref="LlmAccountModelAvailability.Unknown"/> and rely on tests.
+    /// </summary>
+    public LlmAccountModelAvailability AccountAvailability { get; set; } = LlmAccountModelAvailability.Unknown;
+    public DateTime? AccountAvailabilityCheckedAt { get; set; }
+
+    /// <summary>
+    /// Serialized <c>OpenAiAccountDiscoveredModelMetadata</c> for
+    /// <see cref="LlmModelOrigin.AccountDiscovered"/> rows. Contains no credentials.
+    /// </summary>
+    public string? AccountModelMetadataJson { get; set; }
     public bool IsDefault { get; set; }
     public bool LastChatTestSucceeded { get; set; }
     public DateTime? LastChatTestedAt { get; set; }

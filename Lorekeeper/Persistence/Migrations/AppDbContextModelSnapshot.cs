@@ -2234,6 +2234,18 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AccountAvailability")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Unknown");
+
+                    b.Property<DateTime?>("AccountAvailabilityCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountModelMetadataJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ApiKey")
                         .HasColumnType("TEXT");
 
@@ -2606,6 +2618,12 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastAuthenticationError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastModelRefreshAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastModelRefreshError")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("RequiresReauthenticationAt")

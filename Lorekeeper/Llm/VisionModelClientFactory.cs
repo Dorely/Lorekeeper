@@ -170,12 +170,7 @@ public sealed class VisionModelClientFactory(
 
         using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.TryAddWithoutValidation("chatgpt-account-id", accountId);
-        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
-        request.Headers.TryAddWithoutValidation("originator", "pi");
-        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        CodexProvider.ApplyAccountHeaders(request, accessToken, accountId, eventStream: true);
 
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -184,6 +179,8 @@ public sealed class VisionModelClientFactory(
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
             logger.LogError("Codex vision API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
             logger.LogDebug("Codex vision API error response body: {Body}", redactedErrorBody);
+            if (CodexProvider.IsModelNotOnPlanError(redactedErrorBody))
+                throw new HttpRequestException(CodexProvider.ModelNotOnPlanMessage);
             throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Codex vision request", (int)response.StatusCode, redactedErrorBody));
         }
 

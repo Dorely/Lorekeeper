@@ -89,7 +89,7 @@ public sealed class OpenAiAccountOwnershipMigrationTests
                 Assert.Equal(102, (await db.PublishConversations.AsNoTracking().SingleAsync()).SelectedProviderId);
 
                 var obsoleteCatalogColumns = await db.Database.SqlQueryRaw<long>(
-                        "SELECT COUNT(*) AS Value FROM pragma_table_info('LlmProviders') WHERE name IN ('AccountAvailability', 'AccountAvailabilityCheckedAt', 'AccountAvailabilityError', 'DiscoveredContextWindowTokens')")
+                        "SELECT COUNT(*) AS Value FROM pragma_table_info('LlmProviders') WHERE name IN ('AccountAvailabilityError', 'DiscoveredContextWindowTokens')")
                     .SingleAsync();
                 Assert.Equal(0, obsoleteCatalogColumns);
             }

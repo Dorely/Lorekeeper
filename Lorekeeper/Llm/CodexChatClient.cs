@@ -138,6 +138,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
             _logger.LogError("Codex API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
             _logger.LogDebug("Codex API error response body: {Body}", redactedErrorBody);
+            if (CodexProvider.IsModelNotOnPlanError(redactedErrorBody))
+                throw new HttpRequestException(CodexProvider.ModelNotOnPlanMessage);
             throw new HttpRequestException($"Codex API returned {(int)response.StatusCode}: {redactedErrorBody}");
         }
 
@@ -397,12 +399,7 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
-        request.Headers.TryAddWithoutValidation("chatgpt-account-id", _accountId);
-        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
-        request.Headers.TryAddWithoutValidation("originator", "pi");
-        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        CodexProvider.ApplyAccountHeaders(request, _accessToken, _accountId, eventStream: true);
         return request;
     }
 

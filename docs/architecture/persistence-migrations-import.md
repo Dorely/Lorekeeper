@@ -153,10 +153,18 @@ OAuth tokens; account-backed `LlmProvider` rows retain their stable IDs for
 conversation and job selection. The account-ownership migration re-parents the
 legacy root and direct credential-sharing children atomically, preserves token
 rows and duplicate model IDs, and fails closed on ambiguous legacy ownership.
-Account-backed model rows persist catalog/manual origin, while bundled effort,
-capability, and usable-budget metadata remains versioned code-owned catalog data.
-The static-catalog migration removes the earlier availability, refresh-error, and
-advertised-context columns; account model lists are not discovered at runtime.
+Account-backed model rows persist catalog, manual, or account-discovered origin.
+Bundled effort, capability, and usable-budget metadata remains versioned
+code-owned catalog data; account-discovered rows store the account-reported
+efforts, capabilities, budget, and priority as non-secret
+`AccountModelMetadataJson`. `AccountAvailability` (`Unknown`, `Available`,
+`Unavailable`) and its check time record the last successful plan refresh, and
+`OpenAiAccount.LastModelRefreshAt`/`LastModelRefreshError` record the latest
+attempt with a sanitized message. The account-model-availability migration
+reintroduces availability after the earlier static-catalog migration removed it;
+existing rows start `Unknown` and stay usable until a refresh succeeds. Its
+downgrade rewrites account-discovered rows as manual rows so earlier builds keep
+the same model identities.
 `OpenAiAccount.ExternalAccountId` is the persisted request identity populated only
 after a successful authorization exchange. `RequiresReauthenticationAt` and the
 sanitized last-authentication error distinguish terminal refresh rejection or a

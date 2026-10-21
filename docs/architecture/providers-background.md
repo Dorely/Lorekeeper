@@ -84,14 +84,29 @@ image input. Catalog rows retain nullable explicit effort and input-budget
 overrides; runtime resolution supplies catalog defaults only when an override is
 absent. Unsupported saved effort values fail closed.
 
-OpenAI account model discovery is intentionally absent: Lorekeeper never calls
-`/v1/models` for an account-backed connection. The bundled
-seven-model manifest is the complete account model list, while Advanced accepts
-an exact manual model ID followed by the existing explicit Test workflow.
-User-configured OpenAI-compatible connections may still discover models through
-`GET /models`, and Ollama connections through `GET /api/tags`; those generic
-paths degrade to code-owned suggestions or manual entry when discovery is
-unavailable.
+ChatGPT plans do not all offer the same models (Go, for example, omits Sol), so
+the static-only account catalog adopted on 2026-09-16 is superseded by
+plan-aware reconciliation. `IOpenAiAccountModelDiscovery` reads the account's
+selectable models from the Codex backend model endpoint with the persisted
+account identity, a 30-second bound, and a 1 MiB response cap; only entries the
+account marks `list` are kept, and failures surface as sanitized messages.
+`OpenAiAccountModelCatalogService.RefreshAvailabilityAsync` then reconciles:
+catalog and account-discovered rows the account lists become `Available`, those
+it omits become `Unavailable`, and listed models outside the catalog become
+read-only `AccountDiscovered` rows whose efforts, capabilities, and usable input
+budget (context window Ã— effective percent) come from the account. A failed
+refresh keeps the last-known availability and records the error on the account.
+Rows that were never checked stay `Unknown` and usable. Readiness treats
+`Unavailable` as not ready, so model pickers hide those rows, and the Codex chat
+and vision transports map the backend's not-on-this-plan rejection to an
+actionable message. Only an account's first successful refresh may move a
+default Lorekeeper chose automatically (none set, or this account's default is
+unavailable) to the best available model; afterwards Settings offers the switch
+and never replaces an explicit default. Advanced also accepts an exact manual
+model ID followed by the existing explicit Test workflow. User-configured
+OpenAI-compatible connections may still discover models through `GET /models`,
+and Ollama connections through `GET /api/tags`; those generic paths degrade to
+code-owned suggestions or manual entry when discovery is unavailable.
 
 Provider verification performs a protocol-safe chat probe without a constrained
 output budget and, after chat succeeds, a non-blocking vision probe. Saving is
@@ -235,11 +250,10 @@ assistant tool payloads.
 Callback commit, disconnect, reconnect start, and token refresh are serialized
 per account for the whole process and begin from fresh persistence reads. The
 external ChatGPT account identity is read only at the successful authorization
-boundary and persisted on `OpenAiAccount`; chat, vision, model requests, and
-image generation use that persisted identity and never inspect
-access-token shape at request time. Account model discovery is not a supported
-runtime path. A migrated token without persisted external identity fails closed
-as Reauthentication required.
+boundary and persisted on `OpenAiAccount`; chat, vision, model requests, model
+discovery, and image generation use that persisted identity and never inspect
+access-token shape at request time. A migrated token without persisted external
+identity fails closed as Reauthentication required.
 
 A token endpoint `401`, `invalid_grant`, or `invalid_token` marks the account as
 requiring reauthentication while retaining the credential row. Transient
@@ -504,7 +518,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 
 | File or family | Architectural role |
 |---|---|
-| [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, persisted connection/model ownership, working-default resolution, and shared credential lookup. Account-backed discovery is rejected. |
+| [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`IOpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/IOpenAiAccountModelDiscovery.cs), [`OpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/OpenAiAccountModelDiscovery.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, account model-list transport, persisted connection/model ownership, working-default resolution, and shared credential lookup. Generic discovery rejects account-backed rows; account refresh uses the dedicated discovery transport. |
 | [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
 | [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |

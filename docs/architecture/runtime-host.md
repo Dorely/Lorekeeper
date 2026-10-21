@@ -59,9 +59,11 @@ owners. Process-local authorization state, per-account operation coordination,
 callback-origin validation, and the platform-selected external launcher are
 registered at the host boundary; Settings and the callback invoke their
 contracts while the composition root contains no OAuth behavior.
-The catalog service only materializes the bundled versioned manifest into local
-rows; it does not perform account-backed model-list HTTP requests during startup,
-Settings reload, or authorization completion.
+The catalog service materializes the bundled versioned manifest into local rows
+without network access. Its account model-list request runs only after a
+successful authorization, on the first Settings visit for an account that has
+never been checked, or when the user chooses Refresh models; host startup,
+hosted workers, and ordinary Settings reloads never call it.
 
 Razor pages and components own interaction and presentation state. Domain services
 own validation, persistence, graph/index maintenance, provider resolution, image

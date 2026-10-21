@@ -146,12 +146,7 @@ public sealed class CodexProjectImageProvider(
         using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connection.Token);
-        request.Headers.TryAddWithoutValidation("chatgpt-account-id", connection.AccountId);
-        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
-        request.Headers.TryAddWithoutValidation("originator", "pi");
-        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        CodexProvider.ApplyAccountHeaders(request, connection.Token, connection.AccountId, eventStream: true);
 
         var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = Timeout.InfiniteTimeSpan;

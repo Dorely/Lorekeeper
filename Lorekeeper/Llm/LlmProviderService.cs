@@ -535,9 +535,10 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
 
     private async Task<bool> IsChatProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (IsBundledAccountModel(provider))
+        if (IsAccountListedModel(provider))
         {
-            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
+            if (provider.AccountAvailability == LlmAccountModelAvailability.Unavailable
+                || !OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
                 return false;
 
             var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
@@ -555,9 +556,10 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
 
     private async Task<bool> IsVisionProviderWorkingAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (IsBundledAccountModel(provider))
+        if (IsAccountListedModel(provider))
         {
-            if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
+            if (provider.AccountAvailability == LlmAccountModelAvailability.Unavailable
+                || !OpenAiAccountModelCatalog.TryValidateEffort(provider, out _))
                 return false;
 
             var metadata = provider.ResolvedMetadata ?? OpenAiAccountModelCatalog.Resolve(provider);
@@ -575,8 +577,11 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
 
     private async Task<string> GetUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (IsBundledAccountModel(provider))
+        if (IsAccountListedModel(provider))
         {
+            if (provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+                return CodexProvider.ModelNotOnPlanMessage;
+
             if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
                 return effortError!;
 
@@ -602,8 +607,11 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
 
     private async Task<string> GetVisionUnavailableReasonAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        if (IsBundledAccountModel(provider))
+        if (IsAccountListedModel(provider))
         {
+            if (provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
+                return CodexProvider.ModelNotOnPlanMessage;
+
             if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var effortError))
                 return effortError!;
 
@@ -700,16 +708,16 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         target.CredentialSourceId = source.CredentialSourceId;
     }
 
-    private static bool IsBundledAccountModel(LlmProvider provider) =>
+    private static bool IsAccountListedModel(LlmProvider provider) =>
         provider.OpenAiAccountId is not null
-        && provider.ModelOrigin == LlmModelOrigin.BundledCatalog;
+        && provider.ModelOrigin is LlmModelOrigin.BundledCatalog or LlmModelOrigin.AccountDiscovered;
 
     private static void ValidateProvider(LlmProvider provider)
     {
-        if (provider.ModelOrigin == LlmModelOrigin.BundledCatalog
+        if (provider.ModelOrigin is LlmModelOrigin.BundledCatalog or LlmModelOrigin.AccountDiscovered
             && provider.OpenAiAccountId is null)
         {
-            throw new InvalidOperationException("Bundled catalog models must belong to an OpenAI account.");
+            throw new InvalidOperationException("Catalog and account-discovered models must belong to an OpenAI account.");
         }
 
         if (!OpenAiAccountModelCatalog.TryValidateEffort(provider, out var error))

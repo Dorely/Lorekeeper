@@ -34,6 +34,8 @@
 .connection-identity p { color: var(--lk-muted); font-size: 0.76rem; margin: 0; max-width: 38rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .connection-body { border-top: 1px solid var(--lk-line); }
+.model-refresh-note { color: var(--lk-muted); font-size: 0.72rem; margin: 0; padding: 0.55rem 1rem 0; }
+.plan-default-banner { align-items: center; display: flex; flex-wrap: wrap; gap: 0.55rem; justify-content: space-between; margin: 0.6rem 1rem; }
 
 .connection-edit-panel { background: var(--lk-accent-soft); border-top: 1px solid var(--lk-accent-border); padding: 0.85rem 1rem; }
 .connection-edit-panel .provider-form-actions { margin: 0; }
