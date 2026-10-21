@@ -50,8 +50,15 @@ public sealed partial class CodexChatClient
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = LogRedaction.RedactJson(await response.Content.ReadAsStringAsync(cancellationToken));
-            _logger.LogError("Codex web search error {StatusCode}: {Body}", (int)response.StatusCode, errorBody);
-            throw new HttpRequestException($"Codex web search returned {(int)response.StatusCode}: {errorBody}");
+            _logger.LogError(
+                "{Transport} web search error {StatusCode}: {Body}",
+                _profile.Label,
+                (int)response.StatusCode,
+                errorBody);
+            throw await MapAsync(_profile.MapHttpError(
+                (int)response.StatusCode,
+                errorBody,
+                $"{_profile.Label} web search returned {(int)response.StatusCode}: {errorBody}"));
         }
 
         var items = await ReadOutputItemsAsync(response, cancellationToken);
@@ -125,7 +132,7 @@ public sealed partial class CodexChatClient
     }
 
     /// <summary>Collects completed output items, preferring the terminal response's output when it is present.</summary>
-    private static async Task<IReadOnlyList<JsonElement>> ReadOutputItemsAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<JsonElement>> ReadOutputItemsAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
@@ -151,13 +158,17 @@ public sealed partial class CodexChatClient
                             ? output.EnumerateArray().Select(entry => entry.Clone()).ToList()
                             : streamed;
                 case "response.incomplete":
-                    throw new InvalidOperationException("Codex web search ended incomplete.");
+                    throw new InvalidOperationException($"{_profile.Label} web search ended incomplete.");
                 case "response.failed" or "error":
-                    throw new InvalidOperationException(ExtractCodexErrorMessage(evt, "Codex web search failed."));
+                    var (code, param) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
+                    throw await MapAsync(_profile.MapStreamError(
+                        code,
+                        param,
+                        ExtractCodexErrorMessage(evt, $"{_profile.Label} web search failed.")));
             }
         }
 
-        throw new HttpRequestException("Codex web search stream ended before completion.");
+        throw new HttpRequestException($"{_profile.Label} web search stream ended before completion.");
     }
 
     private static string? OptionalString(JsonElement element, string property) =>

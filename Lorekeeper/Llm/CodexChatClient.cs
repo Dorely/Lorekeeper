@@ -25,6 +25,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
     private readonly string? _reasoningEffort;
     private readonly string _accountId;
     private readonly ILogger<CodexChatClient> _logger;
+    private readonly ResponsesTransportProfile _profile;
+    private readonly Func<CancellationToken, Task>? _onPlanNotEligible;
 
     public CodexChatClient(
         HttpClient httpClient,
@@ -32,7 +34,9 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         string externalAccountId,
         string model,
         LlmReasoningEffort? reasoningEffort,
-        ILogger<CodexChatClient> logger)
+        ILogger<CodexChatClient> logger,
+        ResponsesTransportProfile profile,
+        Func<CancellationToken, Task>? onPlanNotEligible = null)
     {
         _httpClient = httpClient;
         _accessToken = accessToken;
@@ -40,9 +44,13 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         _reasoningEffort = reasoningEffort?.ToWireValue();
         _accountId = externalAccountId;
         _logger = logger;
+        _profile = profile;
+        _onPlanNotEligible = onPlanNotEligible;
     }
 
-    public ChatClientMetadata Metadata => new("CodexResponsesAPI", new Uri("https://chatgpt.com"));
+    public ChatClientMetadata Metadata => _profile.Kind == OpenAiAccountKind.ChatGptPlan
+        ? new("ChatGptPlanResponsesAPI", new Uri("https://api.openai.com"))
+        : new("CodexResponsesAPI", new Uri("https://chatgpt.com"));
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> chatMessages,
@@ -77,7 +85,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             {
                 _logger.LogWarning(
                     ex,
-                    "Codex streaming response ended before assistant content on attempt {Attempt}; retrying once.",
+                    "{Transport} streaming response ended before assistant content on attempt {Attempt}; retrying once.",
+                    _profile.Label,
                     attempt);
                 continue;
             }
@@ -85,7 +94,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             {
                 _logger.LogWarning(
                     ex,
-                    "Codex streaming response ended after partial assistant content; not retrying. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                    "{Transport} streaming response ended after partial assistant content; not retrying. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                    _profile.Label,
                     fullText.Length,
                     functionCalls.Count);
                 throw;
@@ -94,7 +104,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             return CreateResponse(fullText, functionCalls);
         }
 
-        throw new HttpRequestException("Codex streaming response ended prematurely before assistant content after retry.");
+        throw new HttpRequestException(
+            $"{_profile.Label} streaming response ended prematurely before assistant content after retry.");
     }
 
     private static ChatResponse CreateResponse(StringBuilder fullText, IReadOnlyList<FunctionCallContent> functionCalls)
@@ -117,13 +128,14 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         var json = JsonSerializer.Serialize(body);
         var toolCount = options?.Tools?.Count ?? 0;
 
-        _logger.LogDebug("Codex request body: {Body}", LogRedaction.RedactJson(json));
+        _logger.LogDebug("{Transport} request body: {Body}", _profile.Label, LogRedaction.RedactJson(json));
 
         using var request = CreateResponsesRequest(json);
 
         _logger.LogDebug(
-            "Codex request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
-            CodexProvider.ResponsesEndpoint,
+            "{Transport} request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
+            _profile.Label,
+            _profile.Endpoint,
             _accountId,
             _model,
             bufferedMessages.Count,
@@ -136,11 +148,19 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
-            _logger.LogError("Codex API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
-            _logger.LogDebug("Codex API error response body: {Body}", redactedErrorBody);
-            if (CodexProvider.IsModelNotOnPlanError(redactedErrorBody))
-                throw new HttpRequestException(CodexProvider.ModelNotOnPlanMessage);
-            throw new HttpRequestException($"Codex API returned {(int)response.StatusCode}: {redactedErrorBody}");
+            _logger.LogError(
+                "{Transport} API error {StatusCode}: {Body}",
+                _profile.Label,
+                (int)response.StatusCode,
+                redactedErrorBody);
+            _logger.LogDebug(
+                "{Transport} API error response body: {Body}",
+                _profile.Label,
+                redactedErrorBody);
+            throw await MapAsync(_profile.MapHttpError(
+                (int)response.StatusCode,
+                redactedErrorBody,
+                $"{_profile.Label} API returned {(int)response.StatusCode}: {redactedErrorBody}"));
         }
 
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -166,7 +186,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             {
                 _logger.LogWarning(
                     ex,
-                    "Codex streaming response ended prematurely after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}",
+                    "{Transport} streaming response ended prematurely after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}",
+                    _profile.Label,
                     eventCount,
                     lastEventType ?? "(none)",
                     outputTextChars,
@@ -332,7 +353,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                     }
                     yield return terminal;
                     _logger.LogDebug(
-                        "Codex streaming response completed after {EventCount} SSE events. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                        "{Transport} streaming response completed after {EventCount} SSE events. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+                        _profile.Label,
                         eventCount,
                         outputTextChars,
                         functionCallCount);
@@ -351,9 +373,13 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                     break;
 
                 case "response.failed":
-                    var responseFailedMessage = ExtractCodexErrorMessage(evt, "Codex API response failed");
+                    var responseFailedMessage = ExtractCodexErrorMessage(
+                        evt,
+                        $"{_profile.Label} API response failed");
+                    var (failedCode, failedParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
                     _logger.LogError(
-                        "Codex streaming response failed after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        "{Transport} streaming response failed after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        _profile.Label,
                         eventCount,
                         lastEventType ?? "(none)",
                         outputTextChars,
@@ -361,12 +387,14 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         _model,
                         json.Length,
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
-                    throw new InvalidOperationException(responseFailedMessage);
+                    throw await MapAsync(_profile.MapStreamError(failedCode, failedParam, responseFailedMessage));
 
                 case "error":
                     var errorMessage = ExtractCodexErrorMessage(evt, "Unknown error");
+                    var (errorCode, errorParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
                     _logger.LogError(
-                        "Codex streaming error after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        "{Transport} streaming error after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
+                        _profile.Label,
                         eventCount,
                         lastEventType ?? "(none)",
                         outputTextChars,
@@ -374,16 +402,23 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         _model,
                         json.Length,
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
-                    throw new InvalidOperationException($"Codex error: {errorMessage}");
+                    throw await MapAsync(_profile.MapStreamError(
+                        errorCode,
+                        errorParam,
+                        $"{_profile.Label} error: {errorMessage}"));
 
                 default:
-                    _logger.LogWarning("Unhandled Codex SSE event type: {EventType}", type);
+                    _logger.LogWarning(
+                        "Unhandled {Transport} SSE event type: {EventType}",
+                        _profile.Label,
+                        type);
                     break;
             }
         }
 
         _logger.LogDebug(
-            "Codex streaming response ended after {EventCount} SSE events without an explicit completion event. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+            "{Transport} streaming response ended after {EventCount} SSE events without an explicit completion event. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
+            _profile.Label,
             eventCount,
             outputTextChars,
             functionCallCount);
@@ -396,11 +431,30 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
 
     private HttpRequestMessage CreateResponsesRequest(string json)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, _profile.Endpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        CodexProvider.ApplyAccountHeaders(request, _accessToken, _accountId, eventStream: true);
+        _profile.ApplyHeaders(request, _accessToken, _accountId);
         return request;
+    }
+
+    private async Task<Exception> MapAsync(Exception exception)
+    {
+        if (exception is ChatGptPlanException { IsNotEligible: true } && _onPlanNotEligible is not null)
+        {
+            try
+            {
+                await _onPlanNotEligible(CancellationToken.None);
+            }
+            catch (Exception callbackException)
+            {
+                _logger.LogWarning(
+                    callbackException,
+                    "Could not record that ChatGPT plan usage is ineligible for this account.");
+            }
+        }
+
+        return exception;
     }
 
     private static bool IsResponseEnded(HttpIOException exception) =>

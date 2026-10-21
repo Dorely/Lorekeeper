@@ -33,7 +33,8 @@ public static class ExternalAuthorizationTargetValidator
         }
 
         var allowed = (target.Host.Equals("auth.openai.com", StringComparison.OrdinalIgnoreCase)
-                && target.AbsolutePath.Equals("/oauth/authorize", StringComparison.Ordinal))
+                && (target.AbsolutePath.Equals("/oauth/authorize", StringComparison.Ordinal)
+                    || target.AbsolutePath.Equals("/api/accounts/authorize", StringComparison.Ordinal)))
             || (target.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
                 && target.AbsolutePath.Equals("/login/device", StringComparison.Ordinal));
         if (!allowed)

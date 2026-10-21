@@ -165,8 +165,17 @@ reintroduces availability after the earlier static-catalog migration removed it;
 existing rows start `Unknown` and stay usable until a refresh succeeds. Its
 downgrade rewrites account-discovered rows as manual rows so earlier builds keep
 the same model identities.
+`OpenAiAccount.Kind` (`Codex`, `ChatGptPlan`; existing rows are `Codex`)
+selects the authorization protocol and transport. A ChatGPT plan account also
+persists its issued client ID, stable host ID, verified email, plan-usage grant,
+not-eligible time, and welcome acknowledgement; `OAuthToken.IdToken` keeps the
+latest ID token inside the credential boundary for `id_token_hint`. The
+ChatGPT-plan-accounts migration adds these columns; its downgrade deletes plan
+accounts with their token and model rows first, because earlier builds would
+treat them as Codex logins.
 `OpenAiAccount.ExternalAccountId` is the persisted request identity populated only
-after a successful authorization exchange. `RequiresReauthenticationAt` and the
+after a successful authorization exchange (the Codex ChatGPT account ID, or the
+verified ID-token `sub` for a plan account). `RequiresReauthenticationAt` and the
 sanitized last-authentication error distinguish terminal refresh rejection or a
 migrated credential lacking that identity from transient refresh failure. A
 reconnect does not overwrite the current `OAuthToken` row until its single-use

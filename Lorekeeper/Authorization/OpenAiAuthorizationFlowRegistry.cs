@@ -31,7 +31,7 @@ public sealed record OpenAiAuthorizationFlowSnapshot(
 public sealed record OpenAiAuthorizationFlowClaim(
     Guid FlowId,
     int AccountId,
-    string CodeVerifier,
+    OpenAiAuthorizationAttempt Attempt,
     OpenAiAuthorizationFlowSnapshot Snapshot);
 
 public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
@@ -44,7 +44,8 @@ public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
 
     public OpenAiAuthorizationFlowSnapshot Start(
         int accountId,
-        Func<string, string, Uri> buildTarget)
+        Uri redirectUri,
+        Func<OpenAiAuthorizationAttempt, Uri> buildTarget)
     {
         lock (_lock)
         {
@@ -59,10 +60,9 @@ public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
                 _byState.Remove(previous.State);
             }
 
-            var state = RandomUrlToken();
-            var verifier = RandomUrlToken();
+            var attempt = new OpenAiAuthorizationAttempt(RandomUrlToken(), RandomUrlToken(), RandomUrlToken(), redirectUri);
             var now = timeProvider.GetUtcNow();
-            var target = ExternalAuthorizationTargetValidator.Validate(buildTarget(state, verifier));
+            var target = ExternalAuthorizationTargetValidator.Validate(buildTarget(attempt));
             var snapshot = new OpenAiAuthorizationFlowSnapshot(
                 Guid.NewGuid(),
                 accountId,
@@ -71,9 +71,9 @@ public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
                 now.Add(FlowLifetime),
                 target,
                 null);
-            var flow = new FlowState(state, verifier, snapshot);
+            var flow = new FlowState(attempt, snapshot);
             _byAccount[accountId] = flow;
-            _byState[state] = flow;
+            _byState[attempt.State] = flow;
             return snapshot;
         }
     }
@@ -101,7 +101,7 @@ public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
             return new OpenAiAuthorizationFlowClaim(
                 flow.Snapshot.FlowId,
                 flow.Snapshot.AccountId,
-                flow.CodeVerifier,
+                flow.Attempt,
                 flow.Snapshot);
         }
     }
@@ -210,12 +210,11 @@ public sealed class OpenAiAuthorizationFlowRegistry(TimeProvider timeProvider)
             .Replace('/', '_');
 
     private sealed class FlowState(
-        string state,
-        string codeVerifier,
+        OpenAiAuthorizationAttempt attempt,
         OpenAiAuthorizationFlowSnapshot snapshot)
     {
-        public string State { get; } = state;
-        public string CodeVerifier { get; } = codeVerifier;
+        public OpenAiAuthorizationAttempt Attempt { get; } = attempt;
+        public string State => Attempt.State;
         public OpenAiAuthorizationFlowSnapshot Snapshot { get; set; } = snapshot;
     }
 }

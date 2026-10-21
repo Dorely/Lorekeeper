@@ -2585,6 +2585,9 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IdToken")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("OpenAiAccountId")
                         .HasColumnType("INTEGER");
 
@@ -2614,8 +2617,23 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ExternalAccountId")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("HostId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssuedClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Codex");
 
                     b.Property<string>("LastAuthenticationError")
                         .HasColumnType("TEXT");
@@ -2626,10 +2644,19 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("LastModelRefreshError")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("PlanIneligibleAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PlanUsageGranted")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("RequiresReauthenticationAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("WelcomeAcknowledgedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

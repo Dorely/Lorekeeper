@@ -77,6 +77,7 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
     public async Task<IReadOnlyList<ChatModelOption>> ListChatModelOptionsAsync(CancellationToken cancellationToken = default)
     {
         var all = await GetAllAsync(cancellationToken);
+        var accountKinds = await GetAccountKindsAsync(cancellationToken);
         var working = await ListWorkingChatProvidersAsync(all, cancellationToken);
         var defaultAvailability = await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
         var defaultProviderId = defaultAvailability.IsAvailable ? defaultAvailability.Provider?.Id : null;
@@ -84,13 +85,15 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         return working
             .Select(provider =>
             {
-                var labels = GetChatModelLabels(provider, all);
+                var labels = GetChatModelLabels(provider, all, accountKinds);
                 return new ChatModelOption(
                     provider.Id,
                     labels.ConnectionLabel,
                     labels.ModelLabel,
                     labels.Label,
                     provider.Id == defaultProviderId,
+                    provider.OpenAiAccountId is int accountId
+                        && accountKinds.GetValueOrDefault(accountId) == OpenAiAccountKind.ChatGptPlan,
                     provider);
             })
             .OrderByDescending(option => option.IsDefault)
@@ -105,6 +108,7 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         CancellationToken cancellationToken = default)
     {
         var all = await GetAllAsync(cancellationToken);
+        var accountKinds = await GetAccountKindsAsync(cancellationToken);
         var defaultAvailability = await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
 
         if (selectedProviderId is null)
@@ -125,7 +129,7 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
                     defaultAvailability.Message);
             }
 
-            var labels = GetChatModelLabels(provider, all);
+            var labels = GetChatModelLabels(provider, all, accountKinds);
             return new ChatModelSelection(
                 null,
                 provider,
@@ -155,7 +159,7 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
                 "This chat's selected model is no longer saved. Choose another available model or press Reset.");
         }
 
-        var selectedLabels = GetChatModelLabels(selected, all);
+        var selectedLabels = GetChatModelLabels(selected, all, accountKinds);
         if (await IsChatProviderWorkingAsync(selected, cancellationToken))
         {
             var isDefault = defaultAvailability.IsAvailable
@@ -246,17 +250,27 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         return ChatProviderAvailability.Unavailable(reason, candidate);
     }
 
+    private async Task<Dictionary<int, OpenAiAccountKind>> GetAccountKindsAsync(CancellationToken cancellationToken)
+    {
+        await using var readOperation = await database.OpenReadAsync(cancellationToken);
+        var accounts = await readOperation.Repositories.OpenAiAccounts.GetAllAsync(cancellationToken);
+        return accounts.ToDictionary(account => account.Id, account => account.Kind);
+    }
+
     private static ChatModelLabels GetChatModelLabels(
         LlmProvider provider,
-        IReadOnlyList<LlmProvider> all)
+        IReadOnlyList<LlmProvider> all,
+        IReadOnlyDictionary<int, OpenAiAccountKind> accountKinds)
     {
         var connection = provider.OpenAiAccountId is not null
             ? provider
             : provider.CredentialSourceId is int sourceId
             ? all.FirstOrDefault(candidate => candidate.Id == sourceId) ?? provider
             : provider;
-        var connectionLabel = provider.OpenAiAccountId is not null
-            ? "OpenAI account"
+        var connectionLabel = provider.OpenAiAccountId is int accountId
+            ? accountKinds.GetValueOrDefault(accountId) == OpenAiAccountKind.ChatGptPlan
+                ? "ChatGPT plan"
+                : "ChatGPT (Codex)"
             : BuildConnectionLabel(connection);
         var modelLabel = BuildModelLabel(provider);
         return new ChatModelLabels(connectionLabel, modelLabel, $"{connectionLabel} · {modelLabel}");
@@ -326,7 +340,10 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
 
     public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
     {
-        var provider = (await GetAllAsync(cancellationToken)).FirstOrDefault(CodexProvider.IsAccountBacked);
+        var accountKinds = await GetAccountKindsAsync(cancellationToken);
+        var provider = (await GetAllAsync(cancellationToken)).FirstOrDefault(candidate =>
+            candidate.OpenAiAccountId is int candidateAccountId
+            && accountKinds.GetValueOrDefault(candidateAccountId) == OpenAiAccountKind.Codex);
         if (provider?.OpenAiAccountId is not int accountId)
             return false;
 
@@ -653,13 +670,21 @@ IAppDatabaseOperationFactory database, IOpenAiAccountTokenService accountTokens)
         {
             try
             {
+                OpenAiAccount? account;
+                await using (var accountRead = await database.OpenReadAsync(cancellationToken))
+                    account = await accountRead.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken);
+
+                if (account is { Kind: OpenAiAccountKind.ChatGptPlan, PlanIneligibleAt: not null })
+                    return new CredentialStatus(false, CodexProvider.PlanNotEligibleMessage);
+
                 if (await accountTokens.GetValidAccessAsync(accountId, cancellationToken) is not null)
                     return new CredentialStatus(true, string.Empty);
 
-                await using var accountRead = await database.OpenReadAsync(cancellationToken);
-                var account = await accountRead.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken);
-                return account?.RequiresReauthenticationAt is not null
-                    ? new CredentialStatus(false, "Reauthentication is required. Reconnect your OpenAI account in Settings > Providers.")
+                if (account?.RequiresReauthenticationAt is not null)
+                    return new CredentialStatus(false, "Reauthentication is required. Reconnect your OpenAI account in Settings > Providers.");
+
+                return account is { Kind: OpenAiAccountKind.ChatGptPlan, PlanUsageGranted: false, ExternalAccountId: not null }
+                    ? new CredentialStatus(false, CodexProvider.PlanUsageNotGrantedMessage)
                     : new CredentialStatus(false, "Connect your OpenAI account in Settings > Providers.");
             }
             catch (Exception ex)

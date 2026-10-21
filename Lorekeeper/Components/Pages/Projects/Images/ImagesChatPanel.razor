@@ -496,7 +496,7 @@
         _chatAvailability = await ImagesChat.GetChatProviderAvailabilityAsync(ProjectId, cancellationToken);
         _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId, cancellationToken);
         _modelOptions = (await Providers.ListChatModelOptionsAsync(cancellationToken))
-            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault, option.UsesChatGptPlan))
             .ToList();
     }
 

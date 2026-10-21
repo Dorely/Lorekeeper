@@ -21,9 +21,6 @@ public interface IOpenAiAccountAuthorizationService
         CancellationToken cancellationToken = default);
 
     Task<OpenAiAuthorizationCallbackResult> HandleCallbackAsync(
-        string? code,
-        string? state,
-        string? error,
-        string? errorDescription,
+        OpenAiAuthorizationCallback callback,
         CancellationToken cancellationToken = default);
 }

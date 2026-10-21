@@ -12,6 +12,7 @@ public class ChatClientFactory(
     ILlmProviderService providerService,
     IHttpClientFactory httpClientFactory,
     IOptions<AgentOptions> agentOptions,
+    IOpenAiAccountService accountService,
     ILoggerFactory loggerFactory) : IChatClientFactory
 {
     private static readonly object SharedHttpClientLock = new();
@@ -69,7 +70,8 @@ public class ChatClientFactory(
     {
         if (provider.OpenAiAccountId is not null
             && access.ApiKey is not null
-            && access.ExternalAccountId is not null)
+            && access.ExternalAccountId is not null
+            && access.AccountKind is { } kind)
         {
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
@@ -80,7 +82,13 @@ public class ChatClientFactory(
                 access.ExternalAccountId,
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
-                loggerFactory.CreateLogger<CodexChatClient>()));
+                loggerFactory.CreateLogger<CodexChatClient>(),
+                ResponsesTransportProfile.For(kind),
+                kind == OpenAiAccountKind.ChatGptPlan
+                    ? cancellationToken => accountService.MarkPlanIneligibleAsync(
+                        provider.OpenAiAccountId!.Value,
+                        cancellationToken)
+                    : null));
         }
 
         if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)

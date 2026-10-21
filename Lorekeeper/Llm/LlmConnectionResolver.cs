@@ -19,7 +19,11 @@ internal static class LlmConnectionResolver
             var access = await providerService.GetOpenAiAccountAccessAsync(
                 provider.OpenAiAccountId.Value,
                 cancellationToken);
-            return new LlmConnectionAccess(access?.AccessToken, AuthType.OAuth, access?.ExternalAccountId);
+            return new LlmConnectionAccess(
+                access?.AccessToken,
+                AuthType.OAuth,
+                access?.ExternalAccountId,
+                access?.Kind);
         }
 
         if (provider.CredentialSourceId is int sourceId)
@@ -28,7 +32,7 @@ internal static class LlmConnectionResolver
                 ?? throw new InvalidOperationException($"Credential source provider {sourceId} not found.");
 
             var sourceApiKey = await providerService.GetEffectiveApiKeyAsync(sourceId, cancellationToken);
-            return new LlmConnectionAccess(sourceApiKey, credentialSource.AuthType, null);
+            return new LlmConnectionAccess(sourceApiKey, credentialSource.AuthType, null, null);
         }
 
         if (provider.Id != 0)
@@ -36,14 +40,16 @@ internal static class LlmConnectionResolver
             return new LlmConnectionAccess(
                 await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken),
                 provider.AuthType,
+                null,
                 null);
         }
 
-        return new LlmConnectionAccess(provider.ApiKey, provider.AuthType, null);
+        return new LlmConnectionAccess(provider.ApiKey, provider.AuthType, null, null);
     }
 }
 
 internal sealed record LlmConnectionAccess(
     string? ApiKey,
     AuthType EffectiveAuthType,
-    string? ExternalAccountId);
+    string? ExternalAccountId,
+    OpenAiAccountKind? AccountKind);

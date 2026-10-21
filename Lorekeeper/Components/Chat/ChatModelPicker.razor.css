@@ -4,6 +4,28 @@
     max-width: 24rem;
 }
 
+.chat-model-picker.chat-model-picker-plan {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.5rem;
+    max-width: 34rem;
+}
+
+.chat-model-picker-plan .chat-model-picker-select {
+    flex: 1 1 12rem;
+    width: auto;
+}
+
+.chat-plan-chip {
+    color: var(--lk-muted, #6c757d);
+    flex: 0 1 auto;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    min-width: 0;
+    white-space: normal;
+}
+
 .chat-model-picker-select {
     width: 100%;
     min-width: 0;

@@ -71,6 +71,7 @@ public sealed record ChatModelOption(
     string ModelLabel,
     string Label,
     bool IsDefault,
+    bool UsesChatGptPlan,
     LlmProvider Provider)
 {
     public bool IsAvailable => true;

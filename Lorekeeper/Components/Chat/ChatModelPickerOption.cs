@@ -7,4 +7,5 @@ public sealed record ChatModelPickerOption(
     int ProviderId,
     string ConnectionLabel,
     string ModelLabel,
-    bool IsDefault);
+    bool IsDefault,
+    bool UsesChatGptPlan = false);

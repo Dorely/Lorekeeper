@@ -1,43 +1,51 @@
-using System.Security.Cryptography;
-using System.Text;
+using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 
 namespace Lorekeeper.Authorization;
 
 public sealed class OpenAiAccountAuthorizationService(
     IAppDatabaseOperationFactory database,
-    IHttpClientFactory httpClientFactory,
     IOpenAiCallbackOriginValidator callbackOriginValidator,
     IExternalAuthorizationLauncher externalLauncher,
+    IEnumerable<IOpenAiAuthorizationProtocol> protocols,
     OpenAiAuthorizationFlowRegistry flowRegistry,
     OpenAiAccountOperationCoordinator coordinator,
     OpenAiAccountTokenService tokenService,
     TimeProvider timeProvider,
     ILogger<OpenAiAccountAuthorizationService> logger) : IOpenAiAccountAuthorizationService
 {
-    private const string AuthEndpoint = "https://auth.openai.com/oauth/authorize";
-    private const string TokenEndpoint = "https://auth.openai.com/oauth/token";
-    private const string Scope = "openid profile email offline_access";
-
     public async Task<OpenAiAuthorizationStartResult> StartAsync(
         int accountId,
         CancellationToken cancellationToken = default)
     {
-        var callback = callbackOriginValidator.Validate();
-        if (!callback.IsValid || callback.RedirectUri is null)
-            throw new InvalidOperationException(callback.Message);
-
-        await using (var operation = await database.OpenReadAsync(cancellationToken))
-        {
-            if (await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken) is null)
-                throw new InvalidOperationException("The OpenAI account was not found.");
-        }
-
         var flow = await coordinator.RunAsync(
             accountId,
-            _ => Task.FromResult(flowRegistry.Start(
-                accountId,
-                (state, verifier) => BuildAuthorizationTarget(callback.RedirectUri, state, verifier))),
+            async token =>
+            {
+                await using var operation = await database.OpenWriteAsync(token);
+                var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, token)
+                    ?? throw new InvalidOperationException("The OpenAI account was not found.");
+                var callback = callbackOriginValidator.Validate(account.Kind);
+                if (!callback.IsValid || callback.RedirectUri is null)
+                    throw new InvalidOperationException(callback.Message);
+
+                if (account.Kind == OpenAiAccountKind.ChatGptPlan && string.IsNullOrWhiteSpace(account.HostId))
+                {
+                    account.HostId = $"urn:uuid:{Guid.NewGuid()}";
+                    account.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+                    operation.Repositories.OpenAiAccounts.Update(account);
+                    await operation.SaveChangesAsync(token);
+                }
+
+                var idTokenHint = account.Kind == OpenAiAccountKind.ChatGptPlan
+                    ? (await operation.Repositories.OAuthTokens.GetLatestForAccountAsync(accountId, token))?.IdToken
+                    : null;
+                var protocol = OpenAiAuthorizationProtocol.For(protocols, account.Kind);
+                return flowRegistry.Start(
+                    accountId,
+                    callback.RedirectUri,
+                    attempt => protocol.BuildAuthorizationTarget(account, idTokenHint, attempt));
+            },
             cancellationToken);
         try
         {
@@ -68,18 +76,16 @@ public sealed class OpenAiAccountAuthorizationService(
             cancellationToken);
 
     public async Task<OpenAiAuthorizationCallbackResult> HandleCallbackAsync(
-        string? code,
-        string? state,
-        string? error,
-        string? errorDescription,
+        OpenAiAuthorizationCallback callback,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(state))
+        if (string.IsNullOrWhiteSpace(callback.State))
             return InvalidCallback();
 
-        if (!string.IsNullOrWhiteSpace(error))
+        // A denial is matched to its attempt by state and never exchanges a code.
+        if (!string.IsNullOrWhiteSpace(callback.Error))
         {
-            var denied = flowRegistry.Claim(state, DenialMessage(error));
+            var denied = flowRegistry.Claim(callback.State, DenialMessage(callback.Error));
             return denied is null
                 ? StaleCallback()
                 : new OpenAiAuthorizationCallbackResult(
@@ -87,10 +93,10 @@ public sealed class OpenAiAccountAuthorizationService(
                     "OpenAI authorization was denied. Return to Lorekeeper to try again.");
         }
 
-        var claim = flowRegistry.Claim(state);
+        var claim = flowRegistry.Claim(callback.State);
         if (claim is null)
             return StaleCallback();
-        if (string.IsNullOrWhiteSpace(code))
+        if (string.IsNullOrWhiteSpace(callback.Code))
         {
             flowRegistry.Complete(
                 claim,
@@ -101,12 +107,26 @@ public sealed class OpenAiAccountAuthorizationService(
 
         try
         {
-            var callback = callbackOriginValidator.Validate();
-            if (!callback.IsValid || callback.RedirectUri is null)
-                throw new InvalidOperationException(callback.Message);
+            OpenAiAccount account;
+            await using (var read = await database.OpenReadAsync(cancellationToken))
+            {
+                account = await read.Repositories.OpenAiAccounts.GetByIdAsync(claim.AccountId, cancellationToken)
+                    ?? throw new OpenAiAuthorizationException("The OpenAI connection no longer exists.");
+            }
 
-            var exchanged = await ExchangeCodeAsync(code, claim.CodeVerifier, callback.RedirectUri, cancellationToken);
-            var externalAccountId = OpenAiTokenClaims.ReadExternalAccountId(exchanged.AccessToken);
+            var protocol = OpenAiAuthorizationProtocol.For(protocols, account.Kind);
+            var issuedClientId = protocol.ResolveIssuedClientId(account, callback);
+            if (issuedClientId is not null && account.IssuedClientId is null)
+            {
+                // Retain a new registration before the exchange so a retry reuses it.
+                await coordinator.RunAsync(
+                    claim.AccountId,
+                    async token => await RetainIssuedClientIdAsync(claim.AccountId, issuedClientId, token),
+                    cancellationToken);
+                account.IssuedClientId = issuedClientId;
+            }
+
+            var grant = await protocol.ExchangeAsync(account, issuedClientId, callback, claim.Attempt, cancellationToken);
             var committed = await coordinator.RunAsync(
                 claim.AccountId,
                 async token =>
@@ -115,31 +135,47 @@ public sealed class OpenAiAccountAuthorizationService(
                         return false;
 
                     await using var operation = await database.OpenWriteAsync(token);
-                    var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(claim.AccountId, token);
-                    if (account is null)
+                    var persisted = await operation.Repositories.OpenAiAccounts.GetByIdAsync(claim.AccountId, token);
+                    if (persisted is null
+                        || !string.Equals(persisted.IssuedClientId, account.IssuedClientId, StringComparison.Ordinal))
+                    {
+                        flowRegistry.Complete(
+                            claim,
+                            OpenAiAuthorizationFlowStatus.Failed,
+                            "The OpenAI connection changed during sign-in. Start a new connection attempt.");
                         return false;
+                    }
 
                     await operation.Repositories.OAuthTokens.ReplaceForAccountAsync(
                         claim.AccountId,
-                        tokenService.ToOAuthToken(claim.AccountId, exchanged),
+                        tokenService.ToOAuthToken(claim.AccountId, grant.Tokens),
                         token);
-                    account.ExternalAccountId = externalAccountId;
-                    account.RequiresReauthenticationAt = null;
-                    account.LastAuthenticationError = null;
-                    account.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-                    operation.Repositories.OpenAiAccounts.Update(account);
+                    persisted.ExternalAccountId = grant.ExternalAccountId;
+                    if (persisted.Kind == OpenAiAccountKind.ChatGptPlan)
+                    {
+                        persisted.Email = grant.Email ?? persisted.Email;
+                        persisted.PlanUsageGranted = grant.PlanUsageGranted;
+                        persisted.PlanIneligibleAt = null;
+                    }
+
+                    persisted.RequiresReauthenticationAt = null;
+                    persisted.LastAuthenticationError = null;
+                    persisted.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+                    operation.Repositories.OpenAiAccounts.Update(persisted);
                     await operation.SaveChangesAsync(token);
                     return flowRegistry.Complete(
                         claim,
                         OpenAiAuthorizationFlowStatus.Succeeded,
-                        "OpenAI account connected.") is not null;
+                        SuccessMessage(persisted)) is not null;
                 },
                 cancellationToken);
 
             return committed
                 ? new OpenAiAuthorizationCallbackResult(
                     OpenAiAuthorizationFlowStatus.Succeeded,
-                    "OpenAI account connected. Return to Lorekeeper.")
+                    account.Kind == OpenAiAccountKind.ChatGptPlan && !grant.PlanUsageGranted
+                        ? "Signed in, but ChatGPT plan usage wasn't granted. Return to Lorekeeper to reconnect and allow it."
+                        : "OpenAI account connected. Return to Lorekeeper.")
                 : StaleCallback();
         }
         catch (OperationCanceledException)
@@ -152,61 +188,43 @@ public sealed class OpenAiAccountAuthorizationService(
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "OpenAI authorization callback failed for account {AccountId}", claim.AccountId);
-            flowRegistry.Complete(
-                claim,
-                OpenAiAuthorizationFlowStatus.Failed,
-                "OpenAI authorization could not be completed. Try again from Lorekeeper.");
+            logger.LogWarning(
+                "OpenAI authorization callback failed for account {AccountId}: {ErrorType}",
+                claim.AccountId,
+                exception.GetType().Name);
+            var message = exception is OpenAiAuthorizationException
+                ? exception.Message
+                : "OpenAI authorization could not be completed. Try again from Lorekeeper.";
+            flowRegistry.Complete(claim, OpenAiAuthorizationFlowStatus.Failed, message);
             return new OpenAiAuthorizationCallbackResult(
                 OpenAiAuthorizationFlowStatus.Failed,
-                "OpenAI authorization could not be completed. Return to Lorekeeper and try again.");
+                $"{message} Return to Lorekeeper.");
         }
     }
 
-    private async Task<OpenAiTokenResponse> ExchangeCodeAsync(
-        string code,
-        string verifier,
-        Uri redirectUri,
-        CancellationToken cancellationToken)
+    private async Task<bool> RetainIssuedClientIdAsync(int accountId, string issuedClientId, CancellationToken cancellationToken)
     {
-        var request = new Dictionary<string, string>
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken)
+            ?? throw new OpenAiAuthorizationException("The OpenAI connection no longer exists.");
+        if (account.IssuedClientId is not null)
         {
-            ["grant_type"] = "authorization_code",
-            ["client_id"] = OpenAiAccountTokenService.ClientId,
-            ["code"] = code,
-            ["redirect_uri"] = redirectUri.AbsoluteUri,
-            ["code_verifier"] = verifier,
-        };
-        using var response = await httpClientFactory.CreateClient().PostAsync(
-            TokenEndpoint,
-            new FormUrlEncodedContent(request),
-            cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException("OpenAI rejected the authorization exchange.", null, response.StatusCode);
-        return await OpenAiAccountTokenService.ReadTokenResponseAsync(response, null, cancellationToken);
+            if (!string.Equals(account.IssuedClientId, issuedClientId, StringComparison.Ordinal))
+                throw new OpenAiAuthorizationException("ChatGPT returned a different app registration than this connection uses.");
+            return false;
+        }
+
+        account.IssuedClientId = issuedClientId;
+        account.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        operation.Repositories.OpenAiAccounts.Update(account);
+        await operation.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
-    private static Uri BuildAuthorizationTarget(Uri redirectUri, string state, string verifier)
-    {
-        var challenge = Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-        var query = new Dictionary<string, string?>
-        {
-            ["response_type"] = "code",
-            ["client_id"] = OpenAiAccountTokenService.ClientId,
-            ["redirect_uri"] = redirectUri.AbsoluteUri,
-            ["scope"] = Scope,
-            ["state"] = state,
-            ["code_challenge"] = challenge,
-            ["code_challenge_method"] = "S256",
-            ["id_token_add_organizations"] = "true",
-            ["codex_cli_simplified_flow"] = "true",
-            ["originator"] = "pi",
-        };
-        return new Uri(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(AuthEndpoint, query));
-    }
+    private static string SuccessMessage(OpenAiAccount account) =>
+        account.Kind == OpenAiAccountKind.ChatGptPlan && !account.PlanUsageGranted
+            ? "Signed in, but ChatGPT plan usage wasn't granted. Reconnect and allow ChatGPT plan usage."
+            : "OpenAI account connected.";
 
     private static string DenialMessage(string error) =>
         error.Equals("access_denied", StringComparison.OrdinalIgnoreCase)

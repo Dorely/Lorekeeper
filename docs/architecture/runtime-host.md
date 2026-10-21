@@ -142,15 +142,18 @@ Electron is the primary debug and product target. The desktop host binds to the
 configured local host and port, while the explicit `http` launch profile supports
 browser development and validation. Both development profiles use
 `localhost:1455`; OpenAI OAuth depends on
-`http://localhost:1455/auth/callback`. Connect remains disabled unless that exact
-configured loopback origin is present in the active server addresses. A port
+`http://localhost:1455/auth/callback`, and Sign in with ChatGPT sends the same
+port and path on `127.0.0.1` because that protocol forbids `localhost`. Connect
+remains disabled unless the kind's exact loopback origin is present in the active
+server addresses (a `localhost` binding serves `127.0.0.1`). A port
 change must update the host binding and accepted OAuth redirect together; no
 second listener is created to compensate. The host remains local-only unless a
 deliberate architecture and security change expands its exposure.
 
 Electron-only responsibilities include hardened binding, desktop-window creation,
 shutdown, and deliberately narrow external-browser handoffs. The shared
-authorization launcher opens only exact allowlisted OpenAI/GitHub HTTPS targets;
+authorization launcher opens only exact allowlisted OpenAI/GitHub HTTPS targets
+(`auth.openai.com` `/oauth/authorize` and `/api/accounts/authorize`);
 browser hosting instead renders explicit user-activated links. The Free update
 channel retains its separate validated release-page handoff.
 `DistributionChannelPolicy` resolves immutable assembly

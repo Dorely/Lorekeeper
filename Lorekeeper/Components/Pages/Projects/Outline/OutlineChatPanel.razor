@@ -403,7 +403,7 @@
         _chatAvailability = await Collab.GetChatProviderAvailabilityAsync(ProjectId);
         _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId);
         _modelOptions = (await Providers.ListChatModelOptionsAsync())
-            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault, option.UsesChatGptPlan))
             .ToList();
     }
 

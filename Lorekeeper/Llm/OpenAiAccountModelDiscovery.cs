@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -21,10 +22,8 @@ public sealed class OpenAiAccountModelDiscovery(
         OpenAiAccountAccess access,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"{CodexProvider.ModelsEndpoint}?client_version={ClientVersion}");
-        CodexProvider.ApplyAccountHeaders(request, access.AccessToken, access.ExternalAccountId, eventStream: false);
+        var plan = access.Kind == OpenAiAccountKind.ChatGptPlan;
+        using var request = CreateRequest(access, plan);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(RequestTimeout);
@@ -44,10 +43,12 @@ public sealed class OpenAiAccountModelDiscovery(
                     "ChatGPT account model list returned {StatusCode}: {Body}",
                     (int)response.StatusCode,
                     LogRedaction.RedactJson(Encoding.UTF8.GetString(body)));
+                if (plan && ReadErrorCode(body) == "subscription_sharing_user_not_eligible")
+                    throw new OpenAiAccountModelDiscoveryException(CodexProvider.PlanNotEligibleMessage) { PlanNotEligible = true };
                 throw CreateStatusException(response.StatusCode);
             }
 
-            return Parse(body);
+            return Parse(body, plan);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -59,7 +60,26 @@ public sealed class OpenAiAccountModelDiscovery(
         }
     }
 
-    private IReadOnlyList<DiscoveredAccountModel> Parse(byte[] body)
+    private static HttpRequestMessage CreateRequest(OpenAiAccountAccess access, bool plan)
+    {
+        if (!plan)
+        {
+            var codexRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{CodexProvider.ModelsEndpoint}?client_version={ClientVersion}");
+            CodexProvider.ApplyAccountHeaders(codexRequest, access.AccessToken, access.ExternalAccountId, eventStream: false);
+            return codexRequest;
+        }
+
+        // ChatGPT plan usage authorizes with the bearer token alone.
+        var request = new HttpRequestMessage(HttpMethod.Get, CodexProvider.PlanModelsEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.AccessToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
+        return request;
+    }
+
+    private IReadOnlyList<DiscoveredAccountModel> Parse(byte[] body, bool plan)
     {
         JsonDocument document;
         try
@@ -88,7 +108,10 @@ public sealed class OpenAiAccountModelDiscovery(
             foreach (var model in models.EnumerateArray())
             {
                 if (TryReadModel(model) is { } discovered)
-                    kept.Add(discovered);
+                {
+                    // The plan model list is already in OpenAI's recommended order.
+                    kept.Add(plan ? discovered with { Priority = kept.Count } : discovered);
+                }
                 else
                     skipped++;
             }
@@ -211,6 +234,23 @@ public sealed class OpenAiAccountModelDiscovery(
         && property.TryGetInt32(out var value)
             ? value
             : null;
+
+    private static string? ReadErrorCode(byte[] body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object
+                    ? ReadString(error, "code")
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static OpenAiAccountModelDiscoveryException CreateStatusException(HttpStatusCode statusCode) =>
         statusCode switch

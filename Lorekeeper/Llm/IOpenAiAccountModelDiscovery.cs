@@ -30,4 +30,8 @@ public interface IOpenAiAccountModelDiscovery
 }
 
 public sealed class OpenAiAccountModelDiscoveryException(string message, Exception? innerException = null)
-    : Exception(message, innerException);
+    : Exception(message, innerException)
+{
+    /// <summary>The ChatGPT plan reported that this user or plan is not eligible for plan usage.</summary>
+    public bool PlanNotEligible { get; init; }
+}

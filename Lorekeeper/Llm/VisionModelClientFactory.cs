@@ -9,6 +9,7 @@ namespace Lorekeeper.Llm;
 
 public sealed class VisionModelClientFactory(
     ILlmProviderService providerService,
+    IOpenAiAccountService accountService,
     IHttpClientFactory httpClientFactory,
     ILogger<VisionModelClientFactory> logger) : IVisionModelClientFactory
 {
@@ -49,12 +50,15 @@ public sealed class VisionModelClientFactory(
 
         if (provider.OpenAiAccountId is not null
             && access.ApiKey is not null
-            && access.ExternalAccountId is not null)
+            && access.ExternalAccountId is not null
+            && access.AccountKind is { } kind)
         {
             return await ReadCodexImageAsync(
                 httpClient,
                 access.ApiKey,
                 access.ExternalAccountId,
+                provider.OpenAiAccountId.Value,
+                ResponsesTransportProfile.For(kind),
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
                 imageBytes,
@@ -106,7 +110,9 @@ public sealed class VisionModelClientFactory(
     private async Task<string> ReadCodexImageAsync(
         HttpClient httpClient,
         string accessToken,
-        string accountId,
+        string externalAccountId,
+        int accountId,
+        ResponsesTransportProfile profile,
         string model,
         LlmReasoningEffort? reasoningEffort,
         byte[] imageBytes,
@@ -145,8 +151,8 @@ public sealed class VisionModelClientFactory(
             },
         };
 
-        // Unlike the public Responses API, the ChatGPT Codex backend rejects
-        // max_output_tokens. Keep the requested budget off this OAuth path.
+        // Both account routes keep max_output_tokens off the wire: the Codex
+        // backend rejects the field, and plan usage keeps the same request shape.
 
         if (reasoningEffort is not null)
         {
@@ -158,9 +164,10 @@ public sealed class VisionModelClientFactory(
         var json = JsonSerializer.Serialize(body);
 
         logger.LogDebug(
-            "Codex vision request: POST {Endpoint}, account={AccountId}, model={Model}, promptChars={PromptChars}, imageBytes={ImageBytes}, mediaType={MediaType}, requestedMaxOutputTokens={MaxOutputTokens}, bodyChars={BodyChars}",
-            CodexProvider.ResponsesEndpoint,
-            accountId,
+            "{Transport} vision request: POST {Endpoint}, account={AccountId}, model={Model}, promptChars={PromptChars}, imageBytes={ImageBytes}, mediaType={MediaType}, requestedMaxOutputTokens={MaxOutputTokens}, bodyChars={BodyChars}",
+            profile.Label,
+            profile.Endpoint,
+            externalAccountId,
             body["model"],
             prompt.Length,
             imageBytes.Length,
@@ -168,20 +175,33 @@ public sealed class VisionModelClientFactory(
             Math.Clamp(maxOutputTokens, 1, 32_000),
             json.Length);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, CodexProvider.ResponsesEndpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Post, profile.Endpoint);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        CodexProvider.ApplyAccountHeaders(request, accessToken, accountId, eventStream: true);
+        profile.ApplyHeaders(request, accessToken, externalAccountId);
 
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
-            logger.LogError("Codex vision API error {StatusCode}: {Body}", (int)response.StatusCode, redactedErrorBody);
-            logger.LogDebug("Codex vision API error response body: {Body}", redactedErrorBody);
-            if (CodexProvider.IsModelNotOnPlanError(redactedErrorBody))
-                throw new HttpRequestException(CodexProvider.ModelNotOnPlanMessage);
-            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Codex vision request", (int)response.StatusCode, redactedErrorBody));
+            logger.LogError(
+                "{Transport} vision API error {StatusCode}: {Body}",
+                profile.Label,
+                (int)response.StatusCode,
+                redactedErrorBody);
+            logger.LogDebug(
+                "{Transport} vision API error response body: {Body}",
+                profile.Label,
+                redactedErrorBody);
+            throw await MapAsync(
+                profile.MapHttpError(
+                    (int)response.StatusCode,
+                    redactedErrorBody,
+                    LlmErrorNormalizer.SummarizeHttpError(
+                        $"{profile.Label} vision request",
+                        (int)response.StatusCode,
+                        redactedErrorBody)),
+                accountId);
         }
 
         var result = new StringBuilder();
@@ -228,17 +248,30 @@ public sealed class VisionModelClientFactory(
                     break;
                 case "response.completed" or "response.done":
                     logger.LogDebug(
-                        "Codex vision response completed after {EventCount} SSE events. TextChars={TextChars}",
+                        "{Transport} vision response completed after {EventCount} SSE events. TextChars={TextChars}",
+                        profile.Label,
                         eventCount,
                         outputTextChars);
                     return result.ToString().Trim();
                 case "response.failed":
-                    throw new InvalidOperationException(ReadCodexResponseError(evt) ?? "Codex vision request failed.");
+                    var (failedCode, failedParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
+                    throw await MapAsync(
+                        profile.MapStreamError(
+                            failedCode,
+                            failedParam,
+                            ReadCodexResponseError(evt) ?? $"{profile.Label} vision request failed."),
+                        accountId);
                 case "error":
+                    var (errorCode, errorParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
                     var errMsg = evt.TryGetProperty("message", out var message)
                         ? message.GetString()
-                        : "Unknown Codex vision error.";
-                    throw new InvalidOperationException($"Codex vision error: {errMsg}");
+                        : $"Unknown {profile.Label} vision error.";
+                    throw await MapAsync(
+                        profile.MapStreamError(
+                            errorCode,
+                            errorParam,
+                            $"{profile.Label} vision error: {errMsg}"),
+                        accountId);
                 case "response.created":
                 case "response.in_progress":
                 case "response.content_part.added":
@@ -249,17 +282,40 @@ public sealed class VisionModelClientFactory(
                 case "keepalive":
                     break;
                 default:
-                    logger.LogDebug("Unhandled Codex vision SSE event type: {EventType}", type);
+                    logger.LogDebug(
+                        "Unhandled {Transport} vision SSE event type: {EventType}",
+                        profile.Label,
+                        type);
                     break;
             }
         }
 
         logger.LogDebug(
-            "Codex vision stream ended after {EventCount} SSE events without explicit completion. LastEvent={LastEventType}; TextChars={TextChars}",
+            "{Transport} vision stream ended after {EventCount} SSE events without explicit completion. LastEvent={LastEventType}; TextChars={TextChars}",
+            profile.Label,
             eventCount,
             lastEventType ?? "(none)",
             outputTextChars);
         return result.ToString().Trim();
+    }
+
+    private async Task<Exception> MapAsync(Exception exception, int accountId)
+    {
+        if (exception is ChatGptPlanException { IsNotEligible: true })
+        {
+            try
+            {
+                await accountService.MarkPlanIneligibleAsync(accountId, CancellationToken.None);
+            }
+            catch (Exception callbackException)
+            {
+                logger.LogWarning(
+                    callbackException,
+                    "Could not record that ChatGPT plan usage is ineligible for this account.");
+            }
+        }
+
+        return exception;
     }
 
     private async Task<string> ReadOpenAiCompatibleImageAsync(

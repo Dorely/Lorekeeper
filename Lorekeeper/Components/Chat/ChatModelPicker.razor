@@ -1,6 +1,7 @@
 @namespace Lorekeeper.Components.Chat
+@using Lorekeeper.Llm
 
-<div class="chat-model-picker @(HasUnavailableSelection ? "chat-model-picker-unavailable" : null)"
+<div class="chat-model-picker @(HasUnavailableSelection ? "chat-model-picker-unavailable" : null) @(UsesChatGptPlan ? "chat-model-picker-plan" : null)"
      title="Choose the model for this chat">
     <label class="visually-hidden" for="@_selectId">Chat model</label>
     <select id="@_selectId"
@@ -28,6 +29,10 @@
             </optgroup>
         }
     </select>
+    @if (UsesChatGptPlan)
+    {
+        <span class="chat-plan-chip">Using ChatGPT plan · <a href="@CodexProvider.ManageUsageUrl" target="_blank" rel="noopener noreferrer">Manage usage</a></span>
+    }
 </div>
 
 @code {
@@ -41,6 +46,13 @@
     [Parameter] public EventCallback<int?> OnChanged { get; set; }
 
     private string SelectedValue => SelectedProviderId?.ToString() ?? string.Empty;
+
+    private ChatModelPickerOption? EffectiveOption =>
+        SelectedProviderId is int selectedProviderId
+            ? Options.FirstOrDefault(option => option.ProviderId == selectedProviderId)
+            : Options.FirstOrDefault(option => option.IsDefault);
+
+    private bool UsesChatGptPlan => EffectiveOption?.UsesChatGptPlan == true;
 
     private bool HasUnavailableSelection =>
         SelectedProviderId is int selectedProviderId

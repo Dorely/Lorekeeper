@@ -42,8 +42,9 @@ ephemeral progress to currently connected Blazor circuits.
 
 ### LLM connection model
 
-Settings > Providers shows each connection (the OpenAI account and every
-top-level OpenAI-compatible connection) as a collapsible section whose header
+Settings > Providers shows each connection (one ChatGPT (Codex) account section,
+one ChatGPT plan account section, and every top-level OpenAI-compatible
+connection) as a collapsible section whose header
 carries only connection identity, status, and connection actions. Every model,
 including the model stored on the top-level connection row itself, appears as
 an ordinary row in the section's models grid; token budgets and model discovery
@@ -87,14 +88,16 @@ absent. Unsupported saved effort values fail closed.
 ChatGPT plans do not all offer the same models (Go, for example, omits Sol), so
 the static-only account catalog adopted on 2026-09-16 is superseded by
 plan-aware reconciliation. `IOpenAiAccountModelDiscovery` reads the account's
-selectable models from the Codex backend model endpoint with the persisted
-account identity, a 30-second bound, and a 1 MiB response cap; only entries the
-account marks `list` are kept, and failures surface as sanitized messages.
+selectable models with a 30-second bound and a 1 MiB response cap: a Codex
+account reads the Codex backend model endpoint with its persisted identity, and a
+ChatGPT plan account reads `GET https://api.openai.com/v1/models` with its bearer
+token, keeping OpenAI's order as priority. Only entries marked `list` are kept,
+and failures surface as sanitized messages.
 `OpenAiAccountModelCatalogService.RefreshAvailabilityAsync` then reconciles:
 catalog and account-discovered rows the account lists become `Available`, those
 it omits become `Unavailable`, and listed models outside the catalog become
 read-only `AccountDiscovered` rows whose efforts, capabilities, and usable input
-budget (context window Ã— effective percent) come from the account. A failed
+budget (context window × effective percent) come from the account. A failed
 refresh keeps the last-known availability and records the error on the account.
 Rows that were never checked stay `Unknown` and usable. Readiness treats
 `Unavailable` as not ready, so model pickers hide those rows, and the Codex chat
@@ -141,12 +144,31 @@ unless a row or deployment override supplies a different value.
 
 ### Chat and vision wire compatibility
 
-`IChatClientFactory` creates either the Codex Responses client or an
+`IChatClientFactory` creates either the account Responses client or an
 OpenAI-compatible client and applies the selected reasoning effort, effective
 output-token budget, max-token field policy, and configured timeout.
 `IVisionModelClientFactory` uses the same connection resolution and error policy
 for readiness probes and artifact vision reads. Assistant transcript/tool-loop
 semantics are owned by [Assistants and chat](assistants-chat.md).
+
+Account-backed requests choose a `ResponsesTransportProfile` from the account
+kind. The Codex profile posts to the ChatGPT Codex backend with the account
+headers. The ChatGPT plan profile posts the same compliant body (`store:false`,
+`stream:true`, `instructions`, no output-token cap) to
+`https://api.openai.com/v1/responses` with only the bearer token, and maps the
+plan's structured `error.code` values, from the HTTP body or a streamed
+`response.failed`/`error` event, to user-facing messages:
+`subscription_sharing_user_not_eligible` records the account as **Not eligible**
+(plan usage needs Plus or Pro) and points to the Codex connection;
+`subscription_sharing_usage_limit_exceeded` shows **Usage limit reached** with a
+**Manage usage** link to ChatGPT settings; `*_unavailable` codes are retryable;
+`subscription_sharing_unsupported_capability` names the rejected parameter;
+the remaining route, user, and scope codes are diagnostic. `{"detail": ...}`
+bodies are never matched as plan errors. The chat picker shows **Using ChatGPT
+plan** with **Manage usage** while a plan-backed model is selected. OpenAI
+exposes no remaining-usage API, so usage tracking is these affordances, the
+per-app limit in ChatGPT settings, and the per-response token usage Lorekeeper
+already records.
 
 OpenAI-compatible endpoint behavior is classified by endpoint host in
 `LlmWireCompatResolver`; it is not maintained as a per-model compatibility matrix.
@@ -217,9 +239,29 @@ user-authorized check; build and static validation do not establish interoperabi
 
 OpenAI account authorization is account-oriented and starts directly from the
 mounted Providers component; there is no application `/auth/start` redirect.
+Each `OpenAiAccount` has a `Kind`, and at most one account exists per kind:
+
+- **ChatGPT (Codex)** signs in through the Codex public client
+  (`auth.openai.com/oauth/authorize`). It works on every ChatGPT plan, serves
+  chat, vision, and image generation through the ChatGPT Codex backend, and its
+  identity is the ChatGPT account ID claim read at the authorization boundary.
+- **ChatGPT plan** is OpenAI's Sign in with ChatGPT for agents
+  (`auth.openai.com/api/accounts/authorize`). The first sign-in registers
+  Lorekeeper dynamically (`client_id=dynamic_agent_client`, agent name
+  `Lorekeeper`); the issued `oaiapp_` client ID is persisted before the code
+  exchange and reused for every later sign-in, refresh, and revocation, and a
+  callback naming a different client is rejected. A stable `urn:uuid` host ID is
+  generated once per account row and sent as `ext_agent_host_id`; later
+  sign-ins add the saved ID token as `id_token_hint`. Plan usage is chat-only
+  (chat, vision, hosted web search) and is never offered for images or
+  embeddings.
+
+`IOpenAiAuthorizationProtocol` implementations own each kind's authorize target,
+exchange, refresh, identity comparison, and revocation; the service, registry,
+coordinator, and callback endpoint are shared.
 `OpenAiAuthorizationFlowRegistry` keeps one process-local flow per account with
-a 256-bit state, independent 256-bit PKCE verifier, ten-minute expiry, and
-terminal status. Starting a replacement cancels the older state, callback claim
+a 256-bit state, independent 256-bit PKCE verifier and OpenID nonce, ten-minute
+expiry, and terminal status. Starting a replacement cancels the older state, callback claim
 is atomic and single-use, and per-account coordination prevents a canceled or
 stale callback from replacing credentials. Reconnect preserves the existing
 credential row until the replacement exchange commits successfully.
@@ -234,10 +276,25 @@ The `/auth/callback` endpoint accepts success or denial, consumes the flow, and
 renders a standalone no-store Lorekeeper completion page. It never redirects to
 Settings or opens another application session.
 
-The configured redirect remains `http://localhost:1455/auth/callback`. Before
-Connect is enabled, Lorekeeper validates that this exact loopback origin and
-callback path are served by the active host. A port/configuration mismatch is
-shown inline; the application never starts or terminates another listener.
+The configured redirect remains `http://localhost:1455/auth/callback`. Sign in
+with ChatGPT forbids `localhost` and allows only the port of
+`http://127.0.0.1:<port>/auth/callback` to vary, so the ChatGPT plan protocol
+sends the same port and path on `127.0.0.1`; both kinds share the one callback
+endpoint and the flow's `state` selects the protocol. Before Connect is enabled,
+Lorekeeper validates that the kind's exact loopback origin and callback path are
+served by the active host (a `localhost` binding serves `127.0.0.1`). A
+port/configuration mismatch is shown inline; the application never starts or
+terminates another listener.
+
+A ChatGPT plan exchange requires an ID token, verified locally before any
+credential is replaced: RS256 against OpenAI's published JWKS (cached, refetched
+at most once a minute for an unknown key), issuer `https://auth.openai.com`, the
+issued client as audience, expiry, and the attempt's nonce. Its `sub` is the
+account identity, and a returning account whose `sub` differs is rejected.
+Inference is authorized only when the granted scope includes
+`chatgpt.tokens.use.direct`; a sign-in without it is kept as **Plan usage not
+granted** and never sends inference. The ID token is stored beside the access and
+refresh tokens inside the credential boundary, only to serve as `id_token_hint`.
 
 LLM and search API keys are persisted on their provider rows. OpenAI-account
 access and refresh tokens are stored in dedicated SQLite rows owned by
@@ -255,11 +312,24 @@ discovery, and image generation use that persisted identity and never inspect
 access-token shape at request time. A migrated token without persisted external
 identity fails closed as Reauthentication required.
 
-A token endpoint `401`, `invalid_grant`, or `invalid_token` marks the account as
-requiring reauthentication while retaining the credential row. Transient
+A Codex token endpoint `401`, `invalid_grant`, or `invalid_token` marks the
+account as requiring reauthentication while retaining the credential row. A
+ChatGPT plan refresh sends the issued client and `resource`, replaces the access
+token, expiry, scope, and rotating refresh token together, and treats `401`,
+`invalid_grant`, `invalid_refresh_token`, `token_expired`,
+`refresh_token_expired`, `refresh_token_invalidated`, and
+`refresh_token_reused` the same way; `invalid_client` is reported as a changed
+registration that needs a new sign-in. Transient
 transport/server failures also retain credentials and remain retryable errors.
 Only a successful replacement flow swaps credentials; explicit Disconnect
-removes them. The Providers surface catches sanitized failures at the card
+removes them. ChatGPT plan Disconnect first revokes the refresh token at OpenAI
+(bounded retries); when revocation cannot be confirmed the local tokens are still
+removed and Settings tells the user to disconnect Lorekeeper in ChatGPT settings.
+Disconnect keeps the plan registration (issued client, host ID, and verified
+identity) so the next sign-in reuses it; **Forget registration** also discards
+the issued client and identity so the next sign-in registers again. After the
+first granted plan sign-in, Settings shows a one-time welcome notice; dismissing
+it records `WelcomeAcknowledgedAt` and the notice is not shown again. The Providers surface catches sanitized failures at the card
 boundary so one unavailable OAuth endpoint cannot break Settings.
 
 Version-control GitHub access is a separate provider-owned boundary. Its device
@@ -519,9 +589,9 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`IOpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/IOpenAiAccountModelDiscovery.cs), [`OpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/OpenAiAccountModelDiscovery.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, account model-list transport, persisted connection/model ownership, working-default resolution, and shared credential lookup. Generic discovery rejects account-backed rows; account refresh uses the dedicated discovery transport. |
-| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
+| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), [`ResponsesTransportProfile.cs`](../../Lorekeeper/Llm/ResponsesTransportProfile.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, account-kind Responses transport profiles, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
-| [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/CodexOAuthEndpoints.cs`](../../Lorekeeper/Auth/CodexOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
+| [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/OpenAiOAuthEndpoints.cs`](../../Lorekeeper/Auth/OpenAiOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
 | [`Lorekeeper/Llm/EmbeddingClient.cs`](../../Lorekeeper/Llm/EmbeddingClient.cs), [`EmbeddingConfigurationService.cs`](../../Lorekeeper/Llm/EmbeddingConfigurationService.cs), and [`ProviderEmbeddingService.cs`](../../Lorekeeper/Llm/ProviderEmbeddingService.cs) | Embedding transport, test-before-save configuration, active-provider resolution, batching, truncation, and dimension validation. |
 | [`Lorekeeper/Llm/EmbeddingRebuild*`](../../Lorekeeper/Llm/) | Versioned/coalesced rebuild queue, hosted worker, scoped bulk index rebuild, throttling, retry, and cancellation. |
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |

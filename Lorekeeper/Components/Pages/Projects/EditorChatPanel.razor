@@ -915,7 +915,7 @@
         _chatAvailability = await Chat.GetChatProviderAvailabilityAsync(ProjectId, cancellationToken);
         _chatSelection = await ProviderService.ResolveChatModelSelectionAsync(_selectedProviderId, cancellationToken);
         _modelOptions = (await ProviderService.ListChatModelOptionsAsync(cancellationToken))
-            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault, option.UsesChatGptPlan))
             .ToList();
     }
 

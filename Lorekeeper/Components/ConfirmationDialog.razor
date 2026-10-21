@@ -17,13 +17,16 @@
             </header>
             <p id="@_messageId">@Message</p>
             <footer>
-                <button type="button"
-                        class="btn btn-sm btn-outline-secondary"
-                        disabled="@Busy"
-                        autofocus
-                        @onclick="CancelAsync">
-                    @CancelLabel
-                </button>
+                @if (ShowCancel)
+                {
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            disabled="@Busy"
+                            autofocus
+                            @onclick="CancelAsync">
+                        @CancelLabel
+                    </button>
+                }
                 <button type="button"
                         class="btn btn-sm @(Destructive ? "btn-danger" : "btn-primary")"
                         disabled="@Busy"
@@ -46,6 +49,7 @@
     [Parameter] public string ConfirmLabel { get; set; } = "Continue";
     [Parameter] public string CancelLabel { get; set; } = "Cancel";
     [Parameter] public bool Destructive { get; set; }
+    [Parameter] public bool ShowCancel { get; set; } = true;
     [Parameter] public bool Busy { get; set; }
     [Parameter] public EventCallback OnConfirm { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }

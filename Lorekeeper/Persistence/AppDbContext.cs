@@ -993,6 +993,9 @@ public class AppDbContext(
         modelBuilder.Entity<OpenAiAccount>(entity =>
         {
             entity.HasIndex(e => e.DisplayName);
+            entity.Property(e => e.Kind)
+                .HasConversion<string>()
+                .HasDefaultValue(OpenAiAccountKind.Codex);
         });
 
         modelBuilder.Entity<EmbeddingConfiguration>(entity =>

@@ -4,12 +4,14 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.Llm;
+using Lorekeeper.Models;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Images;
 
 public sealed class CodexProjectImageProvider(
     ILlmProviderService providerService,
+    IOpenAiAccountService accountService,
     IHttpClientFactory httpClientFactory,
     IOptions<ProjectImageGenerationOptions> options,
     ILogger<CodexProjectImageProvider> logger) : IProjectImageProvider
@@ -82,14 +84,15 @@ public sealed class CodexProjectImageProvider(
 
     private async Task<CodexImageConnection> ResolveConnectionAsync(CancellationToken cancellationToken)
     {
-        var provider = (await providerService.GetAllAsync(cancellationToken))
-            .FirstOrDefault(CodexProvider.IsAccountBacked);
-        if (provider?.OpenAiAccountId is not int accountId)
-            throw new InvalidOperationException("No OpenAI account is configured. Connect OpenAI in Settings first.");
+        // ChatGPT plan sign-in does not permit image generation; only a Codex account can serve it.
+        var codexAccount = (await accountService.GetAllAsync(cancellationToken))
+            .FirstOrDefault(account => account.Kind == OpenAiAccountKind.Codex);
+        if (codexAccount is null)
+            throw new InvalidOperationException("No ChatGPT (Codex) account is configured. Connect it in Settings first.");
 
-        var access = await providerService.GetOpenAiAccountAccessAsync(accountId, cancellationToken);
-        if (access is null)
-            throw new InvalidOperationException("Connect or reauthenticate OpenAI in Settings before generating images.");
+        var access = await providerService.GetOpenAiAccountAccessAsync(codexAccount.Id, cancellationToken);
+        if (access is not { Kind: OpenAiAccountKind.Codex })
+            throw new InvalidOperationException("Connect or reauthenticate the ChatGPT (Codex) account in Settings before generating images.");
 
         return new CodexImageConnection(access.AccessToken, access.ExternalAccountId);
     }

@@ -28,8 +28,10 @@ provenance, and a reproducible export recipe.
   Images, and Publish) work directly in your outline, chapters, story graph, and
   pages. Turn on Review Edits to approve or undo each change they make, and
   revise every word yourself in a structured chapter editor.
-- **Your OpenAI account, built in:** connect once to use OpenAI chat and image
-  models across the workspace. OpenAI-compatible providers and local model
+- **Your ChatGPT account, built in:** connect ChatGPT (Codex) once to use
+  OpenAI chat and image models across the workspace, or use **Continue with
+  ChatGPT** to chat on your Plus or Pro plan's usage with **Manage usage** and
+  usage-limit states from ChatGPT. OpenAI-compatible providers and local model
   servers also work, and semantic search uses a local Ollama or LM Studio
   embedding model (or any API-key embeddings endpoint).
 - **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
@@ -169,7 +171,7 @@ technical map.
   full audit transcript and call metadata. The live token counter reflects the
   tombstone; if all eligible results are exhausted, the turn fails closed with reset
   or larger-context-model guidance.
-- Configurable OpenAI-account chat providers and OpenAI-compatible chat/embedding providers. OpenAI account connections do not provide embeddings; Settings > Embeddings guides you to a local Ollama model (`ollama pull nomic-embed-text`) or LM Studio, and API-key providers with an embeddings endpoint also work. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper checks the account's model list after sign-in (and on Refresh models) so models your ChatGPT plan doesn't offer are marked "Not on your plan" and hidden from pickers, while models the account newly offers are added. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
+- Configurable OpenAI-account chat providers and OpenAI-compatible chat/embedding providers. OpenAI account connections do not provide embeddings; Settings > Embeddings guides you to a local Ollama model (`ollama pull nomic-embed-text`) or LM Studio, and API-key providers with an embeddings endpoint also work. OpenAI accounts receive a local, versioned seven-model catalog for GPT-6.1 Sol, GPT-6 Astra, Sol, and Luna plus GPT-5.6 Sol, Terra, and Luna; GPT-6.1 Sol is preferred for new accounts without an existing global default, catalog models are ready without a manual Test when credentials are valid, and Lorekeeper checks the account's model list after sign-in (and on Refresh models) so models your ChatGPT plan doesn't offer are marked "Not on your plan" and hidden from pickers, while models the account newly offers are added. The catalog owns each model's supported effort, capabilities, and 272,000-token usable input budget. OpenAI Connect/Reconnect keeps Settings open, uses a validated system-browser handoff in Electron or an explicit external link in browser hosting, and returns to a standalone completion page while Settings updates automatically. **Continue with ChatGPT** adds a separate ChatGPT plan connection (Plus or Pro) for chat, vision, and web search on the plan's own usage: it lists the plan's models from OpenAI, shows "Using ChatGPT plan" with Manage usage in the chat model picker, reports usage-limit and not-eligible states, and is never used for images or embeddings. Manual/API-key/local providers retain discovery, explicit verification, reasoning/output/input overrides, and endpoint-aware wire compatibility. Unset output and reasoning settings use the provider's defaults; saved explicit overrides are preserved, and Codex retains its catalog defaults. Compatible-model reasoning is preserved across tool follow-ups and later turns only for the originating connection and model. Output-budget exhaustion reports a failure and retains partial output without executing pending tools or completing contest candidates. Credentials and configuration remain in local SQLite.
 
 </details>
 
@@ -788,7 +790,8 @@ dotnet run --project Lorekeeper --launch-profile electron
 ```
 
 OpenAI OAuth uses `Auth:Codex:RedirectUri`, which defaults to
-`http://localhost:1455/auth/callback`. Changing the desktop port disables Connect
+`http://localhost:1455/auth/callback`; Sign in with ChatGPT uses the same port and
+path on `127.0.0.1`. Changing the desktop port disables Connect
 until the redirect configuration, active Lorekeeper host, and provider-accepted
 callback agree.
 

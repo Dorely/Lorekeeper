@@ -372,6 +372,14 @@
     gap: 0.5rem;
 }
 
+.chat-error-usage {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
 .chat-token-reset-suggestion {
     padding: 0.45rem 0.75rem;
     border-top: 1px solid #eed4a4;

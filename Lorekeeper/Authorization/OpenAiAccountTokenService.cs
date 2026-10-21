@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text.Json;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 
@@ -7,47 +5,69 @@ namespace Lorekeeper.Authorization;
 
 public sealed class OpenAiAccountTokenService(
     IAppDatabaseOperationFactory database,
-    IHttpClientFactory httpClientFactory,
+    IEnumerable<IOpenAiAuthorizationProtocol> protocols,
     OpenAiAccountOperationCoordinator coordinator,
     TimeProvider timeProvider,
     ILogger<OpenAiAccountTokenService> logger) : IOpenAiAccountTokenService
 {
-    private const string TokenEndpoint = "https://auth.openai.com/oauth/token";
-    internal const string ClientId = "app_EMoamEEZ73f0CkXaXp7hrann";
-    private const string ReauthenticationMessage =
-        "Reauthentication is required. Reconnect the OpenAI account in Settings > Providers.";
-
     public Task<OpenAiAccountAccess?> GetValidAccessAsync(
         int accountId,
         CancellationToken cancellationToken = default) =>
         coordinator.RunAsync(accountId, token => GetValidAccessCoreAsync(accountId, token), cancellationToken);
 
-    public Task DisconnectAsync(
+    public Task<string?> DisconnectAsync(
         int accountId,
         CancellationToken cancellationToken = default) =>
-        coordinator.RunAsync(
-            accountId,
-            async token =>
-            {
-                await using var operation = await database.OpenWriteAsync(token);
-                var account = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, token);
-                if (account is null)
-                    return;
+        coordinator.RunAsync(accountId, token => SignOutAsync(accountId, forgetRegistration: false, token), cancellationToken);
 
-                await operation.Repositories.OAuthTokens.DeleteForAccountAsync(accountId, token);
-                account.ExternalAccountId = null;
-                account.RequiresReauthenticationAt = null;
-                account.LastAuthenticationError = null;
-                account.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-                operation.Repositories.OpenAiAccounts.Update(account);
-                await operation.SaveChangesAsync(token);
-            },
-            cancellationToken);
+    public Task<string?> ForgetRegistrationAsync(
+        int accountId,
+        CancellationToken cancellationToken = default) =>
+        coordinator.RunAsync(accountId, token => SignOutAsync(accountId, forgetRegistration: true, token), cancellationToken);
 
-    public static bool IsTerminalRefreshRejection(HttpStatusCode statusCode, string? errorCode) =>
-        statusCode == HttpStatusCode.Unauthorized
-        || (statusCode == HttpStatusCode.BadRequest
-            && errorCode is "invalid_grant" or "invalid_token");
+    private async Task<string?> SignOutAsync(int accountId, bool forgetRegistration, CancellationToken cancellationToken)
+    {
+        OpenAiAccount? account;
+        OAuthToken? savedToken;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            account = await read.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken);
+            savedToken = await read.Repositories.OAuthTokens.GetLatestForAccountAsync(accountId, cancellationToken);
+        }
+
+        if (account is null)
+            return null;
+
+        var warning = savedToken is null
+            ? null
+            : await OpenAiAuthorizationProtocol.For(protocols, account.Kind).RevokeAsync(account, savedToken, cancellationToken);
+
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var persisted = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken);
+        if (persisted is null)
+            return warning;
+
+        await operation.Repositories.OAuthTokens.DeleteForAccountAsync(accountId, cancellationToken);
+        // A ChatGPT plan registration stays bound to its verified identity across
+        // sign-out so the next sign-in reuses it; Codex identity comes from each login.
+        if (persisted.Kind == OpenAiAccountKind.Codex || forgetRegistration)
+            persisted.ExternalAccountId = null;
+        if (forgetRegistration)
+        {
+            persisted.IssuedClientId = null;
+            persisted.Email = null;
+            persisted.PlanIneligibleAt = null;
+            persisted.WelcomeAcknowledgedAt = null;
+        }
+
+        persisted.PlanUsageGranted = false;
+        persisted.RequiresReauthenticationAt = null;
+        persisted.LastAuthenticationError = null;
+        persisted.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        operation.Repositories.OpenAiAccounts.Update(persisted);
+        await operation.SaveChangesAsync(cancellationToken);
+        return warning;
+    }
 
     private async Task<OpenAiAccountAccess?> GetValidAccessCoreAsync(
         int accountId,
@@ -64,59 +84,69 @@ public sealed class OpenAiAccountTokenService(
         if (account is null || savedToken is null || account.RequiresReauthenticationAt is not null)
             return null;
 
+        // Plan inference is only authorized by an explicit plan-usage grant.
+        if (account.Kind == OpenAiAccountKind.ChatGptPlan && !account.PlanUsageGranted)
+            return null;
+
         if (string.IsNullOrWhiteSpace(account.ExternalAccountId))
         {
-            await MarkReauthenticationRequiredAsync(accountId, ReauthenticationMessage, cancellationToken);
+            await MarkReauthenticationRequiredAsync(accountId, OpenAiAuthorizationProtocol.ReauthenticationMessage, cancellationToken);
             return null;
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         if (savedToken.ExpiresAt > now)
-            return new OpenAiAccountAccess(accountId, account.ExternalAccountId, savedToken.AccessToken);
+            return new OpenAiAccountAccess(accountId, account.Kind, account.ExternalAccountId, savedToken.AccessToken);
 
         if (string.IsNullOrWhiteSpace(savedToken.RefreshToken))
         {
-            await MarkReauthenticationRequiredAsync(accountId, ReauthenticationMessage, cancellationToken);
+            await MarkReauthenticationRequiredAsync(accountId, OpenAiAuthorizationProtocol.ReauthenticationMessage, cancellationToken);
             return null;
         }
 
-        using var response = await RefreshAsync(savedToken.RefreshToken, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var protocol = OpenAiAuthorizationProtocol.For(protocols, account.Kind);
+        var outcome = await protocol.RefreshAsync(account, savedToken.RefreshToken, cancellationToken);
+        if (outcome.TerminalMessage is { } terminalMessage)
         {
-            var errorCode = await ReadOAuthErrorCodeAsync(response, cancellationToken);
-            if (IsTerminalRefreshRejection(response.StatusCode, errorCode))
-            {
-                logger.LogWarning(
-                    "OpenAI refresh was rejected for account {AccountId}; reconnect is required. StatusCode={StatusCode}, OAuthError={OAuthError}",
-                    accountId,
-                    (int)response.StatusCode,
-                    errorCode ?? "unavailable");
-                await MarkReauthenticationRequiredAsync(accountId, ReauthenticationMessage, cancellationToken);
-                return null;
-            }
+            logger.LogWarning("OpenAI refresh was rejected for account {AccountId}; reconnect is required.", accountId);
+            await MarkReauthenticationRequiredAsync(accountId, terminalMessage, cancellationToken);
+            return null;
+        }
 
+        if (outcome.Tokens is not { } refreshed)
+        {
             throw new HttpRequestException(
                 "OpenAI authorization could not be refreshed. The saved credentials were retained; try again.",
                 null,
-                response.StatusCode);
+                outcome.TransientStatus);
         }
 
-        var refreshed = await ReadTokenResponseAsync(response, savedToken.RefreshToken, cancellationToken);
-        var refreshedExternalAccountId = OpenAiTokenClaims.ReadExternalAccountId(refreshed.AccessToken);
-        if (!string.Equals(account.ExternalAccountId, refreshedExternalAccountId, StringComparison.Ordinal))
+        if (!protocol.IsSameIdentity(account, refreshed))
         {
-            await MarkReauthenticationRequiredAsync(accountId, ReauthenticationMessage, cancellationToken);
+            await MarkReauthenticationRequiredAsync(accountId, OpenAiAuthorizationProtocol.ReauthenticationMessage, cancellationToken);
             return null;
         }
+
+        var planUsageGranted = account.PlanUsageGranted;
+        if (account.Kind == OpenAiAccountKind.ChatGptPlan && refreshed.Scope is not null)
+            planUsageGranted = ChatGptPlanAuthorizationProtocol.GrantsPlanUsage(refreshed.Scope);
 
         await using (var operation = await database.OpenWriteAsync(cancellationToken))
         {
             var persistedAccount = await operation.Repositories.OpenAiAccounts.GetByIdAsync(accountId, cancellationToken)
                 ?? throw new InvalidOperationException("The OpenAI account no longer exists.");
+            // Access token, expiry, scope, and the rotating refresh token are replaced together.
             await operation.Repositories.OAuthTokens.ReplaceForAccountAsync(
                 accountId,
-                ToOAuthToken(accountId, refreshed),
+                ToOAuthToken(
+                    accountId,
+                    refreshed with
+                    {
+                        Scope = refreshed.Scope ?? savedToken.Scope,
+                        IdToken = refreshed.IdToken ?? savedToken.IdToken,
+                    }),
                 cancellationToken);
+            persistedAccount.PlanUsageGranted = planUsageGranted;
             persistedAccount.RequiresReauthenticationAt = null;
             persistedAccount.LastAuthenticationError = null;
             persistedAccount.UpdatedAt = now;
@@ -124,51 +154,10 @@ public sealed class OpenAiAccountTokenService(
             await operation.SaveChangesAsync(cancellationToken);
         }
 
-        return new OpenAiAccountAccess(accountId, account.ExternalAccountId, refreshed.AccessToken);
-    }
+        if (account.Kind == OpenAiAccountKind.ChatGptPlan && !planUsageGranted)
+            return null;
 
-    private async Task<HttpResponseMessage> RefreshAsync(
-        string refreshToken,
-        CancellationToken cancellationToken)
-    {
-        var request = new Dictionary<string, string>
-        {
-            ["grant_type"] = "refresh_token",
-            ["client_id"] = ClientId,
-            ["refresh_token"] = refreshToken,
-        };
-        return await httpClientFactory.CreateClient().PostAsync(
-            TokenEndpoint,
-            new FormUrlEncodedContent(request),
-            cancellationToken);
-    }
-
-    internal static async Task<OpenAiTokenResponse> ReadTokenResponseAsync(
-        HttpResponseMessage response,
-        string? fallbackRefreshToken,
-        CancellationToken cancellationToken)
-    {
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-        if (!json.TryGetProperty("access_token", out var accessTokenElement)
-            || accessTokenElement.ValueKind != JsonValueKind.String
-            || string.IsNullOrWhiteSpace(accessTokenElement.GetString())
-            || !json.TryGetProperty("expires_in", out var expiresInElement)
-            || !expiresInElement.TryGetInt32(out var expiresIn)
-            || expiresIn <= 0)
-        {
-            throw new InvalidOperationException("OpenAI returned an incomplete authorization response.");
-        }
-
-        var refreshToken = json.TryGetProperty("refresh_token", out var refreshTokenElement)
-            && refreshTokenElement.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(refreshTokenElement.GetString())
-                ? refreshTokenElement.GetString()
-                : fallbackRefreshToken;
-        var scope = json.TryGetProperty("scope", out var scopeElement)
-            && scopeElement.ValueKind == JsonValueKind.String
-                ? scopeElement.GetString()
-                : null;
-        return new OpenAiTokenResponse(accessTokenElement.GetString()!, refreshToken, expiresIn, scope);
+        return new OpenAiAccountAccess(accountId, account.Kind, account.ExternalAccountId, refreshed.AccessToken);
     }
 
     internal OAuthToken ToOAuthToken(int accountId, OpenAiTokenResponse response)
@@ -179,6 +168,7 @@ public sealed class OpenAiAccountTokenService(
             OpenAiAccountId = accountId,
             AccessToken = response.AccessToken,
             RefreshToken = response.RefreshToken,
+            IdToken = response.IdToken,
             ExpiresAt = now.AddSeconds(response.ExpiresInSeconds),
             Scope = response.Scope,
             CreatedAt = now,
@@ -202,29 +192,11 @@ public sealed class OpenAiAccountTokenService(
         operation.Repositories.OpenAiAccounts.Update(account);
         await operation.SaveChangesAsync(cancellationToken);
     }
-
-    private static async Task<string?> ReadOAuthErrorCodeAsync(
-        HttpResponseMessage response,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            return document.RootElement.TryGetProperty("error", out var error)
-                && error.ValueKind == JsonValueKind.String
-                    ? error.GetString()
-                    : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }
 
-internal sealed record OpenAiTokenResponse(
+public sealed record OpenAiTokenResponse(
     string AccessToken,
     string? RefreshToken,
     int ExpiresInSeconds,
-    string? Scope);
+    string? Scope,
+    string? IdToken);

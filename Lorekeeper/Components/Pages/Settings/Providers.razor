@@ -30,7 +30,7 @@
     }
 
     <section class="provider-overview" aria-label="Provider readiness">
-        <div><span class="lk-section-kicker">Connections</span><strong>@(OtherParents.Count() + (_openAiAccount is null ? 0 : 1))</strong><small>credential sources</small></div>
+        <div><span class="lk-section-kicker">Connections</span><strong>@(OtherParents.Count() + AccountSections.Count(section => section.Account is not null))</strong><small>credential sources</small></div>
         <div><span class="lk-section-kicker">Chat ready</span><strong>@_chatReadyStatus.Count(item => item.Value)</strong><small>usable models</small></div>
         <div><span class="lk-section-kicker">Vision ready</span><strong>@_visionReadyStatus.Count(item => item.Value)</strong><small>image-capable models</small></div>
         <div class="provider-overview-action">
@@ -147,94 +147,8 @@
     }
 
     <section class="provider-list" aria-label="Configured provider connections">
-        <article class="connection-section codex-card">
-            @{
-                var openAiSectionKey = "openai-account";
-                var openAiExpanded = IsSectionExpanded(openAiSectionKey);
-                var openAiBodyId = $"{openAiSectionKey}-body";
-                var codexProvider = _codexProvider;
-            }
-            <header class="connection-header">
-                <button type="button" class="connection-toggle" aria-expanded="@(openAiExpanded ? "true" : "false")" aria-controls="@openAiBodyId" @onclick="() => ToggleSection(openAiSectionKey)">
-                    <span class="connection-chevron" aria-hidden="true"></span>
-                    <div class="connection-identity">
-                        <span class="connection-mark">AI</span>
-                        <div><span class="lk-section-kicker">OpenAI account</span><h2>OpenAI account</h2><p>Use the bundled model catalog without managing an API key or running manual model tests.</p></div>
-                    </div>
-                </button>
-                <span class="connection-summary">@($"{CodexModels.Count} model(s) · {CodexModels.Count(model => IsChatReady(model))} chat-ready")</span>
-                <div class="connection-actions">
-                    @if (_authorizationFlow?.IsPending == true)
-                    {
-                        <span class="lk-status-pill is-warning">Authorization pending</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelOpenAiAuthorizationAsync">Cancel</button>
-                    }
-                    @if (_codexConnected)
-                    {
-                        <span class="lk-status-pill is-success">Connected</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_refreshingOpenAiModels" @onclick="() => RefreshOpenAiModelsAsync()">@(_refreshingOpenAiModels ? "Refreshing…" : "Refresh models")</button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Reconnect</button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DisconnectCodexAsync">Disconnect</button>
-                    }
-                    else
-                    {
-                        <span class="lk-status-pill is-warning">Not connected</span>
-                        <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization)" @onclick="ConnectCodexAsync">Connect OpenAI</button>
-                    }
-                    @if (codexProvider is not null)
-                    {
-                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => { _collapsedSections.Remove(openAiSectionKey); ToggleAddChild(codexProvider.Id); }">Add manual model</button>
-                    }
-                </div>
-            </header>
-            @if (!openAiExpanded)
-            {
-                @RenderPlanDefaultBanner()
-            }
-            @if (openAiExpanded)
-            {
-                <div class="connection-body" id="@openAiBodyId">
-                    @if (_openAiAccount is not null)
-                    {
-                        <p class="model-refresh-note">
-                            @if (_openAiAccount.LastModelRefreshAt is { } lastModelRefresh)
-                            {
-                                @($"Models checked {lastModelRefresh.ToLocalTime():g}")
-                            }
-                            else
-                            {
-                                @("Models have not been checked against your plan yet.")
-                            }
-                        </p>
-                        @if (!string.IsNullOrWhiteSpace(_openAiAccount.LastModelRefreshError))
-                        {
-                            <div class="alert alert-warning">@_openAiAccount.LastModelRefreshError</div>
-                        }
-                    }
-                    @RenderPlanDefaultBanner()
-                    @if (_callbackOrigin is { IsValid: false })
-                    {
-                        <div class="alert alert-warning">@_callbackOrigin.Message</div>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(_openAiAccount?.LastAuthenticationError))
-                    {
-                        <div class="alert alert-warning">@_openAiAccount.LastAuthenticationError</div>
-                    }
-                    @if (_authorizationTarget is not null)
-                    {
-                        <div class="alert alert-info">
-                            OpenAI authorization is ready. Use this explicit external link, then return to this page while Lorekeeper completes the connection.
-                            <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
-                        </div>
-                    }
-                    @if (codexProvider is not null)
-                    {
-                        @RenderModelGrid(CodexModels, true)
-                        @RenderChildForm(codexProvider)
-                    }
-                </div>
-            }
-        </article>
+        @RenderAccountSection(_codexSection)
+        @RenderAccountSection(_planSection)
 
         @foreach (var connection in OtherParents)
         {
@@ -293,30 +207,45 @@
             </article>
         }
 
-        @if (_codexProvider is null && !OtherParents.Any())
+        @if (!OtherParents.Any() && AccountSections.All(section => ModelsFor(section).Count == 0))
         {
-            <div class="lk-empty-state"><h2>No model connections yet</h2><p>Connect OpenAI above or add an OpenAI-compatible endpoint.</p><button class="btn btn-primary" @onclick="ToggleAddConnection">Add a connection</button></div>
+            <div class="lk-empty-state"><h2>No model connections yet</h2><p>Connect ChatGPT above or add an OpenAI-compatible endpoint.</p><button class="btn btn-primary" @onclick="ToggleAddConnection">Add a connection</button></div>
         }
     </section>
 </ConfigurationShell>
+
+<ConfirmationDialog IsOpen="_welcomeAccountId is not null"
+                    Title="You're using your ChatGPT plan"
+                    Message="Eligible usage in this app uses your ChatGPT plan. Manage usage in your ChatGPT settings."
+                    ConfirmLabel="Got it"
+                    ShowCancel="false"
+                    OnConfirm="AcknowledgeWelcomeAsync"
+                    OnCancel="AcknowledgeWelcomeAsync" />
+
+<ConfirmationDialog IsOpen="_forgetRegistrationSection is not null"
+                    Title="Forget ChatGPT registration?"
+                    Message="This signs out and discards Lorekeeper's ChatGPT app registration. The next sign-in registers Lorekeeper again."
+                    ConfirmLabel="Forget registration"
+                    Destructive="true"
+                    OnConfirm="ForgetRegistrationAsync"
+                    OnCancel="() => _forgetRegistrationSection = null" />
 
 @code {
     private List<LlmProvider> _parents = [];
     private Dictionary<int, List<LlmProvider>> _children = [];
     private Dictionary<int, bool> _chatReadyStatus = [];
     private Dictionary<int, bool> _visionReadyStatus = [];
-    private LlmProvider? _codexProvider;
-    private OpenAiAccount? _openAiAccount;
-    private bool _codexConnected;
-    private bool _refreshingOpenAiModels;
-    private bool _autoRefreshAttempted;
+    private readonly AccountSection _codexSection = new(OpenAiAccountKind.Codex);
+    private readonly AccountSection _planSection = new(OpenAiAccountKind.ChatGptPlan);
     private bool _hasWorkingChatProvider;
-    private OpenAiCallbackOriginValidation? _callbackOrigin;
     private OpenAiAuthorizationFlowSnapshot? _authorizationFlow;
+    private OpenAiAccountKind? _authorizationKind;
     private Uri? _authorizationTarget;
     private CancellationTokenSource? _authorizationPollingCancellation;
     private Task? _authorizationPollingTask;
     private bool _disposed;
+    private int? _welcomeAccountId;
+    private AccountSection? _forgetRegistrationSection;
 
     private readonly Dictionary<int, ChildDraft> _childForms = [];
     private NewProviderDraft _newProvider = new();
@@ -365,13 +294,18 @@
     ];
 
     private bool AnyTestRunning => _testingProviderId is not null || _isTestingNewProvider || _listingNewProviderModels || _listingRowModelId is not null || _listingChildModelParentId is not null;
-    private bool CanStartOpenAiAuthorization =>
-        _callbackOrigin?.IsValid == true && _authorizationFlow?.IsPending != true;
+    private IEnumerable<AccountSection> AccountSections => [_codexSection, _planSection];
+    private bool CanStartOpenAiAuthorization(AccountSection section) =>
+        section.CallbackOrigin?.IsValid == true && _authorizationFlow?.IsPending != true;
     private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsAccountBacked(provider));
-    private IReadOnlyList<LlmProvider> CodexModels => _openAiAccount is null
-        ? []
-        : _parents
-            .Where(provider => provider.OpenAiAccountId == _openAiAccount.Id)
+
+    private List<LlmProvider> ModelsFor(AccountSection section)
+    {
+        if (section.Account is not { } account)
+            return [];
+
+        return _parents
+            .Where(provider => provider.OpenAiAccountId == account.Id)
             .OrderBy(provider => provider.AccountAvailability == LlmAccountModelAvailability.Unavailable)
             .ThenByDescending(provider => provider.ModelOrigin == LlmModelOrigin.BundledCatalog
                 && OpenAiAccountModelCatalog.Find(provider.ModelId)?.IsPreferred == true)
@@ -379,13 +313,17 @@
             .ThenBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(provider => provider.Id)
             .ToList();
+    }
 
-    private LlmProvider? UnavailableDefault =>
-        CodexModels.FirstOrDefault(provider => provider.IsDefault
+    private LlmProvider? FirstModel(AccountSection section) => ModelsFor(section).FirstOrDefault();
+
+    private LlmProvider? UnavailableDefault(AccountSection section) =>
+        ModelsFor(section).FirstOrDefault(provider => provider.IsDefault
             && IsAccountListed(provider)
             && provider.AccountAvailability == LlmAccountModelAvailability.Unavailable);
 
-    private LlmProvider? BestAvailableAccountModel => OpenAiAccountModelCatalog.BestAvailable(CodexModels);
+    private LlmProvider? BestAvailableAccountModel(AccountSection section) =>
+        OpenAiAccountModelCatalog.BestAvailable(ModelsFor(section));
 
     private bool CanAddNewProvider =>
         !_isTestingNewProvider
@@ -397,13 +335,17 @@
     {
         Nav.LocationChanged += OnLocationChanged;
         ConsumeStatusFromQuery();
-        _callbackOrigin = CallbackOrigin.Validate();
+        foreach (var section in AccountSections)
+            section.CallbackOrigin = CallbackOrigin.Validate(section.Kind);
         await ReloadAsync();
 
-        if (_codexConnected && _openAiAccount is { LastModelRefreshAt: null } neverChecked && !_autoRefreshAttempted)
+        foreach (var section in AccountSections)
         {
-            _autoRefreshAttempted = true;
-            await RefreshOpenAiModelsAsync(neverChecked.Id, automatic: true);
+            if (section.Connected && section.Account is { LastModelRefreshAt: null } neverChecked && !section.AutoRefreshAttempted)
+            {
+                section.AutoRefreshAttempted = true;
+                await RefreshOpenAiModelsAsync(section, neverChecked.Id, automatic: true);
+            }
         }
     }
 
@@ -456,19 +398,26 @@
 
     private async Task ReloadAsync()
     {
-        _openAiAccount = (await OpenAiAccounts.GetAllAsync()).FirstOrDefault();
-        if (_openAiAccount is not null)
+        var accounts = await OpenAiAccounts.GetAllAsync();
+        foreach (var section in AccountSections)
         {
+            var account = accounts.FirstOrDefault(candidate => candidate.Kind == section.Kind);
+            section.Account = account;
+            section.Connected = false;
+            if (account is null)
+                continue;
+
             try
             {
-                await OpenAiCatalog.EnsureCatalogAsync(_openAiAccount.Id);
+                await OpenAiCatalog.EnsureCatalogAsync(account.Id);
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Unable to reconcile OpenAI catalog {AccountId}", _openAiAccount.Id);
+                Logger.LogWarning(ex, "Unable to reconcile OpenAI catalog {AccountId}", account.Id);
                 SetStatus($"OpenAI catalog setup failed: {ex.Message}", "danger");
             }
         }
+
         var all = await ProviderService.GetAllAsync();
         _parents = all.Where(p => p.CredentialSourceId is null).ToList();
         _children = all
@@ -476,12 +425,14 @@
             .GroupBy(p => p.CredentialSourceId!.Value)
             .ToDictionary(g => g.Key, g => g.OrderBy(c => c.ModelId).ToList());
 
-        _codexConnected = false;
-        if (_openAiAccount is not null)
+        foreach (var section in AccountSections)
         {
+            if (section.Account is not { } account)
+                continue;
+
             try
             {
-                _codexConnected = await OpenAiTokens.GetValidAccessAsync(_openAiAccount.Id) is not null;
+                section.Connected = await OpenAiTokens.GetValidAccessAsync(account.Id) is not null;
             }
             catch (OperationCanceledException)
             {
@@ -489,7 +440,7 @@
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Unable to validate OpenAI account {AccountId}", _openAiAccount.Id);
+                Logger.LogWarning(ex, "Unable to validate OpenAI account {AccountId}", account.Id);
                 if (_statusMessage is null)
                 {
                     _statusMessage = "The OpenAI connection could not be checked. Retry or reconnect the account.";
@@ -497,7 +448,7 @@
                 }
             }
 
-            _openAiAccount = await OpenAiAccounts.GetByIdAsync(_openAiAccount.Id);
+            section.Account = await OpenAiAccounts.GetByIdAsync(account.Id);
         }
 
         _chatReadyStatus = new Dictionary<int, bool>();
@@ -508,8 +459,6 @@
         _visionReadyStatus = new Dictionary<int, bool>();
         foreach (var provider in all)
             _visionReadyStatus[provider.Id] = await ProviderService.IsVisionProviderWorkingAsync(provider.Id);
-
-        _codexProvider = CodexModels.FirstOrDefault();
     }
 
     private async Task CreateProviderAsync()
@@ -844,22 +793,23 @@
         }
     }
 
-    private async Task ConnectCodexAsync()
+    private async Task ConnectAccountAsync(AccountSection section)
     {
-        _callbackOrigin = CallbackOrigin.Validate();
-        if (!_callbackOrigin.IsValid)
+        section.CallbackOrigin = CallbackOrigin.Validate(section.Kind);
+        if (!section.CallbackOrigin.IsValid)
         {
-            SetStatus(_callbackOrigin.Message, "warning");
+            SetStatus(section.CallbackOrigin.Message, "warning");
             return;
         }
 
         try
         {
-            var account = _openAiAccount ?? await OpenAiAccounts.CreateAsync();
-            _openAiAccount = account;
+            var account = section.Account ?? await OpenAiAccounts.CreateAsync(section.Kind);
+            section.Account = account;
             await OpenAiCatalog.EnsureCatalogAsync(account.Id);
             var started = await OpenAiAuthorization.StartAsync(account.Id);
             _authorizationFlow = started.Flow;
+            _authorizationKind = section.Kind;
             _authorizationTarget = started.Launch.Disposition == ExternalAuthorizationLaunchDisposition.UserActivationRequired
                 ? started.Launch.Target
                 : null;
@@ -922,6 +872,7 @@
                 }
 
                 _authorizationFlow = null;
+                _authorizationKind = null;
                 if (!_disposed)
                     await InvokeAsync(StateHasChanged);
                 return;
@@ -944,21 +895,38 @@
 
     private async Task FinishOpenAiConnectionAsync(int accountId, CancellationToken cancellationToken)
     {
+        var kind = _authorizationKind ?? OpenAiAccountKind.Codex;
+        var section = SectionFor(kind);
         await OpenAiCatalog.EnsureCatalogAsync(accountId, cancellationToken);
+        if (kind == OpenAiAccountKind.ChatGptPlan
+            && await OpenAiAccounts.GetByIdAsync(accountId, cancellationToken) is { PlanUsageGranted: false })
+        {
+            // Without the plan-usage grant there is no access to list models with.
+            SetStatus(CodexProvider.PlanUsageNotGrantedMessage, "warning");
+            await ReloadAsync();
+            return;
+        }
+
         // A refresh failure replaces this status, which keeps the warning visible.
-        SetStatus("OpenAI account connected.", "success");
-        await RefreshOpenAiModelsAsync(accountId, automatic: true);
+        SetStatus(kind == OpenAiAccountKind.ChatGptPlan ? "ChatGPT plan connected." : "OpenAI account connected.", "success");
+        await RefreshOpenAiModelsAsync(section, accountId, automatic: true);
+
+        if (kind == OpenAiAccountKind.ChatGptPlan && section.Account is { WelcomeAcknowledgedAt: null } account)
+            _welcomeAccountId = account.Id;
     }
 
-    private Task RefreshOpenAiModelsAsync() =>
-        _openAiAccount is null ? Task.CompletedTask : RefreshOpenAiModelsAsync(_openAiAccount.Id, automatic: false);
+    private AccountSection SectionFor(OpenAiAccountKind kind) =>
+        kind == OpenAiAccountKind.ChatGptPlan ? _planSection : _codexSection;
 
-    private async Task RefreshOpenAiModelsAsync(int accountId, bool automatic)
+    private Task RefreshOpenAiModelsAsync(AccountSection section) =>
+        section.Account is null ? Task.CompletedTask : RefreshOpenAiModelsAsync(section, section.Account.Id, automatic: false);
+
+    private async Task RefreshOpenAiModelsAsync(AccountSection section, int accountId, bool automatic)
     {
-        if (_refreshingOpenAiModels)
+        if (section.Refreshing)
             return;
 
-        _refreshingOpenAiModels = true;
+        section.Refreshing = true;
         if (!_disposed)
             await InvokeAsync(StateHasChanged);
         try
@@ -980,7 +948,7 @@
         }
         finally
         {
-            _refreshingOpenAiModels = false;
+            section.Refreshing = false;
         }
 
         await ReloadAsync();
@@ -993,15 +961,53 @@
         _authorizationPollingCancellation?.Cancel();
         _authorizationTarget = null;
         _authorizationFlow = null;
+        _authorizationKind = null;
         SetStatus("OpenAI authorization was canceled. Existing credentials were kept.", "info");
     }
 
-    private async Task DisconnectCodexAsync()
+    private async Task DisconnectAccountAsync(AccountSection section)
     {
-        if (_openAiAccount is null) return;
+        if (section.Account is not { } account)
+            return;
         await CancelOpenAiAuthorizationAsync();
-        await OpenAiTokens.DisconnectAsync(_openAiAccount.Id);
-        SetStatus("OpenAI account disconnected.", "success");
+        var warning = await OpenAiTokens.DisconnectAsync(account.Id);
+        SetStatus(
+            warning ?? (section.Kind == OpenAiAccountKind.ChatGptPlan
+                ? "ChatGPT plan disconnected."
+                : "OpenAI account disconnected."),
+            warning is null ? "success" : "warning");
+        await ReloadAsync();
+    }
+
+    private async Task ForgetRegistrationAsync()
+    {
+        var section = _forgetRegistrationSection;
+        _forgetRegistrationSection = null;
+        if (section?.Account is not { } account)
+            return;
+
+        await CancelOpenAiAuthorizationAsync();
+        var warning = await OpenAiTokens.ForgetRegistrationAsync(account.Id);
+        SetStatus(warning ?? "ChatGPT registration forgotten.", warning is null ? "success" : "warning");
+        await ReloadAsync();
+    }
+
+    private async Task AcknowledgeWelcomeAsync()
+    {
+        var accountId = _welcomeAccountId;
+        _welcomeAccountId = null;
+        if (accountId is not int id)
+            return;
+
+        try
+        {
+            await OpenAiAccounts.AcknowledgeWelcomeAsync(id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to acknowledge the ChatGPT plan welcome notice {AccountId}", id);
+        }
+
         await ReloadAsync();
     }
 
@@ -1100,16 +1106,198 @@
         <span class="lk-status-pill is-danger" title="@provider.LastVisionTestError">Failed</span>
     };
 
-    private RenderFragment RenderPlanDefaultBanner() => __builder =>
+    private RenderFragment RenderPlanDefaultBanner(AccountSection section) => __builder =>
     {
-        if (UnavailableDefault is { } unavailable
-            && BestAvailableAccountModel is { } best
+        if (UnavailableDefault(section) is { } unavailable
+            && BestAvailableAccountModel(section) is { } best
             && best.Id != unavailable.Id)
         {
             <div class="alert alert-warning plan-default-banner">
                 <span>Your default model, @(unavailable.DisplayName ?? unavailable.ModelId), isn't available on your ChatGPT plan.</span>
                 <button type="button" class="btn btn-sm btn-primary" @onclick="() => SetDefaultAsync(best.Id)">Use @(best.DisplayName ?? best.ModelId)</button>
             </div>
+        }
+    };
+
+    private RenderFragment RenderAccountSection(AccountSection section) => __builder =>
+    {
+        var sectionKey = section.SectionKey;
+        var expanded = IsSectionExpanded(sectionKey);
+        var bodyId = $"{sectionKey}-body";
+        var models = ModelsFor(section);
+        var readyModelCount = models.Count(model => IsChatReady(model));
+        var firstModel = FirstModel(section);
+        var isPlan = section.Kind == OpenAiAccountKind.ChatGptPlan;
+        var pending = _authorizationFlow?.IsPending == true && _authorizationKind == section.Kind;
+        var currentAccount = section.Account;
+
+        <article class="connection-section @(isPlan ? null : "codex-card")">
+            <header class="connection-header">
+                <button type="button" class="connection-toggle" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@bodyId" @onclick="() => ToggleSection(sectionKey)">
+                    <span class="connection-chevron" aria-hidden="true"></span>
+                    <div class="connection-identity">
+                        <span class="connection-mark">AI</span>
+                        <div>
+                            <span class="lk-section-kicker">@(isPlan ? "ChatGPT plan" : "ChatGPT (Codex)")</span>
+                            <h2>@(isPlan ? "ChatGPT plan" : "ChatGPT (Codex)")</h2>
+                            @if (isPlan && currentAccount?.Email is { Length: > 0 } email)
+                            {
+                                <p class="account-email">@email</p>
+                            }
+                            <p>@(isPlan
+                                ? "Chat with your ChatGPT Plus or Pro plan's usage, with usage limits managed in ChatGPT. Not used for images."
+                                : "Sign in with the Codex login. Works with every ChatGPT plan and is used for image generation.")</p>
+                        </div>
+                    </div>
+                </button>
+                <span class="connection-summary">@($"{models.Count} model(s) · {readyModelCount} chat-ready")</span>
+                <div class="connection-actions">
+                    @if (pending)
+                    {
+                        <span class="lk-status-pill is-warning">Authorization pending</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelOpenAiAuthorizationAsync">Cancel</button>
+                    }
+                    @if (isPlan)
+                    {
+                        @if (!pending)
+                        {
+                            @if (currentAccount?.PlanIneligibleAt is not null)
+                            {
+                                <span class="lk-status-pill is-warning">Not eligible</span>
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Continue with ChatGPT</button>
+                                @if (section.Connected || currentAccount?.ExternalAccountId is not null)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAccountAsync(section)">Disconnect</button>
+                                }
+                            }
+                            else if (currentAccount?.RequiresReauthenticationAt is not null)
+                            {
+                                <span class="lk-status-pill is-warning">Reconnect required</span>
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Continue with ChatGPT</button>
+                            }
+                            else if (currentAccount is { ExternalAccountId: not null, PlanUsageGranted: false })
+                            {
+                                <span class="lk-status-pill is-warning">Plan usage not granted</span>
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Continue with ChatGPT</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAccountAsync(section)">Disconnect</button>
+                            }
+                            else if (section.Connected)
+                            {
+                                <span class="lk-status-pill is-success">Using ChatGPT plan</span>
+                                <a class="btn btn-sm btn-outline-secondary" href="@CodexProvider.ManageUsageUrl" target="_blank" rel="noopener noreferrer">Manage usage</a>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@section.Refreshing" @onclick="() => RefreshOpenAiModelsAsync(section)">@(section.Refreshing ? "Refreshing…" : "Refresh models")</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Reconnect</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAccountAsync(section)">Disconnect</button>
+                            }
+                            else
+                            {
+                                <span class="lk-status-pill is-warning">Not connected</span>
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Continue with ChatGPT</button>
+                            }
+                        }
+                        @if (currentAccount?.IssuedClientId is not null)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => _forgetRegistrationSection = section">Forget registration</button>
+                        }
+                    }
+                    else
+                    {
+                        @if (section.Connected)
+                        {
+                            <span class="lk-status-pill is-success">Connected</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@section.Refreshing" @onclick="() => RefreshOpenAiModelsAsync(section)">@(section.Refreshing ? "Refreshing…" : "Refresh models")</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Reconnect</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DisconnectAccountAsync(section)">Disconnect</button>
+                        }
+                        else
+                        {
+                            <span class="lk-status-pill is-warning">Not connected</span>
+                            <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanStartOpenAiAuthorization(section))" @onclick="() => ConnectAccountAsync(section)">Connect ChatGPT (Codex)</button>
+                        }
+                        @if (firstModel is not null)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => { _collapsedSections.Remove(sectionKey); ToggleAddChild(firstModel.Id); }">Add manual model</button>
+                        }
+                    }
+                </div>
+            </header>
+            @if (!expanded)
+            {
+                @RenderPlanDefaultBanner(section)
+            }
+            @if (expanded)
+            {
+                <div class="connection-body" id="@bodyId">
+                    @if (currentAccount is { } account)
+                    {
+                        <p class="model-refresh-note">
+                            @if (account.LastModelRefreshAt is { } lastModelRefresh)
+                            {
+                                @($"Models checked {lastModelRefresh.ToLocalTime():g}")
+                            }
+                            else
+                            {
+                                @("Models have not been checked against your plan yet.")
+                            }
+                        </p>
+                        @if (!string.IsNullOrWhiteSpace(account.LastModelRefreshError))
+                        {
+                            <div class="alert alert-warning">@account.LastModelRefreshError</div>
+                        }
+                    }
+                    @RenderPlanDefaultBanner(section)
+                    @if (section.CallbackOrigin is { IsValid: false })
+                    {
+                        <div class="alert alert-warning">@section.CallbackOrigin.Message</div>
+                    }
+                    @if (isPlan)
+                    {
+                        @RenderPlanStateAlert(section)
+                    }
+                    else if (!string.IsNullOrWhiteSpace(currentAccount?.LastAuthenticationError))
+                    {
+                        <div class="alert alert-warning">@currentAccount.LastAuthenticationError</div>
+                    }
+                    @if (_authorizationTarget is not null && _authorizationKind == section.Kind)
+                    {
+                        <div class="alert alert-info">
+                            OpenAI authorization is ready. Use this explicit external link, then return to this page while Lorekeeper completes the connection.
+                            <a class="btn btn-sm btn-outline-primary ms-2" href="@_authorizationTarget.AbsoluteUri" target="_blank" rel="noopener noreferrer">Open OpenAI authorization</a>
+                        </div>
+                    }
+                    @if (isPlan && models.Count > 0)
+                    {
+                        @RenderModelGrid(models, true)
+                    }
+                    else if (firstModel is not null)
+                    {
+                        @RenderModelGrid(models, true)
+                        @RenderChildForm(firstModel)
+                    }
+                </div>
+            }
+        </article>
+    };
+
+    private RenderFragment RenderPlanStateAlert(AccountSection section) => __builder =>
+    {
+        if (section.Account is not { } account)
+            return;
+
+        if (account.PlanIneligibleAt is not null)
+        {
+            <div class="alert alert-warning">@CodexProvider.PlanNotEligibleMessage</div>
+        }
+        else if (account.RequiresReauthenticationAt is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(account.LastAuthenticationError))
+            {
+                <div class="alert alert-warning">@account.LastAuthenticationError</div>
+            }
+        }
+        else if (account is { ExternalAccountId: not null, PlanUsageGranted: false })
+        {
+            <div class="alert alert-warning">@CodexProvider.PlanUsageNotGrantedMessage</div>
         }
     };
 
@@ -1625,6 +1813,17 @@
     {
         _statusMessage = message;
         _statusKind = kind;
+    }
+
+    private sealed class AccountSection(OpenAiAccountKind kind)
+    {
+        public OpenAiAccountKind Kind { get; } = kind;
+        public OpenAiAccount? Account { get; set; }
+        public bool Connected { get; set; }
+        public bool Refreshing { get; set; }
+        public bool AutoRefreshAttempted { get; set; }
+        public OpenAiCallbackOriginValidation? CallbackOrigin { get; set; }
+        public string SectionKey => Kind == OpenAiAccountKind.Codex ? "openai-account" : "chatgpt-plan";
     }
 
     private sealed class NewProviderDraft

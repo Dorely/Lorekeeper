@@ -8,10 +8,28 @@ public static class CodexProvider
     public const string AccountProviderKey = "openai-account";
     public const string ResponsesEndpoint = "https://chatgpt.com/backend-api/codex/responses";
     public const string ModelsEndpoint = "https://chatgpt.com/backend-api/codex/models";
+    public const string PlanResponsesEndpoint = "https://api.openai.com/v1/responses";
+    public const string PlanModelsEndpoint = "https://api.openai.com/v1/models";
+    public const string ManageUsageUrl = "https://chatgpt.com/settings/usage";
     public const string ModelNotOnPlanMessage =
         "This model isn't available on your ChatGPT plan. Choose another model or use Refresh models in Settings > Providers.";
 
+    public const string PlanNotEligibleMessage =
+        "Your ChatGPT plan isn't eligible for plan usage in other apps (Plus or Pro is required). Use the ChatGPT (Codex) connection instead.";
+    public const string PlanUsageNotGrantedMessage =
+        "ChatGPT plan usage wasn't granted. Reconnect in Settings > Providers and allow ChatGPT plan usage.";
+    public const string PlanUsageLimitMessage =
+        "Usage limit reached. Review your plan or this app's limit in ChatGPT settings.";
+
     public static bool IsAccountBacked(LlmProvider provider) => provider.OpenAiAccountId is not null;
+
+    /// <summary>True when a chat turn failed because the ChatGPT plan usage limit was reached.</summary>
+    public static bool IsPlanUsageLimitMessage(string? message) =>
+        message?.Contains(PlanUsageLimitMessage, StringComparison.Ordinal) == true;
+
+    /// <summary>The Responses endpoint an account kind's models are served from.</summary>
+    public static string ResponsesEndpointFor(OpenAiAccountKind kind) =>
+        kind == OpenAiAccountKind.ChatGptPlan ? PlanResponsesEndpoint : ResponsesEndpoint;
 
     /// <summary>True when a Codex backend error says the requested model is not offered to this ChatGPT account.</summary>
     public static bool IsModelNotOnPlanError(string? redactedErrorBody)

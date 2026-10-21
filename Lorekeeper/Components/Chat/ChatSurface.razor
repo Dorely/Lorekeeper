@@ -1,5 +1,6 @@
 @namespace Lorekeeper.Components.Chat
 @using Lorekeeper.ChatTurns
+@using Lorekeeper.Llm
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject Lorekeeper.Images.IProjectImageService ProjectImages
@@ -48,7 +49,14 @@
     @if (!string.IsNullOrWhiteSpace(Error))
     {
         <div class="chat-error">
-            <span>@Error</span>
+            @if (CodexProvider.IsPlanUsageLimitMessage(Error))
+            {
+                <span class="chat-error-usage"><strong>Usage limit reached</strong> <span>Review your plan or this app's limit in ChatGPT settings.</span> <a class="btn btn-sm btn-primary" href="@CodexProvider.ManageUsageUrl" target="_blank" rel="noopener noreferrer">Manage usage</a></span>
+            }
+            else
+            {
+                <span>@Error</span>
+            }
             <button type="button" class="btn-close btn-close-sm" @onclick="OnClearError"></button>
         </div>
     }

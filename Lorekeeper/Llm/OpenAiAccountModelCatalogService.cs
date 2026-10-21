@@ -26,6 +26,7 @@ public sealed class OpenAiAccountModelCatalogService(
         var accountModels = all.Where(provider => provider.OpenAiAccountId == accountId).ToList();
         var freshAccount = accountModels.Count == 0;
         var hasGlobalDefault = all.Any(provider => provider.IsDefault);
+        var endpoint = CodexProvider.ResponsesEndpointFor(account.Kind);
 
         foreach (var obsoleteCatalogRow in accountModels.Where(provider =>
                      provider.ModelOrigin == LlmModelOrigin.BundledCatalog
@@ -48,7 +49,7 @@ public sealed class OpenAiAccountModelCatalogService(
             if (matches.SingleOrDefault() is { } existing)
             {
                 existing.DisplayName = entry.DisplayName;
-                existing.EndpointUrl = CodexProvider.ResponsesEndpoint;
+                existing.EndpointUrl = endpoint;
                 existing.AuthType = AuthType.OAuth;
                 existing.ApiKey = null;
                 existing.UpdatedAt = DateTime.UtcNow;
@@ -66,7 +67,7 @@ public sealed class OpenAiAccountModelCatalogService(
             {
                 Name = providerName,
                 DisplayName = entry.DisplayName,
-                EndpointUrl = CodexProvider.ResponsesEndpoint,
+                EndpointUrl = endpoint,
                 ModelId = entry.ModelId,
                 AuthType = AuthType.OAuth,
                 OpenAiAccountId = accountId,
@@ -109,7 +110,11 @@ public sealed class OpenAiAccountModelCatalogService(
         {
             var message = ex is OpenAiAccountModelDiscoveryException ? ex.Message : GenericRefreshError;
             logger.LogWarning("OpenAI account {AccountId} model refresh failed: {ErrorType}", accountId, ex.GetType().Name);
-            await RecordRefreshFailureAsync(accountId, message, cancellationToken);
+            await RecordRefreshFailureAsync(
+                accountId,
+                message,
+                ex is OpenAiAccountModelDiscoveryException { PlanNotEligible: true },
+                cancellationToken);
             return new OpenAiAccountModelRefreshResult(false, 0, 0, 0, message);
         }
 
@@ -176,7 +181,7 @@ public sealed class OpenAiAccountModelCatalogService(
             {
                 Name = providerName,
                 DisplayName = listed.DisplayName,
-                EndpointUrl = CodexProvider.ResponsesEndpoint,
+                EndpointUrl = CodexProvider.ResponsesEndpointFor(account.Kind),
                 ModelId = listed.Slug,
                 AuthType = AuthType.OAuth,
                 OpenAiAccountId = accountId,
@@ -237,7 +242,11 @@ public sealed class OpenAiAccountModelCatalogService(
         best.UpdatedAt = DateTime.UtcNow;
     }
 
-    private async Task RecordRefreshFailureAsync(int accountId, string message, CancellationToken cancellationToken)
+    private async Task RecordRefreshFailureAsync(
+        int accountId,
+        string message,
+        bool planNotEligible,
+        CancellationToken cancellationToken)
     {
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         var accounts = operation.Repositories.OpenAiAccounts;
@@ -246,6 +255,8 @@ public sealed class OpenAiAccountModelCatalogService(
             return;
 
         account.LastModelRefreshError = message;
+        if (planNotEligible && account.Kind == OpenAiAccountKind.ChatGptPlan)
+            account.PlanIneligibleAt = DateTime.UtcNow;
         account.UpdatedAt = DateTime.UtcNow;
         accounts.Update(account);
         await operation.SaveChangesAsync(cancellationToken);

@@ -90,6 +90,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<OpenAiAccountOperationCoordinator>();
 builder.Services.AddSingleton<OpenAiAuthorizationFlowRegistry>();
 builder.Services.AddSingleton<IOpenAiCallbackOriginValidator, OpenAiCallbackOriginValidator>();
+builder.Services.AddSingleton<OpenAiIdTokenValidator>();
 if (isElectronMode)
     builder.Services.AddSingleton<IExternalAuthorizationLauncher, ElectronExternalAuthorizationLauncher>();
 else
@@ -179,6 +180,8 @@ builder.Services.AddScoped<EmbeddingRebuildService>();
 builder.Services.AddScoped<ILlmProviderService, LlmProviderService>();
 builder.Services.AddScoped<IOpenAiAccountService, OpenAiAccountService>();
 builder.Services.AddScoped<ISystemPromptComposer, SystemPromptComposer>();
+builder.Services.AddScoped<IOpenAiAuthorizationProtocol, CodexAuthorizationProtocol>();
+builder.Services.AddScoped<IOpenAiAuthorizationProtocol, ChatGptPlanAuthorizationProtocol>();
 builder.Services.AddScoped<OpenAiAccountTokenService>();
 builder.Services.AddScoped<IOpenAiAccountTokenService>(services =>
     services.GetRequiredService<OpenAiAccountTokenService>());
@@ -452,7 +455,7 @@ app.MapStaticAssets();
 app.MapRazorComponents<Lorekeeper.Components.App>()
     .AddInteractiveServerRenderMode();
 
-app.MapCodexOAuth();
+app.MapOpenAiOAuth();
 app.MapProjectImages();
 app.MapProjectFonts();
 app.MapProjectSources();

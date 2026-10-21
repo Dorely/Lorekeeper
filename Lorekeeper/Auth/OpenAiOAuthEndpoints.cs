@@ -2,23 +2,28 @@ using Lorekeeper.Authorization;
 
 namespace Lorekeeper.Auth;
 
-public static class CodexOAuthEndpoints
+public static class OpenAiOAuthEndpoints
 {
     /// <summary>
-    /// Maps the OpenAI OAuth callback onto Lorekeeper's existing web host.
+    /// Maps the OpenAI OAuth callback onto Lorekeeper's existing web host. Codex and
+    /// ChatGPT plan sign-in share this path; the attempt's state selects the protocol.
     /// </summary>
-    public static IEndpointRouteBuilder MapCodexOAuth(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapOpenAiOAuth(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/auth/callback", async (
             HttpContext context,
             IOpenAiAccountAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            var query = context.Request.Query;
             var result = await authorization.HandleCallbackAsync(
-                context.Request.Query["code"].FirstOrDefault(),
-                context.Request.Query["state"].FirstOrDefault(),
-                context.Request.Query["error"].FirstOrDefault(),
-                context.Request.Query["error_description"].FirstOrDefault(),
+                new OpenAiAuthorizationCallback(
+                    query["code"].FirstOrDefault(),
+                    query["state"].FirstOrDefault(),
+                    query["error"].FirstOrDefault(),
+                    query["error_description"].FirstOrDefault(),
+                    query["client_id"].FirstOrDefault(),
+                    query["scope"].FirstOrDefault()),
                 cancellationToken);
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers.Pragma = "no-cache";
