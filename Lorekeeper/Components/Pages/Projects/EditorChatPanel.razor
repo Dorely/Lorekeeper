@@ -420,7 +420,7 @@
                 ProjectId,
                 CurrentChapterId);
             _running = false;
-            _error = "Editor chat could not start because the chapter draft could not be saved. Resolve the save problem shown in the editor, then send again.";
+            _error = "Editor chat could not start because the chapter could not reach the app to save. Send again once it reconnects.";
             return;
         }
         catch (OperationCanceledException)

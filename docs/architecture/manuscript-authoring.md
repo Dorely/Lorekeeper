@@ -285,15 +285,23 @@ The bridge opens one target-scoped authoring session and serializes batches.
 Visible edits apply locally first; a 500 ms typing window coalesces one action,
 while paste, formatting, and structure changes force a boundary. The editor
 journals only unacknowledged batches and recovery base data in IndexedDB before
-dispatch. Quota or journal-write failure keeps visible edits but marks them not
-locally recoverable, pauses dispatch, and blocks save claims. A dispatch or
-receipt acknowledgement whose outcome is uncertain also pauses dispatch, but its
-batch stays journaled: the next save or flush replays the journal with the
-original batch identities, exactly as remount recovery does, and resumes
-dispatch once every entry is acknowledged. A target writer
-lease makes another browser window read-only until flush or handoff. Conflicts
-preserve the local variant for the application-owned conflict surface rather
-than silently replacing visible content. JavaScript attachment validates that
+dispatch, with an in-memory copy kept until acknowledgement. Quota or
+journal-store failure only loses reload recovery: saving continues, the author
+sees a dismissable warning, and the store is retried on the next journal
+operation. Nothing leaves saving blocked. A save retries up to three times: an
+uncertain dispatch or acknowledgement first replays its journaled batch with
+the original identity, exactly as remount recovery does. A conflict, a
+still-unresolved batch or history request, or a session that did not open at
+attach then rebases onto the server: queued batches are dropped, the server's
+current version becomes the baseline, and the visible document is saved over
+it as one `replaceRichDocument` action ("Keep local edits") whose Undo restores
+the newer version. A flush (editor chat, fences, navigation, disposal) always
+ends clean; if the visible document still cannot be saved, its changed block
+text becomes review notes on the chapter (plain text, split under the note
+limit, or logged where notes are unavailable) and the editor resets to the saved
+version. A target writer lease makes another browser window read-only; that
+window waits for the lease, replays what the owner left in the journal, shows
+the server version, and becomes writable. JavaScript attachment validates that
 the target element still exists, and asynchronous component work rechecks
 disposal so navigation cannot turn stale element references into circuit-ending
 errors.
@@ -433,6 +441,8 @@ registered writable workspace reports its sequence, generation, reachability,
 and recoverability to `IAuthoringMutationFence`; a dependent read or mutation
 freezes and flushes it before acquiring the project lease. A dirty workspace
 that cannot be durably recovered remains registered and blocks dependent work.
+The manuscript editor always reports itself recoverable: its in-memory journal
+copy holds unacknowledged work, and its resolving flush always ends clean.
 
 There is no parallel snapshot Undo runtime. Each target-isolated delta stream
 retains at most 100 confirmed actions and participates in the 128 MiB
@@ -500,8 +510,9 @@ the only automatic merge: each touched element (including both sides of a
 merge) must retain its fingerprint, and insertion/move preconditions name the
 fingerprinted neighbors at the exact destination after virtual removal.
 Same-element changes, moved anchors, overlapping properties, or ordering
-ambiguity preserve both variants for an
-application-owned conflict surface. State consumers use a mutation fence that
+ambiguity reject the batch; the editor then saves its visible document over the
+newer version as described above, and the newer version stays reachable through
+Undo and version history. State consumers use a mutation fence that
 freezes edits, flushes a captured sequence, takes the project lease, revalidates
 generations, consumes state, then resumes editing. The fence shares that
 physical project lease explicitly with nested same-project operations; nested

@@ -35,6 +35,13 @@
             <button type="button" class="btn btn-sm btn-outline-warning" @onclick="RetryInitialization" disabled="@(_disposed || _disposing)">Retry</button>
         </div>
     }
+    @if (!string.IsNullOrWhiteSpace(_journalWarning))
+    {
+        <div class="semantic-editor-warning" role="status">
+            @_journalWarning
+            <button type="button" class="btn-close" aria-label="Dismiss local recovery warning" @onclick="() => _journalWarning = null"></button>
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(_pasteWarning))
     {
         <div class="semantic-editor-warning" role="status">
@@ -77,6 +84,7 @@
     private AuthoringWriterFlushResult? _finalFlush;
     private string? _initializationError;
     private string? _pasteWarning;
+    private string? _journalWarning;
     private CancellationTokenSource? _importCancellation;
 
     [JSInvokable]
@@ -294,6 +302,96 @@
         return annotation;
     }
 
+    // The editor's last resort for edits it cannot save: their plain text becomes review notes on the
+    // saved chapter before the editor resets to it. Where a note cannot be attached, the text is logged so
+    // the reset never blocks the editor.
+    [JSInvokable]
+    public async Task<bool> PreserveUnsavedEdits(string text, long expectedManuscriptRevision)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            Logger.LogWarning("Chapter {ChapterId} edits could not be saved; they held no text to preserve.", ChapterId);
+            return true;
+        }
+        try
+        {
+            if (!AllowAnnotations)
+                throw new InvalidOperationException("Review annotations are not available in this editor.");
+            var document = ReadDocumentOverrideAsync is null
+                ? (await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
+                    ?? throw new InvalidOperationException("The chapter manuscript was not found.")).Document
+                : await ReadDocumentOverrideAsync(expectedManuscriptRevision);
+            var range = UnsavedEditsAnchor(document)
+                ?? throw new InvalidOperationException("The chapter has no text to attach a review note to.");
+            var chunks = UnsavedEditsChunks(text.Trim());
+            var stamp = DateTime.Now.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+            for (var index = 0; index < chunks.Count; index++)
+            {
+                var part = chunks.Count == 1 ? string.Empty : $" (part {index + 1} of {chunks.Count})";
+                await Annotations.CreateAsync(
+                    ProjectId,
+                    ContentTarget,
+                    ChapterId,
+                    ManuscriptAnnotationKind.Note,
+                    $"Edits that could not be saved, recovered {stamp}{part}. Formatting was not kept.\n\n{chunks[index]}",
+                    range,
+                    document.Revision);
+            }
+            Logger.LogWarning("Chapter {ChapterId} edits could not be saved and were moved to {Count} review note(s).", ChapterId, chunks.Count);
+            _ = NotifyPreservedEditsAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Logger.LogError(exception, "Chapter {ChapterId} edits could not be saved or attached as a review note. Unsaved text: {UnsavedText}", ChapterId, text);
+        }
+        return true;
+    }
+
+    // Context refreshes can fence this writer, whose save chain is still awaiting this call.
+    private async Task NotifyPreservedEditsAsync()
+    {
+        await Task.Yield();
+        try { await AnnotationsChanged.InvokeAsync(); }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Annotation refresh failed after preserving unsaved edits for chapter {ChapterId}.", ChapterId);
+        }
+    }
+
+    private const int _unsavedEditsChunkLength = ManuscriptAnnotationService.MaxNoteLength - 200;
+
+    private static List<string> UnsavedEditsChunks(string text)
+    {
+        var chunks = new List<string>();
+        for (var start = 0; start < text.Length;)
+        {
+            var length = Math.Min(_unsavedEditsChunkLength, text.Length - start);
+            if (start + length < text.Length && char.IsHighSurrogate(text[start + length - 1]))
+                length--;
+            chunks.Add(text.Substring(start, length));
+            start += length;
+        }
+        return chunks;
+    }
+
+    private static ManuscriptAnnotationRange? UnsavedEditsAnchor(ManuscriptDocument document)
+    {
+        foreach (var block in document.Content)
+        {
+            foreach (var length in new[] { 1, 2 })
+            {
+                var range = new ManuscriptAnnotationRange(block.Id, 0, block.Id, length);
+                try
+                {
+                    if (ManuscriptAnnotationAnchors.TryResolveSelection(document, range) is not null)
+                        return range;
+                }
+                catch (InvalidDataException) { }
+            }
+        }
+        return null;
+    }
+
     [JSInvokable]
     public Task OnAnnotationSelected(Guid annotationId) =>
         AllowAnnotations ? AnnotationSelected.InvokeAsync(annotationId) : Task.CompletedTask;
@@ -474,7 +572,25 @@
             [new AuthoringSessionTargetV1(AuthoringTargetId())]));
         _authoringSessionId = opened.SessionId;
         _authoringGeneration = opened.Targets.Single().Generation;
+        // A session that opens after attach still needs its fence writer; register once this reply returns.
+        if (_handle is not null && _authoringWriterLease is null)
+            _ = RegisterLateAuthoringWriterAsync();
         return opened;
+    }
+
+    private async Task RegisterLateAuthoringWriterAsync()
+    {
+        await Task.Yield();
+        try
+        {
+            await RegisterAuthoringWriterAsync();
+            if (_handle is not null && !_disposing && !_disposed)
+                await _handle.InvokeVoidAsync("reportWriterState");
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException or AuthoringMutationFenceException)
+        {
+            Logger.LogWarning(exception, "The editor for chapter {ChapterId} could not register its authoring writer after a late session open.", ChapterId);
+        }
     }
 
     [JSInvokable]
@@ -527,18 +643,16 @@
         return JsonSerializer.SerializeToElement(await AuthoringBatches.RedoAsync(request), ManuscriptCodec.JsonOptions);
     }
 
+    // Saving continues without the browser's recovery journal; only recovery after a crash or reload is lost.
     [JSInvokable]
     public Task OnAuthoringJournalState(bool recoverable, string? message)
     {
         if (!recoverable)
-        {
-            _authoringDirty = true;
-            _authoringRecoverable = false;
-            UpdateAuthoringWriterState(isReachable: true);
-            _initializationError = message ?? "Edits are visible but cannot be safely recovered locally. Saving is paused.";
-            return InvokeAsync(StateHasChanged);
-        }
-        return Task.CompletedTask;
+            Logger.LogWarning("The editor's local recovery journal failed for chapter {ChapterId}: {Message}", ChapterId, message);
+        _journalWarning = recoverable
+            ? null
+            : "Edits are still saving, but this browser cannot keep a local recovery copy. Edits not yet saved could be lost if the app closes unexpectedly.";
+        return InvokeAsync(StateHasChanged);
     }
 
     private void ValidateAuthoringBatch(AuthoringBatchV1 batch)

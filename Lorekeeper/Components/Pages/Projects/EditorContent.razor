@@ -4947,7 +4947,7 @@ else
     private async Task OnAiTurnStartingAsync()
     {
         if (!await FlushAsync())
-            throw new InvalidOperationException("The current chapter draft could not be saved. Resolve the save error before starting an agent turn.");
+            throw new InvalidOperationException("The current chapter draft could not reach the app to save.");
         // Wait for any in-flight save to complete.
         await _saveGate.WaitAsync();
         _saveGate.Release();

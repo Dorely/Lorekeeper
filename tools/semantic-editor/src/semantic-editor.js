@@ -2943,13 +2943,18 @@ export function shouldApplyAuthoringTransaction(transaction, {readOnly, hasUnres
     return !transaction.docChanged || applyingHistory || (!readOnly && !hasUnresolvedHistory);
 }
 
+// Unacknowledged batches are journaled in IndexedDB so a reload can replay
+// them. An in-memory copy is kept until acknowledgement, so an unavailable or
+// full IndexedDB only loses crash recovery: saving continues, and the
+// database is reopened on the next journal operation.
 class AuthoringJournalV1 {
-    constructor(projectId, targetId, sessionId, onFailure) {
+    constructor(projectId, targetId, onFailure, onRecovered) {
         this.projectId = projectId;
         this.targetId = targetId;
-        this.sessionId = sessionId;
         this.onFailure = onFailure;
+        this.onRecovered = onRecovered;
         this.recoverable = true;
+        this.memory = new Map();
     }
 
     async database() {
@@ -2964,49 +2969,56 @@ class AuthoringJournalV1 {
             request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error || new Error("The local authoring journal could not open."));
         });
+        this.db.onclose = () => { this.db = null; };
         return this.db;
     }
 
-    async write(entry) {
+    succeeded() {
+        if (this.recoverable) return;
+        this.recoverable = true;
+        this.onRecovered();
+    }
+
+    failed(error) {
+        this.db = null;
+        if (!this.recoverable) return;
+        this.recoverable = false;
+        this.onFailure(error);
+    }
+
+    async change(apply) {
         try {
             const db = await this.database();
             await new Promise((resolve, reject) => {
                 const transaction = db.transaction(authoringJournalStore, "readwrite");
-                transaction.objectStore(authoringJournalStore).put(entry);
+                apply(transaction.objectStore(authoringJournalStore));
                 transaction.oncomplete = resolve;
                 transaction.onerror = () => reject(transaction.error);
                 transaction.onabort = () => reject(transaction.error);
             });
-            return true;
+            this.succeeded();
         } catch (error) {
-            this.recoverable = false;
-            this.onFailure(error);
-            return false;
+            this.failed(error);
         }
     }
 
-    async remove(key) {
-        try {
-            const db = await this.database();
-            await new Promise((resolve, reject) => {
-                const transaction = db.transaction(authoringJournalStore, "readwrite");
-                transaction.objectStore(authoringJournalStore).delete(key);
-                transaction.oncomplete = resolve;
-                transaction.onerror = () => reject(transaction.error);
-                transaction.onabort = () => reject(transaction.error);
-            });
-            return true;
-        } catch (error) {
-            this.recoverable = false;
-            this.onFailure(error);
-            return false;
-        }
+    write(entry) {
+        this.memory.set(entry.key, entry);
+        return this.change(store => store.put(entry));
+    }
+
+    // A stored entry whose delete fails is replayed later and answered from
+    // its idempotent receipt, so removal never blocks saving.
+    remove(key) {
+        this.memory.delete(key);
+        return this.change(store => store.delete(key));
     }
 
     async pending() {
+        let stored = [];
         try {
             const db = await this.database();
-            return await new Promise((resolve, reject) => {
+            stored = await new Promise((resolve, reject) => {
                 const request = db.transaction(authoringJournalStore, "readonly")
                     .objectStore(authoringJournalStore)
                     .index("byTarget")
@@ -3016,12 +3028,29 @@ class AuthoringJournalV1 {
                 request.onsuccess = () => resolve(request.result || []);
                 request.onerror = () => reject(request.error);
             });
+            this.succeeded();
         } catch (error) {
-            this.recoverable = false;
-            this.onFailure(error);
-            return [];
+            this.failed(error);
         }
+        const byKey = new Map(stored.map(entry => [entry.key, entry]));
+        for (const [key, entry] of this.memory) byKey.set(key, entry);
+        return [...byKey.values()].sort((left, right) => Number(left.sequence) - Number(right.sequence));
     }
+}
+
+// The plain text of every top-level block the local document changed or
+// added relative to the saved one, for preserving edits that cannot be saved.
+function unsavedBlockText(saved, local) {
+    const savedText = new Map((saved.content || []).map(block => [block.id, blockText(block)]));
+    return (local.content || [])
+        .map(block => ({block, text: blockText(block)}))
+        .filter(({block, text}) => text.trim() && savedText.get(block.id) !== text)
+        .map(({text}) => text)
+        .join("\n\n");
+}
+
+function sameDocumentContent(left, right) {
+    return sameJson(left.content || [], right.content || []) && sameJson(left.notes || [], right.notes || []);
 }
 
 function blockText(block) {
@@ -3456,26 +3485,34 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     let confirmedHistoryCursor = 0;
     let confirmedDocument = structuredClone(canonicalInitial);
     let queuedDocument = structuredClone(canonicalInitial);
+    // Dispatch pauses after a conflict or an uncertain dispatch/receipt. It is
+    // never left paused: the next save retries uncertain work with its
+    // idempotent identity, then saves the visible document over the server's.
     let dispatchPaused = false;
-    // True only while dispatch is paused because a journaled batch's outcome
-    // is uncertain (lost response or receipt). The next save replays it with
-    // its idempotent identity; conflicts wait for the author instead.
     let dispatchRetryable = false;
+    let saveFailures = 0;
+    // The next batch replaces the whole server document with the visible one.
+    let forceDocumentReplacement = false;
     let journalFailure = null;
     let pendingJournalCount = 0;
-    const journal = new AuthoringJournalV1(authoringTarget.projectId, authoringTarget.targetId, sessionId, error => {
-        dispatchPaused = true;
-        journalFailure = error?.message || "The browser could not safely store this edit for recovery.";
-        requestedReadOnly = true;
+    let reportSaveState = () => {};
+    const journal = new AuthoringJournalV1(authoringTarget.projectId, authoringTarget.targetId, error => {
+        journalFailure = error?.message || "The browser could not store a local recovery copy of this edit.";
         void dotNetRef.invokeMethodAsync("OnAuthoringJournalState", false, journalFailure).catch(() => {});
+        reportSaveState();
+    }, () => {
+        journalFailure = null;
+        void dotNetRef.invokeMethodAsync("OnAuthoringJournalState", true, null).catch(() => {});
+        reportSaveState();
+    });
+    const openAuthoringSession = () => dotNetRef.invokeMethodAsync("InitializeAuthoringSession", {
+        protocolId: "AuthoringBatchProtocolV1",
+        projectId: authoringTarget.projectId,
+        sessionId,
+        targets: [{targetId: authoringTarget.targetId}]
     });
     try {
-        authoringSession = await dotNetRef.invokeMethodAsync("InitializeAuthoringSession", {
-            protocolId: "AuthoringBatchProtocolV1",
-            projectId: authoringTarget.projectId,
-            sessionId,
-            targets: [{targetId: authoringTarget.targetId}]
-        });
+        authoringSession = await openAuthoringSession();
         ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence}
             = authoringSequenceWatermarks(Number(authoringSession?.nextSequence || 0)));
         const target = authoringSession?.targets?.find(item => item.targetId === authoringTarget.targetId);
@@ -3493,6 +3530,36 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             targetVersion = {generation: target.generation, fingerprint: target.fingerprint};
             elementFingerprints = new Map(Object.entries(target.elementFingerprints || {}));
         }
+    } catch {
+        // The next save reopens the session and saves the visible document.
+        authoringSession = null;
+    }
+    // Another window holding this target's writer lease owns its journal. This
+    // editor stays read-only and clean until that lease is released.
+    let writerLeaseHeld = true;
+    let onWriterLeaseAcquired = () => {};
+    let writerLeaseAvailable = false;
+    const writerLeaseWait = new AbortController();
+    if (navigator.locks?.request && authoringTarget.targetId) {
+        const leaseName = `lorekeeper-authoring-writer:${authoringTarget.projectId}:${authoringTarget.targetId}`;
+        const holdLease = () => new Promise(resolve => { releaseWriterLease = resolve; });
+        let acquired;
+        const acquiredPromise = new Promise(resolve => { acquired = resolve; });
+        void navigator.locks.request(leaseName, {mode: "exclusive", ifAvailable: true}, async lock => {
+            acquired(!!lock);
+            if (lock) await holdLease();
+        });
+        if (!await acquiredPromise) {
+            writerLeaseHeld = false;
+            void navigator.locks.request(leaseName, {mode: "exclusive", signal: writerLeaseWait.signal}, async () => {
+                // This view becomes writable once it shows the server version.
+                writerLeaseAvailable = true;
+                onWriterLeaseAcquired();
+                await holdLease();
+            }).catch(() => {});
+        }
+    }
+    if (writerLeaseHeld) {
         const pending = await journal.pending();
         pendingJournalCount = pending.length;
         for (const entry of pending) stageImportResources(entry.batch?.importResources);
@@ -3510,31 +3577,14 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 queuedDocument = structuredClone(initial);
             }
         }
-    } catch (error) {
-        dispatchPaused = true;
-        journalFailure = error?.message || "The authoring session could not open.";
-    }
-    if (navigator.locks?.request && authoringTarget.targetId) {
-        let acquired;
-        const acquiredPromise = new Promise(resolve => { acquired = resolve; });
-        void navigator.locks.request(
-            `lorekeeper-authoring-writer:${authoringTarget.projectId}:${authoringTarget.targetId}`,
-            {mode: "exclusive", ifAvailable: true},
-            async lock => {
-                acquired(!!lock);
-                if (!lock) return;
-                await new Promise(resolve => { releaseWriterLease = resolve; });
-            });
-        if (!await acquiredPromise) {
-            requestedReadOnly = true;
-            journalFailure = "This manuscript is being edited in another window. Flush or close that editor to take over.";
-        }
     }
     let timer = null;
     hydrateFigureImageUrls(initial, imageById);
     let saveChain = Promise.resolve(true);
     let changeGeneration = 0;
     let savedGeneration = 0;
+    // Advances whenever the visible document is replaced wholesale.
+    let documentEpoch = 0;
     let readOnly = false;
     let importBusy = false;
     let attachmentDisposed = false;
@@ -3563,7 +3613,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         });
     };
     const applyEffectiveReadOnly = () => {
-        readOnly = requestedReadOnly || fenceFrozen || historyMoveInFlight || importBusy;
+        readOnly = requestedReadOnly || !writerLeaseHeld || fenceFrozen || historyMoveInFlight || importBusy;
         if (!view) return;
         view.setProps({editable: () => !readOnly});
         for (const control of root.querySelectorAll("button, select, input"))
@@ -3571,29 +3621,27 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         root.classList.toggle("semantic-editor--readonly", readOnly);
         noteEditor?.update();
     };
-    const notifyWriterState = () => {
-        // A failed IndexedDB operation makes even an otherwise acknowledged
-        // view unsafe to claim as flushable. Keep the fence conservative until
-        // the author resolves the local recovery failure.
-        const dirty = savedGeneration < changeGeneration
-            || pendingJournalCount > 0
-            || pendingVisibleHistoryMove
-            || unresolvedHistoryRequest !== null
-            || !journal.recoverable
-            || !!journalFailure;
-        return dotNetRef.invokeMethodAsync(
-            "OnAuthoringWriterState",
-            targetVersion.generation || 0,
-            highestLocalSequence,
-            lastDispatchedSequence,
-            lastAcknowledgedSequence,
-            dirty,
-            journal.recoverable && !journalFailure,
-            // Paused dispatch (conflict, receipt uncertainty, or quota) is a
-            // recoverability state, not a disconnected browser. Disposal is
-            // the only path that reports this writer as unreachable.
-            true).catch(() => {});
-    };
+    // Dirty means visible work the server has not acknowledged.
+    const isWriterDirty = () => savedGeneration < changeGeneration
+        || pendingJournalCount > 0
+        || pendingVisibleHistoryMove
+        || unresolvedHistoryRequest !== null
+        || dispatchPaused
+        || forceDocumentReplacement;
+    const notifyWriterState = () => dotNetRef.invokeMethodAsync(
+        "OnAuthoringWriterState",
+        targetVersion.generation || 0,
+        highestLocalSequence,
+        lastDispatchedSequence,
+        lastAcknowledgedSequence,
+        isWriterDirty(),
+        // The journal's in-memory copy holds every unacknowledged batch for
+        // this process, and a resolving flush always ends clean (saved, or
+        // moved to a review note). A failed browser store only loses reload
+        // recovery, which the author is warned about separately.
+        true,
+        // Disposal is the only path that reports this writer as unreachable.
+        true).catch(() => {});
 
     const toolbar = document.createElement("div");
     toolbar.className = "semantic-editor-toolbar";
@@ -3610,11 +3658,8 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     const status = document.createElement("div");
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
-    const conflictPanel = document.createElement("section");
-    conflictPanel.className = "semantic-editor-conflict";
-    conflictPanel.hidden = true;
     root.classList.add("semantic-editor-root");
-    root.replaceChildren(editorChrome, surface, status, conflictPanel);
+    root.replaceChildren(editorChrome, surface, status);
     installEditorFontRules(root, fontFamilies);
     const typographyRules = installTypographyRules(root, typography);
     const namedStyleRules = installNamedStyleRules(root, namedStyles);
@@ -3665,133 +3710,26 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             affinity: "forward"
         }]
     });
-    const showConflict = (result, entry) => {
-        const conflict = result?.conflicts?.[0];
-        const canonical = conflict?.canonical?.manuscriptJson;
-        conflictPanel.hidden = false;
-        conflictPanel.replaceChildren();
-        const heading = document.createElement("strong");
-        heading.textContent = "This edit conflicts with a newer manuscript change";
-        const details = document.createElement("p");
-        details.textContent = `${conflict?.message || "Both versions were retained."} Local batch ${entry.batch.batchId}.`;
-        const summary = document.createElement("p");
-        try {
-            const localText = editorialText(documentFromDomain(JSON.parse(entry.afterJson)), manuscriptId, revision);
-            const canonicalText = canonical
-                ? editorialText(documentFromDomain(JSON.parse(canonical)), manuscriptId, revision)
-                : "";
-            summary.textContent = `Local version: ${localText.length.toLocaleString()} characters. Newer version: ${canonicalText.length.toLocaleString()} characters.`;
-        } catch {
-            summary.textContent = "Both the local and newer manuscript variants are retained for your decision.";
-        }
-        const retry = button("Retry", "Retry this unchanged local batch", async () => {
-            try {
-                const retryResult = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
-                const retryCanonical = retryResult?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
-                if (!["committed", "replayed"].includes(String(retryResult?.status || "").toLowerCase()) || !retryCanonical) {
-                    showConflict(retryResult, entry);
-                    return;
-                }
-                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
-                    projectId: authoringTarget.projectId, sessionId, receiptId: retryResult.receiptId,
-                    batchId: entry.batch.batchId, requestHash: entry.batch.requestHash
-                });
-                if (!await journal.remove(entry.key))
-                    throw new Error("The saved edit could not be cleared from the local recovery journal.");
-                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
-                revision = retryCanonical.afterRevision;
-                targetVersion = {generation: retryCanonical.generation, fingerprint: retryCanonical.fingerprint};
-                const retryTarget = retryResult.targets?.find(item => item.targetId === authoringTarget.targetId);
-                if (retryTarget?.elementFingerprints)
-                    elementFingerprints = new Map(Object.entries(retryTarget.elementFingerprints));
-                confirmedDocument = JSON.parse(entry.afterJson);
-                pendingImport = null;
-                confirmedHistory.splice(confirmedHistoryCursor);
-                confirmedHistory.push({
-                    inverse: retryResult.inverse?.operations || [],
-                    forward: entry.batch.operations,
-                    beforeSelection: entry.batch.selection?.before || null,
-                    afterSelection: entry.batch.selection?.after || null
-                });
-                confirmedHistoryCursor = confirmedHistory.length;
-                lastAcknowledgedSequence = Math.max(lastAcknowledgedSequence, Number(entry.batch.sequence));
-                if (sameJson(
-                    domainFromDocument(view.state.doc, manuscriptId, confirmedDocument.revision),
-                    confirmedDocument)) {
-                    queuedDocument = structuredClone(confirmedDocument);
-                    pendingLocalTransition = null;
-                    savedGeneration = changeGeneration;
-                }
-                conflictPanel.hidden = true;
-                dispatchPaused = false;
-                notifyWriterState();
-                status.textContent = "The local edit was saved.";
-            } catch (error) {
-                dispatchPaused = true;
-                notifyWriterState();
-                status.textContent = error?.message || "The local batch could not be retried.";
-            }
-        });
-        const discard = button("Use newer version", "Discard this local batch and use the newer canonical manuscript", async () => {
-            if (!canonical) return;
-            // This is an explicit author decision, never a conflict-side effect.
-            try {
-                // A rejected dispatch rolls back on the server. Re-open the
-                // same durable session before dropping its journal entry so
-                // the next batch reuses the server's expected sequence rather
-                // than skipping the rejected one.
-                const reopened = await dotNetRef.invokeMethodAsync("InitializeAuthoringSession", {
-                    protocolId: "AuthoringBatchProtocolV1",
-                    projectId: authoringTarget.projectId,
-                    sessionId,
-                    targets: [{targetId: authoringTarget.targetId}]
-                });
-                const reopenedTarget = reopened?.targets?.find(item => item.targetId === authoringTarget.targetId);
-                if (!reopenedTarget?.manuscriptJson)
-                    throw new Error("The current canonical manuscript could not be loaded for this conflict.");
-                const watermarks = authoringSequenceWatermarks(Number(reopened.nextSequence));
-                if (!await journal.remove(entry.key))
-                    throw new Error("The discarded local batch could not be cleared from the recovery journal.");
-                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
-                authoringSession = reopened;
-                ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence} = watermarks);
-                replaceDocument(reopenedTarget.manuscriptJson);
-                discardImportResources(entry.batch.importResources);
-                namedStyleRules.update(namedStyles);
-                pendingImport = null;
-                confirmedDocument = JSON.parse(reopenedTarget.manuscriptJson);
-                queuedDocument = structuredClone(confirmedDocument);
-                revision = reopenedTarget.revision;
-                targetVersion = {generation: reopenedTarget.generation, fingerprint: reopenedTarget.fingerprint};
-                elementFingerprints = new Map(Object.entries(reopenedTarget.elementFingerprints || {}));
-                pendingLocalTransition = null;
-                savedGeneration = changeGeneration;
-                dispatchPaused = false;
-                conflictPanel.hidden = true;
-                notifyWriterState();
-                status.textContent = "The newer manuscript version is now shown.";
-            } catch (error) {
-                dispatchPaused = true;
-                notifyWriterState();
-                status.textContent = error?.message || "The local batch could not be discarded.";
-            }
-        });
-        conflictPanel.append(heading, details, summary, retry, discard);
-    };
     // Replays unacknowledged journal batches in sequence order with their
     // durable batch identities. The server commits a batch it never received
     // and replays the receipt of one it already committed, so this is safe after
     // a remount and after an uncertain in-session dispatch.
     const replayJournal = async () => {
         for (const entry of await journal.pending()) {
+            // A browser store that failed to delete an acknowledged entry
+            // leaves it behind; the server session already covers it.
+            if (entry.batch.sessionId === sessionId && Number(entry.sequence) <= lastAcknowledgedSequence) {
+                await journal.remove(entry.key);
+                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+                continue;
+            }
             try {
                 const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", entry.batch);
                 const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
                 if (!["committed", "replayed"].includes(String(result?.status || "").toLowerCase()) || !canonical) {
+                    // The next save rebases onto the newer server version.
                     dispatchPaused = true;
                     dispatchRetryable = false;
-                    status.textContent = result?.conflicts?.[0]?.message || "Recovered edits need resolution before they can be saved.";
-                    showConflict(result, entry);
                     notifyWriterState();
                     return false;
                 }
@@ -3807,8 +3745,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                     sessionId, receiptId: result.receiptId, batchId: entry.batch.batchId,
                     requestHash: entry.batch.requestHash
                 });
-                if (!await journal.remove(entry.key))
-                    throw new Error("The recovered edit could not be cleared from the local recovery journal.");
+                await journal.remove(entry.key);
                 pendingJournalCount = Math.max(0, pendingJournalCount - 1);
                 // An import is dispatched as its own batch and no new batch is
                 // journaled while dispatch is paused, so a replayed import is
@@ -3833,142 +3770,248 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
                 return false;
             }
         }
-        if (journal.recoverable) {
-            dispatchPaused = false;
-            dispatchRetryable = false;
-        }
-        notifyWriterState();
-        updateStatus();
-        return journal.recoverable;
+        dispatchPaused = false;
+        dispatchRetryable = false;
+        reportSaveState();
+        return true;
     };
-    const saveNow = () => {
+    // Drops every queued local batch and adopts the server's current version
+    // as the save baseline. The visible document is kept and saved over it as
+    // one undoable replacement, or, with adoptServerDocument, replaced by it.
+    const rebaseOntoServer = async ({opened = null, adoptServerDocument = false} = {}) => {
+        try {
+            opened ??= await openAuthoringSession();
+        } catch (error) {
+            status.textContent = error?.message || "Reconnecting to save this chapter.";
+            return false;
+        }
+        const target = opened?.targets?.find(item => item.targetId === authoringTarget.targetId);
+        if (!target?.manuscriptJson) return false;
+        // Without local work the visible document is only a stale copy.
+        adoptServerDocument ||= !isWriterDirty();
+        for (const entry of await journal.pending()) await journal.remove(entry.key);
+        pendingJournalCount = 0;
+        authoringSession = opened;
+        ({nextSequence, highestLocalSequence, lastDispatchedSequence, lastAcknowledgedSequence}
+            = authoringSequenceWatermarks(Number(opened.nextSequence || 0)));
+        confirmedDocument = JSON.parse(target.manuscriptJson);
+        queuedDocument = structuredClone(confirmedDocument);
+        revision = target.revision;
+        targetVersion = {generation: target.generation, fingerprint: target.fingerprint};
+        elementFingerprints = new Map(Object.entries(target.elementFingerprints || {}));
+        unresolvedHistoryRequest = null;
+        pendingVisibleHistoryMove = false;
+        historyMoveInFlight = false;
+        dispatchPaused = false;
+        dispatchRetryable = false;
+        forceDocumentReplacement = !adoptServerDocument;
+        if (adoptServerDocument) {
+            discardImportResources(pendingImport?.resources);
+            namedStyleRules.update(namedStyles);
+            pendingImport = null;
+            pendingLocalTransition = null;
+            replaceDocument(target.manuscriptJson);
+        }
+        try {
+            adoptHistoryCursor(await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState"));
+        } catch {}
+        applyEffectiveReadOnly();
+        updateFormattingControls();
+        reportSaveState();
+        return true;
+    };
+    // Last resort when the visible document cannot be saved at all: its
+    // changed text becomes review notes on the chapter and the editor shows
+    // the saved version, so nothing is lost and nothing stays blocked.
+    const preserveUnsavedEdits = async () => {
+        let opened;
+        try {
+            opened = await openAuthoringSession();
+        } catch {
+            return false;
+        }
+        const target = opened?.targets?.find(item => item.targetId === authoringTarget.targetId);
+        if (!target?.manuscriptJson) return false;
+        const text = unsavedBlockText(
+            JSON.parse(target.manuscriptJson),
+            domainFromDocument(view.state.doc, manuscriptId, revision));
+        try {
+            if (!await dotNetRef.invokeMethodAsync("PreserveUnsavedEdits", text, Number(target.revision))) return false;
+        } catch {
+            return false;
+        }
+        if (!await rebaseOntoServer({opened, adoptServerDocument: true})) return false;
+        await refreshReviewAnnotations();
+        if (text) status.textContent = "Edits that could not be saved were moved to a review note.";
+        return true;
+    };
+    // Uncertain work is retried with its idempotent identity first. Anything
+    // still unresolved after that, and a session that never opened, rebases
+    // onto the server so the visible document can be saved.
+    const prepareDispatch = async () => {
+        if (saveFailures < 2) {
+            if (unresolvedHistoryRequest !== null) await reconcileUnresolvedHistory();
+            if (authoringSession && dispatchPaused && dispatchRetryable) await replayJournal();
+        }
+        if (authoringSession && unresolvedHistoryRequest === null && !dispatchPaused) return true;
+        return await rebaseOntoServer();
+    };
+    const saveAttempt = async (targetGeneration, after, selection, saveStartedAt) => {
+        if (!await prepareDispatch()) return false;
+        if (savedGeneration >= targetGeneration && !forceDocumentReplacement) return true;
+        const before = queuedDocument;
+        const imported = pendingImport;
+        const replacing = forceDocumentReplacement;
+        const operations = replacing
+            ? sameDocumentContent(before, after) ? [] : [{kind: "replaceRichDocument", richDocument: after}]
+            : imported ? [imported.operation] : authoringOperations(before, after);
+        addAuthoringPreconditions(operations, before, after, elementFingerprints, targetVersion.fingerprint);
+        if (operations.length === 0) {
+            forceDocumentReplacement = false;
+            savedGeneration = Math.max(savedGeneration, targetGeneration);
+            return true;
+        }
+        const batch = {
+            protocolId: "AuthoringBatchProtocolV1",
+            projectId: authoringTarget.projectId,
+            sessionId,
+            batchId: authoringId(),
+            sequence: nextSequence++,
+            actionLabel: replacing ? "Keep local edits" : pendingActionLabel,
+            targets: [{
+                ordinal: 0,
+                targetId: authoringTarget.targetId,
+                expectedRevision: revision,
+                expectedGeneration: targetVersion.generation,
+                baseFingerprint: targetVersion.fingerprint
+            }],
+            operations: operations.map(operation => ({targetOrdinal: 0, ...operation})),
+            selection: {
+                before: authoringSelection(pendingLocalTransition?.beforeSelection),
+                after: authoringSelection(selection)
+            }
+        };
+        if (imported) batch.importResources = imported.resources;
+        batch.requestHash = await sha256(canonicalJson({
+            protocolId: batch.protocolId, projectId: batch.projectId, sessionId: batch.sessionId,
+            batchId: batch.batchId, sequence: batch.sequence, actionLabel: batch.actionLabel,
+            targets: batch.targets, operations: batch.operations, selection: batch.selection,
+            ...(batch.importResources ? {importResources: batch.importResources} : {})
+        }));
+        const entry = {
+            key: `${authoringTarget.projectId}|${authoringTarget.targetId}|${batch.batchId}`,
+            projectId: authoringTarget.projectId,
+            targetId: authoringTarget.targetId,
+            sequence: batch.sequence,
+            batch,
+            beforeJson: JSON.stringify(before),
+            afterJson: JSON.stringify(after),
+            createdAt: Date.now()
+        };
+        await journal.write(entry);
+        pendingJournalCount++;
+        queuedDocument = structuredClone(after);
+        lastDispatchedSequence = batch.sequence;
+        highestLocalSequence = Math.max(highestLocalSequence, batch.sequence);
+        notifyWriterState();
+        try {
+            const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", batch);
+            const applied = ["committed", "replayed"].includes(String(result?.status || "").toLowerCase());
+            const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
+            if (!applied || !canonical) {
+                // The server kept a newer change. The next attempt rebases
+                // onto it and saves the visible document over it.
+                dispatchPaused = true;
+                dispatchRetryable = false;
+                notifyWriterState();
+                return false;
+            }
+            revision = canonical.afterRevision;
+            targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
+            const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
+            if (canonicalTarget?.elementFingerprints)
+                elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
+            await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
+                projectId: authoringTarget.projectId,
+                sessionId,
+                receiptId: result.receiptId,
+                batchId: batch.batchId,
+                requestHash: batch.requestHash
+            });
+            await journal.remove(entry.key);
+            pendingJournalCount = Math.max(0, pendingJournalCount - 1);
+            confirmedDocument = structuredClone(after);
+            confirmedHistory.splice(confirmedHistoryCursor);
+            confirmedHistory.push({
+                inverse: result.inverse?.operations || [],
+                forward: batch.operations,
+                beforeSelection: entry.batch.selection.before,
+                afterSelection: batch.selection.after,
+            });
+            confirmedHistoryCursor = confirmedHistory.length;
+            // Typing can continue while the batch is in flight. Only clear
+            // the coalesced local transition if this acknowledgement is
+            // still describing the visible document.
+            if (changeGeneration === targetGeneration) {
+                pendingLocalTransition = null;
+            }
+            if (replacing) forceDocumentReplacement = false;
+            savedGeneration = Math.max(savedGeneration, targetGeneration);
+            persistentHistoryState = result.history?.state || persistentHistoryState;
+            if (pendingImport === imported) pendingImport = null;
+            lastAcknowledgedSequence = batch.sequence;
+            notifyWriterState();
+            await refreshReviewAnnotations();
+            updateFormattingControls();
+            updateStatus();
+            recordVisibleFrame("save-acknowledgment", saveStartedAt);
+            return true;
+        } catch (error) {
+            // The batch/receipt remains journaled. Do not report a clean save
+            // or fabricate a new batch over an uncertain receipt; the next
+            // attempt replays the idempotent batch and retries the
+            // acknowledgement before rebasing onto the server.
+            dispatchPaused = true;
+            dispatchRetryable = true;
+            notifyWriterState();
+            status.textContent = error?.message || "The edit is waiting to be saved.";
+            return false;
+        }
+    };
+    // Saves the visible document. A failed save retries, then rebases onto the
+    // server's version. A resolving flush never leaves the writer dirty: as a
+    // last resort it moves the unsaved text to review notes.
+    const saveNow = ({resolve = false} = {}) => {
         if (timer) {
             clearTimeout(timer);
             timer = null;
         }
         const targetGeneration = changeGeneration;
+        const epoch = documentEpoch;
+        const leaseHeld = writerLeaseHeld;
         const saveStartedAt = performance.now();
         const after = domainFromDocument(view.state.doc, manuscriptId, revision);
         const selection = captureStableSelection(view);
         saveChain = saveChain.catch(() => false).then(async () => {
-            if (!await reconcileUnresolvedHistory()) return false;
-            if (dispatchPaused && dispatchRetryable && journal.recoverable && authoringSession
-                && !await replayJournal()) return false;
-            if (savedGeneration >= targetGeneration) return !dispatchPaused;
-            if (dispatchPaused || !journal.recoverable || !authoringSession) return false;
-            const before = queuedDocument;
-            const imported = pendingImport;
-            const operations = imported ? [imported.operation] : authoringOperations(before, after);
-            addAuthoringPreconditions(operations, before, after, elementFingerprints, targetVersion.fingerprint);
-            if (operations.length === 0) {
-                savedGeneration = Math.max(savedGeneration, targetGeneration);
-                return true;
+            // Another window owns this target's writes; this view is read-only.
+            if (!leaseHeld) return true;
+            // A replaced document supersedes this snapshot; later edits have
+            // their own saves.
+            if (epoch !== documentEpoch) return !isWriterDirty();
+            for (let attempt = 0; attempt < 3 && !attachmentDisposed; attempt++) {
+                if (attempt > 0) await new Promise(resume => setTimeout(resume, 250 * attempt));
+                if (await saveAttempt(targetGeneration, after, selection, saveStartedAt)) {
+                    saveFailures = 0;
+                    reportSaveState();
+                    return true;
+                }
+                saveFailures++;
             }
-            const batch = {
-                protocolId: "AuthoringBatchProtocolV1",
-                projectId: authoringTarget.projectId,
-                sessionId,
-                batchId: authoringId(),
-                sequence: nextSequence++,
-                actionLabel: pendingActionLabel,
-                targets: [{
-                    ordinal: 0,
-                    targetId: authoringTarget.targetId,
-                    expectedRevision: revision,
-                    expectedGeneration: targetVersion.generation,
-                    baseFingerprint: targetVersion.fingerprint
-                }],
-                operations: operations.map(operation => ({targetOrdinal: 0, ...operation})),
-                selection: {
-                    before: authoringSelection(pendingLocalTransition?.beforeSelection),
-                    after: authoringSelection(selection)
-                }
-            };
-            if (imported) batch.importResources = imported.resources;
-            batch.requestHash = await sha256(canonicalJson({
-                protocolId: batch.protocolId, projectId: batch.projectId, sessionId: batch.sessionId,
-                batchId: batch.batchId, sequence: batch.sequence, actionLabel: batch.actionLabel,
-                targets: batch.targets, operations: batch.operations, selection: batch.selection,
-                ...(batch.importResources ? {importResources: batch.importResources} : {})
-            }));
-            const entry = {
-                key: `${authoringTarget.projectId}|${authoringTarget.targetId}|${batch.batchId}`,
-                projectId: authoringTarget.projectId,
-                targetId: authoringTarget.targetId,
-                sequence: batch.sequence,
-                batch,
-                beforeJson: JSON.stringify(before),
-                afterJson: JSON.stringify(after),
-                createdAt: Date.now()
-            };
-            if (!await journal.write(entry)) return false;
-            pendingJournalCount++;
-            queuedDocument = structuredClone(after);
-            lastDispatchedSequence = batch.sequence;
-            highestLocalSequence = Math.max(highestLocalSequence, batch.sequence);
-            notifyWriterState();
-            try {
-                const result = await dotNetRef.invokeMethodAsync("DispatchAuthoringBatch", batch);
-                const applied = ["committed", "replayed"].includes(String(result?.status || "").toLowerCase());
-                const canonical = result?.canonicalVersions?.find(item => item.targetId === authoringTarget.targetId);
-                if (!applied || !canonical) {
-                    dispatchPaused = true;
-                    dispatchRetryable = false;
-                    status.textContent = result?.conflicts?.[0]?.message || "The edit needs resolution before it can be saved.";
-                    showConflict(result, entry);
-                    return false;
-                }
-                revision = canonical.afterRevision;
-                targetVersion = {generation: canonical.generation, fingerprint: canonical.fingerprint};
-                const canonicalTarget = result.targets?.find(item => item.targetId === authoringTarget.targetId);
-                if (canonicalTarget?.elementFingerprints)
-                    elementFingerprints = new Map(Object.entries(canonicalTarget.elementFingerprints));
-                await dotNetRef.invokeMethodAsync("AcknowledgeAuthoringReceipt", {
-                    projectId: authoringTarget.projectId,
-                    sessionId,
-                    receiptId: result.receiptId,
-                    batchId: batch.batchId,
-                    requestHash: batch.requestHash
-                });
-                if (!await journal.remove(entry.key))
-                    throw new Error("The saved edit could not be cleared from the local recovery journal.");
-                pendingJournalCount = Math.max(0, pendingJournalCount - 1);
-                confirmedDocument = structuredClone(after);
-                confirmedHistory.splice(confirmedHistoryCursor);
-                confirmedHistory.push({
-                    inverse: result.inverse?.operations || [],
-                    forward: batch.operations,
-                    beforeSelection: entry.batch.selection.before,
-                    afterSelection: batch.selection.after,
-                });
-                confirmedHistoryCursor = confirmedHistory.length;
-                // Typing can continue while the batch is in flight. Only clear
-                // the coalesced local transition if this acknowledgement is
-                // still describing the visible document.
-                if (changeGeneration === targetGeneration) {
-                    pendingLocalTransition = null;
-                }
-                savedGeneration = Math.max(savedGeneration, targetGeneration);
-                persistentHistoryState = result.history?.state || persistentHistoryState;
-                if (pendingImport === imported) pendingImport = null;
-                lastAcknowledgedSequence = batch.sequence;
-                notifyWriterState();
-                await refreshReviewAnnotations();
-                updateFormattingControls();
-                updateStatus();
-                recordVisibleFrame("save-acknowledgment", saveStartedAt);
-                return true;
-            } catch (error) {
-                // The batch/receipt remains journaled. Do not report a clean
-                // save or fabricate a new batch over an uncertain receipt;
-                // the next save (or a remount) replays the idempotent batch
-                // and retries the acknowledgement.
-                dispatchPaused = true;
-                dispatchRetryable = true;
-                notifyWriterState();
-                status.textContent = error?.message || "The edit is waiting to be saved.";
-                return false;
-            }
+            if (resolve) return await preserveUnsavedEdits();
+            if (!attachmentDisposed && !timer)
+                timer = setTimeout(() => { void saveNow(); }, 5000);
+            reportSaveState();
+            return false;
         });
         return saveChain;
     };
@@ -3986,6 +4029,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         revision = incoming.revision;
         changeGeneration = 0;
         savedGeneration = 0;
+        documentEpoch++;
         const incomingDocument = documentFromDomain(incoming);
         view.updateState(EditorState.create({
             doc: incomingDocument,
@@ -4351,14 +4395,14 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         noteEditor?.update();
         const text = editorialText(view.state.doc, manuscriptId, revision);
         const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
-        const saveState = journalFailure
-            ? "not locally recoverable"
-            : dispatchPaused
-                ? "save paused"
-                : savedGeneration < changeGeneration || pendingVisibleHistoryMove
-                    ? "saving"
-                    : "saved";
-        status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision} · ${saveState}`;
+        const saveState = [isWriterDirty() ? "saving" : "saved"];
+        if (journalFailure) saveState.push("no local recovery copy");
+        if (!writerLeaseHeld) saveState.push("read-only while open in another window");
+        status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision} · ${saveState.join(" · ")}`;
+    };
+    reportSaveState = () => {
+        notifyWriterState();
+        updateStatus();
     };
 
     const typographyControls = buildTypographyControls(view, namedStyles, fontFamilies, root);
@@ -5132,16 +5176,35 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
     }).catch(() => {});
     // A reload first renders the server-confirmed base and replays only
     // unacknowledged journal batches. Confirmed history remains process-owned.
+    // A session that did not open at attach is opened by the first save.
     saveChain = saveChain.then(async () => {
-        if (dispatchPaused || !journal.recoverable) return;
-        await replayJournal();
+        if (!writerLeaseHeld) return;
+        if (!authoringSession || !await replayJournal()) scheduleSave();
     });
     updateStatus();
     outline.update();
     recordVisibleFrame("editor-ready-after-navigation", attachmentStartedAt);
 
+    // The other window released its writer lease: replay what it left in the
+    // journal, then show the server version, which holds everything it saved.
+    onWriterLeaseAcquired = () => {
+        saveChain = saveChain.catch(() => false).then(async () => {
+            if (attachmentDisposed) return true;
+            await replayJournal();
+            if (!await rebaseOntoServer({adoptServerDocument: true})) {
+                setTimeout(onWriterLeaseAcquired, 2000);
+                return true;
+            }
+            writerLeaseHeld = true;
+            applyEffectiveReadOnly();
+            reportSaveState();
+            return true;
+        });
+    };
+    if (writerLeaseAvailable) onWriterLeaseAcquired();
+
     return {
-        flush: saveNow,
+        flush: () => saveNow({resolve: true}),
         capturePageInsertion() {
             const resolved = view.state.selection.$from;
             return { index: resolved.index(0) + (resolved.parentOffset > 0 ? 1 : 0), revision };
@@ -5150,23 +5213,20 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
         async freezeAndFlush(sequence) {
             fenceFrozen = true;
             applyEffectiveReadOnly();
-            const flushed = await saveNow();
-            const dirty = savedGeneration < changeGeneration
-                || pendingJournalCount > 0
-                || pendingVisibleHistoryMove
-                || unresolvedHistoryRequest !== null
-                || !journal.recoverable
-                || !!journalFailure;
+            const flushed = await saveNow({resolve: true});
+            const dirty = isWriterDirty();
             notifyWriterState();
             return {
-                // This is always the actual acknowledgement watermark; the
-                // fence compares it with its captured highest-local sequence.
-                flushedSequence: lastAcknowledgedSequence,
+                // The acknowledgement watermark. A clean writer has settled
+                // every sequence the fence captured: local batches the server
+                // rejected were superseded by a saved replacement or a review
+                // note, which resets the watermark to the server session.
+                flushedSequence: dirty ? lastAcknowledgedSequence : Math.max(lastAcknowledgedSequence, Number(sequence)),
                 isDirty: dirty,
-                isRecoverable: journal.recoverable && !journalFailure,
+                isRecoverable: true,
                 isReachable: true,
-                errorCode: flushed ? null : "AUTHORING_FLUSH_INCOMPLETE",
-                errorMessage: flushed ? null : status.textContent
+                errorCode: flushed && !dirty ? null : "AUTHORING_FLUSH_INCOMPLETE",
+                errorMessage: flushed && !dirty ? null : status.textContent
             };
         },
         async resumeAfterFence() {
@@ -5245,6 +5305,7 @@ export async function attach(root, dotNetRef, debounceMs, initialJson, stylesJso
             attachmentDisposed = true;
             importCancelled = true;
             if (timer) clearTimeout(timer);
+            writerLeaseWait.abort();
             if (releaseWriterLease) releaseWriterLease();
             if (caretFrame !== null) cancelAnimationFrame(caretFrame);
             caretResizeObserver.disconnect();
