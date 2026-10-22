@@ -1622,7 +1622,7 @@ public sealed class ProjectVersionSyncService(
 
         return new RemoteTarget(
             selection.ConnectionId,
-            null,
+            remoteId,
             remoteName,
             repository.Owner,
             repository.Name,
