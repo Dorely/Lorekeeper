@@ -23,7 +23,7 @@
     <PackageProjectUrl>https://github.com/Dorely/Lorekeeper</PackageProjectUrl>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageId>Lorekeeper</PackageId>
-    <ElectronVersion>43.6.0</ElectronVersion>
+    <ElectronVersion>43.7.0</ElectronVersion>
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
     <ElectronPackageId>com.lorekeeper.app</ElectronPackageId>
     <ElectronSingleInstance>true</ElectronSingleInstance>
