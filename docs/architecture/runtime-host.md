@@ -78,6 +78,15 @@ server process and are consumed through dependency injection. App-process
 runtimes and notifiers may keep work alive across component disposal, but a Razor
 component or Blazor circuit must never own a durable operation's lifetime.
 
+Interactive pages are prerendered, and enhanced navigation does not switch
+screens until that server prerender completes. Project-scoped loading therefore
+runs only when `RendererInfo.IsInteractive`: `ProjectLayout` prerenders just its
+loading state, so no workspace tab content is prerendered, and the shared
+`ProjectCheckpointControl` defers repository preparation the same way. Opening a
+project or switching tabs swaps screens immediately and loads afterward instead
+of running the workspace load twice. New project-wide chrome must follow the
+same rule.
+
 Service lifetimes must match that topology. Stateless application operations and
 repository-backed feature facades are normally scoped. Process-wide coordination,
 queues, notifiers, startup state, update state, and shared turn runtimes are

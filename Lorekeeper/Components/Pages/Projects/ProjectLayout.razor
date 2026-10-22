@@ -5,7 +5,7 @@
 
 @if (_loading)
 {
-    <p class="text-muted"><em>Loading project…</em></p>
+    <div class="lk-empty-state" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading project…</span></div>
 }
 else if (Project is null)
 {
@@ -69,7 +69,10 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedSlug == Slug) return;
+        // Enhanced navigation waits for the server prerender before switching
+        // screens. Prerender only the loading shell so opening a project swaps
+        // immediately; the project and every workspace tab load once interactive.
+        if (!RendererInfo.IsInteractive || _loadedSlug == Slug) return;
         _loading = true;
         Project = await Projects.GetBySlugAsync(Slug);
         _loadedSlug = Slug;
