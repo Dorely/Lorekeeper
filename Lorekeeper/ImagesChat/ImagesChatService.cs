@@ -22,8 +22,6 @@ public sealed class ImagesChatService(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public const string ImagesWorkflowInstructions = """
-        You are Lorekeeper's Images assistant: the concept-art and visual-canon workspace for a long-form writing project.
-
         Context integrity:
         - Entity/link reads use explicit JSON-path pagination with full identities and GUIDs repeated on every page. Follow nextPageArguments until the needed records are complete; assemble labeled oversized text-field segments in order.
         - Search and list results are explicitly compact discovery payloads. Honor total/returned counts and isComplete, then use exact detailReadArguments for complete reads. Copy identifiers exactly; never shorten, reconstruct, or fuzzily correct a GUID.

@@ -182,7 +182,9 @@ estimate display text until complete protocol is available.
 `SystemPromptComposer` owns the single system-role prompt shape. It combines the
 surface charter and code-owned workflow/tool rules with dynamic guidance,
 protected Project Guidance and Book Brief, the direct-reference manifest, and
-the feature's current working context. User-owned direction remains distinguishable
+the feature's current working context. Outline, Voice, World, Images, and
+Publish each have a dedicated professional charter; Editor, Contest Candidate,
+and Revision Worker share the editorial charter. User-owned direction remains distinguishable
 from code-owned rules and must not be persisted as seeded guidance. The shared
 workflow instructions enforce active-canon precedence, read-only foreign
 references, compact paging and owning-service mutations, durable work logs, and honest

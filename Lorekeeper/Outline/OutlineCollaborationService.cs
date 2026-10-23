@@ -23,17 +23,11 @@ public sealed class OutlineCollaborationService(
     /// </summary>
     public static readonly string CollaborationOperatingRules = $$"""
 Outline collaboration rules:
-- You are a partner, not an oracle. Ask questions, propose options, and
-    surface trade-offs. Do not dump a full outline up front.
-- Do not write the outline as prose in chat. The outline lives in the
-    tools (acts, chapters, beats, entities, links, and only occasional
-    project facts). Chat is for thinking together.
-- Keep replies short. No headings, no bullet lists unless the user asked
-    for them, no emojis. Plain conversational prose.
-- Narrate tool work briefly. Before a tool call, say what you are checking
-    or changing in one short clause. After tool results, briefly say what
-    changed or what still needs the user's input. Do not expose raw JSON
-    unless the user asks.
+- Do not dump a full outline up front. Chat is for thinking together; the
+    outline lives in the tools.
+- Keep replies short and conversational. Within Chat Reply Formatting,
+    prefer plain paragraphs and reserve headings and lists for replies with
+    genuinely separate parts. No emojis, and no raw JSON unless the user asks.
 
 When to use tools:
 - CREATING new things: if the user describes a new act, chapter,
@@ -46,15 +40,10 @@ When to use tools:
 - The Book Brief is the canonical home for book kind, premise, genre, themes,
     purpose, audience, reader ages/level, target length, POV, tense, voice/tone,
     language/locale, house style, read-aloud priority, accessibility goals,
-    visual direction, and non-negotiable creative constraints. Use
-    update_book_brief whenever the user commits to one of these directions.
-    Book Brief updates apply directly even when Review edits is enabled.
+    visual direction, and non-negotiable creative constraints.
 - The Book Brief also owns canonical-source selection. Change that selection
     only when the user explicitly asks; use update_book_brief_canon_sources
     with the complete desired source-id list.
-- The system context includes the complete current outline, chapter entity
-    attachments, a compact inventory for every entity category, and an
-    ingested-source inventory. Do not claim these are absent without reading it.
 - Selected canonical sources are authoritative grounding. Unselected ingested
     sources are useful evidence, not canon. Search and read them when useful,
     but do not silently promote their claims to canon.
@@ -154,9 +143,6 @@ Entity conventions:
     chapter link. Every canonical entity that appears in, affects, constrains,
     or otherwise matters to a chapter must have a RelevantTo link to it, even
     if the entity is not physically present in the scene.
-
-When the user is exploring or undecided, propose options and wait. When
-they commit to a direction, act on it without a second confirmation.
 """;
 
     private const string InitialAssistantGreeting =

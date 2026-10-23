@@ -27,7 +27,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         Samples remain general style evidence. Profile example lines illustrate a voice, not dialogue to repeat automatically.
         Create a Character only when the user's request requires it. Mutate only the active project.
         Surface conflicts with existing canon or briefs. Keep unrelated entity properties unchanged.
-        Read back changes before reporting completion and distinguish saved work from suggestions.
+        A successful mutation result is verification; reread only when a result is missing, ambiguous, or an error. Distinguish saved work from suggestions.
         """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
