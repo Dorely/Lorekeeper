@@ -110,8 +110,13 @@ if (isElectronMode)
 {
     builder.Services.AddSingleton<IDesktopUpdateService>(desktopUpdates);
     builder.Services.AddElectron();
+    var windowIconPath = Path.Combine(
+        builder.Environment.WebRootPath,
+        "branding",
+        OperatingSystem.IsWindows() ? "icon.ico" : "icon.png");
     builder.UseElectron(args, () => ElectronAppReady(
         desktopUrl!,
+        windowIconPath,
         enableDesktopDevTools,
         distributionChannelPolicy,
         desktopUpdates,
@@ -474,6 +479,7 @@ app.Run();
 
 static async Task ElectronAppReady(
     string desktopUrl,
+    string windowIconPath,
     bool enableDevTools,
     DistributionChannelPolicy distributionChannelPolicy,
     DesktopUpdateService desktopUpdates,
@@ -507,7 +513,12 @@ static async Task ElectronAppReady(
     };
 
     if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+    {
         options.AutoHideMenuBar = true;
+        // Packaged executables embed the branding icon; an unpackaged development
+        // run would otherwise show Electron's default window and taskbar icon.
+        options.Icon = windowIconPath;
+    }
 
     if (OperatingSystem.IsMacOS())
         Electron.App.WindowAllClosed += Electron.App.Quit;

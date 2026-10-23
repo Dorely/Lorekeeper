@@ -163,7 +163,9 @@ second listener is created to compensate. The host remains local-only unless a
 deliberate architecture and security change expands its exposure.
 
 Electron-only responsibilities include hardened binding, desktop-window creation,
-shutdown, and deliberately narrow external-browser handoffs. The shared
+shutdown, and deliberately narrow external-browser handoffs. On Windows and
+Linux the window takes its icon from `wwwroot/branding` (`icon.ico`/`icon.png`)
+so unpackaged development runs match the packaged executable. The shared
 authorization launcher opens only exact allowlisted OpenAI/GitHub HTTPS targets
 (`auth.openai.com` `/oauth/authorize` and `/api/accounts/authorize`);
 browser hosting instead renders explicit user-activated links. The Free update
