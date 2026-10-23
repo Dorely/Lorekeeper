@@ -432,7 +432,12 @@ into manifests, snapshots, remote metadata, logs, or UI payloads. Repository
 listing, creation, fetch, manual push, and device authorization happen only after
 the user explicitly starts the corresponding action. Automatic push begins only
 after explicit attachment and a successful local checkpoint. Attaching a remote requires an
-explicit acknowledgement that creative material may be uploaded. After attachment,
+explicit acknowledgement that creative material may be uploaded. GitHub 422
+responses map to typed validation errors that carry GitHub's sanitized
+validation text instead of a generic retry instruction. When repository
+creation reports that the name already exists on the account, History offers
+to attach that existing repository through the normal attach path, reloading
+the repository list first when it is stale. After attachment,
 the consent and repository-selection controls collapse into the attached remote
 status and actions; removing the remote makes setup available again.
 The device code and explicit **Check authorization** action remain application-

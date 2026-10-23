@@ -23,6 +23,8 @@ public enum GitHubConnectionErrorCode
     ConnectionNotFound,
     ConnectionInUse,
     UnsupportedCredentials,
+    ValidationFailed,
+    RepositoryAlreadyExists,
 }
 
 /// <summary>

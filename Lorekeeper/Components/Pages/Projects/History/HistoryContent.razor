@@ -394,7 +394,15 @@
 
                     @if (!string.IsNullOrWhiteSpace(_remoteError))
                     {
-                        <div class="alert alert-danger history-alert history-remote-alert" role="alert">@_remoteError</div>
+                        <div class="alert alert-danger history-alert history-remote-alert" role="alert">
+                            <p>@_remoteError</p>
+                            @if (_existingRepositoryOffer is not null)
+                            {
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@HasActiveHistoryOperation" @onclick="AttachOfferedRepositoryAsync">
+                                    Attach @_existingRepositoryOffer
+                                </button>
+                            }
+                        </div>
                     }
                     @if (!string.IsNullOrWhiteSpace(_remoteMessage))
                     {
@@ -809,6 +817,7 @@
     private RemoteAction? _remoteBusyAction;
     private ProjectVersionRemoteView? _removeRemoteTarget;
     private string? _remoteError;
+    private string? _existingRepositoryOffer;
     private string? _remoteMessage;
     private bool _disposed;
     private Guid? _loadedProjectId;
@@ -932,6 +941,7 @@
         _newRepositoryName = string.Empty;
         _rightsAcknowledged = false;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
         _actionMessage = null;
         _checkpointRefreshPending = false;
@@ -1131,6 +1141,7 @@
         _remoteLoading = true;
         _remoteDataAvailable = false;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         try
         {
             var cancellationToken = _lifetimeCancellation.Token;
@@ -1186,6 +1197,7 @@
         _selectedRepositoryFullName = string.Empty;
         _repositories = [];
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
         try
         {
@@ -1214,6 +1226,7 @@
         using var operation = HistoryEvents.BeginProjectOperation(localRepository.ProjectId);
         _remoteSetupBusy = true;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
         try
         {
@@ -1244,13 +1257,15 @@
         using var operation = HistoryEvents.BeginProjectOperation(localRepository.ProjectId);
         _remoteSetupBusy = true;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
+        var repositoryName = _newRepositoryName.Trim();
         try
         {
             var repository = await GitHub.CreateRepositoryAsync(
                 connection.Id,
                 new GitHubRepositoryCreateRequest(
-                    _newRepositoryName.Trim(),
+                    repositoryName,
                     Description: $"Lorekeeper project history for {Project?.Name}",
                     IsPrivate: _newRepositoryPrivate,
                     AutoInit: false),
@@ -1265,6 +1280,11 @@
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
         }
+        catch (GitHubConnectionException exception) when (exception.Code == GitHubConnectionErrorCode.RepositoryAlreadyExists)
+        {
+            _existingRepositoryOffer = $"{connection.AccountLogin}/{repositoryName}";
+            _remoteError = $"A repository named {repositoryName} already exists on @{connection.AccountLogin}. Choose another name, or attach the existing repository.";
+        }
         catch (Exception exception)
         {
             _remoteError = RemoteErrorMessage(exception);
@@ -1274,6 +1294,35 @@
             _remoteSetupBusy = false;
         }
     }
+
+    private async Task AttachOfferedRepositoryAsync()
+    {
+        if (_existingRepositoryOffer is not { } fullName || SelectedConnection is not { } connection || HasActiveHistoryOperation)
+            return;
+
+        var repository = FindRepository(fullName);
+        if (repository is null)
+        {
+            // The loaded list can predate a repository created elsewhere, so
+            // reload it before deciding the existing repository is unavailable.
+            await SelectConnectionAsync(connection);
+            repository = FindRepository(fullName);
+        }
+
+        if (repository is null)
+        {
+            _remoteError ??= $"GitHub did not list {fullName} for @{connection.AccountLogin}. Check the repository on GitHub, then load repositories again.";
+            return;
+        }
+
+        _existingRepositoryOffer = null;
+        _selectedRepositoryFullName = repository.FullName;
+        await AttachSelectedRepositoryAsync();
+    }
+
+    private GitHubRepositoryInfo? FindRepository(string fullName) =>
+        _repositories.FirstOrDefault(repository =>
+            string.Equals(repository.FullName, fullName, StringComparison.OrdinalIgnoreCase));
 
     private async Task FetchRemoteAsync(ProjectVersionRemoteView remote)
     {
@@ -1314,6 +1363,7 @@
         _remoteBusyRemoteId = remote.Id;
         _remoteBusyAction = action;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
         try
         {
@@ -1347,6 +1397,7 @@
             return;
 
         _remoteError = null;
+        _existingRepositoryOffer = null;
         _remoteMessage = null;
         _removeRemoteTarget = remote;
     }
@@ -1363,6 +1414,7 @@
         _remoteBusyRemoteId = remote.Id;
         _remoteBusyAction = RemoteAction.Remove;
         _remoteError = null;
+        _existingRepositoryOffer = null;
         try
         {
             var status = await VersionSync.RemoveRemoteAsync(remote.Id, _lifetimeCancellation.Token);

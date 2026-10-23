@@ -280,7 +280,7 @@ public sealed class GitHubConnectionService(
             var currentUri = uri;
             using var response = await SendApiAsync(HttpMethod.Get, uri, credential.AccessToken, null, "list GitHub repositories", cancellationToken);
             if (!response.IsSuccessStatusCode)
-                throw CreateApiHttpException(response, "list GitHub repositories");
+                throw await CreateApiHttpExceptionAsync(response, "list GitHub repositories", cancellationToken);
             var payload = await DeserializeAsync<GitHubRepositoryResponse[]>(response, "GitHub repository list", cancellationToken);
             if (payload is null)
                 throw InvalidResponse("GitHub returned an empty repository-list response.");
@@ -337,7 +337,7 @@ public sealed class GitHubConnectionService(
             cancellationToken);
 
         if (!response.IsSuccessStatusCode)
-            throw CreateApiHttpException(response, "create GitHub repository");
+            throw await CreateApiHttpExceptionAsync(response, "create GitHub repository", cancellationToken);
         var repository = await DeserializeAsync<GitHubRepositoryResponse>(response, "created GitHub repository", cancellationToken);
         if (repository is null)
             throw InvalidResponse("GitHub returned an empty repository-creation response.");
@@ -372,7 +372,7 @@ public sealed class GitHubConnectionService(
                    cancellationToken))
         {
             if (!repositoryResponse.IsSuccessStatusCode)
-                throw CreateApiHttpException(repositoryResponse, "validate the GitHub repository identity");
+                throw await CreateApiHttpExceptionAsync(repositoryResponse, "validate the GitHub repository identity", cancellationToken);
 
             var repository = await DeserializeAsync<GitHubRepositoryResponse>(
                 repositoryResponse,
@@ -410,12 +410,13 @@ public sealed class GitHubConnectionService(
                     GitHubConnectionErrorCode.Conflict,
                     "The configured GitHub branch is missing from a non-empty repository. Reattach or choose the remote branch deliberately before pushing.",
                     HttpStatusCode.Conflict);
-            throw CreateApiHttpException(
+            throw await CreateApiHttpExceptionAsync(
                 commitsResponse,
-                "distinguish an empty GitHub repository from a missing branch");
+                "distinguish an empty GitHub repository from a missing branch",
+                cancellationToken);
         }
         if (!branchResponse.IsSuccessStatusCode)
-            throw CreateApiHttpException(branchResponse, "observe the GitHub branch head");
+            throw await CreateApiHttpExceptionAsync(branchResponse, "observe the GitHub branch head", cancellationToken);
 
         var branch = await DeserializeAsync<GitHubBranchResponse>(
             branchResponse,
@@ -493,7 +494,7 @@ public sealed class GitHubConnectionService(
             "validate GitHub account",
             cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw CreateApiHttpException(response, "validate GitHub account");
+            throw await CreateApiHttpExceptionAsync(response, "validate GitHub account", cancellationToken);
         var payload = await DeserializeAsync<GitHubUserResponse>(response, "GitHub account", cancellationToken);
         if (payload is null || payload.Id <= 0 || string.IsNullOrWhiteSpace(payload.Login))
             throw InvalidResponse("GitHub returned an incomplete authenticated-account response.");
@@ -952,8 +953,14 @@ public sealed class GitHubConnectionService(
             oauthError: oauthError);
     }
 
-    private static GitHubConnectionException CreateApiHttpException(HttpResponseMessage response, string operation)
+    private static async Task<GitHubConnectionException> CreateApiHttpExceptionAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken cancellationToken)
     {
+        if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            return await CreateApiValidationExceptionAsync(response, operation, cancellationToken);
+
         var code = response.StatusCode switch
         {
             HttpStatusCode.Unauthorized => GitHubConnectionErrorCode.Unauthorized,
@@ -978,6 +985,56 @@ public sealed class GitHubConnectionService(
             $"GitHub could not {operation} ({(int)response.StatusCode}); {action}.",
             response.StatusCode,
             GetRetryAfter(response));
+    }
+
+    private static async Task<GitHubConnectionException> CreateApiValidationExceptionAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        GitHubValidationErrorResponse? payload;
+        try
+        {
+            payload = await DeserializeAsync<GitHubValidationErrorResponse>(response, operation, cancellationToken);
+        }
+        catch (GitHubConnectionException)
+        {
+            // An unreadable 422 body still has a well-defined meaning: GitHub
+            // rejected the request content, so retrying it unchanged will not help.
+            payload = null;
+        }
+
+        var errors = payload?.Errors ?? [];
+        var nameAlreadyExists = errors.Any(error =>
+            string.Equals(error.Field, "name", StringComparison.OrdinalIgnoreCase) &&
+            error.Message?.Contains("already exists", StringComparison.OrdinalIgnoreCase) == true);
+        var details = errors
+            .Select(error => SanitizeValidationText(error.Message) ??
+                SanitizeValidationText(string.Join(' ', new[] { error.Field, error.Code }.Where(part => !string.IsNullOrWhiteSpace(part)))))
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .Take(4)
+            .ToList();
+        if (details.Count == 0 && SanitizeValidationText(payload?.Message) is { } summary)
+            details.Add(summary);
+
+        var reason = details.Count == 0
+            ? "GitHub did not describe the validation failure"
+            : string.Join("; ", details);
+        return new GitHubConnectionException(
+            nameAlreadyExists ? GitHubConnectionErrorCode.RepositoryAlreadyExists : GitHubConnectionErrorCode.ValidationFailed,
+            $"GitHub rejected the request to {operation} (422): {reason}.",
+            response.StatusCode);
+    }
+
+    private static string? SanitizeValidationText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var sanitized = new string(value.Trim().Select(character => char.IsControl(character) ? ' ' : character).ToArray())
+            .TrimEnd('.');
+        return sanitized.Length <= 200 ? sanitized : sanitized[..200] + "…";
     }
 
     private static TimeSpan? GetRetryAfter(HttpResponseMessage response)
@@ -1150,4 +1207,14 @@ public sealed class GitHubConnectionService(
 
     private sealed record GitHubBranchCommitResponse(
         [property: JsonPropertyName("sha")] string? Sha);
+
+    private sealed record GitHubValidationErrorResponse(
+        [property: JsonPropertyName("message")] string? Message,
+        [property: JsonPropertyName("errors")] GitHubValidationErrorItem[]? Errors);
+
+    private sealed record GitHubValidationErrorItem(
+        [property: JsonPropertyName("resource")] string? Resource,
+        [property: JsonPropertyName("field")] string? Field,
+        [property: JsonPropertyName("code")] string? Code,
+        [property: JsonPropertyName("message")] string? Message);
 }
