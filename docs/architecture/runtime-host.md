@@ -285,7 +285,7 @@ dictionary, and the standard cut/copy/paste/select-all roles; non-editable
 selections offer Copy. Lorekeeper keeps no dictionary or spelling state of its
 own, and the browser profile relies on the browser's native menu. This standard
 edit menu is platform text-editing chrome, not a product dialog.
-The Electron 43.7.0 pin includes the upstream fix for rejected print options
+The Electron 43.8.3 pin includes the upstream fix for rejected print options
 introduced in 43.0/43.1; printer settings must not be dropped to work around that
 runtime regression.
 
