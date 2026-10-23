@@ -383,6 +383,8 @@ Fetching a remote is a network action and updates only the attachment-specific
 remote-tracking ref; cached status and local reads do not contact GitHub. A
 missing/deleted branch or empty repository clears that active ref, so status
 returns to attached/unknown rather than retaining an old synchronized tip.
+History comparison treats an absent side as no commit, never as local `main`,
+so an empty or unfetched remote can never compare as already synchronized.
 Applying a fetched remote
 requires a clean project, creates a deduplicated safety checkpoint, and uses
 fast-forward-only compare-and-swap before exact-head checkout. Local `main` is

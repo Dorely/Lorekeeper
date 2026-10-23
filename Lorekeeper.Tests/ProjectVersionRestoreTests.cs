@@ -52,6 +52,34 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void HistoryComparisonTreatsAnAbsentRemoteAsUnsynchronized()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new GitRepositoryStore(new GitRepositoryStoreOptions { HistoryRoot = root });
+            var repositoryId = Guid.NewGuid();
+            var local = store.WriteSnapshot(repositoryId, [], "Checkpoint", DateTimeOffset.UtcNow).CommitSha;
+
+            var comparison = store.CompareHistory(repositoryId, local, null);
+
+            Assert.Equal(local, comparison.CurrentCommitSha);
+            Assert.Null(comparison.CandidateCommitSha);
+            Assert.Equal(GitHistoryRelation.CurrentFastForward, comparison.Relation);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                // Git writes loose objects read-only.
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void WorldBriefSnapshotsRejectNullContent()
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));

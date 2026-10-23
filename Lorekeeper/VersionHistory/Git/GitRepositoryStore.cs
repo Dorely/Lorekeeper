@@ -470,8 +470,11 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
         lock (GetRepositoryLock(repositoryPath))
         {
             using var repository = OpenRepository(repositoryPath);
-            var current = ResolveCommit(repository, currentCommitSha);
-            var candidate = ResolveCommit(repository, candidateCommitSha);
+            // A missing side means "no commit" (an unborn local main or an
+            // empty/unfetched remote), never local main: resolving it to HEAD
+            // would report an empty remote as already synchronized.
+            var current = ResolveOptionalCommit(repository, currentCommitSha);
+            var candidate = ResolveOptionalCommit(repository, candidateCommitSha);
 
             if (current is null && candidate is null)
                 return new GitHistoryComparison(null, null, null, GitHistoryRelation.Empty);
@@ -617,6 +620,9 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
             throw new InvalidDataException("The main history reference does not point to a commit.");
         return commit;
     }
+
+    private static Commit? ResolveOptionalCommit(Repository repository, string? commitSha) =>
+        string.IsNullOrWhiteSpace(commitSha) ? null : ResolveCommit(repository, commitSha);
 
     private static Commit? ResolveCommit(Repository repository, string? commitSha)
     {
