@@ -916,7 +916,7 @@ preparation, and preview on clean `main`:
 The driver verifies source/index cleanliness, tools, repository access, release
 and tag state, and the build-and-test preflight. It never publishes in preview.
 For a separately authorized stable release, `scripts/release.ps1` owns version
-selection, its version-only commit, preflight before and after that commit, the
+selection, its version-only commit, preflight on that exact commit, the
 normal push, native packaging, checksum verification, and publication. Use
 `-Version <major.minor.patch>` or `-Bump Minor|Major` for a deliberate version,
 `-LinuxDistribution <name>` for the configured WSL distribution, and

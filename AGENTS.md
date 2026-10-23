@@ -224,12 +224,13 @@
   unperformed.
 - Before completion, search for obsolete names and paths, inspect the complete
   diff, and confirm that documentation matches the resulting code.
-- The release driver runs its build-and-test preflight before the version
-  commit and again before publication. Release packaging checks are additional
-  evidence. The exact commit being released must be the verified commit.
+- The release driver runs its build-and-test preflight once, on the exact
+  version commit, before pushing and publication. Release packaging checks are
+  additional evidence. The exact commit being released must be the verified
+  commit.
 - For a user-authorized direct stable release, prefer `scripts/release.ps1` on
-  clean `main`. It owns version selection, the version-only commit, both
-  preflights, pushing, and publication. Use `-CheckOnly` when asked to preview
+  clean `main`. It owns version selection, the version-only commit, the
+  preflight, pushing, and publication. Use `-CheckOnly` when asked to preview
   or validate the driver without releasing. Do not run its publishing path
   merely to test changes to release tooling. It must never commit unrelated
   unfinished work.

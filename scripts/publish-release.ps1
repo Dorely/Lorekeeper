@@ -20,7 +20,11 @@ param(
     [ValidateSet('Draft', 'Submit')]
     [string]$StoreSubmission,
 
-    [switch]$AllowDirectMainPush
+    [switch]$AllowDirectMainPush,
+
+    # Set by scripts/release.ps1 to the commit its preflight already verified.
+    [ValidatePattern('^[0-9a-f]{40}$')]
+    [string]$VerifiedCommit
 )
 
 Set-StrictMode -Version Latest
@@ -412,7 +416,14 @@ try
     {
         Assert-AppImagePublicationReady -RepositoryRoot $repoRoot
     }
-    Invoke-ReleasePreflight $repoRoot
+    if ($VerifiedCommit -ceq $sourceCommit)
+    {
+        Write-Host "Build-and-test preflight already passed for $sourceCommit."
+    }
+    else
+    {
+        Invoke-ReleasePreflight $repoRoot
+    }
     if (@(& git status --porcelain).Count -gt 0 -or (& git rev-parse HEAD).Trim() -ne $sourceCommit)
     {
         throw 'The source changed during release preflight.'

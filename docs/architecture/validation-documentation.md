@@ -374,8 +374,9 @@ publisher/profile inputs, and real-device acceptance. Direct-DMG evidence is not
 MAS or notarization evidence.
 
 The stable driver `scripts/release.ps1` owns clean-main version selection, the
-version-only commit, preflight before that commit and again on its exact source,
-normal push, native packaging, and publication. `-CheckOnly` previews without
+version-only commit, one preflight on that exact committed source, the
+normal push, native packaging, and publication. A failed preflight leaves the
+unpushed version commit for the rerun to reuse. `-CheckOnly` previews without
 editing, committing, pushing, packaging, or publishing. `-WindowsOnly` omits
 Linux and macOS; `-LinuxDistribution` selects the local WSL distribution.
 `-StoreSubmission Draft|Submit` is stable-only and requires the ignored identity
@@ -390,7 +391,8 @@ partial publication require inspection; no reset, force push, or tag overwrite
 is performed.
 
 The publisher requires clean source at fetched `origin/main`, matching project
-version, and `-AllowDirectMainPush`. Exact v1.0.0 creates the final bridge in both
+version, and `-AllowDirectMainPush`. It runs the preflight itself unless the
+driver passes `-VerifiedCommit` equal to that source commit. Exact v1.0.0 creates the final bridge in both
 repositories; all later releases use `Dorely/Lorekeeper` only, and this is the sole
 runtime update authority. At v1 launch, the additional explicit
 `-MakeSourcePublicAfterV1` flag publishes the verified asset sets first, changes

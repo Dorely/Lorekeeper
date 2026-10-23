@@ -252,7 +252,7 @@ try
     }
     $platforms = if ($WindowsOnly) { 'Windows x64' } else { "Windows x64, Linux x64 (WSL2/$LinuxDistribution), and macOS arm64" }
     Write-Host "Release plan: $currentVersion -> $Version; $platforms; main -> $($repositories -join ', ')." -ForegroundColor Green
-    Write-Host 'The driver will verify, commit only the project version if needed, verify again, push main, build, and publish.'
+    Write-Host 'The driver will commit only the project version if needed, verify that exact commit, push main, build, and publish.'
     if (-not $WindowsOnly)
     {
         $null = Assert-AppImagePublicationReady -RepositoryRoot $repoRoot -CheckOnly:$CheckOnly
@@ -280,7 +280,7 @@ try
 
     Assert-CleanReleaseTree
     $preparationHead = Invoke-ReleaseCommand git @('rev-parse', 'HEAD')
-    if ($preparationHead -ne $head) { throw 'HEAD changed during release preflight. Rerun from the new state.' }
+    if ($preparationHead -ne $head) { throw 'HEAD changed during release checks. Rerun from the new state.' }
     if ($Version -ne $currentVersion)
     {
         $originalProjectBytes = [System.IO.File]::ReadAllBytes($projectPath)
@@ -288,7 +288,6 @@ try
         $updatedText = $projectText.Replace("<Version>$currentVersion</Version>", "<Version>$Version</Version>")
         [System.IO.File]::WriteAllText($projectPath, $updatedText, [System.Text.UTF8Encoding]::new($false))
         $writtenProjectHash = (Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash
-        Invoke-ReleasePreflight $repoRoot
         Invoke-ReleaseCommand git @('diff', '--check')
         $changedFiles = @(Invoke-ReleaseCommand git @('diff', '--name-only', 'HEAD'))
         if ($changedFiles.Count -ne 1 -or $changedFiles[0] -ne $projectRelativePath -or
@@ -297,7 +296,7 @@ try
             (Invoke-ReleaseCommand git @('rev-parse', 'HEAD')) -ne $preparationHead -or
             (Get-FileHash -LiteralPath $projectPath -Algorithm SHA256).Hash -ne $writtenProjectHash)
         {
-            throw 'The worktree changed during verification. Inspect it before releasing; no version commit was created.'
+            throw 'The worktree changed while preparing the version edit. Inspect it before releasing; no version commit was created.'
         }
         Invoke-ReleaseCommand git @('diff', '--', $projectRelativePath)
         Invoke-ReleaseCommand git @('add', '--', $projectRelativePath)
@@ -315,7 +314,7 @@ try
     Invoke-ReleaseCommand git @('push', 'origin', 'HEAD:refs/heads/main')
     Invoke-ReleaseCommand git @('fetch', 'origin', '--prune')
     if ((Invoke-ReleaseCommand git @('rev-parse', 'origin/main')) -ne $releaseHead) { throw 'origin/main moved after the push. Rerun verification on its new state.' }
-    $publishArguments = @{ Version = $Version; AllowDirectMainPush = $true }
+    $publishArguments = @{ Version = $Version; AllowDirectMainPush = $true; VerifiedCommit = $releaseHead }
     if ($WindowsOnly) { $publishArguments.WindowsOnly = $true }
     if ($RunMacStartupCheck) { $publishArguments.RunMacStartupCheck = $true }
     $publishArguments.LinuxDistribution = $LinuxDistribution
