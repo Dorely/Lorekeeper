@@ -447,6 +447,48 @@ public sealed class GitRepositoryStore : IGitRepositoryStore
         }
     }
 
+    public void VisitAncestorFiles(
+        Guid repositoryId,
+        string commitSha,
+        IReadOnlyCollection<string> paths,
+        Func<IReadOnlyDictionary<string, byte[]>, bool> visit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(visit);
+        var repositoryPath = GetRepositoryPath(repositoryId);
+        lock (GetRepositoryLock(repositoryPath))
+        {
+            using var repository = OpenRepository(repositoryPath);
+            var commit = ResolveFullCommit(repository, commitSha, nameof(commitSha));
+            var ancestors = repository.Commits.QueryBy(new CommitFilter
+            {
+                IncludeReachableFrom = commit,
+                SortBy = CommitSortStrategies.Topological | CommitSortStrategies.Time,
+            });
+            foreach (var ancestor in ancestors)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (ancestor.Id.Equals(commit.Id))
+                    continue;
+
+                var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                foreach (var path in paths)
+                {
+                    if (ancestor[path]?.Target is not Blob blob)
+                        continue;
+                    using var content = blob.GetContentStream();
+                    using var buffer = new MemoryStream();
+                    content.CopyTo(buffer);
+                    files.Add(path, buffer.ToArray());
+                }
+
+                if (!visit(files))
+                    return;
+            }
+        }
+    }
+
     public GitCommitMetadata? FindMergeBase(Guid repositoryId, string currentCommitSha, string candidateCommitSha)
     {
         var repositoryPath = GetRepositoryPath(repositoryId);

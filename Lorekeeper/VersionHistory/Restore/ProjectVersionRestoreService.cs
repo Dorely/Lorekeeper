@@ -265,7 +265,10 @@ public sealed class ProjectVersionRestoreService(
             || current.Manifest.RepositoryId != current.Payload.RepositoryId
             || current.Manifest.RepositoryId != target.Manifest.RepositoryId)
             throw new VersionHistoryRestoreException("ProjectIdentityMismatch", "The current checkpoint belongs to another project.");
-        var restorePayload = MergePayload(current.Payload, target.Payload, selection);
+        var restorePayload = MergePayload(
+            RecoverForwardFields(current.Payload, current.Manifest.SchemaVersion, current.Commit.Sha, cancellationToken),
+            RecoverForwardFields(target.Payload, target.Manifest.SchemaVersion, target.Commit.Sha, cancellationToken),
+            selection);
         ValidateWholePayload(restorePayload);
         var warnings = new List<string>();
         var unresolved = new List<VersionHistoryUnresolvedReference>();
@@ -333,7 +336,12 @@ public sealed class ProjectVersionRestoreService(
         ArgumentNullException.ThrowIfNull(import.Artifact);
         ValidateImport(import);
 
-        var payload = import.Artifact.Payload;
+        var payload = RecoverForwardFields(
+            import.Artifact.Payload,
+            import.Artifact.Manifest.SchemaVersion,
+            import.HeadCommitSha,
+            cancellationToken);
+        var recoveredForwardFields = !ReferenceEquals(payload, import.Artifact.Payload);
         var warnings = new List<string>();
         var unresolved = new List<VersionHistoryUnresolvedReference>();
         VersionHistoryImportResult result;
@@ -412,6 +420,8 @@ public sealed class ProjectVersionRestoreService(
         }
 
         await RebuildProjectionsAsync(payload.ProjectId, payload, warnings, CancellationToken.None);
+        if (recoveredForwardFields)
+            await CheckpointCarriedForwardFieldsAsync(payload.ProjectId);
         return result;
     }
 
@@ -489,7 +499,13 @@ public sealed class ProjectVersionRestoreService(
             checkout.HeadTreeSha,
             checkout.ParentCommitSha,
             checkout.Message));
-        var payload = checkout.Artifact.Payload;
+        // The checkout's own head is applied; carried-forward content leaves the
+        // workspace changed until the next checkpoint records it.
+        var payload = RecoverForwardFields(
+            checkout.Artifact.Payload,
+            checkout.Artifact.Manifest.SchemaVersion,
+            checkout.HeadCommitSha,
+            cancellationToken);
         if (payload.ProjectId != checkout.ProjectId
             || !string.Equals(localHead.Sha, checkout.HeadCommitSha, StringComparison.Ordinal)
             || !string.Equals(localHead.TreeSha, checkout.HeadTreeSha, StringComparison.Ordinal))
@@ -594,13 +610,52 @@ public sealed class ProjectVersionRestoreService(
         return result;
     }
 
+    // Carries forward content an older Lorekeeper could not represent when it
+    // wrote this checkpoint. Recovery is best effort and never blocks applying
+    // the checkpoint itself.
+    private VersionHistorySnapshotPayload RecoverForwardFields(
+        VersionHistorySnapshotPayload payload,
+        int schemaVersion,
+        string commitSha,
+        CancellationToken cancellationToken)
+    {
+        if (git is null)
+            return payload;
+        try
+        {
+            return VersionHistoryForwardFields.Apply(
+                payload,
+                VersionHistoryForwardFields.Read(git, payload.RepositoryId, commitSha, schemaVersion, cancellationToken));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return payload;
+        }
+    }
+
+    private async Task CheckpointCarriedForwardFieldsAsync(Guid projectId)
+    {
+        try
+        {
+            await history.CreateCheckpointAsync(
+                projectId,
+                ProjectVersionCheckpointKind.Restored,
+                VersionHistoryForwardFields.CheckpointMessage,
+                cancellationToken: CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The content is applied; the next checkpoint records it instead.
+        }
+    }
+
     private static void ValidateImport(VersionHistoryValidatedSnapshotImport import)
     {
         var manifest = import.Artifact.Manifest;
         var payload = import.Artifact.Payload;
         if (!string.Equals(manifest.FormatId, VersionHistorySnapshotContract.FormatId, StringComparison.Ordinal)
             || !VersionHistorySnapshotContract.CanReadSchema(manifest.SchemaVersion)
-            || !manifest.IncludedAreas.SequenceEqual(VersionHistorySnapshotContract.IncludedAreas, StringComparer.Ordinal)
+            || !VersionHistorySnapshotContract.HasReadableAreas(manifest)
             || !IsSha256(manifest.ContentHash)
             || !IsSha256(manifest.ManifestHash)
             || manifest.RepositoryId == Guid.Empty

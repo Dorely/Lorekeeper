@@ -12,6 +12,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
+using Lorekeeper.ProjectArchive;
 using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Lorekeeper.VersionHistory.Restore;
@@ -115,6 +116,107 @@ public sealed class ProjectVersionRestoreTests
             Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(root));
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void SnapshotsFromANewerSchemaAreReadForTheContentThisVersionKnows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var chapter = CreateChapter(Guid.NewGuid(), "Chapter");
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid(), chapter: chapter);
+            payload = payload with { Narrative = payload.Narrative with { WorldWorkingNotes = "Open question" } };
+            WriteSnapshotTree(
+                root,
+                payload,
+                (path, bytes) =>
+                {
+                    if (path is not ("narrative/narrative.json" or "project/project.json")) return bytes;
+                    var node = System.Text.Json.Nodes.JsonNode.Parse(bytes)!.AsObject();
+                    node["zFutureField"] = "added by a newer Lorekeeper";
+                    return VersionHistoryCanonicalJson.Serialize(node);
+                },
+                schemaVersion: VersionHistorySnapshotContract.SchemaVersion + 1,
+                extraFiles: new Dictionary<string, byte[]>
+                {
+                    ["future/area.json"] = Encoding.UTF8.GetBytes("{\"items\":[]}"),
+                    [$"narrative/chapters/{chapter.Id:N}/future.json"] = Encoding.UTF8.GetBytes("{}"),
+                });
+
+            var artifact = new VersionHistorySnapshotReader().Read(root);
+
+            Assert.Equal(VersionHistorySnapshotContract.SchemaVersion + 1, artifact.Manifest.SchemaVersion);
+            Assert.Equal("Open question", artifact.Payload.Narrative.WorldWorkingNotes);
+            Assert.Equal(chapter.Id, Assert.Single(artifact.Payload.Narrative.Chapters).Id);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void SnapshotsFromANewerSchemaStillFailIntegrityChecks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            WriteSnapshotTree(
+                root,
+                CreatePayload(Guid.NewGuid(), Guid.NewGuid()),
+                schemaVersion: VersionHistorySnapshotContract.SchemaVersion + 1);
+            File.AppendAllText(Path.Combine(root, "graph", "graph.json"), " ");
+
+            Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void ContentDroppedByAnOlderWriterIsRecoveredFromNewerHistory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new GitRepositoryStore(new GitRepositoryStoreOptions { HistoryRoot = Path.Combine(root, "history") });
+            var repositoryId = Guid.NewGuid();
+            var payload = CreatePayload(repositoryId, Guid.NewGuid());
+            var withNotes = payload with { Narrative = payload.Narrative with { WorldWorkingNotes = "Keep me" } };
+
+            string Commit(VersionHistorySnapshotPayload snapshot, int schemaVersion)
+            {
+                var tree = Path.Combine(root, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tree);
+                WriteSnapshotTree(tree, snapshot, schemaVersion: schemaVersion);
+                var files = Directory.EnumerateFiles(tree, "*", SearchOption.AllDirectories)
+                    .Select(file => ProjectArchiveFileDescriptor.CreateAsync(
+                        Path.GetRelativePath(tree, file).Replace('\\', '/'),
+                        "version-history-snapshot",
+                        "application/json",
+                        file).GetAwaiter().GetResult())
+                    .ToList();
+                return store.WriteSnapshot(repositoryId, files, $"Schema {schemaVersion}", DateTimeOffset.UtcNow).CommitSha;
+            }
+
+            Commit(withNotes, 13);
+            var olderHead = Commit(payload with { Project = payload.Project with { ContestModeEnabled = true } }, 12);
+
+            var values = VersionHistoryForwardFields.Read(store, repositoryId, olderHead, schemaVersion: 12);
+            var recovered = VersionHistoryForwardFields.Apply(payload, values);
+
+            Assert.Equal("Keep me", recovered.Narrative.WorldWorkingNotes);
+            Assert.Null(VersionHistoryForwardFields.Read(store, repositoryId, olderHead, schemaVersion: 13));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                // Git writes loose objects read-only.
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Theory]
@@ -1897,7 +1999,8 @@ public sealed class ProjectVersionRestoreTests
         VersionHistorySnapshotPayload payload,
         Func<string, byte[], byte[]>? transform = null,
         int? schemaVersion = null,
-        IReadOnlyDictionary<string, byte[]>? sourceOriginalData = null)
+        IReadOnlyDictionary<string, byte[]>? sourceOriginalData = null,
+        IReadOnlyDictionary<string, byte[]>? extraFiles = null)
     {
         var effectiveSchemaVersion = schemaVersion ?? VersionHistorySnapshotContract.SchemaVersion;
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
@@ -1955,6 +2058,8 @@ public sealed class ProjectVersionRestoreTests
             foreach (var path in files.Keys.ToList())
                 files[path] = transform(path, files[path]);
         }
+        foreach (var (path, bytes) in extraFiles ?? new Dictionary<string, byte[]>())
+            files[path] = bytes;
 
         var contentHash = VersionHistoryCanonicalJson.Sha256Hex(files.Select(item => (item.Key, item.Value)));
         var manifest = new VersionHistorySnapshotManifest(

@@ -71,7 +71,7 @@ projection repair do not retain an EF context across that client flush.
 
 ### Snapshot contract
 
-The format ID remains `lorekeeper.version-history-snapshot`. Current schema v12
+The format ID remains `lorekeeper.version-history-snapshot`. Current schema v13
 uses this stable layout:
 
 ```text
@@ -106,10 +106,45 @@ token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
 `N` format. Writers emit the exact canonical schema-v13 file set with manuscript
-v7 tables, notes, and citation identities; undeclared files and
-noncanonical paths or encodings fail closed. Readers route every predecessor
-from schema v1 through v10 through an explicit adapter only after
-validating the predecessor's original manifest and file hashes.
+v7 tables, notes, and citation identities. For the current and older schemas,
+undeclared files and noncanonical paths or encodings are rejected. Readers route
+every predecessor from schema v1 through v10 through an explicit adapter only
+after validating the predecessor's original manifest and file hashes.
+
+### Cross-version compatibility
+
+An older and a newer Lorekeeper can share one history (an update rolling out,
+or two installs synced through GitHub) without losing content:
+
+- **Newer snapshots are readable.** A snapshot whose schema is newer than the
+  app's is read for the content this version understands. Path safety, file
+  lengths and hashes, the content hash, the manifest hash (recomputed from the
+  raw manifest), identities, and references are still verified; unknown
+  properties, unknown files (including extra files in a chapter folder), and
+  additional manifest areas are ignored instead of rejected. Fetch, compare,
+  checkout, and clone import therefore work against history from a newer app,
+  and the newer content stays untouched in Git.
+- **Dropped fields are recovered from history.** An older app cannot store
+  fields it does not know, so checkpoints it writes on top of newer history
+  omit them. `VersionHistoryForwardFields` registers each field with the schema
+  that introduced it (v11 World Brief, v12 Other printer dimensions by release
+  ID, v13 World Working Notes). When a checkpoint older than a field's schema is
+  applied by restore, exact-head checkout, or clone import, the field's value is
+  taken from the newest ancestor whose schema carries it and filled in where the
+  older payload is empty. Recovery is best effort and never blocks applying the
+  checkpoint. Clone import records a carried-forward checkpoint afterward;
+  checkout leaves the workspace changed until the next checkpoint.
+- **Updating brings dropped content back.** At startup, after history
+  reconciliation, `ProjectVersionForwardFieldRecoveryService` checks each
+  project whose head checkpoint is older than the current schema while newer
+  history exists, fills recovered values into the live project where the live
+  value is empty (through the owning World Brief service, so indexing follows),
+  and records a `Restored` checkpoint. Failures are logged and retried on the
+  next startup.
+
+Each schema bump that adds a field registers it in `VersionHistoryForwardFields`
+and, if it lives outside the payload appliers already covered, in the startup
+recovery service.
 Schema v12 adds optional Other printer dimensions to publication releases; the
 field is omitted when no dimensions are entered, so schema v11 publication files
 read unchanged.
@@ -495,9 +530,9 @@ in deterministic checkpoints, comparisons, restore, and clone import.
 
 | Path or family | Architectural role |
 |---|---|
-| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v10 payloads, canonical JSON, deterministic writer, strict reader, explicit predecessor adapters, and manifest/blob validation. |
+| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v13 payloads, canonical JSON, deterministic writer, validating reader (newer schemas read tolerantly), explicit predecessor adapters, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
-| `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, and assistant checkpoint adapter. |
+| `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, assistant checkpoint adapter, and cross-version forward-field recovery. |
 | `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |
 | `Lorekeeper/VersionHistory/Restore/` | Whole/selective restore, clone import application, exact-head checkout, dependency validation, and projection repair. |
 | `Lorekeeper/VersionHistory/Sync/` | GitHub remote attachment, fetch/fast-forward/push policy, remote checkout coordination, and clone transport. |

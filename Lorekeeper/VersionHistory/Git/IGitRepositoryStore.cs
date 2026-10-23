@@ -43,6 +43,19 @@ public interface IGitRepositoryStore
 
     IReadOnlyList<GitCommitMetadata> ListCommits(Guid repositoryId, int maxCount = 100);
 
+    /// <summary>
+    /// Visits the ancestors of a commit, children before parents and excluding
+    /// the commit itself, with the bytes of each requested root-relative path
+    /// present in that ancestor. The walk stops when <paramref name="visit"/>
+    /// returns false.
+    /// </summary>
+    void VisitAncestorFiles(
+        Guid repositoryId,
+        string commitSha,
+        IReadOnlyCollection<string> paths,
+        Func<IReadOnlyDictionary<string, byte[]>, bool> visit,
+        CancellationToken cancellationToken = default);
+
     GitCommitMetadata? FindMergeBase(Guid repositoryId, string currentCommitSha, string candidateCommitSha);
 
     GitHistoryComparison CompareHistory(

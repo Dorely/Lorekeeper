@@ -28,8 +28,18 @@ public static class VersionHistorySnapshotContract
         "publication",
     ];
 
+    // Newer schemas are readable: their known content is applied and anything
+    // newer is ignored here but preserved in history (see IsNewerSchema).
     public static bool CanReadSchema(int schemaVersion) =>
-        schemaVersion is >= MinimumReadableSchemaVersion and <= SchemaVersion;
+        schemaVersion >= MinimumReadableSchemaVersion;
+
+    public static bool IsNewerSchema(int schemaVersion) => schemaVersion > SchemaVersion;
+
+    /// <summary>A newer writer may add areas; it must still carry every area this version reads.</summary>
+    public static bool HasReadableAreas(VersionHistorySnapshotManifest manifest) =>
+        IsNewerSchema(manifest.SchemaVersion)
+            ? IncludedAreas.All(area => manifest.IncludedAreas.Contains(area, StringComparer.Ordinal))
+            : manifest.IncludedAreas.SequenceEqual(IncludedAreas, StringComparer.Ordinal);
 }
 
 public sealed record VersionHistorySnapshotFile(

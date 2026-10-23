@@ -91,6 +91,26 @@ public sealed class ApplicationStartupWorker(
                 await outlineGraphSync.RepairProjectAsync(projectIds[index], stoppingToken);
             }
 
+            var forwardFields = scope.ServiceProvider.GetRequiredService<IProjectVersionForwardFieldRecoveryService>();
+            foreach (var projectId in projectIds)
+            {
+                try
+                {
+                    if (await forwardFields.CarryForwardAsync(projectId, stoppingToken))
+                        logger.LogInformation(
+                            "Carried forward content from newer project history into project {ProjectId}.",
+                            projectId);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // History keeps the content; a later startup retries.
+                    logger.LogWarning(
+                        exception,
+                        "Could not carry forward newer history content into project {ProjectId}.",
+                        projectId);
+                }
+            }
+
             if (projectIds.Count == 0)
             {
                 startup.ReportInitialization(

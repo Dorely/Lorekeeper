@@ -153,6 +153,7 @@ builder.Services.AddSingleton<IProjectVersionAutoPushQueue, ProjectVersionAutoPu
 builder.Services.AddScoped<ProjectVersionAutoPushService>();
 builder.Services.AddHostedService<ProjectVersionAutoPushWorker>();
 builder.Services.AddScoped<IProjectVersionHistoryReconciliationService, ProjectVersionHistoryReconciliationService>();
+builder.Services.AddScoped<IProjectVersionForwardFieldRecoveryService, ProjectVersionForwardFieldRecoveryService>();
 builder.Services.AddScoped<IAssistantVersionCheckpointService, AssistantVersionCheckpointService>();
 builder.Services.AddScoped<ProjectVersionRestoreService>();
 builder.Services.AddScoped<IProjectVersionRestoreService>(services =>

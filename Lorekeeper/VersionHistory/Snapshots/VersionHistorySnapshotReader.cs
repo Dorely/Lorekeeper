@@ -70,7 +70,12 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         var manifestBytes = File.ReadAllBytes(manifestPath);
         var manifest = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotManifest>(manifestBytes);
-        if (!manifestBytes.AsSpan().SequenceEqual(VersionHistoryCanonicalJson.Serialize(manifest)))
+        // A snapshot written by a newer Lorekeeper is read for what this version
+        // understands: file hashes, lengths, paths and identities are still
+        // verified, but properties, files and areas it does not know are ignored
+        // instead of rejected, and they stay untouched in Git history.
+        var canonical = !VersionHistorySnapshotContract.IsNewerSchema(manifest.SchemaVersion);
+        if (canonical && !manifestBytes.AsSpan().SequenceEqual(VersionHistoryCanonicalJson.Serialize(manifest)))
             throw new InvalidDataException("Snapshot manifest.json is not in canonical form.");
         ValidateManifest(manifest, expectedRepositoryId, expectedProjectId);
 
@@ -115,28 +120,30 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         if (!string.Equals(actualPayloadHash, manifest.ContentHash, StringComparison.Ordinal))
             throw new InvalidDataException("Snapshot payload content hash does not match its manifest.");
 
-        var expectedManifestHash = VersionHistoryCanonicalJson.Sha256Hex(
-            VersionHistoryCanonicalJson.Serialize(manifest with { ManifestHash = string.Empty }));
+        var expectedManifestHash = canonical
+            ? VersionHistoryCanonicalJson.Sha256Hex(
+                VersionHistoryCanonicalJson.Serialize(manifest with { ManifestHash = string.Empty }))
+            : VersionHistoryCanonicalJson.ManifestHash(manifestBytes);
         if (!string.Equals(expectedManifestHash, manifest.ManifestHash, StringComparison.Ordinal))
             throw new InvalidDataException("Snapshot manifest hash does not match its contents.");
 
         var listedPaths = manifest.Files.Select(item => NormalizeRelativePath(item.Path)).ToList();
         ValidateFileSet(fullRoot, listedPaths);
-        var project = ReadRequired<VersionHistorySnapshotProjectArea>(files, "project/project.json");
+        var project = ReadRequired<VersionHistorySnapshotProjectArea>(files, "project/project.json", canonical);
         var narrativeFile = manifest.SchemaVersion < 11
             ? ReadRequired<VersionHistorySnapshotNarrativeFileV10>(files, "narrative/narrative.json").ToCurrent()
-            : ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json");
+            : ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json", canonical);
         if (narrativeFile.WorldBrief is null) throw new InvalidDataException("World Brief content cannot be null.");
         if (manifest.SchemaVersion >= 13 && narrativeFile.WorldWorkingNotes is null)
             throw new InvalidDataException("World Working Notes content cannot be null.");
-        var chapterPaths = ValidateChapterFileSet(listedPaths);
+        var chapterPaths = ValidateChapterFileSet(listedPaths, canonical);
         var chapters = ReadChapters(files, chapterPaths, manifest.SchemaVersion);
         var narrative = narrativeFile.ToArea(chapters);
-        var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
+        var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json", canonical);
         var sources = ReadSources(files, manifest.SchemaVersion, listedPaths, fullRoot, validatedFiles, readOptions.CancellationToken);
-        var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
+        var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json", canonical);
         assets = AdaptAssetsForSchema(assets, manifest.SchemaVersion);
-        var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
+        var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json", canonical);
         var composition = ReadComposition(files, manifest.SchemaVersion);
         var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(
             files,
@@ -258,7 +265,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException("Snapshot repository ID does not match the expected repository.");
         if (expectedProjectId is Guid projectId && projectId != manifest.ProjectId)
             throw new InvalidDataException("Snapshot project ID does not match the expected project.");
-        if (!manifest.IncludedAreas.SequenceEqual(VersionHistorySnapshotContract.IncludedAreas, StringComparer.Ordinal))
+        if (!VersionHistorySnapshotContract.HasReadableAreas(manifest))
             throw new InvalidDataException($"Snapshot included areas do not match schema version {manifest.SchemaVersion}.");
         if (manifest.Files.Count == 0)
             throw new InvalidDataException("Snapshot contains no payload files.");
@@ -347,7 +354,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             return AdaptLegacySources(legacy, schemaVersion);
         }
 
-        var index = ReadRequired<VersionHistorySourceIndex>(files, "sources/index.json");
+        var canonical = !VersionHistorySnapshotContract.IsNewerSchema(schemaVersion);
+        var index = ReadRequired<VersionHistorySourceIndex>(files, "sources/index.json", canonical);
         if (index.SourceIds.Distinct().Count() != index.SourceIds.Count || index.SourceIds.Any(id => id == Guid.Empty))
             throw new InvalidDataException("Snapshot source index contains duplicate or empty source IDs.");
         var retained = new SourceRecordList(index.SourceIds.OrderBy(id => id).ToList(), sourceId =>
@@ -357,7 +365,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             if (!validatedFiles.TryGetValue(path, out var descriptor))
                 throw new InvalidDataException($"Source manifest {sourceId:N} is missing.");
             var bytes = ReadValidatedRecord(root, path, descriptor, cancellationToken);
-            var manifest = ReadRequired<VersionHistoryRetainedSource>(new Dictionary<string, byte[]> { [path] = bytes }, path);
+            var manifest = ReadRequired<VersionHistoryRetainedSource>(new Dictionary<string, byte[]> { [path] = bytes }, path, canonical);
             if (manifest.Id != sourceId)
                 throw new InvalidDataException($"Source manifest {sourceId:N} has a mismatched source ID.");
             return manifest;
@@ -606,7 +614,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     }
 
     private static IReadOnlyDictionary<Guid, ChapterFilePaths> ValidateChapterFileSet(
-        IEnumerable<string> actualFiles)
+        IEnumerable<string> actualFiles,
+        bool exact)
     {
         var entries = new Dictionary<Guid, (string? MetadataPath, string? ManuscriptPath)>();
         foreach (var path in actualFiles.Where(path =>
@@ -620,6 +629,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 || chapterId == Guid.Empty
                 || !string.Equals(segments[2], chapterId.ToString("N"), StringComparison.Ordinal))
             {
+                if (!exact)
+                    continue;
                 throw new InvalidDataException(
                     $"Snapshot chapter path '{path}' is not in the canonical chapter layout.");
             }
@@ -637,7 +648,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                     throw new InvalidDataException($"Snapshot contains duplicate chapter manuscript for {chapterId:N}.");
                 current.ManuscriptPath = path;
             }
-            else
+            else if (exact)
             {
                 throw new InvalidDataException($"Snapshot chapter path '{path}' is not a declared chapter file.");
             }
@@ -668,7 +679,10 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var chapters = new List<ProjectExportChapter>(chapterPaths.Count);
         foreach (var (chapterId, paths) in chapterPaths.OrderBy(item => item.Key))
         {
-            var metadata = ReadRequired<VersionHistorySnapshotChapter>(files, paths.MetadataPath);
+            var metadata = ReadRequired<VersionHistorySnapshotChapter>(
+                files,
+                paths.MetadataPath,
+                !VersionHistorySnapshotContract.IsNewerSchema(schemaVersion));
             if (metadata.Id != chapterId)
             {
                 throw new InvalidDataException(
@@ -704,7 +718,10 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     {
         const string path = "composition/composition.json";
         if (schemaVersion >= VersionHistorySnapshotContract.DesignedPagesSchemaVersion)
-            return ReadRequired<VersionHistorySnapshotCompositionArea>(files, path);
+            return ReadRequired<VersionHistorySnapshotCompositionArea>(
+                files,
+                path,
+                !VersionHistorySnapshotContract.IsNewerSchema(schemaVersion));
 
         // Validate the persisted shape before adapting it. Serializing the current
         // DTO would add designedPages, which did not exist in schema v1-v6.
@@ -837,7 +854,9 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 throw new InvalidDataException($"Snapshot blob path '{face.BlobPath}' is duplicated.");
         }
 
-        if (!expected.SetEquals(actualFiles))
+        if (VersionHistorySnapshotContract.IsNewerSchema(schemaVersion)
+                ? !expected.IsSubsetOf(actualFiles)
+                : !expected.SetEquals(actualFiles))
             throw new InvalidDataException(
                 "Snapshot payload files do not exactly match the canonical area, chapter, style, and asset paths.");
     }

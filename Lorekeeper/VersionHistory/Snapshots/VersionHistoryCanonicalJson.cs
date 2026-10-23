@@ -96,6 +96,27 @@ internal static class VersionHistoryCanonicalJson
         };
     }
 
+    /// <summary>
+    /// Recomputes a manifest hash from its raw JSON, so a manifest from a newer
+    /// writer verifies even when it carries properties this version does not model.
+    /// </summary>
+    public static string ManifestHash(ReadOnlySpan<byte> manifestBytes)
+    {
+        JsonNode node;
+        try
+        {
+            node = JsonNode.Parse(manifestBytes) as JsonObject
+                ?? throw new InvalidDataException("Snapshot manifest.json must be an object.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Snapshot manifest.json is malformed.", exception);
+        }
+
+        node["manifestHash"] = string.Empty;
+        return Sha256Hex(Encoding.UTF8.GetBytes(Canonicalize(node).ToJsonString(SerializerOptions)));
+    }
+
     public static string Sha256Hex(ReadOnlySpan<byte> bytes) =>
         Convert.ToHexStringLower(SHA256.HashData(bytes));
 
