@@ -426,7 +426,7 @@ and update behavior requires target-specific, user-authorized evidence.
 
 | File or family | Architectural role |
 |---|---|
-| [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
+| [`AGENTS.md`](../../AGENTS.md) and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/evidence/`](../evidence/) | Current sourced requirements, the owned-renderer decision, and the trailer QA and sharing audit; none supersedes current code. |

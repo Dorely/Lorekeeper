@@ -117,6 +117,28 @@
   and resolve ownership before implementation. Never use a destructive reset or
   checkout to simplify the task.
 
+## Resilience Over Fail-Closed
+
+- Lorekeeper should just work. When the app meets a conflict, an unexpected,
+  older, or newer data shape, a transient failure, or partially invalid state,
+  it does everything it reasonably can to resolve the situation automatically:
+  retry, adapt, repair, reconcile, and carry forward what it cannot yet
+  interpret. Stopping and showing the user an error is the last resort.
+- Do not design new behavior to fail closed. Prefer graceful degradation:
+  accept and use what can be understood, keep what cannot be understood intact,
+  and continue.
+- Automatic resolution never silently loses or overwrites authored content. When
+  two versions of content cannot be reconciled, keep both (for example in
+  version history) rather than discarding one or blocking the user.
+- Show the user a failure only when no automatic resolution exists and their
+  decision is genuinely required. Then explain it plainly in product terms and
+  offer the action that resolves it, never a dead end or a generic error.
+- Security boundaries are not fail-closed UX and stay strict: credentials and
+  tokens, path containment and reparse-point checks, untrusted-content execution,
+  and external-publication consent.
+- Existing fail-closed paths and documentation are legacy. When work touches
+  one, rework it to this philosophy in the same change.
+
 ## Application-Owned Dialogs
 
 - Product confirmations, alerts, prompts, pickers, and modal workflows must be
@@ -180,7 +202,7 @@
   This is the Press TDD workflow and stays.
 - Automated tests in `Lorekeeper.Tests` are limited to the data-safety core:
   startup database migration, versioned project import/export, archive, and
-  history preservation and fail-closed behavior, and recovery.
+  history preservation, automatic conflict and error resolution, and recovery.
 - **Automated tests outside those two scopes are forbidden.** Do not create
   new test projects, test suites, or one-off test harnesses anywhere else. A
   request to add tests does not broaden this boundary unless the user

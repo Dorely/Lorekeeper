@@ -24,6 +24,12 @@ implemented.
 
 ## Global invariants
 
+- Resilience over fail-closed: the app resolves conflicts, version and shape
+  differences, and recoverable errors automatically, preserves anything it
+  cannot interpret, and shows the user a failure only when their decision is
+  genuinely required. Security boundaries stay strict. Fail-closed behavior
+  described in routed chapters is legacy and is reworked when touched (see
+  `AGENTS.md`).
 - Razor components own interaction and presentation state. Domain behavior,
   persistence, provider access, indexing, assistant mutations, media workflows,
   publishing, and background work belong to injected owning services.
