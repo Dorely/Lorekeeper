@@ -38,7 +38,8 @@ provenance, and a reproducible export recipe.
   own image allowance, at about 1.6 megapixels in the requested aspect), an
   OpenRouter API key, or an OpenAI Images-compatible endpoint. Pick the default
   in Settings > Image providers, and switch provider or model per request in
-  the Images workspace.
+  the Images workspace, where any library image can also be edited from a
+  written description of the change.
 - **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
   EPUB, and PDF ebook releases, with covers sized to the calculated spine and
   print profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu, or

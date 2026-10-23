@@ -272,7 +272,11 @@ aspect or framing expansion is a separate outpainting edit: wider targets ask
 for natural extension left and right and taller targets above and below. Both
 are model-driven and do not guarantee exact source-pixel preservation. Edits
 locate the change through the prompt alone, and the complete result must
-be inspected before it is presented, promoted, or placed. The resulting `Edited`
+be inspected before it is presented, promoted, or placed. The Images page's
+manual Edit action queues the same source-driven edit from a written change and
+optional keep-unchanged details, using an edit-capable model and the source
+image's aspect when the model can render it (otherwise the Core Book page
+default). The resulting `Edited`
 asset remains unattached and linked to its source, while provider-versus-final
 raster details are recorded without selecting a materially different fallback
 implicitly.
@@ -579,7 +583,7 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, requested-scope/background guidance, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
 | `Lorekeeper/Images/ProjectImageBinary.cs` | Image-asset normalization, transparency detection, and full decoding of provider output with local JPEG conversion. |
 | `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
-| `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` | Manual image-library, generation, crop, partial, and job interaction. |
+| `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` | Manual image-library, generation, prompt-only edit, crop, partial, and job interaction. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/DesignedPageService.cs` | `IDesignedPageService`, revision-aware Designed Page aggregates, placement lifecycle, release overrides, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |

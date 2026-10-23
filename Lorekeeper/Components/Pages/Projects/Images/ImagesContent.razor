@@ -116,6 +116,7 @@ else
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenEditModalAsync(image)">Edit</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
                                 <button type="button"
                                         class="btn btn-sm btn-outline-danger"
@@ -436,6 +437,106 @@ else
     </ImageViewerModal>
 }
 
+@if (_editingImage is not null && Project is not null)
+{
+    <div class="edit-modal-backdrop" @onclick="CloseEditModal">
+        <section class="edit-modal" role="dialog" aria-modal="true" aria-label="Edit image" @onclick:stopPropagation="true">
+            <header class="edit-modal-header">
+                <div>
+                    <h5>Edit image</h5>
+                    <span>@_editingImage.FileName</span>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseEditModal"></button>
+            </header>
+            <div class="edit-modal-body">
+                <div class="edit-modal-preview">
+                    <img src="@_editingImage.PreviewUrl" alt="@ImageAlt(_editingImage)" />
+                </div>
+                <div class="edit-modal-form">
+                    <label>
+                        <span>Change</span>
+                        <textarea class="form-control form-control-sm" rows="5" placeholder="Describe the change to make" @bind="_editPrompt"></textarea>
+                    </label>
+                    <label>
+                        <span>Keep unchanged</span>
+                        <textarea class="form-control form-control-sm" rows="3" placeholder="Optional: details that must stay the same" @bind="_editPreserve"></textarea>
+                    </label>
+                    @if (CurrentImageModel is not { Capabilities.Edit: true } editModel)
+                    {
+                        <p class="text-muted small mb-0">No ready image model supports edits. <a href="/settings/image-providers">Image providers</a></p>
+                    }
+                    else
+                    {
+                        <label>
+                            <span>Image model</span>
+                            <select class="form-select form-select-sm" @bind="_imageModelKey" @bind:after="OnImageModelChangedAsync">
+                                @foreach (var group in EditImageModels.GroupBy(model => model.ProviderId))
+                                {
+                                    <optgroup label="@ProviderGroupLabel(group.First())">
+                                        @foreach (var model in group)
+                                        {
+                                            <option value="@ImageModelKey(model)">@model.ModelLabel</option>
+                                        }
+                                    </optgroup>
+                                }
+                            </select>
+                        </label>
+                        <div class="image-form-grid">
+                            <label>
+                                <span>Quality</span>
+                                <select class="form-select form-select-sm" @bind="_imageQuality">
+                                    @if (!editModel.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
+                                    {
+                                        <option value="@_imageQuality">@_imageQuality (currently configured)</option>
+                                    }
+                                    @foreach (var quality in editModel.Capabilities.Qualities)
+                                    {
+                                        <option value="@quality">@quality</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                <span>Background</span>
+                                <select class="form-select form-select-sm" @bind="_imageBackground">
+                                    <option value="auto">Auto</option>
+                                    <option value="opaque">Opaque</option>
+                                    <option value="transparent">Transparent</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>Format</span>
+                                <select class="form-select form-select-sm" @bind="_imageFormat">
+                                    @foreach (var format in ImageFormatOptions)
+                                    {
+                                        <option value="@format">@FormatLabel(format)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                <span>Output compression</span>
+                                <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat is not ("jpeg" or "webp"))" />
+                            </label>
+                        </div>
+                    }
+                    <label><span>Additional represented entities</span></label>
+                    <EntityVisualTargetPicker ProjectId="@Project.Id" @bind-Targets="_editEntityTargets" />
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="_inheritEditEntityTargets" />
+                        <span class="form-check-label">Inherit source image entity associations</span>
+                    </label>
+                    @if (_editError is not null)
+                    {
+                        <p class="text-danger small mb-0">@_editError</p>
+                    }
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_queueingEdit || CurrentImageModel is not { Capabilities.Edit: true })" @onclick="QueueEditAsync">
+                        @(_queueingEdit ? "Queueing..." : "Queue edit")
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+}
+
 <ConfirmationDialog IsOpen="@(_historyDeleteImageId is not null)"
                     Title="Delete image and clear Undo/Redo history?"
                     Message="@(_historyDeleteMessage ?? string.Empty)"
@@ -464,7 +565,14 @@ else
     private IReadOnlyList<ProjectImagePartialView> _partials = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private ProjectImageView? _croppingImage;
+    private ProjectImageView? _editingImage;
     private List<EntityVisualTarget> _generationEntityTargets = [];
+    private List<EntityVisualTarget> _editEntityTargets = [];
+    private bool _inheritEditEntityTargets = true;
+    private string _editPrompt = string.Empty;
+    private string _editPreserve = string.Empty;
+    private string? _editError;
+    private bool _queueingEdit;
     private ProjectImageView? _viewImage;
     private ProjectImagePartialView? _viewPartial;
     private Guid? _partialModalImageId;
@@ -1270,6 +1378,99 @@ else
 
     private void CloseCropModal() => _croppingImage = null;
 
+    private IReadOnlyList<ResolvedImageModel> EditImageModels =>
+        _imageModels.Where(model => model.Capabilities.Edit).ToList();
+
+    private async Task OpenEditModalAsync(ProjectImageView image)
+    {
+        _editingImage = image;
+        _editPrompt = string.Empty;
+        _editPreserve = string.Empty;
+        _editError = null;
+        _editEntityTargets = [];
+        _inheritEditEntityTargets = true;
+        if (CurrentImageModel is not { Capabilities.Edit: true } && EditImageModels.FirstOrDefault() is { } editModel)
+        {
+            _imageModelKey = ImageModelKey(editModel);
+            await OnImageModelChangedAsync();
+        }
+    }
+
+    private void CloseEditModal() => _editingImage = null;
+
+    private async Task QueueEditAsync()
+    {
+        if (Project is null || _editingImage is not { } source) return;
+        _editError = null;
+        _status = null;
+        if (CurrentImageModel is not { Capabilities.Edit: true } model)
+        {
+            _editError = "Choose an image model that supports edits.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_editPrompt))
+        {
+            _editError = "Describe the change to make.";
+            return;
+        }
+
+        _queueingEdit = true;
+        try
+        {
+            // Keep the source framing whenever the model can render its aspect;
+            // otherwise the shared Core Book page default applies.
+            var sourceAspect = source.Width > 0 && source.Height > 0
+                && model.Constraints.AspectInRange((double)source.Width / source.Height)
+                    ? new ImageGenerationTarget { AspectRatio = $"{source.Width}:{source.Height}" }
+                    : null;
+            var compiled = await ImagePrompts.CompileEditAsync(
+                Project.Id,
+                model.Constraints,
+                source.Id,
+                new ImageEditBrief
+                {
+                    IntendedUse = "Project-library edit requested through the manual Images panel.",
+                    Change = _editPrompt,
+                    Preserve = _editPreserve,
+                    AllowRenderedText = false,
+                },
+                references: null,
+                target: sourceAspect,
+                background: _imageBackground);
+            await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
+                source.Id,
+                compiled.Prompt,
+                compiled.Size,
+                _imageQuality,
+                _imageFormat,
+                _imageFormat is "jpeg" or "webp" ? _imageCompression : null,
+                source.AltText,
+                1,
+                [],
+                Label: $"Edit {source.FileName}",
+                EntityTargets: _editEntityTargets,
+                InheritSourceEntityTargets: _inheritEditEntityTargets,
+                BriefJson: compiled.BriefJson,
+                ReferenceManifestJson: compiled.ReferenceManifestJson,
+                TargetGeometryJson: compiled.TargetGeometryJson,
+                ImageModel: model.ModelId,
+                Background: _imageBackground,
+                ImageProviderId: model.ProviderId));
+            await ImageRuntime.EnqueueProjectAsync(Project.Id);
+            _editingImage = null;
+            _status = "Edit job queued.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _editError = ex.Message;
+        }
+        finally
+        {
+            _queueingEdit = false;
+        }
+    }
+
     private async Task OnCropSavedAsync(ProjectImageCropSaved result)
     {
         if (Project is null) return;
@@ -1479,6 +1680,8 @@ else
             _viewImage = ids.Contains(_viewImage.Id) ? _images.First(image => image.Id == _viewImage.Id) : null;
         if (_upscaleModalImageId is Guid upscaleOwnerId && !ids.Contains(upscaleOwnerId))
             _upscaleModalImageId = null;
+        if (_editingImage is not null)
+            _editingImage = ids.Contains(_editingImage.Id) ? _images.First(image => image.Id == _editingImage.Id) : null;
     }
 
     private static string ImageAlt(ProjectImageView image) =>
