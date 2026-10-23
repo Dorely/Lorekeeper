@@ -333,7 +333,9 @@ unexpected framework attribute constructors fail closed.
 MakeAppx runs semantic validation without `/nv`. Logos ship only as scale- and
 target-size-qualified files (including unplated app-list icons, so the shell
 does not shrink the self-backed icon onto an accent plate) resolved through an
-Assets-only `resources.pri`. The manifest deliberately
+Assets-only `resources.pri` whose resource names keep the `Assets\` path the
+manifest references; Partner Center rejects a package whose manifest images do
+not resolve, so the builder checks each one in the packed index. The manifest deliberately
 uses the full-trust desktop model; it does not imply AppContainer confinement.
 It declares no `unvirtualizedResources` capability (certification denied it on
 2026-10-13), so standard MSIX redirection keeps `%LocalAppData%\Lorekeeper`

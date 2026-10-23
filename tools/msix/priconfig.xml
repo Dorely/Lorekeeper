@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <resources targetOsVersion="10.0.0" majorVersion="1">
-	<index root="\" startIndexAt="Assets">
+	<index root="\" startIndexAt="\">
 		<default>
 			<qualifier name="Language" value="en-US"/>
 			<qualifier name="Contrast" value="standard"/>

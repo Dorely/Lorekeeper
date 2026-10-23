@@ -377,6 +377,7 @@ $msixVersion = ConvertTo-MsixVersion $sourceVersion
 $packageRoot = Join-Path $outputDirectory 'package-root'
 $appDirectory = Join-Path $packageRoot 'app'
 $assetsDirectory = Join-Path $packageRoot 'Assets'
+$priIndexRoot = Join-Path $outputDirectory 'pri-index'
 $packageFlavor = if ($LocalValidation) { 'LocalValidation' } else { 'Store' }
 $packagePath = Join-Path $outputDirectory "Lorekeeper-$packageFlavor-$sourceVersion-x64.msix"
 $unpackDirectory = Join-Path $outputDirectory 'unpacked'
@@ -447,11 +448,28 @@ try
     try { $manifest.Save($writer) }
     finally { $writer.Dispose() }
 
-    # Qualified logo files resolve only through resources.pri; index Assets alone so
-    # the Electron payload never becomes package resources.
-    Invoke-CheckedTool $makePri @('new', '/pr', $packageRoot, '/cf', $priConfigPath, '/mn', (Join-Path $packageRoot 'AppxManifest.xml'), '/of', (Join-Path $packageRoot 'resources.pri'), '/o')
+    # Qualified logo files resolve only through resources.pri. Index a copy holding
+    # only Assets so resource names keep their Assets\ prefix (as the manifest and
+    # Store validation look them up) while the Electron payload stays unindexed.
+    New-Item -ItemType Directory -Path $priIndexRoot -Force | Out-Null
+    Copy-Item -LiteralPath $assetsDirectory -Destination $priIndexRoot -Recurse
+    Invoke-CheckedTool $makePri @('new', '/pr', $priIndexRoot, '/cf', $priConfigPath, '/mn', (Join-Path $packageRoot 'AppxManifest.xml'), '/of', (Join-Path $packageRoot 'resources.pri'), '/o')
     Invoke-CheckedTool $makeAppx @('pack', '/o', '/h', 'SHA256', '/d', $packageRoot, '/p', $packagePath)
     Invoke-CheckedTool $makeAppx @('unpack', '/o', '/p', $packagePath, '/d', $unpackDirectory)
+
+    $priDumpPath = Join-Path $outputDirectory 'resources.pri.xml'
+    Invoke-CheckedTool $makePri @('dump', '/if', (Join-Path $unpackDirectory 'resources.pri'), '/of', $priDumpPath, '/o')
+    $priResourceNames = @(([xml][System.IO.File]::ReadAllText($priDumpPath)).SelectNodes('//NamedResource') |
+        ForEach-Object { $_.GetAttribute('uri') -replace '^ms-resource://[^/]+/Files/', '' })
+    foreach ($manifestImage in @($manifest.SelectNodes('//@*|//p:Logo', $namespaces) |
+        ForEach-Object { if ($_ -is [System.Xml.XmlAttribute]) { $_.Value } else { $_.InnerText } } |
+        Where-Object { $_ -like 'Assets\*.png' }))
+    {
+        if ($priResourceNames -notcontains $manifestImage.Replace('\', '/'))
+        {
+            throw "resources.pri does not resolve manifest image $manifestImage."
+        }
+    }
 
     foreach ($requiredPackageFile in @(
         'AppxManifest.xml',
