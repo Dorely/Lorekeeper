@@ -228,9 +228,10 @@ else
                         <label>
                             <span>Format</span>
                             <select class="form-select form-select-sm" @bind="_imageFormat" disabled="@(_layoutTarget is not null)">
-                                <option value="png">PNG</option>
-                                <option value="jpeg">JPEG</option>
-                                <option value="webp">WebP</option>
+                                @foreach (var format in ImageFormatOptions)
+                                {
+                                    <option value="@format">@FormatLabel(format)</option>
+                                }
                             </select>
                             @if (_layoutTarget is not null)
                             {
@@ -515,9 +516,10 @@ else
                     <label>
                         <span>Output format</span>
                         <select class="form-select form-select-sm" @bind="_imageFormat">
-                            <option value="png">PNG</option>
-                            <option value="jpeg">JPEG</option>
-                            <option value="webp">WebP</option>
+                            @foreach (var format in ImageFormatOptions)
+                            {
+                                <option value="@format">@FormatLabel(format)</option>
+                            }
                         </select>
                     </label>
                     <label>
@@ -786,12 +788,29 @@ else
                 ?? _imageModels.FirstOrDefault();
             _imageModelKey = fallback is null ? string.Empty : ImageModelKey(fallback);
         }
+        NormalizeImageFormat();
+    }
+
+    private IReadOnlyList<string> ImageFormatOptions => CurrentImageModel?.Capabilities.OutputFormats ?? ["png"];
+
+    private static string FormatLabel(string format) => format switch
+    {
+        "jpeg" => "JPEG",
+        "webp" => "WebP",
+        _ => format.ToUpperInvariant(),
+    };
+
+    private void NormalizeImageFormat()
+    {
+        if (!ImageFormatOptions.Contains(_imageFormat, StringComparer.OrdinalIgnoreCase))
+            _imageFormat = ImageFormatOptions.Contains("png") ? "png" : ImageFormatOptions[0];
     }
 
     private async Task OnImageModelChangedAsync()
     {
         if (CurrentImageModel is { } model && !model.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
             _imageQuality = model.Capabilities.Qualities[0];
+        NormalizeImageFormat();
         if (_imageSize != "auto" && SizePresets.All(preset => preset.Size != _imageSize))
             _imageSize = "auto";
         await DescribeLayoutTargetAsync();

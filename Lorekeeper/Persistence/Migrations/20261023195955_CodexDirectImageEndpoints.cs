@@ -10,18 +10,6 @@ namespace Lorekeeper.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "MainlineModel",
-                table: "ProjectImagePartials");
-
-            migrationBuilder.DropColumn(
-                name: "MainlineModel",
-                table: "ProjectImageGenerationJobs");
-
-            migrationBuilder.DropColumn(
-                name: "MainlineModelId",
-                table: "ImageProviders");
-
             // ChatGPT account image requests now go straight to the Codex image
             // endpoints, which pick quality, ignore masks and size, return PNG
             // (converted locally for JPEG), and render the prompt's aspect at a
@@ -38,6 +26,18 @@ namespace Lorekeeper.Persistence.Migrations
                 WHERE Origin = 'Bundled'
                   AND ImageProviderId IN (SELECT Id FROM ImageProviders WHERE Kind = 'ChatGptAccount');
                 """);
+
+            migrationBuilder.DropColumn(
+                name: "MainlineModel",
+                table: "ProjectImagePartials");
+
+            migrationBuilder.DropColumn(
+                name: "MainlineModel",
+                table: "ProjectImageGenerationJobs");
+
+            migrationBuilder.DropColumn(
+                name: "MainlineModelId",
+                table: "ImageProviders");
         }
 
         /// <inheritdoc />
