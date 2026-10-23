@@ -461,7 +461,10 @@ bare repository and atomically creates the local `Project` and
 repository ID, and slug collisions fail closed. The imported head/checkpoint is
 recorded and the selected GitHub remote can be attached as `origin`. If import
 or attachment fails, only a repository installed by that attempt and not yet
-adopted by matching database identity may be removed.
+adopted by matching database identity may be removed. A clone or validation
+failure surfaces the sync service's specific, credential-free reason (for
+example a missing root `manifest.json`, an empty repository, or a transport
+failure); clone and snapshot-import failures are logged with their exception.
 
 `ProjectReference` stores the referenced repository ID and project ID as
 persistent identity, with nullable local resolution. A local target is linked

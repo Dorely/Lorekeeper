@@ -13,7 +13,8 @@ namespace Lorekeeper.VersionHistory.Sync;
 public sealed class ProjectVersionCloneImportService(
     IProjectVersionSyncService sync,
     IProjectVersionRestoreService restore,
-    IAppDatabaseOperationFactory database) : IProjectVersionCloneImportService
+    IAppDatabaseOperationFactory database,
+    ILogger<ProjectVersionCloneImportService> logger) : IProjectVersionCloneImportService
 {
     public async Task<VersionHistoryCloneImportResult> ImportCloneAsync(
         VersionHistoryCloneImportRequest request,
@@ -33,9 +34,13 @@ public sealed class ProjectVersionCloneImportService(
         }
         catch (Exception exception)
         {
+            logger.LogWarning(
+                exception,
+                "GitHub clone import of {Repository} failed before the snapshot was imported.",
+                request.CloneRequest.Repository?.FullName);
             throw new ProjectVersionCloneImportException(
                 ProjectVersionCloneImportErrorCode.CloneFailed,
-                "The GitHub repository could not be cloned and validated for import.",
+                CloneFailureMessage(exception),
                 exception);
         }
 
@@ -53,6 +58,10 @@ public sealed class ProjectVersionCloneImportService(
         }
         catch (Exception exception)
         {
+            logger.LogWarning(
+                exception,
+                "GitHub clone import of repository {RepositoryId} failed while importing the validated snapshot.",
+                clone.RepositoryId);
             var cleanup = await TryCleanupUnownedCloneAsync(clone, CancellationToken.None);
             if (!cleanup.Removed && !cleanup.DatabaseIdentityExists)
             {
@@ -154,6 +163,14 @@ public sealed class ProjectVersionCloneImportService(
                 repository => repository.Id == clone.RepositoryId,
                 cancellationToken);
     }
+
+    // Sync exceptions carry curated, credential-free reasons; anything else
+    // stays generic in the UI and is diagnosable from the log.
+    private static string CloneFailureMessage(Exception exception) => exception switch
+    {
+        ProjectVersionSyncException sync => $"The GitHub repository could not be imported. {sync.Message}",
+        _ => "The GitHub repository could not be cloned and validated for import.",
+    };
 
     private static string ErrorCodeFor(Exception exception) => exception switch
     {
