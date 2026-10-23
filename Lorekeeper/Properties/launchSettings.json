@@ -29,6 +29,19 @@
         "environmentVariables": {
           "ASPNETCORE_ENVIRONMENT": "Development"
         }
+      },
+      "electron-installed-data": {
+        "commandName": "Project",
+        "dotnetRunMessages": true,
+        "launchBrowser": false,
+        "applicationUrl": "http://localhost:1455",
+        "commandLineArgs": "--electron",
+        "environmentVariables": {
+          "ASPNETCORE_ENVIRONMENT": "Development",
+          "ConnectionStrings__DefaultConnection": "Data Source=%LOCALAPPDATA%/Lorekeeper/Data/lorekeeper.db",
+          "VersionHistory__HistoryRoot": "%LOCALAPPDATA%/Lorekeeper/History",
+          "Persistence__BlockSchemaMigrations": "true"
+        }
       }
     }
   }

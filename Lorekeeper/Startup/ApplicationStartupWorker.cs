@@ -22,6 +22,8 @@ public sealed class ApplicationStartupWorker(
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<IDatabaseSchemaChangeGuard>()
+                .EnsureSchemaUnchangedAsync(stoppingToken);
             var startupMigration = scope.ServiceProvider.GetRequiredService<IDatabaseStartupMigrationService>();
             if (!await startupMigration.ApplyAsync(stoppingToken, startup))
             {

@@ -149,7 +149,10 @@ semantics are owned by
 
 Electron is the primary debug and product target. The desktop host binds to the
 configured local host and port, while the explicit `http` launch profile supports
-browser development and validation. Both development profiles use
+browser development and validation. The `electron-installed-data` profile runs
+the Development Electron host against an installed release's
+`%LOCALAPPDATA%\Lorekeeper` database and History root with schema migrations
+blocked (see the persistence chapter). All development profiles use
 `localhost:1455`; OpenAI OAuth depends on
 `http://localhost:1455/auth/callback`, and Sign in with ChatGPT sends the same
 port and path on `127.0.0.1` because that protocol forbids `localhost`. Connect
@@ -346,7 +349,7 @@ product setting or a replacement for target-platform validation.
 | [`Lorekeeper/Program.cs`](../../Lorekeeper/Program.cs) | Application composition root for host mode, DI, middleware, endpoints, startup gating, Electron window creation, and desktop update setup. |
 | [`Lorekeeper/Lorekeeper.csproj`](../../Lorekeeper/Lorekeeper.csproj) | .NET 10 application definition, warnings-as-errors policy, Electron packaging integration, and managed/native dependency boundary. Release alone pins runtime patch 10.0.12; Debug preserves its installed SDK runtime. |
 | [`Lorekeeper/appsettings*.json`](../../Lorekeeper/appsettings.json) | Versioned defaults for desktop, startup, persistence, providers, Blazor, agents, images, ingest, embeddings, and research; environment variables supply deployment overrides. |
-| [`Lorekeeper/Properties/launchSettings.json`](../../Lorekeeper/Properties/launchSettings.json) | Local Electron, HTTP, and HTTPS profiles; Electron is the default product/debug shape and HTTP is the explicit browser-validation profile. |
+| [`Lorekeeper/Properties/launchSettings.json`](../../Lorekeeper/Properties/launchSettings.json) | Local Electron, HTTP, HTTPS, and installed-data Electron profiles; Electron is the default product/debug shape, HTTP is the explicit browser-validation profile, and `electron-installed-data` targets installed-release data with schema migrations blocked. |
 | [`Lorekeeper/Properties/electron-builder.json`](../../Lorekeeper/Properties/electron-builder.json) and [`PublishProfiles/`](../../Lorekeeper/Properties/PublishProfiles/) | Electron packaging metadata/targets and runtime-specific self-contained .NET publication profiles. |
 | [`Lorekeeper/Startup/`](../../Lorekeeper/Startup/) | Immutable startup state/readiness gate and the hosted bootstrap worker that releases normal workers only after migration and initialization are safe. |
 | [`Lorekeeper/Diagnostics/DevFileLoggerProvider.cs`](../../Lorekeeper/Diagnostics/DevFileLoggerProvider.cs), [`LogRedaction.cs`](../../Lorekeeper/Diagnostics/LogRedaction.cs), and [`PerformanceTraceWriter.cs`](../../Lorekeeper/Diagnostics/PerformanceTraceWriter.cs) | Development-only diagnostic file logging (bounded daily files under `%LOCALAPPDATA%\Lorekeeper\dev-logs`, 14-day/50 MB retention), fail-safe provider/tool log redaction, and the separately opt-in timestamp-only M0.3 local trace writer. The trace writer rejects outputs outside ignored `.artifacts/performance/`. |

@@ -553,6 +553,14 @@ virtualization on, so Windows redirects these per-user paths into package
 storage that survives updates but is deleted on uninstall; exports and GitHub
 sync are the user's durable copies there.
 
+`Persistence:BlockSchemaMigrations` (off by default, on in the
+`electron-installed-data` launch profile) lets a development build open an
+installed release's database without moving its schema. `DatabaseSchemaChangeGuard`
+runs before `DatabaseStartupMigrationService`, so before scheduled restores,
+compatibility-column repair, and migrations. It fails startup closed unless the
+applied EF migrations exactly match the build's, in either direction. It does not
+detect data-only startup conversions that ship without an EF migration.
+
 Image-upscale lineage is durable portable state. V29 and later preserve parent identity
 and structured upscale metadata, remap parents on import, and fail closed when
 a v29 derivative names a missing parent. A non-structural export that includes an
@@ -604,6 +612,7 @@ physical jobs are not recovered into the current scoped render queue.
 | `Lorekeeper/Persistence/SqliteConnectionSettings.cs` | Local SQLite paths, PRAGMAs, WAL, busy timeout, and packaged per-user placement. |
 | `Lorekeeper/Persistence/DatabaseMigrationRecoveryService.cs` | Protected backup/restore, markers, recovery shell, confirmation, discovery, and pruning. |
 | `Lorekeeper/Persistence/DatabaseStartupMigrationService.cs` | Ordered startup migration/recovery orchestration and readiness-boundary integration. |
+| `Lorekeeper/Persistence/DatabaseSchemaChangeGuard.cs` | Opt-in pre-startup refusal to open a database whose applied EF migrations differ from the build's. |
 | `Lorekeeper/Persistence/Migrations/` | Immutable EF schema history and current model snapshot; never edit applied files. |
 | `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v7 upgrade across every persisted manuscript-bearing payload. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
@@ -614,6 +623,7 @@ physical jobs are not recovered into the current scoped render queue.
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |
 | `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, explicit remote attachment, and durable automatic transport; detailed ownership is in `version-history-sync.md`. |
 | `Lorekeeper.Tests/DatabaseMigrationRecoveryTests.cs` | Recovery markers, protected backup retention, and fail-closed startup behavior. |
+| `Lorekeeper.Tests/DatabaseSchemaChangeGuardTests.cs` | Blocked-migration guard refusal for pending and unknown migrations without database changes. |
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v26 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |

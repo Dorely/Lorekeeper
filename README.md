@@ -785,6 +785,19 @@ Run the Electron.NET desktop shell:
 dotnet run --project Lorekeeper --launch-profile electron
 ```
 
+To test a development build against the data an installed Windows release uses
+under `%LOCALAPPDATA%\Lorekeeper`, close the installed app first and run:
+
+```bash
+dotnet run --project Lorekeeper --launch-profile electron-installed-data
+```
+
+This profile sets `Persistence:BlockSchemaMigrations`, so startup stops without
+changing anything when the build's EF migrations differ from the database's.
+Test schema changes against the repository database instead. A Store install
+whose data Windows virtualized into package storage is not reached by this
+profile.
+
 Desktop binding is configured in `Lorekeeper/appsettings.json` under
 `Desktop:BindHost` and `Desktop:HttpPort`. Override the port in PowerShell with:
 

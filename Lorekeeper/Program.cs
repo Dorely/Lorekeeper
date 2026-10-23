@@ -252,6 +252,9 @@ builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccesso
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigrationService>();
+builder.Services.AddSingleton<IDatabaseSchemaChangeGuard>(services => new DatabaseSchemaChangeGuard(
+    services.GetRequiredService<IAppDatabaseOperationFactory>(),
+    builder.Configuration.GetValue<bool>(DatabaseSchemaChangeGuard.ConfigurationKey)));
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
 builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
 builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
