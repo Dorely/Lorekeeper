@@ -16,11 +16,12 @@ using Lorekeeper.Projects;
 using Lorekeeper.Search;
 using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, IDesignedPageService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IWorldBriefService worldBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, IDesignedPageService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IWorldBriefService worldBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector, IEntityTypeService entityTypes) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -85,6 +86,31 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 Kind: ContextItemKind.ProjectFacts,
                 Label: "Project Facts",
                 Body: await BuildProjectFactsBlockAsync(project.Id, cancellationToken),
+                IsEnabled: true,
+                IsRemovable: false,
+                IsProtected: true));
+        }
+
+        if (request.Purpose == ContextBuildPurpose.World)
+        {
+            // Working Notes are World-only: no other purpose may receive them.
+            var world = await worldBriefs.GetAsync(project.Id, cancellationToken);
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.WorldWorkingNotes,
+                Kind: ContextItemKind.WorldWorkingNotes,
+                Label: "World Working Notes (World assistant only; not canon)",
+                Body: $"World Brief revision: {world.Revision}\nWorking Notes revision: {world.WorkingNotesRevision}\n\n"
+                    + (string.IsNullOrWhiteSpace(world.WorkingNotes) ? "(no working notes yet)" : world.WorkingNotes.Trim()),
+                IsEnabled: true,
+                IsRemovable: false,
+                Badge: "Author",
+                Origin: ContextItemOrigin.User,
+                IsProtected: true));
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.EntityInventory,
+                Kind: ContextItemKind.EntityInventory,
+                Label: "Project Entity Inventory",
+                Body: await BuildEntityInventoryBlockAsync(project.Id, cancellationToken),
                 IsEnabled: true,
                 IsRemovable: false,
                 IsProtected: true));
@@ -261,7 +287,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 + "\n\n" + AssistantWorkflowInstructions.ManuscriptOperationDiscipline,
             ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
             ContextBuildPurpose.World =>
-                "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
+                "Help the author develop the world or research context and maintain the World Brief, entities, and Working Notes. Save only approved canon, distinguish invention from sourced fact and inference, and never fabricate a source.",
             ContextBuildPurpose.Voice => "Help the author develop writing samples and character voice profiles.",
             ContextBuildPurpose.Publish =>
                 "Use the supplied publication tools to inspect and prepare publication artifacts. Report validation results accurately and never claim vendor acceptance.",
@@ -916,6 +942,37 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
 
         return sb.Length == 0 ? "(no outline yet)" : sb.ToString().TrimEnd();
+    }
+
+    private const int EntityInventoryNamesPerType = 60;
+
+    private async Task<string> BuildEntityInventoryBlockAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        // The type service also registers discovered types, so custom categories are listed.
+        var types = (await entityTypes.ListAsync(projectId, includeStructural: false, cancellationToken))
+            .Select(type => type.Type)
+            .ToList();
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = await databaseOperation.Db.GraphNodes.AsNoTracking()
+            .Where(node => node.ProjectId == projectId && types.Contains(node.NodeType))
+            .Select(node => new { node.NodeType, node.Key, node.Label })
+            .ToListAsync(cancellationToken);
+        if (nodes.Count == 0) return "(no entities yet)";
+
+        var sb = new StringBuilder();
+        foreach (var type in types)
+        {
+            var named = nodes.Where(node => node.NodeType == type)
+                .OrderBy(node => node.Label ?? node.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (named.Count == 0) continue;
+            sb.Append(type).Append(" (").Append(named.Count).AppendLine("):");
+            foreach (var node in named.Take(EntityInventoryNamesPerType))
+                sb.Append("- ").Append(node.Label ?? node.Key).Append(" [").Append(node.Key).AppendLine("]");
+            if (named.Count > EntityInventoryNamesPerType)
+                sb.Append("- ... ").Append(named.Count - EntityInventoryNamesPerType).AppendLine(" more; use list_entities.");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private async Task<string> BuildProjectFactsBlockAsync(Guid projectId, CancellationToken cancellationToken)

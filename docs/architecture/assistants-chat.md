@@ -407,23 +407,40 @@ bounded project/direct-reference reads, guarded cached webpage reads, source/ima
 promotion, and entity/fact/relationship tools. web_search uses the selected
 model's built-in search when its chat client offers one (OpenAI account models)
 and otherwise the active search provider; local work and ordinary chat need
-neither. The World Brief view shares its
+neither. The World Brief and Working Notes views share its
 conversation with a separate Research Activity view, derived from touched
-entities and cached sources. Its brief editor grows with its text inside a
+entities and cached sources. Each editor grows with its text inside a
 scrolling column beside the shared Outline entity list, which refreshes with
 World activity. Search/fetch security stays in research services.
-World primarily maintains the free-form World Brief through read_world_brief and
-update_world_brief, using exact revisions and the shared authoring mutation fence.
-Direct build/edit requests authorize saves; brainstorming stays conversational
-until a direction is chosen. Brief changes trigger editor refresh, profile
-reindexing, Pending changes, and the existing assistant checkpoint policy.
+World maintains the free-form World Brief through read_world_brief and
+update_world_brief, and its Working Notes through read_world_working_notes and
+update_world_working_notes, each with its own exact revision and the shared
+authoring mutation fence. World context carries both texts with their revisions
+plus a Project Entity Inventory, so saves need no readback. The author owns
+invention: direct build/edit requests authorize saves, while proposals, open
+questions, and contradictions stay in chat or Working Notes until approved.
+Saved Brief text and entity data read as present canon, without status markers or
+draft-relative wording. Brief changes trigger editor refresh, profile reindexing,
+Pending changes, and the existing assistant checkpoint policy; notes changes skip
+reindexing.
+
+World's shared entity tools add list_entities, delete_entity (after the author
+confirms the entity), list_ingested_sources, and update_entity_link /
+delete_entity_link, which Outline also receives. Link edits mirror the graph
+editor and refuse structural, AutoMention, and source-evidenced links.
+update_entity accepts a type to move a misfiled non-structural entity to another
+non-structural type through IEntityService.ChangeTypeAsync, which keeps identity,
+properties, and links and refreshes indexing and auto-links; beats cannot change
+type. save_research_source queues an index-only ingest of a read web page after
+the author agrees, so it becomes searchable evidence without entity extraction.
 
 Project Guidance, Book Brief, and World Brief are protected user-owned sections
 in all six assistants, revision workers, and captured contest context. World
 Brief remains that name for every book type. Fiction captures established world
 principles; nonfiction captures scope, supported findings, terminology, uncertainty,
 and background. Detailed canon stays in entities/facts and evidence in Sources.
-Research does not automatically promote sources to canon.
+Research does not automatically promote sources to canon. World Working Notes are
+World-only: no other assistant, revision worker, or contest capture receives them.
 
 Images is concept art and visual canon. It can read narrative context for
 grounding and can mutate project images, canonical entity associations, and the

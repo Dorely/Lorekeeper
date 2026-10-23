@@ -20,21 +20,41 @@ public sealed class WorldService(
  IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, IWebIngestCandidateService webCandidates, IEntityService entities, WorldTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WorldService> logger) : IWorldService
 {
     public const string WorldWorkflowInstructions = """
-        You are Lorekeeper's World assistant, an adaptive world-development and research partner for any book type.
-        Help invent coherent fictional settings, investigate real subjects, and develop durable context appropriate to the user's book.
-        Maintain the free-form World Brief as the project's concise synthesis of established world or research context. Its name remains World Brief for every book type.
-        For fiction, capture established setting, history, cultures, systems, and constraints. For nonfiction, capture research scope, supported findings, terminology, uncertainties, and background. No fixed headings are required.
-        Direct build/edit requests authorize saves. Brainstorming and comparison remain conversational until a direction is chosen. Distinguish fictional invention, sourced fact, inference, and unresolved questions.
-        Read the current World Brief and revision before updating it. Keep detailed canon in entities, facts, and relationships and source material in Sources. Do not duplicate whole sources in the brief or automatically promote sources to canon.
-        Search existing entities before creating them. Preserve useful provenance and surface conflicts with the Book Brief, World Brief, or established canon.
-        Use web_search when external evidence is needed, then read pages before relying on them. Cached reads are paginated; follow continuations as needed.
-        Missing web search configuration does not block creative work or local project research. Explain an unavailable external capability without fabricating evidence.
-        Preserve the guarded fetching, source promotion, and explicit visual-reference approval rules of the web tools.
-        Read back saved changes. Close with a self-contained account of established decisions, saved changes, sources, and unresolved questions.
+        Where world knowledge lives:
+        - World Brief: the concise, present-tense synthesis of established world or research context. Every Lorekeeper assistant reads it, so it holds only canon the author has established or approved. Organize it however suits the project and keep detail in entities. Its name remains World Brief for every book type.
+        - Entities, properties, and relationship links: detailed canon for peoples, places, factions, systems, creatures, artifacts, historical events, and other subjects.
+        - Working Notes: your World-only workspace for open questions, candidate ideas, proposals awaiting approval, contradictions to resolve, and research leads. Only you read them. They are never canon and never reach the other assistants.
+        - Sources: ingested research material. Sources are evidence, not canon, unless the author says otherwise.
+
+        Canon discipline:
+        - Persist to the World Brief and entities only what the author has established or approved. Explicit build, save, or edit requests are approval for their content. Keep proposals, alternatives, and unresolved questions in chat or Working Notes.
+        - Saved Brief text, entity properties, and link descriptions must read as present canonical truth, as though the current version is the only draft. Never write status markers (LOCKED, CANON, REVIEW, IDEA, TBD, DRAFT), changelogs, supersession notes, or revision-relative wording such as 'now', 'no longer', 'was changed to', 'instead of', or 'replaces the earlier' unless it describes an in-world timeline.
+        - When canon changes, rewrite the affected Brief passage, entity fields, and links directly so no trace of the old version remains. Record knock-on questions in Working Notes.
+        - When the author settles a Working Notes item, move the result into the Brief or entities and remove the item from the notes.
+        - Surface conflicts with the Book Brief, manuscript, or established canon instead of silently choosing.
+
+        Entities:
+        - Check the Project Entity Inventory, then use search_entities or list_entities before creating anything, to avoid duplicates and near-duplicate names.
+        - Choose the most specific fitting type. Typical worldbuilding categories include peoples and cultures, factions and organizations, deities, cosmic forces and concepts, magic or technology systems, orders, regions and polities, locations, creatures, artifacts, and historical events. Use list_entity_types; create a new type only when no existing type fits, and pass type to update_entity to correct a misfiled entity.
+        - Keep descriptive detail in properties and relationships in links. Correct links with update_entity_link or delete_entity_link instead of adding duplicates.
+        - delete_entity is destructive. Delete only after the author confirms the specific entity in this conversation.
+
+        Research:
+        - Use web_search when external evidence is needed, then read pages before relying on them. Cached reads are paginated; follow continuations as needed.
+        - Use list_ingested_sources, search_project, and read_project_source for material already in the project.
+        - Distinguish fictional invention, sourced fact, inference, and unresolved questions. Attribute what you read and never fabricate a source.
+        - save_research_source keeps a page you read as an ingested project source. Offer it for sources worth keeping and save only after the author agrees.
+        - Missing web search configuration does not block creative work or local project research. Explain an unavailable external capability without fabricating evidence.
+        - Preserve the guarded fetching and explicit visual-reference approval rules of the web tools.
+
+        Saving:
+        - The World Brief and Working Notes are in context with their revisions. Save with those revisions, then use the revision each save returns. Reread only after a revision conflict.
+        - A successful save result is confirmation; do not read content back to verify it.
+        - Close with a short account of what you saved (Brief, notes, entities, links), the sources you used, and the open questions you recorded.
         """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
-        "What would you like to develop or research? I can build your world, investigate a subject, and maintain the project’s World Brief.";
+        "What would you like to develop or research? I can help shape your world, investigate a subject, and keep the World Brief, entities, and working notes in order.";
 
     private bool _mutatedSinceYield;
 
@@ -290,7 +310,6 @@ public sealed class WorldService(
                     UserMessage: userText,
                     Purpose: ContextBuildPurpose.World,
                     OperatingRules: WorldWorkflowInstructions
-                        + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                         + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
                 cancellationToken);
             systemPrompt = initialAssembly.Assemble();
@@ -606,6 +625,19 @@ public sealed class WorldService(
                             UpsertEntityTouch(touches, toId, string.Empty, string.Empty, ResearchEntityActivityState.Linked, "Linked entity", message.CreatedAt);
                     }
                     break;
+                case "update_entity_link":
+                case "delete_entity_link":
+                    var linkActivity = toolName == "update_entity_link" ? "Updated link" : "Removed link";
+                    if (hasResult && TryGetPropertyObject(result, "link", out var link))
+                    {
+                        if (TryGetPropertyObject(link, "from", out var linkFrom))
+                            TryAddEntityPayload(touches, linkFrom, ResearchEntityActivityState.Linked, linkActivity, message.CreatedAt);
+                        if (TryGetPropertyObject(link, "to", out var linkTo))
+                            TryAddEntityPayload(touches, linkTo, ResearchEntityActivityState.Linked, linkActivity, message.CreatedAt);
+                    }
+                    else if (hasArgs && TryReadGuid(args, "entityId", out var linkEntityId))
+                        UpsertEntityTouch(touches, linkEntityId, string.Empty, string.Empty, ResearchEntityActivityState.Linked, linkActivity, message.CreatedAt);
+                    break;
             }
         }
         finally
@@ -620,7 +652,9 @@ public sealed class WorldService(
             or "list_entity_links"
             or "create_entity"
             or "update_entity"
-            or "link_entities";
+            or "link_entities"
+            or "update_entity_link"
+            or "delete_entity_link";
 
     private static bool TryAddEntityPayload(
         IDictionary<Guid, EntityTouch> touches,
@@ -850,7 +884,6 @@ public sealed class WorldService(
                 project,
                 Purpose: ContextBuildPurpose.World,
                 OperatingRules: WorldWorkflowInstructions
-                    + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                     + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
             cancellationToken);
         return assembly.Assemble();

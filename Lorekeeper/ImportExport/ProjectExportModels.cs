@@ -57,6 +57,9 @@ public sealed record ProjectExportDocument
     public ProjectExportPageSetup? PageSetup { get; init; }
     public ProjectExportBookBrief? BookBrief { get; init; }
     public string WorldBrief { get; init; } = string.Empty;
+    // Archive record schema 6+. Older records omit it; readers treat null as empty.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorldWorkingNotes { get; init; }
     public List<ProjectExportIngestSource> IngestSources { get; init; } = [];
     public List<Guid> BookBriefCanonSourceIds { get; init; } = [];
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];

@@ -51,6 +51,16 @@ public interface IEntityService
         IReadOnlyCollection<string>? propertiesToRemove = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Moves a non-structural entity to another non-structural type, keeping its identity,
+    /// properties, and links. Beats and structural nodes cannot be retyped.
+    /// </summary>
+    Task<StoryEntity> ChangeTypeAsync(
+        Guid projectId,
+        Guid entityId,
+        string nodeType,
+        CancellationToken cancellationToken = default);
+
     Task DeleteAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default);
 
     Task ReorderAsync(

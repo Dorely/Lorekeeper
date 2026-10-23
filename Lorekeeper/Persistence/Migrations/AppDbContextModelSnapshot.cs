@@ -6008,6 +6008,13 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("WorkingNotes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("WorkingNotesRevision")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("ProjectId");
 
                     b.ToTable("WorldBriefs");

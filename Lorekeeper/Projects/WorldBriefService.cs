@@ -10,6 +10,7 @@ public interface IWorldBriefService
 {
     Task<WorldBrief> GetAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<WorldBrief> UpdateAsync(Guid projectId, long expectedRevision, string content, CancellationToken cancellationToken = default);
+    Task<WorldBrief> UpdateWorkingNotesAsync(Guid projectId, long expectedRevision, string notes, CancellationToken cancellationToken = default);
 }
 
 public sealed class WorldBriefService(IAppDatabaseOperationFactory database, IContextIndexingService indexing,
@@ -45,6 +46,31 @@ public sealed class WorldBriefService(IAppDatabaseOperationFactory database, ICo
         }
         historyEvents?.PublishReviewStateChanged(projectId);
         await indexing.ReindexProjectProfileAsync(projectId, cancellationToken);
+        return brief;
+    }
+
+    // Working Notes carry their own revision so a notes save never conflicts with a Brief edit.
+    // They are not part of the indexed project profile, so no reindex follows.
+    public async Task<WorldBrief> UpdateWorkingNotesAsync(Guid projectId, long expectedRevision, string notes, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(notes);
+        WorldBrief brief;
+        await using (var operation = await database.OpenWriteAsync(projectId, cancellationToken))
+        {
+            var project = await operation.Db.Projects.SingleOrDefaultAsync(value => value.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException("Project not found.");
+            var existing = await operation.Db.WorldBriefs.SingleOrDefaultAsync(value => value.ProjectId == projectId, cancellationToken);
+            brief = existing ?? new WorldBrief { ProjectId = projectId };
+            if (brief.WorkingNotesRevision != expectedRevision)
+                throw new InvalidOperationException("The World Working Notes changed. Read them again before saving; your draft has been retained.");
+            if (brief.WorkingNotes == notes) return brief;
+            brief.WorkingNotes = notes;
+            brief.WorkingNotesRevision++;
+            project.UpdatedAt = DateTime.UtcNow;
+            if (existing is null) operation.Db.WorldBriefs.Add(brief);
+            await operation.SaveChangesAsync(cancellationToken);
+        }
+        historyEvents?.PublishReviewStateChanged(projectId);
         return brief;
     }
 }

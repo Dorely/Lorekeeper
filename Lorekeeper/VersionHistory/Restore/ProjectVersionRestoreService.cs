@@ -1072,7 +1072,8 @@ public sealed class ProjectVersionRestoreService(
             current.WritingSamples,
             preferences,
             annotations,
-            current.WorldBrief);
+            current.WorldBrief,
+            current.WorldWorkingNotes);
     }
 
     private static void ValidateWholePayload(VersionHistorySnapshotPayload payload)
@@ -1082,6 +1083,7 @@ public sealed class ProjectVersionRestoreService(
         if (payload.Project.Project.Id != payload.ProjectId)
             throw new VersionHistoryRestoreException("ProjectIdentityMismatch", "The snapshot project payload does not match its manifest.");
         if (payload.Narrative.WorldBrief is null) throw new VersionHistoryRestoreException("InvalidWorldBrief", "World Brief content cannot be null.");
+        if (payload.Narrative.WorldWorkingNotes is null) throw new VersionHistoryRestoreException("InvalidWorldBrief", "World Working Notes content cannot be null.");
         VersionHistoryCitationReferences.Validate(payload);
 
         var actIds = payload.Narrative.Acts.Select(item => item.Id).ToHashSet();
@@ -1423,7 +1425,14 @@ public sealed class ProjectVersionRestoreService(
             warnings.Add($"Retained source originals restored: {retainedSourceBytes.NewBytes} new bytes; {retainedSourceBytes.ReusedBytes} reused bytes.");
         await AddAssetsAsync(db, projectId, payload, cancellationToken);
         AddBookBrief(db, projectId, payload.Narrative.BookBrief, payload.Narrative.BookBriefCanonSourceIds);
-        db.WorldBriefs.Add(new WorldBrief { ProjectId = projectId, Content = payload.Narrative.WorldBrief, Revision = DateTime.UtcNow.Ticks });
+        db.WorldBriefs.Add(new WorldBrief
+        {
+            ProjectId = projectId,
+            Content = payload.Narrative.WorldBrief,
+            Revision = DateTime.UtcNow.Ticks,
+            WorkingNotes = payload.Narrative.WorldWorkingNotes,
+            WorkingNotesRevision = DateTime.UtcNow.Ticks,
+        });
         foreach (var entityType in payload.Narrative.EntityTypes)
             db.GraphEntityTypes.Add(new GraphEntityType
             {

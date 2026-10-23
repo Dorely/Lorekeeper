@@ -111,7 +111,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     [
         "list_entity_types", "list_search_sources", "read_project_source", "search_project",
         "list_reference_visuals", "read_reference_visual",
-        "search_entities", "create_entity", "update_entity", "link_entities",
+        "list_ingested_sources", "list_entities", "search_entities",
+        "create_entity", "update_entity", "delete_entity",
+        "link_entities", "update_entity_link", "delete_entity_link",
         "list_entity_canonical_references", "attach_entity_canonical_reference",
         "update_entity_canonical_reference", "detach_entity_canonical_reference", "crop_project_image",
     ];
@@ -333,10 +335,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 description: "Create a new graph entity. type is the entity category ('Character', 'Location', 'Event' for beats, 'ProjectFact' for rare canonical/global constraints, ...). name is the display name. propertiesJson is a JSON object string for the free-form property bag (e.g. '{\"description\":\"...\", \"role\":\"...\"}') or null/empty for none. Never use ProjectFact for Book Brief fields, rework notes, act/chapter plans, character roles, beats, relationships, or location details. For a justified ProjectFact include key/value properties; it will be parented to the Project automatically. For chapter-scoped beats set type='Event' and parentId=<chapter id> (order is auto-assigned to the end if omitted). If an entity with the same name/key already exists, returns status='existing_match' and its compact identity instead of creating a duplicate. Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
 
             AIFunctionFactory.Create(
-                method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null) =>
-                    UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson),
+                method: (string entityId, string? name = null, string? propertiesToSetJson = null, string? propertiesToRemoveJson = null, string? type = null) =>
+                    UpdateEntityAsync(context, entityId, name, propertiesToSetJson, propertiesToRemoveJson, type),
                 name: "update_entity",
-                description: "Update an entity's name and/or properties. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]'). Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
+                description: "Update an entity's name, properties, and/or type. Pass null for fields to leave unchanged. propertiesToSetJson is a JSON object string of keys to merge into the existing bag (e.g. '{\"role\":\"protagonist\"}'). propertiesToRemoveJson is a JSON array string of keys to delete (e.g. '[\"role\"]'). type moves a misfiled non-structural entity to another non-structural type, keeping its id, properties, and links; beats and structural nodes cannot change type. Returns compact identity/current properties; use read_entity for full knowledge and relationships."),
 
             AIFunctionFactory.Create(
                 method: (string entityId) => DeleteEntityAsync(context, entityId),
@@ -354,6 +356,17 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                     LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
                 name: "link_entities",
                 description: "Create a typed edge between two entities. propertiesJson is optional JSON metadata. Prefer 'RelevantTo' from every canonical entity to each Chapter it matters to; Editor uses these chapter links for automatic context. Use 'AppearsIn' only for Character -> Event/beat, 'LocatedAt' for Event -> Location, and 'KnownTo' for Character -> Character. Returns link details plus compact endpoints."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId, long edgeId, string? edgeType = null, string? propertiesJson = null) =>
+                    UpdateEntityLinkAsync(context, entityId, edgeId, edgeType, propertiesJson),
+                name: "update_entity_link",
+                description: "Correct the type and/or metadata of one manual link adjacent to entityId. Take edgeId from list_entity_links or read_entity. Omit edgeType or propertiesJson to keep the current value; propertiesJson replaces the link's whole metadata object. Structural, AutoMention, and source-evidenced links cannot be edited. Returns link details plus compact endpoints."),
+
+            AIFunctionFactory.Create(
+                method: (Guid entityId, long edgeId) => DeleteEntityLinkAsync(context, entityId, edgeId),
+                name: "delete_entity_link",
+                description: "Remove one manual link adjacent to entityId without deleting either entity. Take edgeId from list_entity_links or read_entity. Structural, AutoMention, and source-evidenced links cannot be deleted. Returns the removed link."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
@@ -1546,7 +1559,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         string entityId,
         string? name,
         string? propertiesToSetJson,
-        string? propertiesToRemoveJson)
+        string? propertiesToRemoveJson,
+        string? type = null)
     {
         if (!Guid.TryParse(entityId, out var id)) return $"Error: entityId '{entityId}' is not a valid Guid.";
 
@@ -1560,8 +1574,21 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
         try
         {
-            var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
-            ctx.OnMutated();
+            StoryEntity? updated = null;
+            if (!string.IsNullOrWhiteSpace(type))
+            {
+                // Reuse an existing type's spelling so a casing slip does not create a parallel category.
+                var requested = type.Trim();
+                var known = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
+                var canonical = known.FirstOrDefault(item => string.Equals(item.Type, requested, StringComparison.OrdinalIgnoreCase))?.Type ?? requested;
+                updated = await entities.ChangeTypeAsync(ctx.ProjectId, id, canonical);
+                ctx.OnMutated();
+            }
+            if (updated is null || !string.IsNullOrWhiteSpace(name) || propertiesToSet is { Count: > 0 } || propertiesToRemove is { Length: > 0 })
+            {
+                updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
+                ctx.OnMutated();
+            }
             return JsonSerializer.Serialize(EntityMutationPayload(updated));
         }
         catch (Exception ex)
@@ -1677,6 +1704,76 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 from = fromEntity is null ? null : OutlineMutationPayloads.Endpoint(fromEntity.Id, fromEntity.Type, fromEntity.Name),
                 to = toEntity is null ? null : OutlineMutationPayloads.Endpoint(toEntity.Id, toEntity.Type, toEntity.Name),
             });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<(StoryEntity? Entity, EntityLink? Link, string? Error)> ResolveEditableLinkAsync(
+        OutlineCollaborationContext ctx, Guid entityId, long edgeId)
+    {
+        var entity = await entities.GetAsync(ctx.ProjectId, entityId);
+        if (entity is null) return (null, null, $"Error: entity {entityId} not found in this project.");
+        var link = (await entities.ListLinksAsync(ctx.ProjectId, entityId)).FirstOrDefault(item => item.EdgeId == edgeId);
+        if (link is null) return (entity, null, $"Error: link {edgeId} is not adjacent to entity {entityId}.");
+        // Same protection as the graph editor: structural, generated, and source-evidenced links keep their provenance.
+        if (string.Equals(link.EdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase)
+            || link.IsAutoLink || link.IsIngestCreated || link.SourceEvidenceCount > 0 || link.RelationshipCitations.Count > 0)
+            return (entity, link, $"Error: link {edgeId} is a structural, generated, or source-evidenced link and cannot be changed directly.");
+        return (entity, link, null);
+    }
+
+    private static object LinkPayload(StoryEntity entity, EntityLink link, string edgeType, IReadOnlyDictionary<string, string?> properties)
+    {
+        var self = OutlineMutationPayloads.Endpoint(entity.Id, entity.Type, entity.Name);
+        var other = OutlineMutationPayloads.Endpoint(link.OtherEntityId, link.OtherEntityType, link.OtherEntityName);
+        var outgoing = link.Direction == EntityLinkDirection.Outgoing;
+        return new
+        {
+            edgeId = link.EdgeId,
+            edgeType,
+            properties,
+            from = outgoing ? self : other,
+            to = outgoing ? other : self,
+        };
+    }
+
+    private async Task<string> UpdateEntityLinkAsync(
+        OutlineCollaborationContext ctx, Guid entityId, long edgeId, string? edgeType, string? propertiesJson)
+    {
+        Dictionary<string, string?>? properties;
+        try { properties = ParsePropertiesJson(propertiesJson); }
+        catch (Exception ex) { return $"Error: propertiesJson is not a valid JSON object: {ex.Message}"; }
+
+        try
+        {
+            var (entity, link, error) = await ResolveEditableLinkAsync(ctx, entityId, edgeId);
+            if (error is not null) return error;
+            var nextType = string.IsNullOrWhiteSpace(edgeType) ? link!.EdgeType : edgeType.Trim();
+            var nextProperties = properties
+                ?? new Dictionary<string, string?>(link!.Properties, StringComparer.OrdinalIgnoreCase);
+            await entities.UpdateLinkAsync(ctx.ProjectId, edgeId, nextType, nextProperties);
+            ctx.OnMutated();
+            var saved = (await entities.ListLinksAsync(ctx.ProjectId, entityId)).FirstOrDefault(item => item.EdgeId == edgeId) ?? link!;
+            return JsonSerializer.Serialize(new { status = "updated", link = LinkPayload(entity!, saved, saved.EdgeType, saved.Properties) });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> DeleteEntityLinkAsync(OutlineCollaborationContext ctx, Guid entityId, long edgeId)
+    {
+        try
+        {
+            var (entity, link, error) = await ResolveEditableLinkAsync(ctx, entityId, edgeId);
+            if (error is not null) return error;
+            await entities.DeleteLinkAsync(ctx.ProjectId, edgeId);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new { status = "deleted", link = LinkPayload(entity!, link!, link!.EdgeType, link.Properties) });
         }
         catch (Exception ex)
         {

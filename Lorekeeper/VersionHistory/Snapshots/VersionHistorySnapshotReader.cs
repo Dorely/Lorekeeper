@@ -127,6 +127,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             ? ReadRequired<VersionHistorySnapshotNarrativeFileV10>(files, "narrative/narrative.json").ToCurrent()
             : ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json");
         if (narrativeFile.WorldBrief is null) throw new InvalidDataException("World Brief content cannot be null.");
+        if (manifest.SchemaVersion >= 13 && narrativeFile.WorldWorkingNotes is null)
+            throw new InvalidDataException("World Working Notes content cannot be null.");
         var chapterPaths = ValidateChapterFileSet(listedPaths);
         var chapters = ReadChapters(files, chapterPaths, manifest.SchemaVersion);
         var narrative = narrativeFile.ToArea(chapters);

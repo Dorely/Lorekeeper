@@ -168,6 +168,46 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         return entity;
     }
 
+    public async Task<StoryEntity> ChangeTypeAsync(
+        Guid projectId,
+        Guid entityId,
+        string nodeType,
+        CancellationToken cancellationToken = default)
+    {
+        var type = nodeType?.Trim() ?? string.Empty;
+        if (type.Length == 0)
+            throw new ArgumentException("Entity type is required.", nameof(nodeType));
+        if (!IsRetypeableType(type))
+            throw new InvalidOperationException($"Entities cannot be moved to the structural type '{type}'.");
+
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken)
+            ?? throw new InvalidOperationException($"Entity {entityId} not found in project {projectId}.");
+        if (!IsContextEntityNode(node) || !IsRetypeableType(node.NodeType))
+            throw new InvalidOperationException($"{node.NodeType} entities cannot change type.");
+
+        if (!string.Equals(node.NodeType, type, StringComparison.Ordinal))
+        {
+            node.NodeType = type;
+            node.UpdatedAt = DateTime.UtcNow;
+            nodes.Update(node);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+        }
+
+        var parent = await FindParentAsync(node.Id, cancellationToken);
+        var entity = Project(node, parent);
+        await contextIndexing.ReindexEntityAsync(projectId, entity.Id, cancellationToken);
+        await autoLinks.RefreshEntityAsync(projectId, entity.Id, cancellationToken);
+        return entity;
+    }
+
+    // Beats are chapter-owned Event children, so they stay outside retyping alongside structural nodes.
+    private static bool IsRetypeableType(string type) =>
+        IsContextEntityType(type)
+        && !string.Equals(type, EntityTypeService.EventNodeType, StringComparison.OrdinalIgnoreCase);
+
     public async Task DeleteAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
     {
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);

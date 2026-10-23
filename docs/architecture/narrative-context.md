@@ -302,7 +302,10 @@ maintained primarily in World. IWorldBriefService owns revision-checked updates
 for both tools and manual editing. Its text is protected context across assistants,
 revision workers, and contest captures, and is included in indexed project profiles
 and origin-qualified reference profile reads. Reference reads retain their source
-project identity. Character voice profiles remain canonical entity properties,
+project identity. World Working Notes live beside the brief with their own
+revision. They are World-only scratch context for open questions and proposals:
+never injected into other assistants or contest captures, never indexed or
+searched, and never canon. Character voice profiles remain canonical entity properties,
 included only with relevant character context and exact reads, not every prompt.
 
 Background ingest and embedding work is app-process-owned. Durable job and

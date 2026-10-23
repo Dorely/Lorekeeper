@@ -8,7 +8,7 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 12;
+    public const int SchemaVersion = 13;
     public const int ImageUpscaleSchemaVersion = 5;
     public const int CoverDescriptionSchemaVersion = 6;
     public const int DesignedPagesSchemaVersion = 7;
@@ -67,7 +67,8 @@ public sealed record VersionHistorySnapshotNarrativeArea(
     IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
     IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
     IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations,
-    string WorldBrief = "");
+    string WorldBrief = "",
+    string WorldWorkingNotes = "");
 
 /// <summary>
 /// The non-chapter portion of <c>narrative/narrative.json</c>. Chapters are
@@ -82,7 +83,9 @@ public sealed record VersionHistorySnapshotNarrativeFile(
     IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
     IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
     IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations,
-    string WorldBrief = "")
+    string WorldBrief = "",
+    // Schema 13+. Absent from schema 11-12 files, so null keeps their canonical bytes.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WorldWorkingNotes = null)
 {
     public static VersionHistorySnapshotNarrativeFile FromArea(VersionHistorySnapshotNarrativeArea area) => new(
         area.BookBrief,
@@ -92,7 +95,8 @@ public sealed record VersionHistorySnapshotNarrativeFile(
         area.WritingSamples,
         area.ContextPreferences,
         area.Annotations,
-        area.WorldBrief);
+        area.WorldBrief,
+        area.WorldWorkingNotes);
 
     public VersionHistorySnapshotNarrativeArea ToArea(IReadOnlyList<ProjectExportChapter> chapters) => new(
         BookBrief,
@@ -103,7 +107,8 @@ public sealed record VersionHistorySnapshotNarrativeFile(
         WritingSamples,
         ContextPreferences,
         Annotations,
-        WorldBrief);
+        WorldBrief,
+        WorldWorkingNotes ?? "");
 }
 
 // Explicit predecessor boundary: preserve canonical bytes of schema 1-10 narrative files.

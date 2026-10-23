@@ -87,6 +87,8 @@ public enum ContextItemKind
     ProjectImage,
     ChapterVisualLayout,
     WorldBrief,
+    WorldWorkingNotes,
+    EntityInventory,
 }
 
 public sealed record ContextTraceEntry(

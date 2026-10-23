@@ -132,6 +132,9 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             options, "world-brief", baseline.Narrative.WorldBrief, candidate.Narrative.WorldBrief,
             _ => "world-brief", _ => "World Brief", Hash, metadataHash: Hash, readableText: brief => brief));
         accumulator.Add(CompareOptional(
+            options, "world-working-notes", baseline.Narrative.WorldWorkingNotes, candidate.Narrative.WorldWorkingNotes,
+            _ => "world-working-notes", _ => "World Working Notes", Hash, metadataHash: Hash, readableText: notes => notes));
+        accumulator.Add(CompareOptional(
             options,
             "book-brief",
             baseline.Narrative.BookBrief,

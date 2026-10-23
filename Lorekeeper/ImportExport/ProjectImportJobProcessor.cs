@@ -300,6 +300,22 @@ public sealed class ProjectImportJobProcessor(
             await databaseOperation.SaveChangesAsync(cancellationToken);
         }
 
+        var importedNotes = document.WorldWorkingNotes ?? string.Empty;
+        if (worldBrief is not null && worldBrief.WorkingNotes.Length > 0 && importedNotes.Length > 0
+            && worldBrief.WorkingNotes != importedNotes)
+            throw new InvalidDataException("The destination already has different World Working Notes. Import into a new project or reconcile the notes first.");
+        if (importedNotes.Length > 0 && (worldBrief is null || worldBrief.WorkingNotes.Length == 0))
+        {
+            if (worldBrief is null)
+            {
+                worldBrief = new WorldBrief { ProjectId = project.Id };
+                databaseOperation.Db.WorldBriefs.Add(worldBrief);
+            }
+            worldBrief.WorkingNotes = importedNotes;
+            worldBrief.WorkingNotesRevision++;
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+        }
+
         if (document.BookBrief is not { } imported)
             return;
 
@@ -974,7 +990,7 @@ public sealed class ProjectImportJobProcessor(
         {
             var legacy = await JsonSerializer.DeserializeAsync<ProjectExportDocument>(input, JsonOptions, cancellationToken)
                 ?? throw new InvalidOperationException("Import file did not contain a project export document.");
-            return legacy with { WorldBrief = string.Empty };
+            return legacy with { WorldBrief = string.Empty, WorldWorkingNotes = null };
         }
 
         var archive = await ProjectArchiveZip.ReadAsync(input, _archiveLimits, cancellationToken);
@@ -991,6 +1007,8 @@ public sealed class ProjectImportJobProcessor(
             ?? throw new InvalidDataException("Archive creative-state record is invalid.");
         if (archive.Manifest.SchemaVersions.ArchiveRecord < 4)
             document = document with { WorldBrief = string.Empty };
+        if (archive.Manifest.SchemaVersions.ArchiveRecord < 6)
+            document = document with { WorldWorkingNotes = null };
         if (document.WorldBrief is null) throw new InvalidDataException("World Brief content cannot be null.");
         // `sources/` is the v1 archive authority. Do not use the legacy
         // SourceText projection embedded in creative-state.json when restoring

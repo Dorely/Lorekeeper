@@ -42,6 +42,8 @@ public static class EditorContextKeys
     public const string ProjectGuidance = "project-guidance";
     public const string BookBrief = "book-brief";
     public const string WorldBrief = "world-brief";
+    public const string WorldWorkingNotes = "world-working-notes";
+    public const string EntityInventory = "entity-inventory";
     public const string CurrentChapter = "current-chapter";
     public const string ManuscriptAnnotations = "manuscript-annotations";
     public const string ProjectPageSetup = "project-page-setup";

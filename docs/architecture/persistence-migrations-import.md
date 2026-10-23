@@ -78,6 +78,16 @@ and values outside the application's ranges, rolling back the whole import.
 Legacy and archived Generic profile keys map to the per-process `UserDefined`
 keys without dimensions.
 
+The forward AddWorldWorkingNotes migration adds non-null `WorkingNotes` text
+(default empty) and an independent `WorkingNotesRevision` to WorldBriefs, so a
+notes save never conflicts with a brief edit. Existing brief content and
+revisions are unchanged.
+
+Archive-record schema 6 adds optional `worldWorkingNotes` to full and
+non-structural documents. Schema 1-5 records and legacy JSON adapt to empty
+notes. Import applies the World Brief rule: fill empty destination notes, keep
+identical notes, and refuse conflicting nonempty notes, rolling back the import.
+
 The forward RemoveOpenAiAccountEmbeddings migration deletes the singleton
 embedding configuration when it references an account-backed `LlmProvider`,
 because OpenAI account connections no longer serve embeddings. Provider,
@@ -406,7 +416,7 @@ Legacy project export v31 is the final JSON format and is import-only. Its
 adapter retains the durable print registry/profile fields, removes finish, and
 accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
-at that boundary. New `.lorekeeper` full archives use archive-record schema 5
+at that boundary. New `.lorekeeper` full archives use archive-record schema 6
 and include the current v7
 manuscript model, Core/release annotations, the complete retained-source closure,
 page setup, independent Designed

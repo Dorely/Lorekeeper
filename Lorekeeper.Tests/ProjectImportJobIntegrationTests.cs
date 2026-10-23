@@ -1050,7 +1050,7 @@ public sealed class ProjectImportJobIntegrationTests
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
 
-        var sourceProject = new Project { WorldBrief = new WorldBrief { Content = "# World\nEstablished principles.", Revision = 4 }, Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
+        var sourceProject = new Project { WorldBrief = new WorldBrief { Content = "# World\nEstablished principles.", Revision = 4, WorkingNotes = "Open: tide calendar?", WorkingNotesRevision = 2 }, Name = "Archive source", Slug = $"archive-source-{Guid.NewGuid():N}" };
         var destination = new Project { Name = "Archive destination", Slug = $"archive-destination-{Guid.NewGuid():N}" };
         db.Projects.AddRange(sourceProject, destination);
         var publicationBook = new PublicationBook { Project = sourceProject, CitationStyle = Lorekeeper.Citations.CitationStyle.APA7 };
@@ -1212,6 +1212,7 @@ public sealed class ProjectImportJobIntegrationTests
             exporter);
         var capture = await exporter.CaptureArchiveDocumentAsync(sourceProject.Id, ProjectExportKind.Full);
         Assert.Equal("# World\nEstablished principles.", capture.Document.WorldBrief);
+        Assert.Equal("Open: tide calendar?", capture.Document.WorldWorkingNotes);
         Assert.Empty(capture.Document.IngestSources);
         Assert.Equal([retainedSource.Id], capture.Document.BookBriefCanonSourceIds);
         Assert.Contains(capture.Document.Nodes, node => node.Key == secondary.Id.ToString("N"));
@@ -1248,7 +1249,9 @@ public sealed class ProjectImportJobIntegrationTests
         var restoredCharacter = await db.GraphNodes.SingleAsync(node => node.ProjectId == destination.Id && node.Label == "Mira");
         Assert.NotEqual(character.Id, restoredCharacter.Id);
         Assert.Equal("Clipped dialogue; expansive POV.", restoredCharacter.Properties["voiceProfile"]?.ToString());
-        Assert.Equal("# World\nEstablished principles.", (await db.WorldBriefs.SingleAsync(item => item.ProjectId == destination.Id)).Content);
+        var importedBrief = await db.WorldBriefs.SingleAsync(item => item.ProjectId == destination.Id);
+        Assert.Equal("# World\nEstablished principles.", importedBrief.Content);
+        Assert.Equal("Open: tide calendar?", importedBrief.WorkingNotes);
         Assert.Equal(2, await db.IngestSources.CountAsync(item => item.ProjectId == destination.Id));
         var restored = await db.IngestSources.AsNoTracking()
             .Include(item => item.Original).ThenInclude(original => original!.Chunks).ThenInclude(chunk => chunk.Blob)

@@ -70,9 +70,13 @@ public sealed class WorldTools(
         var tools = new List<AITool>
         {
             AIFunctionFactory.Create((int? pageNumber = null) => ReadBriefAsync(context, pageNumber),
-                "read_world_brief", "Read the current World Brief and revision with pagination. Follow every page before updating."),
+                "read_world_brief", "Read the current World Brief and revision with pagination. The Brief is already in context at turn start; read it after a revision conflict."),
             AIFunctionFactory.Create((long expectedRevision, string content) => UpdateBriefAsync(context, expectedRevision, content),
-                "update_world_brief", "Save the complete free-form World Brief at its exact read revision; empty content clears it. Keep it concise and preserve unrelated established context."),
+                "update_world_brief", "Save the complete free-form World Brief at its current revision; empty content clears it. Write only approved canon as present truth, keep it a concise synthesis, and preserve unrelated established context. Returns the new revision."),
+            AIFunctionFactory.Create((int? pageNumber = null) => ReadWorkingNotesAsync(context, pageNumber),
+                "read_world_working_notes", "Read the World Working Notes and their revision with pagination. The notes are already in context at turn start; read them after a revision conflict."),
+            AIFunctionFactory.Create((long expectedRevision, string notes) => UpdateWorkingNotesAsync(context, expectedRevision, notes),
+                "update_world_working_notes", "Save the complete World Working Notes at their current revision; empty notes clear them. Use them for open questions, proposals awaiting approval, contradictions, and research leads. Only the World assistant reads them. Returns the new revision."),
 
             AIFunctionFactory.Create(
                 method: (string query, int count = 5) => WebSearchAsync(context, query, count),
@@ -116,6 +120,11 @@ public sealed class WorldTools(
                 description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full identity fields repeat on every page; follow nextPageArguments until complete. Includes the latest live entity and link state from this project."),
 
             AIFunctionFactory.Create(
+                method: (Guid pageId, string? rationale = null) => SaveResearchSourceAsync(context, pageId, rationale),
+                name: "save_research_source",
+                description: "After the user agrees, keep a web page you have read as an ingested project source. Queues an index-only ingest job, so the page becomes searchable evidence without extracting entities or becoming canon. pageId is a page id returned by web_search, read_webpage, or follow_page_links."),
+
+            AIFunctionFactory.Create(
                 method: (Guid pageId, string? imageUrl = null) => InspectWebImageAsync(context, pageId, imageUrl),
                 name: "inspect_web_image",
                 description: "Safely fetch, validate, cache, and visually inspect an image discovered on a read webpage. Use the exact image URL returned by the page read when more than one is available."),
@@ -151,6 +160,48 @@ public sealed class WorldTools(
             if (updated.Revision != expectedRevision) context.OnMutated();
             return JsonSerializer.Serialize(new { updated.ProjectId, updated.Revision });
         });
+
+    private async Task<string> ReadWorkingNotesAsync(WorldToolContext context, int? page)
+    {
+        var brief = await briefs.GetAsync(context.ProjectId);
+        return AgentPayloadPaginator.SerializePage(
+            new JsonObject { ["projectId"] = context.ProjectId, ["revision"] = brief.WorkingNotesRevision },
+            new JsonObject { ["notes"] = brief.WorkingNotes }, "read_world_working_notes", new(), page);
+    }
+
+    private Task<string> UpdateWorkingNotesAsync(WorldToolContext context, long expectedRevision, string notes) =>
+        fence.ExecuteAsync(new AuthoringFenceRequest(context.ProjectId, [], "World Working Notes edit"), async (_, token) =>
+        {
+            var updated = await briefs.UpdateWorkingNotesAsync(context.ProjectId, expectedRevision, notes, token);
+            if (updated.WorkingNotesRevision != expectedRevision) context.OnMutated();
+            return JsonSerializer.Serialize(new { updated.ProjectId, Revision = updated.WorkingNotesRevision });
+        });
+
+    private async Task<string> SaveResearchSourceAsync(WorldToolContext context, Guid pageId, string? rationale)
+    {
+        try
+        {
+            if (await candidates.GetCachedDetailAsync(context.ProjectId, pageId) is null)
+                return $"Error: page {pageId} was not found in this project.";
+            if (!string.IsNullOrWhiteSpace(rationale))
+                await candidates.StageAsync(pageId, rationale);
+            var job = await candidates.QueueBatchAsync(
+                context.ProjectId, [pageId], providerId: null, instructions: null, mode: IngestJobMode.IndexOnly);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "queued",
+                pageId,
+                ingestJobId = job.Id,
+                mode = nameof(IngestJobMode.IndexOnly),
+                note = "The page is indexing as a project source. It is evidence, not canon; find it later with list_ingested_sources or search_project.",
+            }, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
 
     private async Task<string> WebSearchAsync(WorldToolContext context, string query, int count)
     {

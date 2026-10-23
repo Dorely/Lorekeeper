@@ -30,6 +30,8 @@ public sealed class ProjectVersionRestoreTests
     [Theory]
     [InlineData(10)]
     [InlineData(11)]
+    [InlineData(12)]
+    [InlineData(13)]
     public void WorldBriefSnapshotsPreserveCurrentTextAndAdaptPredecessors(int schemaVersion)
     {
         var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
@@ -37,11 +39,12 @@ public sealed class ProjectVersionRestoreTests
         try
         {
             var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid());
-            payload = payload with { Narrative = payload.Narrative with { WorldBrief = "# World\nEstablished rules." } };
+            payload = payload with { Narrative = payload.Narrative with { WorldBrief = "# World\nEstablished rules.", WorldWorkingNotes = "Open: river names?" } };
             WriteSnapshotTree(root, payload, schemaVersion: schemaVersion);
             var original = File.ReadAllBytes(Path.Combine(root, "narrative", "narrative.json"));
             var read = new VersionHistorySnapshotReader().Read(root);
             Assert.Equal(schemaVersion < 11 ? "" : payload.Narrative.WorldBrief, read.Payload.Narrative.WorldBrief);
+            Assert.Equal(schemaVersion < 13 ? "" : payload.Narrative.WorldWorkingNotes, read.Payload.Narrative.WorldWorkingNotes);
             WriteSnapshotTree(root, payload, schemaVersion: schemaVersion);
             Assert.Equal(original, File.ReadAllBytes(Path.Combine(root, "narrative", "narrative.json")));
         }
@@ -60,6 +63,25 @@ public sealed class ProjectVersionRestoreTests
                 if (path != "narrative/narrative.json") return bytes;
                 var node = System.Text.Json.Nodes.JsonNode.Parse(bytes)!.AsObject();
                 node["worldBrief"] = null;
+                return VersionHistoryCanonicalJson.Serialize(node);
+            });
+            Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void WorldWorkingNotesAreRequiredFromSchema13()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            WriteSnapshotTree(root, CreatePayload(Guid.NewGuid(), Guid.NewGuid()), (path, bytes) =>
+            {
+                if (path != "narrative/narrative.json") return bytes;
+                var node = System.Text.Json.Nodes.JsonNode.Parse(bytes)!.AsObject();
+                node.Remove("worldWorkingNotes");
                 return VersionHistoryCanonicalJson.Serialize(node);
             });
             Assert.Throws<InvalidDataException>(() => new VersionHistorySnapshotReader().Read(root));
@@ -1382,7 +1404,7 @@ public sealed class ProjectVersionRestoreTests
             var recordId = Guid.NewGuid();
             var manuscript = CitationPreservationTests.Document(recordId, null);
             var payload = CreatePayload(repositoryId, projectId);
-            payload = payload with { Narrative = payload.Narrative with { WorldBrief = "Saved world principles." } };
+            payload = payload with { Narrative = payload.Narrative with { WorldBrief = "Saved world principles.", WorldWorkingNotes = "Saved open questions." } };
             if (withCitations)
             {
                 payload = payload with
@@ -1527,7 +1549,9 @@ public sealed class ProjectVersionRestoreTests
                 Assert.Equal(0, await verify.ContestBatches.CountAsync());
                 Assert.Equal(0, await verify.ProjectVersionOperations.CountAsync());
                 Assert.Equal("Project", (await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId)).Name);
-                Assert.Equal("Saved world principles.", (await verify.WorldBriefs.SingleAsync(item => item.ProjectId == projectId)).Content);
+                var restoredBrief = await verify.WorldBriefs.SingleAsync(item => item.ProjectId == projectId);
+                Assert.Equal("Saved world principles.", restoredBrief.Content);
+                Assert.Equal("Saved open questions.", restoredBrief.WorkingNotes);
                 if (withCitations)
                 {
                     Assert.Equal(2, await verify.IngestSources.CountAsync(item => item.ProjectId == projectId));
@@ -1855,7 +1879,10 @@ public sealed class ProjectVersionRestoreTests
                 ? VersionHistoryCanonicalJson.Serialize(new VersionHistorySnapshotNarrativeFileV10(
                     payload.Narrative.BookBrief, payload.Narrative.BookBriefCanonSourceIds, payload.Narrative.EntityTypes,
                     payload.Narrative.Acts, payload.Narrative.WritingSamples, payload.Narrative.ContextPreferences, payload.Narrative.Annotations))
-                : VersionHistoryCanonicalJson.Serialize(VersionHistorySnapshotNarrativeFile.FromArea(payload.Narrative)),
+                : VersionHistoryCanonicalJson.Serialize(VersionHistorySnapshotNarrativeFile.FromArea(payload.Narrative) with
+                {
+                    WorldWorkingNotes = effectiveSchemaVersion < 13 ? null : payload.Narrative.WorldWorkingNotes,
+                }),
             ["graph/graph.json"] = VersionHistoryCanonicalJson.Serialize(payload.Graph),
             ["assets/assets.json"] = VersionHistoryCanonicalJson.Serialize(payload.Assets),
             ["manuscript/styles.json"] = VersionHistoryCanonicalJson.Serialize(payload.Manuscript),

@@ -75,4 +75,33 @@ public sealed class WorldWorkspaceMigrationTests
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
+
+    [Fact]
+    public async Task Working_notes_upgrade_preserves_brief_text_and_revision()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var projectId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={Path.Combine(directory, "notes.db")};Pooling=False").Options;
+        try
+        {
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.GetService<IMigrator>().MigrateAsync("20261021030258_ImageProviders");
+                db.Projects.Add(new Project { Id = projectId, Name = "Notes fixture", Slug = "notes-fixture" });
+                await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO WorldBriefs (ProjectId, Content, Revision) VALUES ({projectId}, 'Exact world canon', 7)");
+            }
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                var world = await db.WorldBriefs.SingleAsync();
+                Assert.Equal("Exact world canon", world.Content);
+                Assert.Equal(7, world.Revision);
+                Assert.Empty(world.WorkingNotes);
+                Assert.Equal(0, world.WorkingNotesRevision);
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
 }

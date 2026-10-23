@@ -27,11 +27,12 @@ else
 
         <section class="research-pages-pane">
             <div class="btn-group p-2" role="group" aria-label="World workspace">
-                <button class="btn @(!_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = false">World Brief</button>
-                <button class="btn @(_showActivity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _showActivity = true">Research Activity</button>
+                <button class="btn @(_view == WorldView.Brief ? "btn-primary" : "btn-outline-primary")" @onclick="() => _view = WorldView.Brief">World Brief</button>
+                <button class="btn @(_view == WorldView.Notes ? "btn-primary" : "btn-outline-primary")" @onclick="() => _view = WorldView.Notes">Working Notes</button>
+                <button class="btn @(_view == WorldView.Activity ? "btn-primary" : "btn-outline-primary")" @onclick="() => _view = WorldView.Activity">Research Activity</button>
             </div>
-            <div class="world-brief-layout" style="@(_showActivity ? "display:none" : null)">
-                <div class="world-brief-editor">
+            <div class="world-brief-layout" style="@(_view == WorldView.Activity ? "display:none" : null)">
+                <div class="world-brief-editor" style="@(_view != WorldView.Brief ? "display:none" : null)">
                     @if (_brief is not null)
                     {
                         <NarrativeTextEditor @key="Project.Id" ProjectId="Project.Id" TargetId="@($"world-brief:{Project.Id:N}")"
@@ -40,11 +41,20 @@ else
                             Placeholder="Develop the established world or research context for this book. Organize it however suits your project." />
                     }
                 </div>
+                <div class="world-brief-editor" style="@(_view != WorldView.Notes ? "display:none" : null)">
+                    @if (_brief is not null)
+                    {
+                        <NarrativeTextEditor @key="Project.Id" ProjectId="Project.Id" TargetId="@($"world-working-notes:{Project.Id:N}")"
+                            Label="Working Notes" Body="@_brief.WorkingNotes" Revision="_brief.WorkingNotesRevision" Save="SaveWorkingNotesAsync" OnResumed="ReloadActivityAsync"
+                            AutoSize="true"
+                            Placeholder="Open questions, proposals, and items to review. Only the World assistant reads these notes; they are not canon." />
+                    }
+                </div>
                 <aside class="world-brief-entities" aria-label="Entities">
                     <EntitiesPanel ProjectId="Project.Id" RefreshSignal="_entityRefreshSignal" OnChanged="RefreshActivityAsync" />
                 </aside>
             </div>
-            <div style="@(!_showActivity ? "display:none" : null)">
+            <div style="@(_view != WorldView.Activity ? "display:none" : null)">
 
             <div class="research-side-head">
                 <div>
@@ -297,7 +307,7 @@ else
     [CascadingParameter] public Project? Project { get; set; }
 
     private WorldBrief? _brief;
-    private bool _showActivity;
+    private WorldView _view;
     private int _entityRefreshSignal;
     private SearchProvider? _activeSearchProvider;
     private ResearchActivity? _activity;
@@ -340,6 +350,13 @@ else
         _brief = await Briefs.UpdateAsync(Project!.Id, draft.Revision, draft.Body);
         StateHasChanged();
         return new("", _brief.Content, _brief.Revision, _brief.Content);
+    }
+
+    private async Task<NarrativeTextSnapshot> SaveWorkingNotesAsync(NarrativeTextSnapshot draft)
+    {
+        _brief = await Briefs.UpdateWorkingNotesAsync(Project!.Id, draft.Revision, draft.Body);
+        StateHasChanged();
+        return new("", _brief.WorkingNotes, _brief.WorkingNotesRevision, _brief.WorkingNotes);
     }
 
     private Task OpenEntityAsync(ResearchEntityActivityItem entity)
@@ -463,4 +480,6 @@ else
         string.IsNullOrEmpty(text) || text.Length <= maxChars
             ? text
             : text[..maxChars].TrimEnd() + "\n\n[Truncated for display.]";
+
+    private enum WorldView { Brief, Notes, Activity }
 }

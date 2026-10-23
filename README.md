@@ -312,8 +312,9 @@ technical map.
   an unavailable original file. Monitor, stop, or resume either operation in
   **Sources → Manage jobs**.
 - **World** combines world development and research in one conversation, with a
-  free-form **World Brief** editor beside the project's entity list and a
-  separate Research Activity view. Local
+  free-form **World Brief** editor beside the project's entity list, a
+  **Working Notes** view for open questions and proposals that only the World
+  assistant reads, and a separate Research Activity view. Local
   world building works without a search provider. OpenAI account models search the
   web with their built-in search; other models need a SerpApi or Brave provider.
   The brief becomes persistent project context for all six assistants and revision
