@@ -24,7 +24,10 @@ for production. Then prepare the unsigned submission package:
 
 The default output is `.artifacts/msix/store/Lorekeeper-Store-<version>-x64.msix`
 with `msix-package.json`. The script validates immutable Store metadata, stages
-the exact package, runs SDK MakeAppx semantic validation without `/nv`, unpacks
+the exact package, renders every logo from `icon-512.png` at scale-100 to
+scale-200 plus `Square44x44Logo` target sizes 16-256 in plated, unplated, and
+light-unplated forms, indexes only `Assets` into `resources.pri` with
+[priconfig.xml](priconfig.xml), runs SDK MakeAppx semantic validation without `/nv`, unpacks
 it, verifies contents and all notice hashes, and leaves it unsigned. It does not
 create certificates, install a package, or contact Partner Center. See
 [store-listing.md](store-listing.md) for prepared copy, free pricing, capability

@@ -330,7 +330,10 @@ Channel and informational-version inspection uses bounded passive PE metadata,
 never loads the application assembly, and closes the reader and stream before
 any later package build in the same PowerShell process. Malformed metadata or
 unexpected framework attribute constructors fail closed.
-MakeAppx runs semantic validation without `/nv`. The manifest deliberately
+MakeAppx runs semantic validation without `/nv`. Logos ship only as scale- and
+target-size-qualified files (including unplated app-list icons, so the shell
+does not shrink the self-backed icon onto an accent plate) resolved through an
+Assets-only `resources.pri`. The manifest deliberately
 uses the full-trust desktop model; it does not imply AppContainer confinement.
 It declares no `unvirtualizedResources` capability (certification denied it on
 2026-10-13), so standard MSIX redirection keeps `%LocalAppData%\Lorekeeper`

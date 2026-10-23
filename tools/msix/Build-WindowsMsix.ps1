@@ -18,6 +18,7 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT)
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $artifactRoot = Join-Path $repoRoot '.artifacts\msix'
 $manifestTemplatePath = Join-Path $PSScriptRoot 'Package.appxmanifest.xml'
+$priConfigPath = Join-Path $PSScriptRoot 'priconfig.xml'
 $brandingIconPath = Join-Path $repoRoot 'Lorekeeper\wwwroot\branding\icon-512.png'
 . (Join-Path $repoRoot 'eng/ReleaseWorkflow.ps1')
 
@@ -340,6 +341,7 @@ if (-not (Test-Path -LiteralPath $windowsUnpackedDirectory -PathType Container))
 }
 foreach ($requiredInput in @(
     $manifestTemplatePath,
+    $priConfigPath,
     $brandingIconPath,
     (Join-Path $windowsUnpackedDirectory 'Lorekeeper.exe'),
     (Join-Path $windowsUnpackedDirectory 'resources\bin\Lorekeeper.dll'),
@@ -368,6 +370,9 @@ if ($assemblyVersion.Count -ne 1 -or $assemblyVersion[0] -cne $sourceVersion)
 }
 
 $makeAppx = Find-WindowsSdkTool 'makeappx.exe'
+$makePri = Find-WindowsSdkTool 'makepri.exe'
+$logoScales = @(100, 125, 150, 200)
+$appIconTargetSizes = @(16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256)
 $msixVersion = ConvertTo-MsixVersion $sourceVersion
 $packageRoot = Join-Path $outputDirectory 'package-root'
 $appDirectory = Join-Path $packageRoot 'app'
@@ -403,12 +408,24 @@ try
     Get-ChildItem -LiteralPath $windowsUnpackedDirectory -Force | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $appDirectory -Recurse -Force
     }
-    foreach ($asset in @(
-        @{ Name = 'StoreLogo.png'; Size = 50 },
-        @{ Name = 'Square44x44Logo.png'; Size = 44 },
-        @{ Name = 'Square150x150Logo.png'; Size = 150 }))
+    foreach ($logo in @(
+        @{ Name = 'StoreLogo'; Size = 50 },
+        @{ Name = 'Square44x44Logo'; Size = 44 },
+        @{ Name = 'Square150x150Logo'; Size = 150 }))
     {
-        Export-PackageLogo -Path (Join-Path $assetsDirectory $asset.Name) -Size $asset.Size
+        foreach ($scale in $logoScales)
+        {
+            Export-PackageLogo -Path (Join-Path $assetsDirectory "$($logo.Name).scale-$scale.png") -Size ([int][Math]::Round($logo.Size * $scale / 100))
+        }
+    }
+    # The taskbar, Start list, and Alt+Tab pick exact target sizes. Without unplated
+    # forms the shell shrinks the self-backed icon onto an accent-colored plate.
+    foreach ($targetSize in $appIconTargetSizes)
+    {
+        foreach ($form in @('', '_altform-unplated', '_altform-lightunplated'))
+        {
+            Export-PackageLogo -Path (Join-Path $assetsDirectory "Square44x44Logo.targetsize-$targetSize$form.png") -Size $targetSize
+        }
     }
 
     $manifest = [xml][System.IO.File]::ReadAllText($manifestTemplatePath)
@@ -430,14 +447,19 @@ try
     try { $manifest.Save($writer) }
     finally { $writer.Dispose() }
 
+    # Qualified logo files resolve only through resources.pri; index Assets alone so
+    # the Electron payload never becomes package resources.
+    Invoke-CheckedTool $makePri @('new', '/pr', $packageRoot, '/cf', $priConfigPath, '/mn', (Join-Path $packageRoot 'AppxManifest.xml'), '/of', (Join-Path $packageRoot 'resources.pri'), '/o')
     Invoke-CheckedTool $makeAppx @('pack', '/o', '/h', 'SHA256', '/d', $packageRoot, '/p', $packagePath)
     Invoke-CheckedTool $makeAppx @('unpack', '/o', '/p', $packagePath, '/d', $unpackDirectory)
 
     foreach ($requiredPackageFile in @(
         'AppxManifest.xml',
-        'Assets/StoreLogo.png',
-        'Assets/Square44x44Logo.png',
-        'Assets/Square150x150Logo.png',
+        'resources.pri',
+        'Assets/StoreLogo.scale-100.png',
+        'Assets/Square44x44Logo.scale-100.png',
+        'Assets/Square44x44Logo.targetsize-24_altform-unplated.png',
+        'Assets/Square150x150Logo.scale-100.png',
         'app/Lorekeeper.exe',
         'app/resources/bin/Lorekeeper.dll',
         'app/resources/bin/press-runtime/lorekeeper-press.exe'))
@@ -479,7 +501,7 @@ try
         }
         validation = [pscustomobject][ordered]@{
             makeAppxSemanticValidation = 'passed during pack without /nv'
-            requiredContent = @('AppxManifest.xml', 'Assets/*.png', 'app/Lorekeeper.exe', 'app/resources/bin/Lorekeeper.dll', 'app/resources/bin/press-runtime/lorekeeper-press.exe')
+            requiredContent = @('AppxManifest.xml', 'resources.pri', 'Assets/*.png', 'app/Lorekeeper.exe', 'app/resources/bin/Lorekeeper.dll', 'app/resources/bin/press-runtime/lorekeeper-press.exe')
             signature = $signatureResult
             dataPreservation = 'Standard MSIX filesystem virtualization: LocalAppData/Lorekeeper writes persist across updates in package storage and are removed on uninstall; installed update/uninstall evidence remains required.'
             installed = $false
