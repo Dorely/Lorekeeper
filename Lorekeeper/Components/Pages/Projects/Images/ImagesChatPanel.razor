@@ -27,7 +27,7 @@
              OnClearError="ClearError"
              Input="@_input"
              InputChanged="SetInput"
-             Placeholder="Ask for an image, edit, mask, or layout inspection..."
+             Placeholder="Ask for an image, edit, or layout inspection..."
              Running="@_running"
              ComposerDisabled="@(ChatDisabled || _running || _resetting)"
              SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input))"

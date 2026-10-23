@@ -110,7 +110,6 @@ public class AppDbContext(
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
     public DbSet<ProjectImagePartial> ProjectImagePartials => Set<ProjectImagePartial>();
-    public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
     public DbSet<EntityVisualExample> EntityVisualExamples => Set<EntityVisualExample>();
     public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
     public DbSet<ProjectFontFamily> ProjectFontFamilies => Set<ProjectFontFamily>();
@@ -1664,7 +1663,6 @@ public class AppDbContext(
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
             entity.HasIndex(e => new { e.ProjectId, e.Kind, e.CreatedAt });
             entity.HasIndex(e => e.SourceImageId);
-            entity.HasIndex(e => e.MaskId);
             entity.Property(e => e.Kind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.Background).HasDefaultValue("auto");
@@ -1696,22 +1694,6 @@ public class AppDbContext(
             entity.HasOne(e => e.FinalOutputImage)
                 .WithMany()
                 .HasForeignKey(e => e.FinalOutputImageId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<ProjectImageMask>(entity =>
-        {
-            entity.HasIndex(e => new { e.ProjectId, e.ImageId, e.CreatedAt });
-            entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerId });
-
-            entity.HasOne(e => e.Project)
-                .WithMany(p => p.ProjectImageMasks)
-                .HasForeignKey(e => e.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.Image)
-                .WithMany(a => a.ImageMasks)
-                .HasForeignKey(e => e.ImageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

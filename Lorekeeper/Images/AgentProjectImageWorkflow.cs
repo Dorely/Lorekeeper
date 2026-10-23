@@ -26,7 +26,6 @@ public interface IAgentProjectImageWorkflow
         Guid projectId,
         Guid sourceImageId,
         ImageEditBrief brief,
-        ProjectImageMaskShapeRequest? regionalGuide,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? geometryGuidance,
         string? altText,
@@ -152,7 +151,6 @@ public sealed class AgentProjectImageWorkflow(
         Guid projectId,
         Guid sourceImageId,
         ImageEditBrief brief,
-        ProjectImageMaskShapeRequest? regionalGuide,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? geometryGuidance,
         string? altText,
@@ -166,9 +164,7 @@ public sealed class AgentProjectImageWorkflow(
         string? imageModel = null,
         string? background = null)
     {
-        var effectiveTarget = WithDefaultMinimumDpi(
-            geometryGuidance,
-            regionalGuide is null ? defaultMinimumDpi : null);
+        var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
         var model = await imageProviders.ResolveAsync(modelId: imageModel, cancellationToken: cancellationToken);
         var resolved = ProjectImageModelCatalog.Resolve(model, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileEditAsync(
@@ -178,7 +174,6 @@ public sealed class AgentProjectImageWorkflow(
             brief,
             references?.ToArray(),
             effectiveTarget,
-            regionalGuide is null ? ImageEditGuidanceMode.SourceDriven : ImageEditGuidanceMode.RegionalGuide,
             cancellationToken,
             background: resolved.Background);
         var job = await jobs.CreateEditJobAsync(
@@ -192,10 +187,8 @@ public sealed class AgentProjectImageWorkflow(
                 resolved.OutputCompression,
                 altText?.Trim() ?? string.Empty,
                 1,
-                MaskPngDataUrl: null,
                 ReferenceImageIds: compiled.ReferenceImageIds,
                 Label: label,
-                RegionalGuide: regionalGuide,
                 EntityTargets: null,
                 InheritSourceEntityTargets: false,
                 compiled.BriefJson,

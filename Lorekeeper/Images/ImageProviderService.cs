@@ -375,7 +375,6 @@ public sealed partial class ImageProviderService(
         OutputFormatsJson = ImageModelCapabilities.ToJson(discovered.Capabilities.OutputFormats),
         SupportsGenerate = discovered.Capabilities.Generate,
         SupportsEdit = discovered.Capabilities.Edit,
-        SupportsRegionalGuide = discovered.Capabilities.RegionalGuide,
         MaxReferenceImages = discovered.Capabilities.MaxReferenceImages,
         SupportsTransparentBackground = discovered.Capabilities.TransparentBackground,
         SupportsStreaming = discovered.Capabilities.Streaming,
@@ -501,8 +500,6 @@ public sealed partial class ImageProviderService(
             throw new ArgumentException("Reference image limit must be between 0 and 64.", nameof(model));
         if (!model.SupportsGenerate && !model.SupportsEdit)
             throw new ArgumentException("A model must generate or edit images.", nameof(model));
-        if (model.SupportsRegionalGuide && !model.SupportsEdit)
-            throw new ArgumentException("Regional guides require edit support.", nameof(model));
         model.RasterConstraintsJson = ImageRasterConstraints.FromJson(model.RasterConstraintsJson).ToJson();
     }
 
@@ -515,7 +512,6 @@ public sealed partial class ImageProviderService(
         target.OutputFormatsJson = source.OutputFormatsJson;
         target.SupportsGenerate = source.SupportsGenerate;
         target.SupportsEdit = source.SupportsEdit;
-        target.SupportsRegionalGuide = source.SupportsRegionalGuide;
         target.MaxReferenceImages = source.MaxReferenceImages;
         target.SupportsTransparentBackground = source.SupportsTransparentBackground;
         target.SupportsStreaming = source.SupportsStreaming;

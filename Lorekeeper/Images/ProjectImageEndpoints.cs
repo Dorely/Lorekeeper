@@ -61,28 +61,6 @@ public static class ProjectImageEndpoints
             });
 
         endpoints.MapGet(
-            "/projects/{projectId:guid}/image-masks/{maskId:guid}/content",
-            async (
-                Guid projectId,
-                Guid maskId,
-                IProjectImageJobService imageJobs,
-                CancellationToken cancellationToken) =>
-            {
-                var mask = await imageJobs.GetMaskDataAsync(projectId, maskId, cancellationToken);
-                if (mask is null)
-                    return Results.NotFound();
-
-                var etag = $"\"{mask.Id:N}-{mask.UpdatedAt.Ticks:x}-{mask.Data.LongLength:x}\"";
-                return Results.File(
-                    mask.Data,
-                    mask.ContentType,
-                    fileDownloadName: null,
-                    lastModified: mask.UpdatedAt,
-                    entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag),
-                    enableRangeProcessing: true);
-            });
-
-        endpoints.MapGet(
             "/projects/{projectId:guid}/source-visuals/{candidateId:guid}/content",
             async (
                 Guid projectId,

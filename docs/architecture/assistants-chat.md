@@ -309,7 +309,7 @@ does not yet use an authoring receipt.
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
-asset. Free-standing generation and unmasked editing default to a provider-valid
+asset. Free-standing generation and editing default to a provider-valid
 raster with the configured Core Book page aspect; a concrete layout target
 replaces that default when the composition must honor a Figure, page, frame, or
 cover. Publish exposes only target identity, aspect, protected regions, and exact
@@ -329,20 +329,14 @@ Same-aspect up-resolution uses the ordinary source-driven edit operation: the
 latest accepted image is supplied directly, the complete framing and content
 are preserved, and the prompt restates the requested change and constraints
 while asking for credible reconstructed detail without outward extension or
-cropping. Unmasked edits make only the requested change plus directly dependent
+cropping. Edits make only the requested change plus directly dependent
 adaptations, preserving named invariants, unrelated scene details, and existing
 open space unless the request explicitly changes them. Intentional expansion is a distinct outpainting
 request whose prompt describes the larger framing, including left-and-right or
-above-and-below surroundings as appropriate. Regional guides are reserved for
-genuinely localized or otherwise hard-to-describe edits. They are soft visual
-guidance, not pixel protection, and are unavailable for broad restyling,
-reframing, resizing, layout-bound targets, or reserved-region work. Assistant
-tool catalogs expose no standalone mask-creation tool and no reusable mask ID or
-label. `edit_project_image` accepts only optional inline
-`regionalGuideShapes`; the owning workflow validates and persists the resulting
-guide atomically with that edit. Every generated or edited result is inspected
-in full before the assistant presents, promotes, associates, or places it,
-including the area outside any guide. Deterministic resize creates a new
+above-and-below surroundings as appropriate. The prompt alone locates an
+edit's change. Every generated or edited result is
+inspected in full before the assistant presents, promotes, associates, or places
+it. Deterministic resize creates a new
 unattached source-linked asset and adds no visual detail; it is never evidence
 of publication-quality enhancement.
 
@@ -446,9 +440,7 @@ World-only: no other assistant, revision worker, or contest capture receives the
 
 Images is concept art and visual canon. It can read narrative context for
 grounding and can mutate project images, canonical entity associations, and the
-user-approved Book Brief Visual Direction. It may provide an inline regional
-guide only as part of the edit that consumes it; it cannot create or reuse masks
-independently. It cannot author Figures, Designed Pages, covers, or publication
+user-approved Book Brief Visual Direction. It cannot author Figures, Designed Pages, covers, or publication
 placements. Visual Direction uses an exact previously-read value so a stale turn
 cannot overwrite newer direction.
 

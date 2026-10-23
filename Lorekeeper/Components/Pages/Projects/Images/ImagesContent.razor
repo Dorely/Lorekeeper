@@ -116,7 +116,6 @@ else
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
-                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
                                 <button type="button"
                                         class="btn btn-sm btn-outline-danger"
@@ -437,110 +436,6 @@ else
     </ImageViewerModal>
 }
 
-@if (_maskModalOpen && _editingImage is not null)
-{
-    <div class="mask-modal-backdrop" @onclick="CloseMaskModal">
-        <section class="mask-modal" role="dialog" aria-modal="true" aria-label="Edit with mask" @onclick:stopPropagation="true">
-            <header class="mask-modal-header">
-                <div>
-                    <h5>Edit with mask</h5>
-                    <span>@_editingImage.FileName</span>
-                </div>
-                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseMaskModal"></button>
-            </header>
-            <div class="mask-modal-body">
-                <div class="mask-canvas-wrap">
-                    <canvas class="mask-canvas" @ref="_maskCanvas"></canvas>
-                </div>
-                <aside class="mask-tools">
-                    <div class="btn-group btn-group-sm" role="group" aria-label="Mask tool">
-                        <button type="button" class="@BrushToolClass" @onclick='() => SetMaskToolAsync("brush")'>Brush</button>
-                        <button type="button" class="@EraserToolClass" @onclick='() => SetMaskToolAsync("erase")'>Eraser</button>
-                        <button type="button" class="@PanToolClass" @onclick='() => SetMaskToolAsync("pan")'>Pan</button>
-                    </div>
-                    <label>
-                        <span>Brush size</span>
-                        <input type="range" min="4" max="160" step="1" class="form-range" value="@_maskBrushSize" @oninput="OnMaskBrushInputAsync" />
-                    </label>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearMaskAsync">Clear</button>
-                    <label>
-                        <span>Edit prompt</span>
-                        <textarea class="form-control form-control-sm" rows="7" @bind="_maskPrompt"></textarea>
-                    </label>
-                    <label>
-                        <span>Image model</span>
-                        <select class="form-select form-select-sm" @bind="_imageModelKey" @bind:after="OnImageModelChangedAsync">
-                            @foreach (var group in _imageModels.Where(model => model.Capabilities.RegionalGuide).GroupBy(model => model.ProviderId))
-                            {
-                                <optgroup label="@group.First().ProviderLabel">
-                                    @foreach (var model in group)
-                                    {
-                                        <option value="@ImageModelKey(model)">@model.ModelLabel</option>
-                                    }
-                                </optgroup>
-                            }
-                        </select>
-                    </label>
-                    @if (CurrentImageModel is { } maskModel)
-                    {
-                        @if (!maskModel.Capabilities.RegionalGuide)
-                        {
-                            <p class="text-danger small mb-0">@maskModel.ModelLabel on @maskModel.ProviderLabel cannot apply a painted mask. Choose a model that supports regional guides.</p>
-                        }
-                        <label>
-                            <span>Quality</span>
-                            <select class="form-select form-select-sm" @bind="_imageQuality">
-                                @if (!maskModel.Capabilities.Qualities.Contains(_imageQuality, StringComparer.OrdinalIgnoreCase))
-                                {
-                                    <option value="@_imageQuality">@_imageQuality (currently configured)</option>
-                                }
-                                @foreach (var quality in maskModel.Capabilities.Qualities)
-                                {
-                                    <option value="@quality">@quality</option>
-                                }
-                            </select>
-                        </label>
-                    }
-                    else
-                    {
-                        <p class="text-muted small mb-0">@ImageReadinessMessage <a href="/settings/image-providers">Image providers</a></p>
-                    }
-                    <label>
-                        <span>Background</span>
-                        <select class="form-select form-select-sm" @bind="_imageBackground">
-                            <option value="auto">Auto</option>
-                            <option value="opaque">Opaque</option>
-                            <option value="transparent">Transparent</option>
-                        </select>
-                    </label>
-                    <label>
-                        <span>Output format</span>
-                        <select class="form-select form-select-sm" @bind="_imageFormat">
-                            @foreach (var format in ImageFormatOptions)
-                            {
-                                <option value="@format">@FormatLabel(format)</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        <span>Output compression</span>
-                        <input class="form-control form-control-sm" type="number" min="0" max="100" @bind="_imageCompression" disabled="@(_imageFormat is not ("jpeg" or "webp"))" />
-                    </label>
-                    <label><span>Additional represented entities</span></label>
-                    <EntityVisualTargetPicker ProjectId="@Project!.Id" @bind-Targets="_editEntityTargets" />
-                    <label class="form-check">
-                        <input class="form-check-input" type="checkbox" @bind="_inheritEditEntityTargets" />
-                        <span class="form-check-label">Inherit source image entity associations</span>
-                    </label>
-                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_sendingMaskEdit || CurrentImageModel is not { Capabilities.RegionalGuide: true })" @onclick="SendMaskEditAsync">
-                        @(_sendingMaskEdit ? "Sending..." : "Send edit")
-                    </button>
-                </aside>
-            </div>
-        </section>
-    </div>
-}
-
 <ConfirmationDialog IsOpen="@(_historyDeleteImageId is not null)"
                     Title="Delete image and clear Undo/Redo history?"
                     Message="@(_historyDeleteMessage ?? string.Empty)"
@@ -568,11 +463,8 @@ else
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
     private IReadOnlyList<ProjectImagePartialView> _partials = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
-    private ProjectImageView? _editingImage;
     private ProjectImageView? _croppingImage;
     private List<EntityVisualTarget> _generationEntityTargets = [];
-    private List<EntityVisualTarget> _editEntityTargets = [];
-    private bool _inheritEditEntityTargets = true;
     private ProjectImageView? _viewImage;
     private ProjectImagePartialView? _viewPartial;
     private Guid? _partialModalImageId;
@@ -581,8 +473,6 @@ else
     private Guid? _upscaleModalImageId;
     private readonly HashSet<Guid> _promotingPartialIds = [];
     private IJSObjectReference? _downloadModule;
-    private IJSObjectReference? _maskModule;
-    private ElementReference _maskCanvas;
     private string _query = string.Empty;
     private string _uploadAltText = string.Empty;
     private string _imagePrompt = string.Empty;
@@ -597,16 +487,10 @@ else
     private string _imageFormat = "png";
     private int? _imageCompression;
     private string _generatedAltText = string.Empty;
-    private string _maskPrompt = string.Empty;
-    private string _maskTool = "brush";
-    private int _maskBrushSize = 32;
     private string? _error;
     private string? _status;
     private bool _loading = true;
     private bool _queueingGenerate;
-    private bool _maskModalOpen;
-    private bool _maskCanvasNeedsInit;
-    private bool _sendingMaskEdit;
     private Guid? _loadedProjectId;
     private int _attachmentRefreshKey;
     private readonly List<ManualGenerationReference> _generationReferences = [];
@@ -751,21 +635,7 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
-        {
             _downloadModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/fileDownloads.js");
-            _maskModule = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/Projects/Images/ImagesContent.razor.js");
-        }
-
-        if (_maskCanvasNeedsInit && _maskModule is not null && _editingImage is not null && Project is not null)
-        {
-            _maskCanvasNeedsInit = false;
-            await _maskModule.InvokeVoidAsync(
-                "loadMaskCanvas",
-                _maskCanvas,
-                $"/projects/{Project.Id:N}/images/{_editingImage.Id:N}/content",
-                _maskTool,
-                _maskBrushSize);
-        }
     }
 
     private async Task LoadImageModelsAsync()
@@ -1426,118 +1296,6 @@ else
         }
     }
 
-    private void OpenMaskModal(ProjectImageView image)
-    {
-        _editingImage = image;
-        _maskPrompt = string.Empty;
-        _editEntityTargets = [];
-        _inheritEditEntityTargets = true;
-        _maskTool = "brush";
-        _maskBrushSize = 32;
-        _maskModalOpen = true;
-        _maskCanvasNeedsInit = true;
-    }
-
-    private void CloseMaskModal() => _maskModalOpen = false;
-
-    private async Task SetMaskToolAsync(string tool)
-    {
-        _maskTool = tool;
-        if (_maskModule is not null)
-            await _maskModule.InvokeVoidAsync("setMaskTool", _maskCanvas, tool);
-    }
-
-    private async Task OnMaskBrushInputAsync(ChangeEventArgs args)
-    {
-        if (int.TryParse(args.Value?.ToString(), out var value))
-            _maskBrushSize = Math.Clamp(value, 4, 160);
-        if (_maskModule is not null)
-            await _maskModule.InvokeVoidAsync("setMaskBrushSize", _maskCanvas, _maskBrushSize);
-    }
-
-    private async Task ClearMaskAsync()
-    {
-        if (_maskModule is not null)
-            await _maskModule.InvokeVoidAsync("clearMask", _maskCanvas);
-    }
-
-    private async Task SendMaskEditAsync()
-    {
-        if (Project is null || _editingImage is null || _maskModule is null) return;
-        _error = null;
-        _status = null;
-        if (CurrentImageModel is not { } model)
-        {
-            _error = ImageReadinessMessage;
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(_maskPrompt))
-        {
-            _error = "Edit prompt is required.";
-            return;
-        }
-
-        _sendingMaskEdit = true;
-        try
-        {
-            var hasPaint = await _maskModule.InvokeAsync<bool>("hasMaskPaint", _maskCanvas);
-            if (!hasPaint)
-            {
-                _error = "Paint the editable mask area first.";
-                return;
-            }
-
-            var maskDataUrl = await _maskModule.InvokeAsync<string>("exportMaskPng", _maskCanvas);
-            var compiled = await ImagePrompts.CompileEditAsync(
-                Project.Id,
-                model.Constraints,
-                _editingImage.Id,
-                new ImageEditBrief
-                {
-                    IntendedUse = "Localized project-library edit requested through the manual mask editor.",
-                    Change = _maskPrompt,
-                    Preserve = "Focus the requested change in the guided region and preserve unmentioned identity, composition, crop, style, palette, lighting, and background details outside it as closely as possible.",
-                    AllowRenderedText = false,
-                },
-                references: null,
-                target: null,
-                guidanceMode: ImageEditGuidanceMode.RegionalGuide,
-                background: _imageBackground);
-            await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
-                _editingImage.Id,
-                compiled.Prompt,
-                compiled.Size,
-                _imageQuality,
-                _imageFormat,
-                _imageFormat is "jpeg" or "webp" ? _imageCompression : null,
-                _generatedAltText,
-                1,
-                maskDataUrl,
-                [],
-                Label: $"Edit {_editingImage.FileName}",
-                EntityTargets: _editEntityTargets,
-                InheritSourceEntityTargets: _inheritEditEntityTargets,
-                BriefJson: compiled.BriefJson,
-                ReferenceManifestJson: compiled.ReferenceManifestJson,
-                TargetGeometryJson: compiled.TargetGeometryJson,
-                ImageModel: model.ModelId,
-                Background: _imageBackground,
-                ImageProviderId: model.ProviderId));
-            await ImageRuntime.EnqueueProjectAsync(Project.Id);
-            _maskModalOpen = false;
-            _status = "Edit job queued.";
-            await ReloadAsync();
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _sendingMaskEdit = false;
-        }
-    }
-
     private RenderFragment RenderJobCard(ProjectImageJobView job) => __builder =>
     {
         var runtimeJob = RuntimeJob(job.Id);
@@ -1721,16 +1479,6 @@ else
             _viewImage = ids.Contains(_viewImage.Id) ? _images.First(image => image.Id == _viewImage.Id) : null;
         if (_upscaleModalImageId is Guid upscaleOwnerId && !ids.Contains(upscaleOwnerId))
             _upscaleModalImageId = null;
-        if (_editingImage is not null && !ids.Contains(_editingImage.Id))
-        {
-            _editingImage = null;
-            _maskModalOpen = false;
-            _maskCanvasNeedsInit = false;
-        }
-        else if (_editingImage is not null)
-        {
-            _editingImage = _images.First(image => image.Id == _editingImage.Id);
-        }
     }
 
     private static string ImageAlt(ProjectImageView image) =>
@@ -1741,15 +1489,6 @@ else
             ? $"{bytes / 1024.0 / 1024.0:0.0} MB"
             : $"{Math.Max(1, bytes / 1024)} KB";
 
-    private string MaskToolClass(string tool) =>
-        string.Equals(_maskTool, tool, StringComparison.Ordinal) ? "btn-primary" : "btn-outline-secondary";
-
-    private string BrushToolClass => $"btn {MaskToolClass("brush")}";
-
-    private string EraserToolClass => $"btn {MaskToolClass("erase")}";
-
-    private string PanToolClass => $"btn {MaskToolClass("pan")}";
-
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
 
@@ -1759,10 +1498,6 @@ else
         if (_downloadModule is not null)
         {
             try { await _downloadModule.DisposeAsync(); } catch (JSDisconnectedException) { }
-        }
-        if (_maskModule is not null)
-        {
-            try { await _maskModule.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
     }
 

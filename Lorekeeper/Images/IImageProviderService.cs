@@ -90,7 +90,6 @@ public sealed record ImageModelCapabilities(
     IReadOnlyList<string> OutputFormats,
     bool Generate,
     bool Edit,
-    bool RegionalGuide,
     int MaxReferenceImages,
     bool TransparentBackground,
     bool Streaming)
@@ -100,7 +99,6 @@ public sealed record ImageModelCapabilities(
         ReadStringArray(model.OutputFormatsJson, "png"),
         model.SupportsGenerate,
         model.SupportsEdit,
-        model.SupportsRegionalGuide,
         Math.Max(0, model.MaxReferenceImages),
         model.SupportsTransparentBackground,
         model.SupportsStreaming);

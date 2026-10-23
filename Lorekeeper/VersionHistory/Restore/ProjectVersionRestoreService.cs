@@ -1381,7 +1381,6 @@ public sealed class ProjectVersionRestoreService(
         await db.PublishMessageVisuals.Where(item => item.Message.Conversation.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectImageMessageVisuals.Where(item => item.Message.Conversation.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.SourceVisualCandidates.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
-        await db.ProjectImageMasks.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectImageGenerationJobs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ContestBatches.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.EditorRevisionJobs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);

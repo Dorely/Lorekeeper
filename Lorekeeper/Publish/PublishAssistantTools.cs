@@ -1403,7 +1403,6 @@ public sealed class PublishAssistantTools(
                 context.ProjectId,
                 sourceImageId,
                 brief,
-                null,
                 references,
                 ToApplicationImageTarget(geometryGuidance),
                 altText,

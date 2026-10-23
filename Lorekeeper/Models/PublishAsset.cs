@@ -28,7 +28,6 @@ public class PublishAsset
 
     public ICollection<PublicationImagePlacement> PublicationPlacements { get; set; } = [];
     public ICollection<PublicationEdition> CoverEditions { get; set; } = [];
-    public ICollection<ProjectImageMask> ImageMasks { get; set; } = [];
 
     public ICollection<ProjectImageChatAttachment> ImageChatAttachments { get; set; } = [];
     public ICollection<EntityVisualExample> EntityVisualExamples { get; set; } = [];

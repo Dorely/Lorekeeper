@@ -173,10 +173,10 @@ public sealed class ImageProviderMigrationTests
                 var chatGpt = Assert.Single(providers, row => row.Kind == ImageProviderKind.ChatGptAccount);
                 AssertCodexBundledCapabilities(Assert.Single(chatGpt.Models, row => row.Origin == ImageProviderModelOrigin.Bundled));
                 var manual = Assert.Single(chatGpt.Models, row => row.Origin == ImageProviderModelOrigin.Manual);
-                Assert.True(manual.SupportsRegionalGuide && manual.SupportsStreaming);
+                Assert.True(manual.SupportsStreaming);
                 Assert.Equal(GptImageConstraintsJson, manual.RasterConstraintsJson);
                 var compatible = Assert.Single(Assert.Single(providers, row => row.Kind == ImageProviderKind.OpenAiImagesCompatible).Models);
-                Assert.True(compatible.SupportsRegionalGuide && compatible.SupportsStreaming);
+                Assert.True(compatible.SupportsStreaming);
                 Assert.Equal(GptImageConstraintsJson, compatible.RasterConstraintsJson);
 
                 var job = await db.ProjectImageGenerationJobs.AsNoTracking().SingleAsync(row => row.Id == jobId);
@@ -195,7 +195,6 @@ public sealed class ImageProviderMigrationTests
         OutputFormatsJson = "[\"png\",\"jpeg\",\"webp\"]",
         SupportsGenerate = true,
         SupportsEdit = true,
-        SupportsRegionalGuide = true,
         MaxReferenceImages = 16,
         SupportsTransparentBackground = true,
         SupportsStreaming = true,
@@ -210,7 +209,6 @@ public sealed class ImageProviderMigrationTests
         Assert.Equal(expected.QualitiesJson, model.QualitiesJson);
         Assert.Equal(expected.OutputFormatsJson, model.OutputFormatsJson);
         Assert.True(model.SupportsGenerate && model.SupportsEdit && model.SupportsTransparentBackground);
-        Assert.False(model.SupportsRegionalGuide);
         Assert.False(model.SupportsStreaming);
         Assert.Equal(16, model.MaxReferenceImages);
         Assert.Equal(expected.RasterConstraintsJson, model.RasterConstraintsJson);

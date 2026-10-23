@@ -1108,7 +1108,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 context.ProjectId,
                 sourceImageId,
                 brief,
-                null,
                 references,
                 geometryGuidance: MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,

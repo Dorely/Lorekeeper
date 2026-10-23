@@ -579,7 +579,6 @@
                 OutputFormatsJson = ImageModelCapabilities.ToJson(SelectedOutputFormats(draft)),
                 SupportsGenerate = draft.SupportsGenerate,
                 SupportsEdit = draft.SupportsEdit,
-                SupportsRegionalGuide = draft.SupportsRegionalGuide,
                 SupportsTransparentBackground = draft.SupportsTransparentBackground,
                 SupportsStreaming = draft.SupportsStreaming,
                 MaxReferenceImages = draft.MaxReferenceImages,
@@ -772,7 +771,6 @@
                         <div class="model-check-row">
                             <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsGenerate" /><span>Generate</span></label>
                             <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsEdit" /><span>Edit</span></label>
-                            <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsRegionalGuide" /><span>Regional guide</span></label>
                             <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsTransparentBackground" /><span>Transparent background</span></label>
                             <label class="model-check"><input type="checkbox" class="form-check-input" @bind="draft.SupportsStreaming" /><span>Streaming</span></label>
                         </div>
@@ -814,8 +812,6 @@
             chips.Add("Generate");
         if (capabilities.Edit)
             chips.Add("Edit");
-        if (capabilities.RegionalGuide)
-            chips.Add("Regional guide");
         if (capabilities.TransparentBackground)
             chips.Add("Transparent");
         if (capabilities.Streaming)
@@ -953,7 +949,6 @@
         public string DisplayName { get; set; } = string.Empty;
         public bool SupportsGenerate { get; set; } = true;
         public bool SupportsEdit { get; set; }
-        public bool SupportsRegionalGuide { get; set; }
         public bool SupportsTransparentBackground { get; set; }
         public bool SupportsStreaming { get; set; }
         public int MaxReferenceImages { get; set; }

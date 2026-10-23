@@ -419,8 +419,8 @@ is a security and external-service behavior change, not a UI-only adjustment.
 Image connections are configured separately from chat providers, under
 Settings > Image providers. `ImageProvider` rows hold any number of connections
 with exactly one default; each owns `ImageProviderModel` rows carrying the
-model's qualities, output formats, capability flags (generate, edit, regional
-guide, reference limit, transparency, streaming), and `ImageRasterConstraints`.
+model's qualities, output formats, capability flags (generate, edit, reference
+limit, transparency, streaming), and `ImageRasterConstraints`.
 Kinds are the ChatGPT (Codex) account, which borrows that account's OAuth tokens
 through `OpenAiAccountId` and never copies them onto the row; OpenRouter; and an
 OpenAI Images-compatible endpoint. ChatGPT plan sign-in is never offered for
@@ -433,9 +433,9 @@ Settings offers only kinds whose adapter is registered with
 resolution boundary: a null provider means the default, a null model means that
 provider's default model, and readiness is decided from stored state without a
 network call. Pickers list every ready provider's models; assistant tools always
-use the default provider and may name one of its models. Capability errors (a
-regional guide on a model without one, too many references, transparency
-without support) fail before any durable job. A job stamps its
+use the default provider and may name one of its models. Capability errors (an
+edit on a model without edit support, too many references, transparency without
+support) fail before any durable job. A job stamps its
 `ImageProviderId` and never falls back to another provider; a deleted or
 unready provider fails the job with the reason. `TestAsync` checks an unsaved
 provider through account access or a model listing, never a billed generation.
@@ -453,8 +453,7 @@ bearer token, `chatgpt-account-id`, and the shared Codex originator and user
 agent through `CodexProvider.ApplyAccountIdentity`. The backend ignores `size`
 and `quality` and serves a fixed budget of about 1.57 megapixels at the aspect
 the prompt states, so Codex models store fixed-budget raster constraints, offer
-only `auto` quality, never offer regional guides or streaming, and accept but do
-not send masks. The response's `data[0].b64_json` is fully decoded; a JPEG
+only `auto` quality, and never offer streaming. The response's `data[0].b64_json` is fully decoded; a JPEG
 request receives a local re-encode because the backend returns PNG, and WebP is
 not offered. A 401 forces one token refresh through
 `IOpenAiAccountTokenService.RefreshRejectedAccessAsync` and retries once; a
@@ -467,8 +466,7 @@ provider row's API key and an `X-Title` header. `GET /images/models` maps each
 image model's `supported_parameters` (quality, output format, background,
 reference limit) and `supports_streaming` onto capabilities. Generation and
 edits post to `POST /images`; an edit sends the source as the first
-`input_references` entry, and because the API has no mask input, OpenRouter
-models never offer regional guides. Streaming models report
+`input_references` entry. Streaming models report
 `image_generation.partial_image` events as previews and finish on
 `image_generation.completed`. Errors map 401/403, 402 (credits), 429, and 5xx
 (502 for a failed generation) onto the shared kinds, honoring `Retry-After`.
@@ -498,9 +496,7 @@ that pixel count. The delivered raster can differ from the plan; decoded
 dimensions stay authoritative, raster mismatches remain visible in provenance,
 and print preparation upscales as for any other undersized placement.
 
-A guide is prompt guidance rather than a provider-enforced pixel boundary, so the provider
-contract never represents it as protecting unmasked pixels. `ImagePromptComposer`
-supplies the shared structured prompt contract. Feature-specific use of generated
+`ImagePromptComposer` supplies the shared structured prompt contract. Feature-specific use of generated
 images, geometry targets, assets, and deletion guards belongs to
 [Composition and media](composition-media.md).
 The provider transport accepts pixel dimensions, not physical DPI. Lorekeeper
@@ -512,19 +508,9 @@ an explicit size that misses its budget to the budget at the same aspect rather
 than rejecting it. An infeasible request fails before any durable job or provider
 call; no density metadata is fabricated in the image file.
 
-Regional-guided dispatch revalidates the source, compiled geometry, and mask
-immediately before the request. The image runtime decodes a PNG, JPEG, or WebP
-source and re-encodes the first input as PNG without resizing, requires a
-same-sized binary-alpha PNG mask with at least one editable pixel, and sends
-those same-format inputs together. Failure to load, validate, or normalize
-either input fails the attempt rather than silently issuing an unmasked edit.
-The request uses the source-aspect-bound provider raster resolved by the image
-workflow; regional guides cannot accompany layout-bound targets, reserved
-regions, or aspect-changing reframes.
-`gpt-image-2` receives no
-adjustable input-fidelity field because that model processes edit inputs at high
-fidelity automatically. Stored source assets and requested output formats are
-not rewritten by this transient provider normalization.
+Edits send the stored source asset unchanged as the first input. `gpt-image-2`
+receives no adjustable input-fidelity field because that model processes edit
+inputs at high fidelity automatically.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. Explicit requested
@@ -537,7 +523,7 @@ compatibility alone does not make a raster match. A provider result
 below a requested minimum DPI completes normally without a warning, because
 publication preparation upscales placed rasters to the edition DPI.
 Free-standing generation
-and unmasked edit callers send a concrete provider-valid raster derived from the
+and edit callers send a concrete provider-valid raster derived from the
 configured Core Book page by default; layout-bound callers replace it with their
 server-owned target raster. Publish derives that raster entirely behind its tool
 boundary from the target's internal output expectation; the assistant supplies
@@ -685,7 +671,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`IModelWebSearch.cs`](../../Lorekeeper/Search/IModelWebSearch.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary, the model built-in search contract, and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
 | [`Lorekeeper/Images/IImageProviderService.cs`](../../Lorekeeper/Images/IImageProviderService.cs), [`ImageProviderService.cs`](../../Lorekeeper/Images/ImageProviderService.cs), and [`Lorekeeper/Composition/ImageRasterConstraints.cs`](../../Lorekeeper/Composition/ImageRasterConstraints.cs) | Image-provider configuration, single-default invariants, stored-state readiness, provider/model resolution, assistant tool guidance, and per-model raster limits. |
-| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`OpenRouterImageProvider.cs`](../../Lorekeeper/Images/OpenRouterImageProvider.cs), [`OpenAiImagesCompatibleProvider.cs`](../../Lorekeeper/Images/OpenAiImagesCompatibleProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account, OpenRouter, and OpenAI Images-compatible image adapters, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, regional-guide input normalization, previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`ChatGptAccountImageProvider.cs`](../../Lorekeeper/Images/ChatGptAccountImageProvider.cs), [`OpenRouterImageProvider.cs`](../../Lorekeeper/Images/OpenRouterImageProvider.cs), [`OpenAiImagesCompatibleProvider.cs`](../../Lorekeeper/Images/OpenAiImagesCompatibleProvider.cs), [`ImageProviderRetryPolicy.cs`](../../Lorekeeper/Images/ImageProviderRetryPolicy.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Kind-keyed adapter abstraction and factory, the ChatGPT account, OpenRouter, and OpenAI Images-compatible image adapters, adapter-owned retry decisions, and singleton FIFO execution with per-job provider resolution, previews, cancellation, and terminal waiters. |
 | [`Lorekeeper/Images/ProjectImageModelCatalog.cs`](../../Lorekeeper/Images/ProjectImageModelCatalog.cs) | The bundled GPT Image model set and request normalization of quality, background, output format, and compression against the resolved model's capabilities. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 

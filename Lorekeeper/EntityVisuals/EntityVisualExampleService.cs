@@ -398,7 +398,6 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
         if (await db.EntityVisualExamples.AnyAsync(example => example.ProjectId == projectId && example.ImageId == imageId, cancellationToken)) return true;
-        if (await db.ProjectImageMasks.AnyAsync(mask => mask.ProjectId == projectId && mask.ImageId == imageId, cancellationToken)) return true;
         var idN = imageId.ToString("N");
         var idD = imageId.ToString();
         if (await db.EditorContextPreferences.AnyAsync(preference => preference.ProjectId == projectId && (preference.Key.Contains(idN) || preference.Key.Contains(idD)), cancellationToken)) return true;

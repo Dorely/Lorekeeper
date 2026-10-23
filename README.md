@@ -335,10 +335,8 @@ technical map.
   layout details open only when requested. Designed Page text frames are edited
   directly on the canvas; selected text uses the same semantic inline marks as
   ordinary manuscript paragraphs, without exposing content bindings or offsets.
-  Free-standing generation and unmasked editing default to the configured Core
-  Book page aspect instead of an implicit square. Regional-guided edits preserve
-  the source framing and treat the painted area as approximate model guidance,
-  not a hard pixel boundary; the complete result still requires inspection. The
+  Free-standing generation and editing default to the configured Core Book page
+  aspect instead of an implicit square. The
   Editor's **Insert Page** modal browses reusable and unplaced pages with clean
   artwork previews, search, placement filters, and page details. It follows the
   active Core/release target and supports creation, duplication, placement moves

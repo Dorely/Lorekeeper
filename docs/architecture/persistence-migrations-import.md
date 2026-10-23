@@ -257,7 +257,7 @@ back to the latest attempt only when no active extraction exists.
 The application stores local state in SQLite through `AppDbContext`, including
 provider/OAuth configuration, projects, Book Briefs, outline/graph state,
 transcripts, review/contest state, writing samples, ingest/import jobs, images,
-masks, entity visual links, fonts, publication state, composition, and binary
+entity visual links, fonts, publication state, composition, and binary
 assets. Image-generation partials are job-owned binary artifacts until
 explicit promotion moves one into the ordinary project image library; SQLite
 deletes unpromoted partials associated with a final image when that image is

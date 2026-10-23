@@ -11,9 +11,8 @@ namespace Lorekeeper.Images;
 
 /// <summary>
 /// Generates and edits images through OpenRouter's dedicated Image API. Edits
-/// send the source as the first reference; there is no mask input, so models
-/// never offer regional guides. Aspect-tier models receive the nearest listed
-/// aspect ratio and resolution tier for the planned raster.
+/// send the source as the first reference. Aspect-tier models receive the
+/// nearest listed aspect ratio and resolution tier for the planned raster.
 /// </summary>
 public sealed class OpenRouterImageProvider(
     IHttpClientFactory httpClientFactory,
@@ -62,11 +61,6 @@ public sealed class OpenRouterImageProvider(
         CancellationToken cancellationToken = default,
         IProgress<ProjectImageProviderProgress>? progress = null)
     {
-        if (request.Mask is not null)
-            throw new ProjectImageProviderException(
-                "This OpenRouter model cannot use a regional guide.",
-                "invalid_request");
-
         var row = ResolveModelRow(provider, request.ImageModel);
         var constraints = ImageRasterConstraints.FromJson(row.RasterConstraintsJson);
         var references = new List<ProjectImageProviderReference> { request.SourceImage };
@@ -272,7 +266,6 @@ public sealed class OpenRouterImageProvider(
                 outputFormats,
                 Generate: true,
                 Edit: maxReferenceImages > 0,
-                RegionalGuide: false,
                 MaxReferenceImages: maxReferenceImages,
                 TransparentBackground: backgroundValues.Contains("transparent", StringComparer.Ordinal),
                 Streaming: streaming);

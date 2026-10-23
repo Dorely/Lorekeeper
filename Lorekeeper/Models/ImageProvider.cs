@@ -73,9 +73,6 @@ public class ImageProviderModel
 
     public bool SupportsEdit { get; set; }
 
-    /// <summary>Accepts an alpha mask that guides where an edit lands.</summary>
-    public bool SupportsRegionalGuide { get; set; }
-
     public int MaxReferenceImages { get; set; }
 
     public bool SupportsTransparentBackground { get; set; }

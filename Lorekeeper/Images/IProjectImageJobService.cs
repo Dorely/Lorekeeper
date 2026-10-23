@@ -22,7 +22,6 @@ public interface IProjectImageJobService
     Task<ProjectImageView> SaveGeneratedOutputAsync(Guid projectId, Guid jobId, int outputIndex, ProjectImageProviderResult result, ProjectImageProviderImage image, CancellationToken cancellationToken = default);
     Task CompleteJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default);
     Task MarkInterruptedRunningJobsFailedAsync(CancellationToken cancellationToken = default);
-    Task<ProjectImageData?> GetMaskDataAsync(Guid projectId, Guid maskId, CancellationToken cancellationToken = default);
 }
 
 public sealed record ProjectImageGenerationWorkItem(
@@ -38,23 +37,8 @@ public sealed record ProjectImageGenerationWorkItem(
     string AltText,
     string Label,
     Guid? SourceImageId,
-    Guid? MaskId,
     IReadOnlyList<Guid> ReferenceImageIds,
     string TargetGeometryJson,
     int? ImageProviderId,
     string ImageModel,
     string Background = "auto");
-
-public sealed record ProjectImageMaskShapeRequest(
-    string Label,
-    IReadOnlyList<ProjectImageMaskShape> Shapes);
-
-public sealed record ProjectImageMaskShape(
-    string Kind,
-    double X,
-    double Y,
-    double Width,
-    double Height,
-    IReadOnlyList<ProjectImageMaskPoint>? Points = null);
-
-public sealed record ProjectImageMaskPoint(double X, double Y);

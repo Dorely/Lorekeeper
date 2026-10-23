@@ -16,7 +16,7 @@ namespace Lorekeeper.Images;
 /// Generates images through a signed-in ChatGPT (Codex) account with the Codex
 /// image endpoints: images/generations for a text-only request and images/edits
 /// whenever input images are supplied, the edit source first. No chat model is
-/// involved. The backend ignores size, quality, and masks; the prompt states the
+/// involved. The backend ignores size and quality; the prompt states the
 /// target aspect, and every output holds about 1.57 MP. ChatGPT plan sign-in
 /// cannot serve this route.
 /// </summary>
@@ -55,8 +55,6 @@ public sealed class ChatGptAccountImageProvider(
         CancellationToken cancellationToken = default,
         IProgress<ProjectImageProviderProgress>? progress = null)
     {
-        // Regional guides are not offered for this route; a mask from an older
-        // queued job is not sent, and the edit runs from the source and prompt.
         var inputs = new List<ProjectImageProviderReference> { request.SourceImage };
         inputs.AddRange(request.ReferenceImages.Take(options.Value.MaxReferenceImages));
         return await RunAsync(

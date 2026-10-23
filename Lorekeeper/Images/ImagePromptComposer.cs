@@ -47,12 +47,6 @@ public sealed class ImageEditBrief
     public string RenderedText { get; init; } = string.Empty;
 }
 
-public enum ImageEditGuidanceMode
-{
-    SourceDriven,
-    RegionalGuide,
-}
-
 public sealed class ImageReferenceUse
 {
     [Description("Exact grounded project image id. For every depicted character with an available canonical reference, include one relevant canonical reference before optional variant, setting, prop, or style inputs.")]
@@ -75,13 +69,13 @@ public sealed class ImageGenerationTarget
     public Guid? TargetId { get; init; }
     [Description("Exact Designed Page variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
-    [Description("Optional W:H, W/H, or decimal aspect for free-standing work. A regional-guided edit accepts only the source image aspect. Layout-bound targets derive their aspect from Lorekeeper.")]
+    [Description("Optional W:H, W/H, or decimal aspect for free-standing work. Layout-bound targets derive their aspect from Lorekeeper.")]
     public string AspectRatio { get; init; } = string.Empty;
-    [Description("Optional explicit WIDTHxHEIGHT provider raster for free-standing generation or editing, or for a layout-bound target when a larger proportional raster is warranted. Both dimensions must satisfy provider constraints. For a regional-guided edit, omit or use auto to derive a source-aspect raster; an explicit raster must preserve the source aspect. Layout-bound targets must preserve the server-owned aspect. Other free-standing work with omitted or auto size uses the configured Core Book page raster; a layout target uses its server-owned moderate raster.")]
+    [Description("Optional explicit WIDTHxHEIGHT provider raster for free-standing generation or editing, or for a layout-bound target when a larger proportional raster is warranted. Both dimensions must satisfy provider constraints. Layout-bound targets must preserve the server-owned aspect. Other free-standing work with omitted or auto size uses the configured Core Book page raster; a layout target uses its server-owned moderate raster.")]
     public string Size { get; init; } = string.Empty;
     [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
-    [Description("Optional positive integer minimum effective DPI for the physical target. Omit size when using minimumDpi. The request is rejected before provider dispatch when the provider cannot meet it; do not confuse this with embedded file metadata. Regional-guide edits cannot request minimumDpi because they are source-aspect-bound.")]
+    [Description("Optional positive integer minimum effective DPI for the physical target. Omit size when using minimumDpi. The request is rejected before provider dispatch when the provider cannot meet it; do not confuse this with embedded file metadata.")]
     public int? MinimumDpi { get; init; }
     [Description("Optional canvas-local percentage bounds for generating only a subregion of a verified PageSurface, CoverSurface, or CoreCoverSurface. The bounds become the physical target and all protected regions are transformed into that local coordinate system.")]
     public CompositionBounds? SurfaceBounds { get; init; }
@@ -196,7 +190,6 @@ public interface IImagePromptComposer
         ImageEditBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
-        ImageEditGuidanceMode guidanceMode,
         CancellationToken cancellationToken = default,
         string background = "auto");
 }
@@ -271,7 +264,6 @@ public sealed class ImagePromptComposer(
         ImageEditBrief brief,
         IReadOnlyList<ImageReferenceUse>? references,
         ImageGenerationTarget? target,
-        ImageEditGuidanceMode guidanceMode,
         CancellationToken cancellationToken = default,
         string background = "auto")
     {
@@ -289,9 +281,7 @@ public sealed class ImagePromptComposer(
             ?? throw new InvalidOperationException($"Source image {sourceImageId:N} was not found in this project.");
         if ((references ?? []).Any(reference => reference.ImageId == sourceImageId))
             throw new ArgumentException("The edit source is already provider input image 1 and must not also appear in references.", nameof(references));
-        var targetResolution = guidanceMode == ImageEditGuidanceMode.RegionalGuide
-            ? await ResolveRegionalGuideTargetAsync(projectId, constraints, sourceImageId, target, cancellationToken)
-            : await ResolveTargetAsync(projectId, constraints, target, background, cancellationToken);
+        var targetResolution = await ResolveTargetAsync(projectId, constraints, target, background, cancellationToken);
         var manifest = await BuildReferenceManifestAsync(projectId, references, firstProviderInputOrder: 2, cancellationToken);
         var builder = new StringBuilder();
         AppendSection(builder, "Intended use", brief.IntendedUse);
@@ -303,92 +293,22 @@ public sealed class ImagePromptComposer(
         AppendSection(
             builder,
             "Purposeful use of space after edit",
-            guidanceMode == ImageEditGuidanceMode.RegionalGuide
-                ? "Preserve the source image's existing balance of occupied and open space outside the guided region. Do not fill, clear, expand, crop, or otherwise redesign surrounding areas unless the requested local change requires a minimal boundary adjustment for coherence."
-                : "Preserve the source image's existing balance of occupied and open space. Keep existing open space, background treatment, and surrounding scene intact unless the requested change explicitly asks to alter them; make only the local or directly dependent adaptations needed for a coherent result.");
+            "Preserve the source image's existing balance of occupied and open space. Keep existing open space, background treatment, and surrounding scene intact unless the requested change explicitly asks to alter them; make only the local or directly dependent adaptations needed for a coherent result.");
         AppendSection(builder, "Lighting and mood after edit", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Additional constraints and exclusions", brief.Constraints);
         AppendRenderedTextPolicy(builder, brief.AllowRenderedText, brief.RenderedText);
-        if (guidanceMode == ImageEditGuidanceMode.RegionalGuide)
-            AppendSection(builder, "Regional edit guide", ProjectImageRegionalGuide.PromptInstruction);
         AppendTarget(builder, targetResolution, target?.ReservedTextRegions, brief.AllowRenderedText, background);
         AppendSection(
             builder,
             "Edit discipline",
-            guidanceMode == ImageEditGuidanceMode.RegionalGuide
-                ? "Render the requested revision as one coherent complete image using the supplied image as its visual starting point. Preserve the source framing and the explicitly listed identity, story, style, and composition priorities. Concentrate the requested change in the guided region, allow only the minimal nearby lighting, texture, edge, or geometry adaptation needed for coherence, and avoid unrelated changes elsewhere. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them."
-                : "Render one coherent complete image using the supplied image as its visual starting point. Make the requested change and only the directly dependent adaptations needed for coherence. Preserve every named identity, story, style, composition, framing, lighting, background, and open-space invariant, and keep unrelated subjects and scene details recognizable without duplicating, deforming, or partially reconstructing them. Do not broaden a local request into a new pose, framing, lighting, or background design.");
+            "Render one coherent complete image using the supplied image as its visual starting point. Make the requested change and only the directly dependent adaptations needed for coherence. Preserve every named identity, story, style, composition, framing, lighting, background, and open-space invariant, and keep unrelated subjects and scene details recognizable without duplicating, deforming, or partially reconstructing them. Do not broaden a local request into a new pose, framing, lighting, or background design.");
 
         return BuildResult(
             builder,
             targetResolution,
             manifest,
             JsonSerializer.Serialize(brief, JsonOptions));
-    }
-
-    private async Task<TargetResolution> ResolveRegionalGuideTargetAsync(
-        Guid projectId,
-        ImageRasterConstraints constraints,
-        Guid sourceImageId,
-        ImageGenerationTarget? target,
-        CancellationToken cancellationToken)
-    {
-        if (target?.EditionId is not null
-            || target?.TargetId is { } targetId && targetId != Guid.Empty
-            || !string.IsNullOrWhiteSpace(target?.TargetKind)
-            || target?.VariantId is not null)
-        {
-            throw new ArgumentException(
-                "Regional guides cannot be combined with layout-bound targets. Use an unmasked source-driven edit for reframing or layout work.",
-                nameof(target));
-        }
-        if (target?.ReservedTextRegions is { Count: > 0 })
-        {
-            throw new ArgumentException(
-                "Regional guides cannot be combined with reserved text regions. Use an unmasked source-driven edit for composition changes.",
-                nameof(target));
-        }
-        if (target?.MinimumDpi is not null)
-        {
-            throw new ArgumentException(
-                "Regional guides cannot be combined with minimumDpi. Use an unmasked source-driven edit for a physical DPI target.",
-                nameof(target));
-        }
-        if (target?.SurfaceBounds is not null)
-        {
-            throw new ArgumentException(
-                "Regional guides cannot be combined with surfaceBounds. Use an unmasked source-driven edit for layout work.",
-                nameof(target));
-        }
-
-        var source = await images.GetDataAsync(projectId, sourceImageId, cancellationToken: cancellationToken)
-            ?? throw new InvalidOperationException($"Source image {sourceImageId:N} was not found in this project.");
-        var sourcePng = ProjectImageBinary.EncodePng(source.Data, source.FileName);
-        var sourceAspect = (double)sourcePng.Width / sourcePng.Height;
-        if (!string.IsNullOrWhiteSpace(target?.AspectRatio)
-            && !LayoutImageSizeResolver.AspectMatches(ParseAspectRatio(constraints, target.AspectRatio), sourceAspect))
-        {
-            throw new ArgumentException(
-                $"Regional-guide aspect ratio {target.AspectRatio} must preserve the source image aspect {sourcePng.Width}:{sourcePng.Height}. Use an unmasked edit for reframing.",
-                nameof(target));
-        }
-
-        var output = ProjectImageRegionalGuide.ResolveOutputSize(constraints, sourcePng.Width, sourcePng.Height, target?.Size);
-        var aspectLabel = AspectLabel(output.Width, output.Height);
-        return new TargetResolution(
-            output.Size,
-            aspectLabel,
-            "Preserve the source framing and aspect. The regional guide identifies only the approximate location of the requested edit; it does not define a hard pixel boundary.",
-            JsonSerializer.Serialize(new
-            {
-                LayoutBound = false,
-                RegionalGuide = true,
-                SourceRaster = $"{sourcePng.Width}x{sourcePng.Height}",
-                Size = output.Size,
-                AspectRatio = aspectLabel,
-                ReservedTextRegions = Array.Empty<ImageReservedRegion>(),
-            }, JsonOptions));
     }
 
     private static CompiledImagePrompt BuildResult(

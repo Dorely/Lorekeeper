@@ -39,8 +39,6 @@ public class ProjectImageGenerationJob
 
     public Guid? SourceImageId { get; set; }
 
-    public Guid? MaskId { get; set; }
-
     public string ReferenceImageIdsJson { get; set; } = "[]";
 
     public string EntityVisualTargetsJson { get; set; } = "[]";

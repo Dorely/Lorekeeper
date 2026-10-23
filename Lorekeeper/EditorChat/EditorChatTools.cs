@@ -427,11 +427,11 @@ IActService acts,
                 $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster and warningCodes before placement; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + imageGuidance));
 
         tools.Add(AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
-                EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
+                EditProjectImageAsync(context, sourceImageId, brief, references, target, altText, quality, outputFormat, outputCompression, imageModel, background),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster and warningCodes; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + imageGuidance));
+                $"Edit one project image and wait for a terminal result. Default to a source-driven edit: use the latest accepted source image directly and describe the complete desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned PageSurface or CoreCoverSurface subregion. Same-aspect up-resolution preserves complete source framing/content; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster and warningCodes; publication preparation upscales placed images to the edition DPI, so effectiveDpi is informational. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed." + imageGuidance));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
@@ -2470,7 +2470,6 @@ IActService acts,
         EditorChatContext ctx,
         Guid sourceImageId,
         ImageEditBrief brief,
-        ProjectImageMaskShape[]? regionalGuideShapes,
         ImageReferenceUse[]? references,
         ImageGenerationTarget? target,
         string? altText,
@@ -2480,20 +2479,12 @@ IActService acts,
         string? imageModel,
         string? background)
     {
-        if (regionalGuideShapes is { Length: 0 })
-            return "Error: regionalGuideShapes must contain at least one shape when supplied.";
-
-        var regionalGuide = regionalGuideShapes is { Length: > 0 }
-            ? new ProjectImageMaskShapeRequest("Editor assistant regional guide", regionalGuideShapes)
-            : null;
-
         try
         {
             var result = await imageWorkflow.EditAsync(
                 ctx.ProjectId,
                 sourceImageId,
                 brief,
-                regionalGuide,
                 references,
                 target,
                 altText,

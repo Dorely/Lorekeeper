@@ -34,8 +34,8 @@ public static class ProjectImageModelCatalog
 
     /// <summary>
     /// The same GPT Image models as the ChatGPT (Codex) image endpoints serve
-    /// them; the first is the default. The backend picks quality, ignores size
-    /// and masks, and returns PNG, which Lorekeeper converts when JPEG is requested.
+    /// them; the first is the default. The backend picks quality, ignores size,
+    /// and returns PNG, which Lorekeeper converts when JPEG is requested.
     /// </summary>
     public static IReadOnlyList<DiscoveredImageModel> CodexImageModels { get; } = Array.AsReadOnly(GptImageModels
         .Select(model => model with
@@ -44,7 +44,6 @@ public static class ProjectImageModelCatalog
             {
                 Qualities = CodexQualities,
                 OutputFormats = CodexFormats,
-                RegionalGuide = false,
                 Streaming = false,
             },
             Constraints = ImageRasterConstraints.CodexImage,
@@ -103,11 +102,10 @@ public static class ProjectImageModelCatalog
             effectiveBackground);
     }
 
-    /// <summary>Rejects references, edits, and regional guides the model cannot accept, before a job exists.</summary>
+    /// <summary>Rejects references and edits the model cannot accept, before a job exists.</summary>
     public static void ValidateInputs(
         ResolvedImageModel model,
         bool edit,
-        bool regionalGuide,
         int referenceCount,
         int applicationReferenceLimit)
     {
@@ -117,8 +115,6 @@ public static class ProjectImageModelCatalog
             throw new ArgumentException($"{model.ModelLabel} on {model.ProviderLabel} does not generate new images.");
         if (edit && !capabilities.Edit)
             throw new ArgumentException($"{model.ModelLabel} on {model.ProviderLabel} does not edit images.");
-        if (regionalGuide && !capabilities.RegionalGuide)
-            throw new ArgumentException($"{model.ModelLabel} on {model.ProviderLabel} does not accept a regional guide. Use an unmasked edit.");
         var limit = ReferenceLimit(model, applicationReferenceLimit);
         if (referenceCount > limit)
             throw new ArgumentException($"{model.ModelLabel} on {model.ProviderLabel} accepts at most {limit} reference image(s).");
@@ -149,7 +145,6 @@ public static class ProjectImageModelCatalog
         var capabilities = defaultModel.Capabilities;
         var limits = new List<string>();
         if (!capabilities.Edit) limits.Add("no edits");
-        if (!capabilities.RegionalGuide) limits.Add("no regional guides");
         if (!capabilities.TransparentBackground) limits.Add("no transparent backgrounds");
         limits.Add($"at most {capabilities.MaxReferenceImages} reference image(s)");
         return $" Images use {defaultModel.ProviderLabel}. Optional imageModel selects one of: {modelList}; omit it for {defaultModel.ModelId}."
@@ -166,7 +161,6 @@ public static class ProjectImageModelCatalog
             GptImageFormats,
             Generate: true,
             Edit: true,
-            RegionalGuide: true,
             MaxReferenceImages: 16,
             TransparentBackground: true,
             Streaming: true),

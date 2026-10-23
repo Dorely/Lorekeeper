@@ -1645,9 +1645,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<bool>("SupportsGenerate")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("SupportsRegionalGuide")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("SupportsStreaming")
                         .HasColumnType("INTEGER");
 
@@ -3172,9 +3169,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("MaskId")
-                        .HasColumnType("TEXT");
-
                     b.Property<int?>("OutputCompression")
                         .HasColumnType("INTEGER");
 
@@ -3250,8 +3244,6 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ImageProviderId");
 
-                    b.HasIndex("MaskId");
-
                     b.HasIndex("SourceImageId");
 
                     b.HasIndex("ProjectId", "Kind", "CreatedAt");
@@ -3259,60 +3251,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
                     b.ToTable("ProjectImageGenerationJobs");
-                });
-
-            modelBuilder.Entity("Lorekeeper.Models.ProjectImageMask", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<byte[]>("Data")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.Property<int>("Height")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("ImageId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Width")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ImageId");
-
-                    b.HasIndex("ProjectId", "ImageId", "CreatedAt");
-
-                    b.HasIndex("ProjectId", "OwnerKind", "OwnerId");
-
-                    b.ToTable("ProjectImageMasks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageMessage", b =>
@@ -6997,25 +6935,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("Lorekeeper.Models.ProjectImageMask", b =>
-                {
-                    b.HasOne("Lorekeeper.Models.PublishAsset", "Image")
-                        .WithMany("ImageMasks")
-                        .HasForeignKey("ImageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Lorekeeper.Models.Project", "Project")
-                        .WithMany("ProjectImageMasks")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Image");
-
-                    b.Navigation("Project");
-                });
-
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageMessage", b =>
                 {
                     b.HasOne("Lorekeeper.Models.ProjectImageConversation", "Conversation")
@@ -7984,8 +7903,6 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("ProjectImageGenerationJobs");
 
-                    b.Navigation("ProjectImageMasks");
-
                     b.Navigation("ProjectImagePartials");
 
                     b.Navigation("ProjectImportJobs");
@@ -8117,8 +8034,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("EntityVisualExamples");
 
                     b.Navigation("ImageChatAttachments");
-
-                    b.Navigation("ImageMasks");
 
                     b.Navigation("PublicationPlacements");
 

@@ -39,7 +39,6 @@ public sealed class OpenAiImagesCompatibleProvider(
         ["png", "jpeg", "webp"],
         Generate: true,
         Edit: true,
-        RegionalGuide: true,
         MaxReferenceImages: 16,
         TransparentBackground: true,
         Streaming: false);
@@ -65,7 +64,6 @@ public sealed class OpenAiImagesCompatibleProvider(
                 request.OutputCompression,
                 request.Background,
                 request.ReferenceImages[0],
-                mask: null,
                 request.ReferenceImages.Skip(1),
                 row.SupportsStreaming);
             return await SendImageRequestAsync(provider, "edits", editContent, request.ImageModel,
@@ -106,7 +104,6 @@ public sealed class OpenAiImagesCompatibleProvider(
             request.OutputCompression,
             request.Background,
             request.SourceImage,
-            request.Mask,
             request.ReferenceImages,
             row.SupportsStreaming);
         return await SendImageRequestAsync(provider, "edits", content, request.ImageModel,
@@ -655,7 +652,6 @@ public sealed class OpenAiImagesCompatibleProvider(
         int? outputCompression,
         string background,
         ProjectImageProviderReference source,
-        ProjectImageProviderReference? mask,
         IEnumerable<ProjectImageProviderReference> referenceImages,
         bool stream)
     {
@@ -663,8 +659,6 @@ public sealed class OpenAiImagesCompatibleProvider(
         AddFilePart(content, "image[]", source);
         foreach (var reference in referenceImages)
             AddFilePart(content, "image[]", reference);
-        if (mask is not null)
-            AddFilePart(content, "mask", mask);
 
         content.Add(new StringContent(prompt), "prompt");
         content.Add(new StringContent(imageModel), "model");

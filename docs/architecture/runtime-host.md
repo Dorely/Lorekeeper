@@ -109,7 +109,7 @@ OAuth callback and scoped binary/media delivery are representative examples. The
 callback returns a standalone completion page and never redirects into a Blazor
 circuit; authorization starts from the still-mounted Settings component. Endpoint
 handlers validate identifiers and delegate to owning services; they do not become
-an alternate domain layer. Local image, mask, chat-visual, artifact, or other media
+an alternate domain layer. Local image, chat-visual, artifact, or other media
 routes must enforce the same project/ownership rules as the Razor surface and must
 not expose filesystem paths or credentials. A new endpoint is therefore both a
 host-routing change and a feature-owner change, and should route to both chapters.

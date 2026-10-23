@@ -151,10 +151,10 @@ public sealed class ImagesChatTools(
                 description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request hard-rejects before dispatch with provider limits and a panel plan; use multiple Figure blocks or a Designed Page for multi-image publication coverage. Inspect the result before promoting it; publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + imageGuidance),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
-                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null, string? label = null, string? imageModel = null, string? background = null) =>
+                    EditImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, label, imageModel, background),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content; use the latest accepted source image and reconstruct credible detail without cropping, zooming out, or inventing surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. Regional guides are source-geometry-bound, reject explicit DPI, and accept only an aspect that preserves the source. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect it before promoting it. Publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + imageGuidance),
+                description: $"Edit one project image and wait for a terminal result. Edits use the moderate Core Book page raster by default and may explicitly request minimumDpi plus an optional aspectRatio. Same-aspect up-resolution preserves complete source framing/content; use the latest accepted source image and reconstruct credible detail without cropping, zooming out, or inventing surrounding canvas. Intentional framing expansion is separate outpainting: describe the new surroundings and direction in desired-result and composition. An infeasible DPI request hard-rejects before dispatch; use multiple Figure blocks or a Designed Page when publication coverage requires multiple images. The output is unattached; inspect it before promoting it. Publication preparation upscales placed images to the edition DPI. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references." + imageGuidance),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -583,7 +583,6 @@ public sealed class ImagesChatTools(
         ImagesChatToolContext ctx,
         Guid sourceImageId,
         ImageEditBrief brief,
-        ProjectImageMaskShape[]? regionalGuideShapes,
         ImageReferenceUse[]? references,
         string? altText,
         string? quality,
@@ -597,12 +596,6 @@ public sealed class ImagesChatTools(
     {
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
-        if (regionalGuideShapes is { Length: 0 })
-            return "Error: regionalGuideShapes must contain at least one shape when supplied.";
-
-        var regionalGuide = regionalGuideShapes is { Length: > 0 }
-            ? new ProjectImageMaskShapeRequest("Images assistant regional guide", regionalGuideShapes)
-            : null;
 
         try
         {
@@ -610,7 +603,6 @@ public sealed class ImagesChatTools(
                 ctx.ProjectId,
                 sourceImageId,
                 brief,
-                regionalGuide,
                 references,
                 MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,
