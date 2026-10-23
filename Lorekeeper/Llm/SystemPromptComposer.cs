@@ -94,6 +94,19 @@ public sealed class SystemPromptComposer(
                 SystemPromptSectionKind.OperatingRules,
                 "Direct Project Reference Continuity",
                 AssistantWorkflowInstructions.ProjectReferenceContinuity),
+        };
+
+        if (RendersChatReplies(request.AgentRole))
+        {
+            sections.Add(new(
+                "chat-reply-formatting",
+                SystemPromptSectionKind.OperatingRules,
+                "Chat Reply Formatting",
+                AssistantWorkflowInstructions.ChatReplyFormatting));
+        }
+
+        sections.AddRange(
+        [
             new(
                 "dynamic-guidance",
                 SystemPromptSectionKind.DynamicGuidance,
@@ -119,7 +132,7 @@ public sealed class SystemPromptComposer(
                 "World Brief",
                 string.IsNullOrWhiteSpace(request.WorldBrief) ? "No World Brief has been supplied." : request.WorldBrief,
                 IsUserOwned: true),
-        };
+        ]);
 
         foreach (var source in request.WorkingContext ?? [])
         {
@@ -146,6 +159,10 @@ public sealed class SystemPromptComposer(
         }
         return builder.ToString();
     }
+
+    // Contest candidates return manuscript prose and revision workers report to the Editor, not the chat panel.
+    private static bool RendersChatReplies(SystemPromptAgentRole role) =>
+        role is not (SystemPromptAgentRole.ContestCandidate or SystemPromptAgentRole.RevisionWorker);
 
     internal static string ProfessionalIdentityFor(SystemPromptAgentRole role)
     {

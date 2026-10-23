@@ -43,6 +43,10 @@ selected-provider override. Feature services adapt their repository, prompt
 context, tools, and typed streaming updates to the common `ChatTurnEngine`.
 `ChatSurface` provides the shared transcript, composer, model picker, image
 attachments, tool chips, scrolling, and textarea behavior.
+`ChatMarkdown` renders assistant text and reasoning as display-only
+GitHub-flavored Markdown through Markdig, with raw HTML escaped and model-authored
+links and images rendered as inert text, so a reply cannot navigate the app, open
+an external browser, or fetch remote content. User messages remain plain text.
 
 The shared engine owns the provider-facing loop: persist the outgoing user
 message, stream assistant text, reasoning, and function-call argument deltas,
@@ -183,6 +187,12 @@ from code-owned rules and must not be persisted as seeded guidance. The shared
 workflow instructions enforce active-canon precedence, read-only foreign
 references, compact paging and owning-service mutations, durable work logs, and honest
 verification.
+
+The six user-facing roles also receive
+`AssistantWorkflowInstructions.ChatReplyFormatting`, which encourages Markdown
+replies for the chat panel while leaving tool-written project content in each
+tool's own format. Contest Candidate and Revision Worker prompts omit it because
+their prose is parsed into the manuscript or reported to the coordinating Editor.
 
 `SystemPromptComposer` adds the shared
 `AssistantWorkflowInstructions.ProjectSearchQueryDiscipline` to every
@@ -669,7 +679,7 @@ assistant evidence link never silently creates a manuscript citation.
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, provenance-bound replay, compaction, message-store boundary, and image attachments. |
-| [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, tool chips, and composer behavior. |
+| [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, inert Markdown rendering, tool chips, and composer behavior. |
 | [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
 | [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Git-backed Review page, contests, revision jobs/workers, and active-turn updates. |

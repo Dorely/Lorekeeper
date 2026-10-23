@@ -101,8 +101,121 @@
     border-bottom-left-radius: 0.2rem;
 }
 
-.chat-msg-text {
+.chat-msg-plain {
     white-space: pre-wrap;
+}
+
+.chat-md ::deep :is(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6, hr) {
+    margin: 0 0 0.5rem;
+}
+
+.chat-md ::deep > :last-child {
+    margin-bottom: 0;
+}
+
+.chat-md ::deep :is(h1, h2, h3, h4, h5, h6) {
+    margin-top: 0.75rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.chat-md ::deep > :is(h1, h2, h3, h4, h5, h6):first-child {
+    margin-top: 0;
+}
+
+.chat-md ::deep h1 { font-size: 1.15rem; }
+.chat-md ::deep h2 { font-size: 1.07rem; }
+.chat-md ::deep :is(h3, h4, h5, h6) { font-size: 1rem; }
+
+.chat-md ::deep :is(ul, ol) {
+    padding-left: 1.35rem;
+}
+
+.chat-md ::deep li > :is(ul, ol, p) {
+    margin-bottom: 0.15rem;
+}
+
+.chat-md ::deep li.task-list-item {
+    list-style: none;
+}
+
+.chat-md ::deep li.task-list-item input {
+    margin: 0 0.4rem 0 -1.2rem;
+    vertical-align: middle;
+}
+
+.chat-md ::deep blockquote {
+    padding-left: 0.65rem;
+    border-left: 3px solid var(--bs-border-color, #dee2e6);
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.chat-md ::deep code {
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.25rem;
+    background: rgba(127, 127, 127, 0.14);
+    color: inherit;
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+}
+
+.chat-md ::deep pre {
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.4rem;
+    background: var(--bs-body-bg, #fff);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.chat-md ::deep pre code {
+    padding: 0;
+    background: none;
+    font-size: 0.82rem;
+    overflow-wrap: normal;
+}
+
+.chat-md ::deep table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.chat-md ::deep :is(th, td) {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    vertical-align: top;
+}
+
+.chat-md ::deep th {
+    font-weight: 700;
+}
+
+.chat-md ::deep hr {
+    border: 0;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+    opacity: 1;
+}
+
+.chat-md ::deep .chat-md-link {
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+.chat-md ::deep .chat-md-image {
+    font-style: italic;
+}
+
+.chat-md-streaming ::deep > :last-child::after {
+    content: "|";
+    display: inline-block;
+    margin-left: 1px;
+    color: var(--bs-secondary-color, #6c757d);
+    font-style: normal;
+    font-weight: 400;
+    animation: chat-blink 1s steps(2) infinite;
 }
 
 .chat-chip + .chat-msg-text {
@@ -294,7 +407,6 @@
 .chat-reasoning-body {
     padding: 0.15rem 0.55rem 0.5rem;
     border-top: 1px solid var(--bs-border-color, #dee2e6);
-    white-space: pre-wrap;
     color: var(--bs-secondary-color, #6c757d);
 }
 
@@ -443,6 +555,9 @@
 .chat-reasoning { border-color: var(--lk-line); border-radius: var(--lk-radius-md); background: var(--lk-surface-subtle); }
 .chat-reasoning-label, .chat-reasoning-body { color: var(--lk-text-muted); }
 .chat-reasoning-body { border-top-color: var(--lk-line); }
+.chat-md ::deep :is(pre, th, td, hr) { border-color: var(--lk-line); }
+.chat-md ::deep pre { background: var(--lk-surface); border-radius: var(--lk-radius-md); }
+.chat-md ::deep blockquote { border-left-color: var(--lk-line-strong); color: var(--lk-text-muted); }
 .chat-composer { background: var(--lk-surface); border-top-color: var(--lk-line); padding: 0.65rem; }
 .chat-composer textarea { border-color: var(--lk-line-strong); border-radius: var(--lk-radius-md); }
 .chat-error { background: var(--lk-danger-soft); color: var(--lk-danger); }

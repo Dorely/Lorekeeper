@@ -348,11 +348,12 @@
 
     private RenderFragment RenderMessage(ChatRenderableMessage message) => __builder =>
     {
-        var bubbleClass = message.Role == ChatMessageRole.User
+        var isUser = message.Role == ChatMessageRole.User;
+        var bubbleClass = isUser
             ? "chat-msg chat-msg-user"
             : "chat-msg chat-msg-asst";
         <div class="@bubbleClass">
-            @RenderParts(message.Parts)
+            @RenderParts(message.Parts, renderMarkdown: !isUser)
             @if (message.Status == ChatMessageStatus.Failed)
             {
                 <div class="chat-msg-status chat-msg-failed">Failed</div>
@@ -380,7 +381,7 @@
                 ? liveMessage.Parts.LastOrDefault() as ChatTextPart
                 : null;
             <div class="chat-msg chat-msg-asst chat-msg-streaming">
-                @RenderParts(liveMessage.Parts, trailingText)
+                @RenderParts(liveMessage.Parts, trailingText, renderMarkdown: true)
             </div>
         }
 
@@ -400,8 +401,7 @@
 
     private static RenderFragment RenderReasoning(ChatReasoningPart reasoning, bool showCursor = false) => __builder =>
     {
-        var text = reasoning.Text.ToString();
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrWhiteSpace(reasoning.Text.ToString()))
             return;
 
         <details class="chat-reasoning @(reasoning.IsStreaming ? "chat-reasoning-live" : "")" open="@reasoning.IsStreaming">
@@ -412,18 +412,18 @@
                     <span class="chat-cursor">|</span>
                 }
             </summary>
-            <div class="chat-reasoning-body">@text</div>
+            <div class="chat-reasoning-body chat-md">@ChatMarkdown.Render(reasoning.Text)</div>
         </details>
     };
 
-    private RenderFragment RenderParts(IReadOnlyList<ChatMessagePart> parts, ChatTextPart? trailingText = null) => __builder =>
+    private RenderFragment RenderParts(IReadOnlyList<ChatMessagePart> parts, ChatTextPart? trailingText = null, bool renderMarkdown = false) => __builder =>
     {
         var index = 0;
         while (index < parts.Count)
         {
             if (parts[index] is not ChatToolPart firstTool)
             {
-                @RenderPart(parts[index], ReferenceEquals(parts[index], trailingText))
+                @RenderPart(parts[index], ReferenceEquals(parts[index], trailingText), renderMarkdown)
                 index++;
                 continue;
             }
@@ -451,14 +451,17 @@
         }
     };
 
-    private RenderFragment RenderPart(ChatMessagePart part, bool showCursor = false) => __builder =>
+    private RenderFragment RenderPart(ChatMessagePart part, bool showCursor = false, bool renderMarkdown = false) => __builder =>
     {
-        if (part is ChatTextPart textPart)
+        if (part is ChatTextPart textPart && textPart.Text.Length > 0)
         {
-            var text = textPart.Text.ToString();
-            if (!string.IsNullOrEmpty(text))
+            if (renderMarkdown)
             {
-                <div class="chat-msg-text">@text@if (showCursor) { <span class="chat-cursor">|</span> }</div>
+                <div class="chat-msg-text chat-md @(showCursor ? "chat-md-streaming" : "")">@ChatMarkdown.Render(textPart.Text)</div>
+            }
+            else
+            {
+                <div class="chat-msg-text chat-msg-plain">@textPart.Text.ToString()@if (showCursor) { <span class="chat-cursor">|</span> }</div>
             }
         }
         else if (part is ChatToolPart toolPart)

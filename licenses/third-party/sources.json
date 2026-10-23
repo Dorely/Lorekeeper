@@ -208,6 +208,22 @@
       ]
     },
     {
+      "package": "Markdig/1.4.2",
+      "sha512": "C5jl2hFLK5KHxWWWO6JxfuQCRirW5DGnCn9IEhJ7xgBMVnd+PjRNdAKO2C6YHpkOtVvZMJ8Zbma7B+CDi+hl+g==",
+      "licenseExpression": "BSD-2-Clause",
+      "repository": "https://github.com/xoofx/markdig",
+      "repositoryCommit": "6a410393ba74c5da30e21202a3a4ea463216829d",
+      "copyright": "Alexandre Mutel",
+      "authors": "Alexandre Mutel",
+      "evidence": [
+        {
+          "path": "licenses/third-party/7423242b4ae72bcc-license.txt",
+          "sha256": "7423242b4ae72bccdf19a06cd3c20790df8519a164a08f37b31cb4a40034d827",
+          "source": "https://raw.githubusercontent.com/xoofx/markdig/6a410393ba74c5da30e21202a3a4ea463216829d/license.txt"
+        }
+      ]
+    },
+    {
       "package": "Microsoft.AspNetCore.App.Internal.Assets/10.0.0",
       "sha512": "0gZrESKwnlmbE8Br8XIy3kk7Pj0++9T2Ly+A8BFYYgo5EgfqWEln26cho+l92KOaHUzclhvz314RiwE910s24g==",
       "licenseExpression": "MIT",

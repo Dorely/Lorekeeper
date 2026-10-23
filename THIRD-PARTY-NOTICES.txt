@@ -72,6 +72,12 @@ Authors: LibGit2Sharp contributors
 Source: https://github.com/libgit2/libgit2sharp eaa698d078941fd5e3cc82b59b885cd35d8cc0f8
 Retained full terms/notice: licenses/third-party/d745334f7db93761-LICENSE.md (SHA-256 d745334f7db93761cf9c1ffd4c03d0a843618ff87f594077bd6029a73dd0ccb2); nuget:LibGit2Sharp/0.32.0/App_Readme/LICENSE.md
 
+Markdig/1.4.2 — BSD-2-Clause
+Alexandre Mutel
+Authors: Alexandre Mutel
+Source: https://github.com/xoofx/markdig 6a410393ba74c5da30e21202a3a4ea463216829d
+Retained full terms/notice: licenses/third-party/7423242b4ae72bcc-license.txt (SHA-256 7423242b4ae72bccdf19a06cd3c20790df8519a164a08f37b31cb4a40034d827); https://raw.githubusercontent.com/xoofx/markdig/6a410393ba74c5da30e21202a3a4ea463216829d/license.txt
+
 Microsoft.AspNetCore.App.Internal.Assets/10.0.0 — MIT
 © Microsoft Corporation. All rights reserved.
 Authors: Microsoft

@@ -16,6 +16,14 @@ public static class AssistantWorkflowInstructions
         - Referenced publication/release material is not narrative canon and must not be used as continuity evidence.
         """;
 
+    public const string ChatReplyFormatting = """
+        Chat reply formatting:
+        - The chat panel renders your replies as GitHub-flavored Markdown. Use it where it helps the user scan: short headings for multi-part answers, numbered or bulleted lists for steps and options, bold for key terms, tables for comparisons, and fenced code blocks for code, JSON, or literal text.
+        - Keep brief conversational replies as plain paragraphs. Quote short manuscript passages with > blockquotes rather than code blocks.
+        - Links and images display as plain text and raw HTML is not rendered, so name sources and locations directly.
+        - This applies only to chat replies. Text written through tools into the manuscript, briefs, canon, or other project content follows that tool's own format.
+        """;
+
     public const string ProjectSearchQueryDiscipline = """
         Lorekeeper project-search query discipline:
         - Apply the following only to Lorekeeper's internal project-search tools exposed in this role: list_search_sources, search_project, read_project_source, and, where exposed, find_impacted_chapters. If a named tool is not exposed, do not invent a call. This discipline explicitly does not apply to external web_search, read_webpage, read_search_result, or other web tools; follow those tools' separate role-specific contract instead.
