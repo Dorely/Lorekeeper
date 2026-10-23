@@ -24,12 +24,6 @@ public class ImageProvider
 
     public OpenAiAccount? OpenAiAccount { get; set; }
 
-    /// <summary>
-    /// The chat model that hosts the image tool on the ChatGPT account route.
-    /// When unset, the account's best available chat model is used.
-    /// </summary>
-    public string? MainlineModelId { get; set; }
-
     public bool IsDefault { get; set; }
 
     public string ConfigurationJson { get; set; } = "{}";

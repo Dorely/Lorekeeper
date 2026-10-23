@@ -10,7 +10,7 @@ public sealed record ProjectImageRequestSettings(
     string Background);
 
 /// <summary>
-/// The bundled GPT Image model set and the validation of per-request image
+/// The bundled GPT Image model sets and the validation of per-request image
 /// settings against a resolved model's capabilities.
 /// </summary>
 public static class ProjectImageModelCatalog
@@ -18,8 +18,10 @@ public static class ProjectImageModelCatalog
     private static readonly string[] Image2Qualities = ["auto", "low", "medium", "high"];
     private static readonly string[] Image25Qualities = ["auto", "low", "medium", "high", "xhigh", "max"];
     private static readonly string[] GptImageFormats = ["png", "jpeg", "webp"];
+    private static readonly string[] CodexQualities = ["auto"];
+    private static readonly string[] CodexFormats = ["png", "jpeg"];
 
-    /// <summary>GPT Image models served by the ChatGPT account route and the OpenAI Images API; the first is the default.</summary>
+    /// <summary>GPT Image models served by the OpenAI Images API; the first is the default.</summary>
     public static IReadOnlyList<DiscoveredImageModel> GptImageModels { get; } = Array.AsReadOnly(new[]
     {
         GptImage("gpt-image-2.5-flare", "GPT Image 2.5 Flare", Image25Qualities),
@@ -29,6 +31,25 @@ public static class ProjectImageModelCatalog
         GptImage("gpt-image-2.5-sunburst-2026-09-08", "GPT Image 2.5 Sunburst (2026-09-08)", Image25Qualities),
         GptImage("gpt-image-2-2026-04-21", "GPT Image 2 (2026-04-21)", Image2Qualities),
     });
+
+    /// <summary>
+    /// The same GPT Image models as the ChatGPT (Codex) image endpoints serve
+    /// them; the first is the default. The backend picks quality, ignores size
+    /// and masks, and returns PNG, which Lorekeeper converts when JPEG is requested.
+    /// </summary>
+    public static IReadOnlyList<DiscoveredImageModel> CodexImageModels { get; } = Array.AsReadOnly(GptImageModels
+        .Select(model => model with
+        {
+            Capabilities = model.Capabilities with
+            {
+                Qualities = CodexQualities,
+                OutputFormats = CodexFormats,
+                RegionalGuide = false,
+                Streaming = false,
+            },
+            Constraints = ImageRasterConstraints.CodexImage,
+        })
+        .ToArray());
 
     public static ProjectImageRequestSettings Resolve(
         ResolvedImageModel model,

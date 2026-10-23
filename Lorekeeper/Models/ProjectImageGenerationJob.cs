@@ -62,8 +62,6 @@ public class ProjectImageGenerationJob
     /// <summary>Non-secret provider label recorded for history.</summary>
     public string Provider { get; set; } = string.Empty;
 
-    public string MainlineModel { get; set; } = string.Empty;
-
     public string ImageModel { get; set; } = string.Empty;
 
     public string RawProviderResponseJson { get; set; } = string.Empty;

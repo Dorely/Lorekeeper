@@ -120,7 +120,6 @@ public sealed record ProjectImagePartialView(
     int Width,
     int Height,
     string Provider,
-    string MainlineModel,
     string ImageModel,
     string? RequestId,
     string? ResponseId,
@@ -200,7 +199,6 @@ public sealed record ProjectImageJobView(
     IReadOnlyList<ProjectImageOutputStateView> OutputStates,
     IReadOnlyList<ProjectImageOutputErrorView> OutputErrors,
     string Provider,
-    string MainlineModel,
     string ImageModel,
     string Error,
     DateTime CreatedAt,
@@ -284,7 +282,6 @@ public sealed record ProjectImageProviderReference(
 public sealed record ProjectImageProviderResult(
     IReadOnlyList<ProjectImageProviderImage> Images,
     string Provider,
-    string MainlineModel,
     string ImageModel,
     string RawMetadataJson);
 

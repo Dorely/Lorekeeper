@@ -26,7 +26,6 @@ public class ProjectImagePartial
     public int Height { get; set; }
 
     public string Provider { get; set; } = string.Empty;
-    public string MainlineModel { get; set; } = string.Empty;
     public string ImageModel { get; set; } = string.Empty;
     public string? RequestId { get; set; }
     public string? ResponseId { get; set; }

@@ -286,7 +286,7 @@ public sealed class AgentProjectImageWorkflow(
                     ?? throw new InvalidOperationException($"Completed project image {imageId:N} has no readable data.");
                 var normalized = ProjectImageBinary.Normalize(data.Data, data.ContentType, data.FileName, int.MaxValue);
                 var rasterMatched = !hasRequestedRaster
-                    || normalized.Width == requested.Width && normalized.Height == requested.Height;
+                    || LayoutImageSizeResolver.RasterMatches(requested, normalized.Width, normalized.Height);
                 var aspectMatched = geometry is { WidthInches: > 0, HeightInches: > 0 }
                     ? LayoutImageSizeResolver.AspectMatches(
                         (double)normalized.Width / normalized.Height,

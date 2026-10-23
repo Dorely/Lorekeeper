@@ -385,7 +385,6 @@ public sealed class OpenAiImagesCompatibleProvider(
                 ReportedSize: ReadString(root, "size"),
                 ReportedOutputFormat: reportedFormat)],
             provider.Name,
-            string.Empty,
             imageModel,
             metadataJson);
     }
@@ -502,7 +501,6 @@ public sealed class OpenAiImagesCompatibleProvider(
                 ReportedSize: ReadString(evt, "size"),
                 ReportedOutputFormat: reportedFormat)],
             provider.Name,
-            string.Empty,
             imageModel,
             metadataJson);
     }

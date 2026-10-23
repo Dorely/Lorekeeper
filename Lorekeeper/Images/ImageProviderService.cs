@@ -86,7 +86,6 @@ public sealed partial class ImageProviderService(
         stored.EndpointUrl = provider.EndpointUrl;
         stored.ApiKey = provider.ApiKey;
         stored.OpenAiAccountId = provider.OpenAiAccountId;
-        stored.MainlineModelId = provider.MainlineModelId;
         stored.ConfigurationJson = provider.ConfigurationJson;
         stored.LastTestedAt = provider.LastTestedAt;
         stored.LastTestSucceeded = provider.LastTestSucceeded;
@@ -457,8 +456,8 @@ public sealed partial class ImageProviderService(
 
         if (provider.Kind != ImageProviderKind.ChatGptAccount)
         {
-            if (provider.OpenAiAccountId is not null || provider.MainlineModelId is not null)
-                throw new ArgumentException("Only a ChatGPT account provider uses an account and host model.", nameof(provider));
+            if (provider.OpenAiAccountId is not null)
+                throw new ArgumentException("Only a ChatGPT account provider uses an account.", nameof(provider));
             if (provider.EndpointUrl is not null)
                 ValidateEndpoint(provider.EndpointUrl);
         }
@@ -483,7 +482,6 @@ public sealed partial class ImageProviderService(
         provider.DisplayName = Clean(provider.DisplayName);
         provider.EndpointUrl = Clean(provider.EndpointUrl)?.TrimEnd('/');
         provider.ApiKey = Clean(provider.ApiKey);
-        provider.MainlineModelId = Clean(provider.MainlineModelId);
         provider.LastTestMessage = Clean(provider.LastTestMessage);
         provider.ConfigurationJson = string.IsNullOrWhiteSpace(provider.ConfigurationJson) ? "{}" : provider.ConfigurationJson.Trim();
     }

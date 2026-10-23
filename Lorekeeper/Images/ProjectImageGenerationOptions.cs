@@ -10,7 +10,6 @@ public sealed class ProjectImageGenerationOptions
     public int MaxParallelRequests { get; set; } = 1;
     public int MaxRequestAttempts { get; set; } = 3;
     public int RequestTimeoutSeconds { get; set; } = 600;
-    public int PartialImages { get; set; } = 2;
     public int MaxReferenceImages { get; set; } = 4;
     public int AgentJobWaitTimeoutSeconds { get; set; } = 600;
     public int MaxProviderOutputBytes { get; set; } = 64 * 1024 * 1024;

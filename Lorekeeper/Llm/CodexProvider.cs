@@ -8,6 +8,8 @@ public static class CodexProvider
     public const string AccountProviderKey = "openai-account";
     public const string ResponsesEndpoint = "https://chatgpt.com/backend-api/codex/responses";
     public const string ModelsEndpoint = "https://chatgpt.com/backend-api/codex/models";
+    public const string ImageGenerationsEndpoint = "https://chatgpt.com/backend-api/codex/images/generations";
+    public const string ImageEditsEndpoint = "https://chatgpt.com/backend-api/codex/images/edits";
     public const string PlanResponsesEndpoint = "https://api.openai.com/v1/responses";
     public const string PlanModelsEndpoint = "https://api.openai.com/v1/models";
     public const string ManageUsageUrl = "https://chatgpt.com/settings/usage";
@@ -47,7 +49,7 @@ public static class CodexProvider
 
     /// <summary>
     /// Applies the ChatGPT account backend headers shared by Codex chat, vision,
-    /// image generation, and model discovery requests.
+    /// and model discovery requests.
     /// </summary>
     public static void ApplyAccountHeaders(
         HttpRequestMessage request,
@@ -55,11 +57,24 @@ public static class CodexProvider
         string externalAccountId,
         bool eventStream)
     {
+        ApplyAccountIdentity(request, accessToken, externalAccountId);
+        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(eventStream ? "text/event-stream" : "application/json"));
+    }
+
+    /// <summary>
+    /// The account identity every Codex backend request carries. The image
+    /// endpoints take only this plus a JSON accept header; Responses and model
+    /// requests add the beta header through <see cref="ApplyAccountHeaders"/>.
+    /// </summary>
+    public static void ApplyAccountIdentity(
+        HttpRequestMessage request,
+        string accessToken,
+        string externalAccountId)
+    {
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         request.Headers.TryAddWithoutValidation("chatgpt-account-id", externalAccountId);
-        request.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
         request.Headers.TryAddWithoutValidation("originator", "pi");
         request.Headers.TryAddWithoutValidation("User-Agent", "Lorekeeper");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(eventStream ? "text/event-stream" : "application/json"));
     }
 }

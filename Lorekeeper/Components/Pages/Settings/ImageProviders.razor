@@ -7,7 +7,6 @@
 @inject IImageProviderService ImageProviderService
 @inject IImageProviderClientFactory ImageClients
 @inject IOpenAiAccountService Accounts
-@inject ILlmProviderService LlmProviders
 
 <PageTitle>Image Providers</PageTitle>
 
@@ -173,7 +172,6 @@
 @code {
     private List<ImageProvider> _providers = [];
     private List<OpenAiAccount> _accounts = [];
-    private List<LlmProvider> _llmProviders = [];
     private List<ImageProviderKind> _supportedKinds = [];
     private ImageProviderReadiness? _readiness;
     private ProviderDraft _newDraft = new();
@@ -243,11 +241,10 @@
         try
         {
             _accounts = (await Accounts.GetAllAsync()).ToList();
-            _llmProviders = await LlmProviders.GetAllAsync();
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            SetStatus($"Could not load accounts or chat models: {ex.Message}", "danger");
+            SetStatus($"Could not load accounts: {ex.Message}", "danger");
         }
     }
 
@@ -638,16 +635,6 @@
                     Sign in with the ChatGPT (Codex) account in <a href="/settings/providers">Settings &gt; Providers</a> first.
                 </div>
             }
-            <label class="field-wide">
-                <span>Host chat model</span>
-                <select class="form-select" @bind="draft.MainlineModelId">
-                    <option value="">Best available on the plan (recommended)</option>
-                    @foreach (var model in HostModelOptions(draft.OpenAiAccountId))
-                    {
-                        <option value="@model.ModelId">@(model.DisplayName ?? model.ModelId)</option>
-                    }
-                </select>
-            </label>
         }
         else if (draft.Kind == ImageProviderKind.OpenRouter)
         {
@@ -820,15 +807,6 @@
     private void ToggleSection(int providerId) =>
         _collapsedProviders[providerId] = !IsSectionExpanded(providerId);
 
-    private IEnumerable<LlmProvider> HostModelOptions(int? accountId) =>
-        accountId is not { } id
-            ? Enumerable.Empty<LlmProvider>()
-            : _llmProviders
-                .Where(provider => provider.OpenAiAccountId == id
-                    && provider.AccountAvailability != LlmAccountModelAvailability.Unavailable)
-                .OrderBy(provider => provider.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(provider => provider.ModelId, StringComparer.Ordinal);
-
     private static IReadOnlyList<string> CapabilityChips(ImageModelCapabilities capabilities)
     {
         var chips = new List<string>();
@@ -878,7 +856,6 @@
             ? null
             : Clean(draft.ApiKey) ?? Clean(draft.StoredApiKey),
         OpenAiAccountId = draft.Kind == ImageProviderKind.ChatGptAccount ? draft.OpenAiAccountId : null,
-        MainlineModelId = draft.Kind == ImageProviderKind.ChatGptAccount ? Clean(draft.MainlineModelId) : null,
         IsDefault = draft.IsDefault,
     };
 
@@ -954,7 +931,6 @@
         public string ApiKey { get; set; } = string.Empty;
         public string? StoredApiKey { get; set; }
         public int? OpenAiAccountId { get; set; }
-        public string MainlineModelId { get; set; } = string.Empty;
         public bool IsDefault { get; set; }
 
         public bool HasStoredApiKey => !string.IsNullOrWhiteSpace(StoredApiKey);
@@ -967,7 +943,6 @@
             EndpointUrl = provider.EndpointUrl ?? string.Empty,
             StoredApiKey = provider.ApiKey,
             OpenAiAccountId = provider.OpenAiAccountId,
-            MainlineModelId = provider.MainlineModelId ?? string.Empty,
             IsDefault = provider.IsDefault,
         };
     }

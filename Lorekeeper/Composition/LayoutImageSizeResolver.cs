@@ -64,6 +64,8 @@ public sealed record LayoutImagePanel(
 public static class LayoutImageSizeResolver
 {
     public const double PreferredAspectError = .001d;
+    /// <summary>The pixel-count tolerance, in log space, of an approximate raster match (about 4%).</summary>
+    public const double ApproximatePixelError = .04d;
     private const double ExactAspectError = 1e-10;
     private const double RasterIntegerTolerance = 1e-9;
     private const int MaximumSuggestedPanels = 64;
@@ -153,6 +155,20 @@ public static class LayoutImageSizeResolver
         && actualAspect > 0
         && targetAspect > 0
         && Math.Abs(Math.Log(actualAspect / targetAspect)) <= PreferredAspectError;
+
+    /// <summary>
+    /// A delivered raster matches the requested one when its edges are equal, or
+    /// when its aspect matches and its pixel count is within
+    /// <see cref="ApproximatePixelError"/>, as a fixed-budget model delivers it.
+    /// </summary>
+    public static bool RasterMatches(LayoutImageSize requested, int width, int height) =>
+        width == requested.Width && height == requested.Height
+        || width > 0
+            && height > 0
+            && requested.Width > 0
+            && requested.Height > 0
+            && AspectMatches((double)width / height, (double)requested.Width / requested.Height)
+            && Math.Abs(Math.Log((double)width * height / requested.PixelCount)) <= ApproximatePixelError;
 
     public static LayoutImageSize ResolveAspect(ImageRasterConstraints constraints, double aspect)
     {
@@ -397,6 +413,21 @@ public static class LayoutImageSizeResolver
         return parsed;
     }
 
+    /// <summary>
+    /// Parses an explicitly requested raster for a model. A fixed-budget model
+    /// cannot honor other pixel counts, so a size outside its limits is rescaled
+    /// to the budget at the same aspect; other models must accept it as given.
+    /// </summary>
+    public static LayoutImageSize ParseRequested(ImageRasterConstraints constraints, string size)
+    {
+        ArgumentNullException.ThrowIfNull(constraints);
+        var parsed = Parse(size);
+        if (constraints.FixedPixelBudget && ValidationError(constraints, parsed.Width, parsed.Height) is not null)
+            return ResolveAspect(constraints, (double)parsed.Width / parsed.Height);
+        Validate(constraints, parsed.Width, parsed.Height);
+        return parsed;
+    }
+
     public static bool TryParse(string? size, out LayoutImageSize result)
     {
         try
@@ -413,17 +444,24 @@ public static class LayoutImageSizeResolver
 
     public static void Validate(ImageRasterConstraints constraints, int width, int height)
     {
+        if (ValidationError(constraints, width, height) is { } error)
+            throw new ArgumentException(error);
+    }
+
+    private static string? ValidationError(ImageRasterConstraints constraints, int width, int height)
+    {
         ArgumentNullException.ThrowIfNull(constraints);
         var multiple = constraints.SizeMultiple;
         if (width <= 0 || height <= 0 || width % multiple != 0 || height % multiple != 0)
-            throw new ArgumentException($"Image width and height must be positive and divisible by {multiple}.");
+            return $"Image width and height must be positive and divisible by {multiple}.";
         if (width > constraints.MaximumEdge || height > constraints.MaximumEdge)
-            throw new ArgumentException($"Image edges cannot exceed {constraints.MaximumEdge} pixels.");
+            return $"Image edges cannot exceed {constraints.MaximumEdge} pixels.";
         var pixels = (long)width * height;
         if (pixels < constraints.MinimumPixels || pixels > constraints.MaximumPixels)
-            throw new ArgumentException($"Image size must contain {constraints.MinimumPixels:N0}-{constraints.MaximumPixels:N0} pixels.");
+            return $"Image size must contain {constraints.MinimumPixels:N0}-{constraints.MaximumPixels:N0} pixels.";
         if (!constraints.AspectInRange((double)width / height))
-            throw new ArgumentException($"Image aspect ratio must be between {constraints.AspectRangeLabel}.");
+            return $"Image aspect ratio must be between {constraints.AspectRangeLabel}.";
+        return null;
     }
 
     public static void ValidatePhysicalDimensions(double widthInches, double heightInches)

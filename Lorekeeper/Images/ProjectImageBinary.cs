@@ -58,6 +58,51 @@ public static class ProjectImageBinary
         return new NormalizedProjectImage(png, "image/png", SafeFileName(Path.ChangeExtension(fileName, ".png"), "image/png"), bitmap.Width, bitmap.Height);
     }
 
+    /// <summary>
+    /// Fully decodes a provider's image, rejecting truncated or corrupt data
+    /// that a header-only read would accept, and re-encodes it as JPEG when
+    /// JPEG was requested from a provider that returned another format.
+    /// </summary>
+    public static NormalizedProjectImage DecodeProviderOutput(
+        byte[] data,
+        string requestedOutputFormat,
+        int? outputCompression,
+        int maxBytes)
+    {
+        if (data.Length == 0)
+            throw new InvalidDataException("The image provider returned an empty image.");
+        if (data.Length > maxBytes)
+            throw new InvalidDataException($"The provider image is larger than the configured {maxBytes / 1024 / 1024:N0} MB limit.");
+
+        using var stream = new SKMemoryStream(data);
+        using var codec = SKCodec.Create(stream) ?? throw new InvalidDataException("The provider image is not a supported raster image.");
+        var contentType = codec.EncodedFormat switch
+        {
+            SKEncodedImageFormat.Png => "image/png",
+            SKEncodedImageFormat.Jpeg => "image/jpeg",
+            SKEncodedImageFormat.Webp => "image/webp",
+            _ => throw new InvalidDataException("The provider image is not PNG, JPEG, or WebP."),
+        };
+        var info = new SKImageInfo(
+            codec.Info.Width,
+            codec.Info.Height,
+            SKImageInfo.PlatformColorType,
+            codec.Info.AlphaType == SKAlphaType.Opaque ? SKAlphaType.Opaque : SKAlphaType.Premul);
+        if (info.Width <= 0 || info.Height <= 0)
+            throw new InvalidDataException("The provider image dimensions are invalid.");
+        using var bitmap = new SKBitmap(info);
+        if (codec.GetPixels(info, bitmap.GetPixels()) != SKCodecResult.Success)
+            throw new InvalidDataException("The provider image is truncated or corrupt.");
+
+        if (requestedOutputFormat is not ("jpeg" or "jpg") || contentType == "image/jpeg")
+            return new NormalizedProjectImage(data, contentType, SafeFileName(null, contentType), info.Width, info.Height);
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, Math.Clamp(outputCompression ?? 90, 0, 100))
+            ?? throw new InvalidDataException("The provider image could not be converted to JPEG.");
+        return new NormalizedProjectImage(encoded.ToArray(), "image/jpeg", SafeFileName(null, "image/jpeg"), info.Width, info.Height);
+    }
+
     public static NormalizedProjectImage EncodePng(
         byte[] data,
         string? fileName,

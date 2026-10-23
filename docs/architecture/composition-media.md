@@ -234,7 +234,10 @@ Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. The result
 reports `rasterMatched` separately from `aspectMatched`; any explicit
 requested raster is compared with actual decoded pixels even for a
-free-standing request, and mismatches are surfaced as warnings. When a minimum
+free-standing request, and mismatches are surfaced as warnings. A raster
+matches when its edges are exact or when its aspect matches and its pixel count
+is within 4% of the request, so fixed-budget providers such as the ChatGPT
+(Codex) account match without returning exact edges. When a minimum
 was requested, provenance and assistant results also carry the physical basis,
 requested minimum, `effectiveDpi`, and every warning code. A provider result
 below the requested minimum is a normal successful output, not a warning:
@@ -277,7 +280,8 @@ for natural extension left and right and taller targets above and below. Both
 are model-driven and do not guarantee exact source-pixel preservation. A
 regional guide remains an
 exception for genuinely localized changes or changes that cannot be described
-reliably in words. It is explicitly soft guidance for the model, not a pixel
+reliably in words, offered only by models whose capabilities include it (the
+ChatGPT (Codex) account's models do not). It is explicitly soft guidance for the model, not a pixel
 boundary or protection guarantee; the complete result must be inspected for
 changes outside the indicated region before it is presented, promoted, or
 placed.

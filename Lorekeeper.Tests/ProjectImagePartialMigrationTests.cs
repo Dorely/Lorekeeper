@@ -60,36 +60,9 @@ public sealed class ProjectImagePartialMigrationTests
                     ContentType = "image/png",
                     Data = [4, 5, 6],
                 });
-                db.ProjectImagePartials.Add(new ProjectImagePartial
-                {
-                    Id = partialId,
-                    ProjectId = projectId,
-                    JobId = jobId,
-                    OutputIndex = 0,
-                    Attempt = 1,
-                    PartialImageIndex = 0,
-                    FileName = "partial.png",
-                    ContentType = "image/png",
-                    Data = [1, 2, 3],
-                    Width = 1,
-                    Height = 1,
-                    FinalOutputImageId = finalImageId,
-                });
-                db.ProjectImagePartials.Add(new ProjectImagePartial
-                {
-                    Id = orphanPartialId,
-                    ProjectId = projectId,
-                    JobId = jobId,
-                    OutputIndex = 0,
-                    Attempt = 2,
-                    PartialImageIndex = 0,
-                    FileName = "orphan-partial.png",
-                    ContentType = "image/png",
-                    Data = [7, 8, 9],
-                    Width = 1,
-                    Height = 1,
-                });
                 await db.SaveChangesAsync();
+                await InsertLegacyPartialAsync(db, partialId, projectId, jobId, 1, "partial.png", [1, 2, 3], finalImageId);
+                await InsertLegacyPartialAsync(db, orphanPartialId, projectId, jobId, 2, "orphan-partial.png", [7, 8, 9], null);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
@@ -145,4 +118,22 @@ public sealed class ProjectImagePartialMigrationTests
                 Directory.Delete(directory, recursive: true);
         }
     }
+
+    private static Task InsertLegacyPartialAsync(
+        AppDbContext db,
+        Guid id,
+        Guid projectId,
+        Guid jobId,
+        int attempt,
+        string fileName,
+        byte[] data,
+        Guid? finalOutputImageId)
+        => db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO ProjectImagePartials
+            (Id, ProjectId, JobId, OutputIndex, Attempt, PartialImageIndex, FileName, ContentType,
+             Data, Width, Height, Provider, MainlineModel, ImageModel, EventCount, FinalOutputImageId,
+             CreatedAt, UpdatedAt)
+            VALUES ({0}, {1}, {2}, 0, {3}, 0, {4}, 'image/png', {5}, 1, 1, 'Codex', 'gpt-5.6-sol',
+                    'gpt-image-2', 0, {6}, datetime('now'), datetime('now'))
+            """, id, projectId, jobId, attempt, fileName, data, new SqliteParameter("@final", (object?)finalOutputImageId?.ToString().ToUpperInvariant() ?? DBNull.Value));
 }

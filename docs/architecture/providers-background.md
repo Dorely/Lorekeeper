@@ -119,8 +119,8 @@ extract concise provider detail rather than exposing raw response bodies.
 Direct OpenAI presets and OpenAI-account chat and vision fallbacks use
 `gpt-6-sol` as the code-owned default; existing persisted model selections
 remain authoritative until the user changes them. The ChatGPT-account image
-route never assumes that default: it uses the image provider's chosen host model
-or the account's best model its plan offers.
+route uses no chat model: it calls the Codex image endpoints directly with the
+selected image model.
 
 Bundled account rows need valid account credentials and catalog-valid settings,
 but they do not require a manual chat or vision Test. Manual account rows retain
@@ -245,7 +245,8 @@ Each `OpenAiAccount` has a `Kind`, and at most one account exists per kind:
 
 - **ChatGPT (Codex)** signs in through the Codex public client
   (`auth.openai.com/oauth/authorize`). It works on every ChatGPT plan, serves
-  chat, vision, and image generation through the ChatGPT Codex backend, and its
+  chat and vision through the ChatGPT Codex Responses backend and image
+  generation through its direct image endpoints, and its
   identity is the ChatGPT account ID claim read at the authorization boundary.
 - **ChatGPT plan** is OpenAI's Sign in with ChatGPT for agents
   (`auth.openai.com/api/accounts/authorize`). The first sign-in registers
@@ -443,10 +444,23 @@ provider through account access or a model listing, never a billed generation.
 
 Project image generation and editing use `IProjectImageProvider` adapters keyed
 by kind; each adapter receives the resolved provider row and owns its retry
-policy. The ChatGPT account adapter supports account-backed Responses image
-generation, source-driven edits, optional soft regional guides for narrowly localized or
-otherwise hard-to-describe work, streamed partial images, explicit generate/edit
-actions, continuity references, and source-image edit semantics.
+policy. The ChatGPT account adapter posts JSON to
+`https://chatgpt.com/backend-api/codex/images/generations` for text-only
+requests and to `.../images/edits` whenever input images are present, the
+source first and continuity references after it, each as a base64 data URL. No
+chat model or forced image tool is involved. Requests carry the account's
+bearer token, `chatgpt-account-id`, and the shared Codex originator and user
+agent through `CodexProvider.ApplyAccountIdentity`. The backend ignores `size`
+and `quality` and serves a fixed budget of about 1.57 megapixels at the aspect
+the prompt states, so Codex models store fixed-budget raster constraints, offer
+only `auto` quality, never offer regional guides or streaming, and accept but do
+not send masks. The response's `data[0].b64_json` is fully decoded; a JPEG
+request receives a local re-encode because the backend returns PNG, and WebP is
+not offered. A 401 forces one token refresh through
+`IOpenAiAccountTokenService.RefreshRejectedAccessAsync` and retries once; a
+second rejection asks the user to reconnect the account. The `x-codex-*`
+allowance headers (plan, active limit, used percent, window, reset) are kept in
+result provenance, and a quota failure names the reset time.
 
 The OpenRouter adapter uses OpenRouter's dedicated Image API with the
 provider row's API key and an `X-Title` header. `GET /images/models` maps each
@@ -493,7 +507,9 @@ The provider transport accepts pixel dimensions, not physical DPI. Lorekeeper
 resolves effective-DPI requests against server-owned physical geometry before
 dispatch, enforcing the selected model's raster constraints (for the GPT Image
 models: 16-pixel alignment, edge, megapixel, and aspect limits; for aspect-tier
-models, the approximate limits described above). An infeasible request fails before any durable job or provider
+models, the approximate limits described above). A fixed-budget model rescales
+an explicit size that misses its budget to the budget at the same aspect rather
+than rejecting it. An infeasible request fails before any durable job or provider
 call; no density metadata is fabricated in the image file.
 
 Regional-guided dispatch revalidates the source, compiled geometry, and mask
@@ -513,8 +529,11 @@ not rewritten by this transient provider normalization.
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. Explicit requested
 rasters are compared with decoded output dimensions even for free-standing jobs,
-and mismatches remain visible in persisted provenance and assistant results;
-aspect compatibility does not make a raster mismatch exact. A provider result
+and mismatches remain visible in persisted provenance and assistant results.
+`LayoutImageSizeResolver.RasterMatches` treats output as matching when its edges
+are exact, or when its aspect matches and its pixel count is within 4% of the
+request, which covers fixed-budget providers that pick their own edges; aspect
+compatibility alone does not make a raster match. A provider result
 below a requested minimum DPI completes normally without a warning, because
 publication preparation upscales placed rasters to the edition DPI.
 Free-standing generation
@@ -546,7 +565,7 @@ for reconstructed detail, while intentional outpainting separately describes
 the desired larger framing and direction. The provider owns how source pixels
 are reinterpreted in either operation. Provider output has its own
 configurable 64 MiB byte cap rather than inheriting the smaller upload limit.
-Image options also bound request attempts, timeout, partials, references, output
+Image options also bound request attempts, timeout, references, output
 count, and one parallel provider request by default.
 
 `IProjectImageJobService` persists request/audit state, every valid streamed
@@ -574,7 +593,9 @@ Image-provider failures are classified from structured error `code`/`type`,
 status, and redacted message into stable kinds. `rate_limit`,
 `codex_image_input_rate_limit`, `server_error`, and `transport_error` are
 retryable; invalid requests, invalid models, authentication/permission,
-moderation, quota/billing, and other API errors fail without retry. A
+moderation, quota/billing (including the Codex `usage_limit_reached`), and
+other API errors fail without retry; a revoked Codex token is an authentication
+error after the one forced refresh. A
 `Retry-After` delta/date is honored when present, otherwise the runtime uses
 bounded backoff (with the image-input rate-limit floor). The request timeout
 covers the entire provider stream, including partial-image receipt, and is

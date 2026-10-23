@@ -13,7 +13,13 @@ public sealed class OpenAiAccountTokenService(
     public Task<OpenAiAccountAccess?> GetValidAccessAsync(
         int accountId,
         CancellationToken cancellationToken = default) =>
-        coordinator.RunAsync(accountId, token => GetValidAccessCoreAsync(accountId, token), cancellationToken);
+        coordinator.RunAsync(accountId, token => GetValidAccessCoreAsync(accountId, rejectedAccessToken: null, token), cancellationToken);
+
+    public Task<OpenAiAccountAccess?> RefreshRejectedAccessAsync(
+        int accountId,
+        string rejectedAccessToken,
+        CancellationToken cancellationToken = default) =>
+        coordinator.RunAsync(accountId, token => GetValidAccessCoreAsync(accountId, rejectedAccessToken, token), cancellationToken);
 
     public Task<string?> DisconnectAsync(
         int accountId,
@@ -71,6 +77,7 @@ public sealed class OpenAiAccountTokenService(
 
     private async Task<OpenAiAccountAccess?> GetValidAccessCoreAsync(
         int accountId,
+        string? rejectedAccessToken,
         CancellationToken cancellationToken)
     {
         OpenAiAccount? account;
@@ -95,7 +102,7 @@ public sealed class OpenAiAccountTokenService(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        if (savedToken.ExpiresAt > now)
+        if (savedToken.ExpiresAt > now && savedToken.AccessToken != rejectedAccessToken)
             return new OpenAiAccountAccess(accountId, account.Kind, account.ExternalAccountId, savedToken.AccessToken);
 
         if (string.IsNullOrWhiteSpace(savedToken.RefreshToken))

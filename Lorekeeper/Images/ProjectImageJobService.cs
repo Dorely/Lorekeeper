@@ -83,7 +83,6 @@ public sealed class ProjectImageJobService(
                 partial.Width,
                 partial.Height,
                 partial.Provider,
-                partial.MainlineModel,
                 partial.ImageModel,
                 partial.RequestId,
                 partial.ResponseId,
@@ -167,7 +166,6 @@ public sealed class ProjectImageJobService(
             Width = payload.Width,
             Height = payload.Height,
             Provider = job.Provider,
-            MainlineModel = job.MainlineModel,
             ImageModel = job.ImageModel,
             RequestId = Clean(progress.RequestId),
             ResponseId = Clean(progress.ResponseId),
@@ -207,7 +205,7 @@ public sealed class ProjectImageJobService(
         var physicalGeometry = TryReadPhysicalGeometry(job.TargetGeometryJson);
         var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requestedRaster);
         var rasterMatched = !hasRequestedRaster
-            || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
+            || LayoutImageSizeResolver.RasterMatches(requestedRaster, storedImage.Width, storedImage.Height);
         var aspectMatched = TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
             ? LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect)
             : !hasRequestedRaster
@@ -248,7 +246,6 @@ public sealed class ProjectImageJobService(
                 partial.Attempt,
                 partial.PartialImageIndex,
                 partial.Provider,
-                partial.MainlineModel,
                 partial.ImageModel,
                 RequestedImageModel = job.ImageModel,
                 RequestedQuality = job.Quality,
@@ -704,7 +701,7 @@ public sealed class ProjectImageJobService(
         if (layoutBound && !hasRequestedRaster)
             throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
         var rasterMatched = !hasRequestedRaster
-            || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
+            || LayoutImageSizeResolver.RasterMatches(requestedRaster, storedImage.Width, storedImage.Height);
         var aspectMatched = TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
             ? LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect)
             : !hasRequestedRaster
@@ -744,7 +741,6 @@ public sealed class ProjectImageJobService(
                 JobKind = job.Kind.ToString(),
                 OutputIndex = outputIndex,
                 result.Provider,
-                result.MainlineModel,
                 RequestedImageModel = job.ImageModel,
                 RequestedQuality = job.Quality,
                 RequestedOutputFormat = job.OutputFormat,
@@ -813,7 +809,6 @@ public sealed class ProjectImageJobService(
             partial.UpdatedAt = now;
         }
         job.Provider = result.Provider;
-        job.MainlineModel = result.MainlineModel;
         job.RawProviderResponseJson = result.RawMetadataJson;
         if (!string.IsNullOrWhiteSpace(image.RevisedPrompt))
         {
@@ -1032,7 +1027,6 @@ public sealed class ProjectImageJobService(
             NormalizeOutputStates(job.OutputStatesJson, job.Count),
             DeserializeOutputErrors(job.OutputErrorsJson),
             job.Provider,
-            job.MainlineModel,
             job.ImageModel,
             job.Error,
             job.CreatedAt,
@@ -1066,7 +1060,6 @@ public sealed class ProjectImageJobService(
             partial.Width,
             partial.Height,
             partial.Provider,
-            partial.MainlineModel,
             partial.ImageModel,
             partial.RequestId,
             partial.ResponseId,
@@ -1145,7 +1138,7 @@ public sealed class ProjectImageJobService(
     {
         var normalized = Clean(value);
         if (normalized.Length > 0 && !normalized.Equals("auto", StringComparison.OrdinalIgnoreCase))
-            return LayoutImageSizeResolver.ParseValid(constraints, normalized).Size;
+            return LayoutImageSizeResolver.ParseRequested(constraints, normalized).Size;
 
         return (await defaultRasters.ResolveAsync(projectId, constraints, cancellationToken)).Size;
     }

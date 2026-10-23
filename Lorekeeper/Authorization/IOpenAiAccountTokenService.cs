@@ -15,6 +15,16 @@ public interface IOpenAiAccountTokenService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Refreshes the account after a backend rejected <paramref name="rejectedAccessToken"/>
+    /// before its recorded expiry. Returns the saved access unchanged when another
+    /// operation already replaced that token, or null when reconnect is required.
+    /// </summary>
+    Task<OpenAiAccountAccess?> RefreshRejectedAccessAsync(
+        int accountId,
+        string rejectedAccessToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Signs the account out and deletes its local tokens. Returns a user-facing
     /// warning when remote revocation could not be confirmed.
     /// </summary>

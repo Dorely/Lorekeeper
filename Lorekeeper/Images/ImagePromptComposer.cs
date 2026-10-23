@@ -887,10 +887,7 @@ public sealed class ImagePromptComposer(
         CancellationToken cancellationToken)
     {
         if (requestedSize.Length > 0 && !requestedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
-        {
-            _ = ParseAndValidateSize(constraints, requestedSize);
-            return requestedSize.ToLowerInvariant();
-        }
+            return LayoutImageSizeResolver.ParseRequested(constraints, requestedSize).Size;
         if (requestedAspect.Length > 0)
             return LayoutImageSizeResolver.ResolveAspect(constraints, ParseAspectRatio(constraints, requestedAspect)).Size;
 
@@ -899,15 +896,8 @@ public sealed class ImagePromptComposer(
 
     private static (int Width, int Height) ParseAndValidateSize(ImageRasterConstraints constraints, string size)
     {
-        var parts = size.Trim().ToLowerInvariant().Split('x', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2
-            || !int.TryParse(parts[0], CultureInfo.InvariantCulture, out var width)
-            || !int.TryParse(parts[1], CultureInfo.InvariantCulture, out var height))
-        {
-            throw new ArgumentException("Image size must be WIDTHxHEIGHT.", nameof(size));
-        }
-        LayoutImageSizeResolver.Validate(constraints, width, height);
-        return (width, height);
+        var parsed = LayoutImageSizeResolver.ParseRequested(constraints, size);
+        return (parsed.Width, parsed.Height);
     }
 
     private static double ParseAspectRatio(ImageRasterConstraints constraints, string value)

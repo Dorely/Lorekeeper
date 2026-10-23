@@ -401,7 +401,6 @@ public sealed class OpenRouterImageProvider(
         return new ProjectImageProviderResult(
             [new ProjectImageProviderImage(image, contentType, outputFormat, null, null, null, imageModel)],
             provider.Name,
-            string.Empty,
             imageModel,
             metadataJson);
     }
@@ -507,7 +506,6 @@ public sealed class OpenRouterImageProvider(
         return new ProjectImageProviderResult(
             [new ProjectImageProviderImage(image, contentType, outputFormat, null, null, null, imageModel)],
             provider.Name,
-            string.Empty,
             imageModel,
             metadataJson);
     }

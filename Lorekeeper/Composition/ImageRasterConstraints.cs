@@ -11,7 +11,11 @@ namespace Lorekeeper.Composition;
 /// instead of pixels) also lists <see cref="AspectRatios"/> and
 /// <see cref="ResolutionTiers"/>; its pixel limits are then an approximation
 /// used for planning, and the adapter maps each planned raster to the nearest
-/// ratio and tier. The decoded output stays authoritative.
+/// ratio and tier. A fixed-budget model (<see cref="FixedPixelBudget"/>)
+/// renders the aspect named in the prompt at about <see cref="TargetPixels"/>
+/// with unaligned edges; its narrow pixel window keeps planned rasters near
+/// that budget, and an explicit size outside it is rescaled to the budget at
+/// the same aspect. The decoded output stays authoritative.
 /// </summary>
 public sealed record ImageRasterConstraints(
     int SizeMultiple,
@@ -21,7 +25,8 @@ public sealed record ImageRasterConstraints(
     double MaximumAspectRatio,
     long TargetPixels,
     IReadOnlyList<string>? AspectRatios = null,
-    IReadOnlyList<string>? ResolutionTiers = null)
+    IReadOnlyList<string>? ResolutionTiers = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool FixedPixelBudget = false)
 {
     /// <summary>The aspect ratios assumed when a model accepts aspect_ratio without listing values.</summary>
     public static IReadOnlyList<string> DocumentedAspectRatios { get; } = Array.AsReadOnly(new[]
@@ -31,6 +36,12 @@ public sealed record ImageRasterConstraints(
 
     /// <summary>The GPT Image size rules.</summary>
     public static ImageRasterConstraints GptImage { get; } = new(16, 655_360, 8_294_400, 3840, 3d, 1_572_864);
+
+    /// <summary>
+    /// The ChatGPT (Codex) image endpoints: the size field is ignored and every
+    /// output holds about 1.57 MP at the aspect stated in the prompt.
+    /// </summary>
+    public static ImageRasterConstraints CodexImage { get; } = new(16, 1_525_000, 1_620_000, 2208, 3d, 1_572_864, FixedPixelBudget: true);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -65,7 +76,10 @@ public sealed record ImageRasterConstraints(
         resolutionTiers = ResolutionTiers,
         approximate = UsesAspectTiers
             ? "This model takes an aspect ratio and resolution tier; the delivered raster may differ from the requested size and is reported after generation."
-            : null,
+            : FixedPixelBudget
+                ? "This model renders the requested aspect at a fixed pixel budget near targetPixels; the delivered edges differ slightly from the requested size, and other sizes are rescaled to the budget."
+                : null,
+        targetPixels = TargetPixels,
     };
 
     /// <summary>

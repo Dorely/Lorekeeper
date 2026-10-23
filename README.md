@@ -34,7 +34,8 @@ provenance, and a reproducible export recipe.
   usage-limit states from ChatGPT. OpenAI-compatible providers and local model
   servers also work, and semantic search uses a local Ollama or LM Studio
   embedding model (or any API-key embeddings endpoint).
-- **Image providers:** generate images with your ChatGPT (Codex) account, an
+- **Image providers:** generate images with your ChatGPT (Codex) account (on its
+  own image allowance, at about 1.6 megapixels in the requested aspect), an
   OpenRouter API key, or an OpenAI Images-compatible endpoint. Pick the default
   in Settings > Image providers, and switch provider or model per request in
   the Images workspace.

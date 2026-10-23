@@ -1573,9 +1573,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime?>("LastTestedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("MainlineModelId")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -3175,10 +3172,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("MainlineModel")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("MaskId")
                         .HasColumnType("TEXT");
 
@@ -3482,10 +3475,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastEventType")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MainlineModel")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("OutputIndex")
