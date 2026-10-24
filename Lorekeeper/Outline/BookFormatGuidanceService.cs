@@ -57,7 +57,9 @@ public sealed class BookFormatGuidanceService : IBookFormatGuidanceService
             BookKind.GeneralNonfiction =>
                 new("reference-nonfiction", "General and reference nonfiction", "Plan heading hierarchy, navigation, lists, diagrams, callouts, indexes, and accessible reading order around the reader's questions and tasks."),
             BookKind.PictureBook =>
-                new("picture-book", "Picture-book pacing", "Plan page turns, facing spreads, read-aloud cadence, text-image counterpoint, quiet copy areas, gutter risk, and total page extent. Let images carry action that prose need not repeat."),
+                new("picture-book", "Picture-book pacing", scope == BookFormatGuidanceScope.StructureAndPublication
+                    ? "Build each story page or facing spread as a Designed Page that composes its bound text with its art; use flowing Figures only when the author asks. Plan page turns, read-aloud cadence, text-image counterpoint, quiet copy areas, gutter risk, and total page extent. Let images carry action that prose need not repeat."
+                    : "Plan page turns, facing spreads, read-aloud cadence, text-image counterpoint, quiet copy areas, gutter risk, and total page extent. Let images carry action that prose need not repeat."),
             BookKind.IllustratedBook =>
                 new("illustrated-book", "Illustrated-book rhythm", scope == BookFormatGuidanceScope.StructureAndPublication
                     ? "Balance flowing Figures, plates, captions, color and bleed strategy, Designed Pages, spreads, and a viable reflow adaptation for EPUB."
@@ -103,7 +105,9 @@ public sealed class BookFormatGuidanceService : IBookFormatGuidanceService
         }
         if (scope == BookFormatGuidanceScope.StructureAndPublication)
         {
-            yield return new("layout-choice", "Layout choice", "Use a flowing Figure when art belongs to nearby prose, a Designed Page when composition is intrinsic, and a facing spread only when the cross-gutter relationship is worth its print and digital adaptation costs.");
+            yield return new("layout-choice", "Layout choice", brief.BookKind == BookKind.PictureBook
+                ? "Picture-book story pages are Designed Pages by default. Use a facing spread when the cross-gutter relationship is intended, and a flowing Figure only on the author's request."
+                : "Use a flowing Figure when art belongs to nearby prose, a Designed Page when composition is intrinsic, and a facing spread only when the cross-gutter relationship is worth its print and digital adaptation costs.");
             yield return new("geometry", "Geometry discipline", "Read a concrete edition geometry before physical layout or geometry-specific image generation. Reusable and flowing art may remain free-standing; use Lorekeeper targets only when composition must honor a specific page, frame, or cover region.");
         }
     }

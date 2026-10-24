@@ -5,6 +5,7 @@ public interface IEntityVisualExampleService
     Task<IReadOnlyList<EntityVisualExampleView>> ListForEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default);
     Task<EntityVisualExampleView?> GetAsync(Guid projectId, Guid exampleId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<Guid, IReadOnlyList<EntityVisualExampleView>>> ListForEntitiesAsync(Guid projectId, IReadOnlyCollection<Guid> entityIds, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EntityVisualExampleView>> ListForProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EntityVisualExampleView>> ListForImageAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default);
     Task<EntityVisualTargetValidationResult> ValidateTargetsAsync(Guid projectId, IReadOnlyCollection<EntityVisualTarget>? targets, CancellationToken cancellationToken = default);
     Task<EntityVisualExampleView> AttachAsync(Guid projectId, Guid entityId, Guid imageId, string? label = null, Models.EntityVisualExampleOrigin origin = Models.EntityVisualExampleOrigin.Manual, Guid? sourceVisualCandidateId = null, CancellationToken cancellationToken = default);

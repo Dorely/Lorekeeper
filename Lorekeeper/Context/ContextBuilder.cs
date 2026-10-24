@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
@@ -90,6 +91,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 IsRemovable: false,
                 IsProtected: true));
         }
+
+        if (request.Purpose == ContextBuildPurpose.Images)
+            items.Add(await BuildEntityVisualReferencesItemAsync(project.Id, request.UserMessage, cancellationToken));
 
         if (request.Purpose == ContextBuildPurpose.World)
         {
@@ -973,6 +977,49 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 sb.Append("- ... ").Append(named.Count - EntityInventoryNamesPerType).AppendLine(" more; use list_entities.");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Images receives every entity's canonical references as text, plus pixels only for the
+    /// entities named in the current message, so continuity work never has to rediscover them.
+    /// </summary>
+    private async Task<ContextItem> BuildEntityVisualReferencesItemAsync(
+        Guid projectId,
+        string? userMessage,
+        CancellationToken cancellationToken)
+    {
+        var examples = await entityVisualExamples.ListForProjectAsync(projectId, cancellationToken);
+        var sb = new StringBuilder();
+        var named = new List<EntityVisualContextReference>();
+        foreach (var entity in examples
+            .GroupBy(example => example.EntityId)
+            .OrderBy(group => group.First().EntityType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.First().EntityName, StringComparer.OrdinalIgnoreCase))
+        {
+            var first = entity.First();
+            sb.Append("- ").Append(first.EntityType).Append(' ').Append(first.EntityName)
+                .Append(" [entityId=").Append(first.EntityId.ToString("N")).AppendLine("]");
+            foreach (var example in entity.OrderBy(example => example.SortOrder))
+                sb.Append("  - ").Append(example.Label).Append(": imageId=").Append(example.Image.Id.ToString("N"))
+                    .Append("; file=").Append(example.Image.FileName).AppendLine();
+            if (!string.IsNullOrWhiteSpace(userMessage)
+                && Regex.IsMatch(userMessage, $@"(?<!\w){Regex.Escape(first.EntityName)}(?!\w)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                named.AddRange(entity.OrderBy(example => example.SortOrder).Select(EntityVisualContextService.ToReference));
+        }
+
+        return new ContextItem(
+            Key: EditorContextKeys.EntityVisualReferences,
+            Kind: ContextItemKind.EntityVisualReferences,
+            Label: "Canonical Entity Visual References",
+            Body: sb.Length == 0
+                ? "(no canonical entity references yet)"
+                : sb.ToString().TrimEnd() + "\nPixels are supplied for entities named in the current message; load others with read_reference_visual or list_entity_canonical_references.",
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: "Canon",
+            Reason: "Canonical appearance references for visual continuity",
+            Visuals: named,
+            IsProtected: true);
     }
 
     private async Task<string> BuildProjectFactsBlockAsync(Guid projectId, CancellationToken cancellationToken)

@@ -89,6 +89,7 @@ public enum ContextItemKind
     WorldBrief,
     WorldWorkingNotes,
     EntityInventory,
+    EntityVisualReferences,
 }
 
 public sealed record ContextTraceEntry(

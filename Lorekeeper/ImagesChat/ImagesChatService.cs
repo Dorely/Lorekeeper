@@ -28,12 +28,13 @@ public sealed class ImagesChatService(
 
         Your job:
         - Help the user discover and define a coherent art style, create concept art, and establish canonical appearances for characters, locations, creatures, props, costumes, and other entities.
-        - Use Project Guidance, the Book Brief, outline, facts, chapters, entities, canonical references, and image metadata as read-only grounding before making visual decisions.
-        - Work only in the project image library, entity canonical references, and the approved Book Brief Visual Direction. Do not modify manuscript content, Figures, Designed Pages, page setup, covers, publication sections, or chapter context.
+        - Use Project Guidance, the Book Brief, the World Brief, outline, facts, chapters, entities, canonical references, and image metadata as read-only grounding before making visual decisions. The Book Brief, World Brief, outline, and facts are already in your context, and Canonical Entity Visual References lists every entity's canonical images with exact ids; read entity records and reference pixels with the supplied tools.
+        - Work only in the project image library, entity canonical references, and the approved Book Brief Visual Direction. Do not modify manuscript content, Figures, Designed Pages, page setup, covers, publication sections, or chapter context. The World Brief and entity text are maintained in World; when a change belongs there, say so rather than implying you cannot read them.
         - When a request belongs to page illustration or composition, direct the user to Editor. When it belongs to publication sections or covers, direct the user to Publish. You may still create reusable concept art when that is the actual request, but never imply that it was placed in the book.
         - Generate or edit unattached project images with generate_project_image or edit_project_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
         - Use the image provider's default model for ordinary image work. Request another listed model explicitly only when its description fits a demanding detail, exact raster text, or difficult composition task, and use the highest qualities only when a concrete unmet need justifies them. For iterative edits, use the latest accepted image as the source and restate the requested change, named invariants, and user-grounded exclusions in the new brief.
         - Every image attached to the current turn is already supplied with its complete project-library metadata and, for a vision-ready provider, its full pixels. Treat that attachment snapshot as authoritative for the turn. Do not call list_project_images or read_project_image to rediscover or reload an attached image; use its supplied ID directly when it belongs in references.
+        - Earlier user turns carry an app-recorded image log, and the current turn lists the most recent attached or produced images. Resolve follow-up references such as "it", "that one", or "the second version" against those exact ids; ask only when the log leaves the reference genuinely ambiguous.
         - Inspect completed outputs before describing them as successful. Attach an image to an entity only when the user has approved it as a stable canonical reference; exploratory art remains unattached.
         - Save Visual Direction only after explicit user approval. Read its exact current value immediately before saving and preserve it when the user is still exploring.
         - Reconnect with read_project_image_job or wait_project_image_job when a prior generation/edit job must be resumed; never replay its prompt. Cancel with cancel_project_image_job when requested or when a wait times out.
@@ -43,6 +44,18 @@ public sealed class ImagesChatService(
 
     private const string InitialAssistantGreeting =
         "Let’s define the visual language of your book. I can help explore art styles and establish canonical designs for characters, locations, and other story elements.";
+
+    private const int RecentImageLimit = 2;
+
+    private static readonly HashSet<string> ImageOutputTools = new(StringComparer.Ordinal)
+    {
+        "generate_project_image",
+        "edit_project_image",
+        "crop_project_image",
+        "resize_project_image",
+        "read_project_image_job",
+        "wait_project_image_job",
+    };
 
     private bool _mutatedSinceYield;
 
@@ -368,25 +381,33 @@ public sealed class ImagesChatService(
                 "Canonical entity references and explicit-image visual context from the project follow. Entity mappings are stable appearance/design references, not scene tags; inspect each label, association origin, image source, purpose, and visible content before using it.", cancellationToken);
             if (visualMessage is not null) messages.Add(visualMessage);
         }
+        var historyImages = await BuildHistoryImageLogAsync(projectId, history, userMessage.Id, turnImages, cancellationToken);
         foreach (var persistedMessage in history)
         {
-            if (persistedMessage.Id == userMessage.Id && turnImages.Count > 0)
+            if (persistedMessage.Id == userMessage.Id)
             {
-                messages.Add(await BuildUserMessageWithAttachedImagesAsync(
-                    projectId,
-                    persistedMessage.Content,
-                    turnImages,
-                    attachmentLabels,
-                    visionReady,
-                    cancellationToken));
+                var currentMessage = turnImages.Count > 0
+                    ? await BuildUserMessageWithAttachedImagesAsync(
+                        projectId,
+                        persistedMessage.Content,
+                        turnImages,
+                        attachmentLabels,
+                        visionReady,
+                        cancellationToken)
+                    : new ChatMessage(ChatRole.User, persistedMessage.Content);
+                await AppendRecentImagesAsync(projectId, currentMessage, historyImages.Recent, visionReady, cancellationToken);
+                messages.Add(currentMessage);
                 continue;
             }
 
             var modelMessage = ChatModelHistory.Project(
                 persistedMessage.Role.ToString(),
                 persistedMessage.Content, persistedMessage.ResponseMetadataJson, chatProvider);
-            if (modelMessage is not null)
-                messages.Add(modelMessage);
+            if (modelMessage is null)
+                continue;
+            if (historyImages.LogByTurn.TryGetValue(persistedMessage.Id, out var turnLog))
+                modelMessage.Contents.Add(new TextContent(turnLog));
+            messages.Add(modelMessage);
         }
 
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
@@ -697,6 +718,92 @@ public sealed class ImagesChatService(
         return new ChatMessage(ChatRole.User, contents);
     }
 
+    /// <summary>
+    /// Cross-turn replay omits tool results and image pixels, so each earlier user turn carries an
+    /// app-recorded log of the images attached to it or returned by its tools. The most recent
+    /// attached or produced images are also resupplied so follow-up references resolve.
+    /// </summary>
+    private async Task<ImagesChatHistoryImages> BuildHistoryImageLogAsync(
+        Guid projectId,
+        IReadOnlyList<ProjectImageMessage> history,
+        Guid currentUserMessageId,
+        IReadOnlyList<ProjectImageView> turnImages,
+        CancellationToken cancellationToken)
+    {
+        var attachedByMessage = await imageAttachments.LoadForSurfaceAsync(projectId, ChatTurnSurface.Images, cancellationToken);
+        var entries = new List<(Guid TurnId, Guid ImageId, string Source, bool IsFocus)>();
+        Guid? turnId = null;
+        foreach (var message in history)
+        {
+            if (message.Id == currentUserMessageId)
+                break;
+            if (message.Role == ProjectImageMessageRole.User)
+            {
+                turnId = message.Id;
+                foreach (var attachment in attachedByMessage.GetValueOrDefault(message.Id) ?? [])
+                    entries.Add((message.Id, attachment.ImageId, "attached by the user", true));
+            }
+            if (turnId is not { } activeTurnId)
+                continue;
+            foreach (var visual in message.Visuals.OrderBy(visual => visual.SortOrder))
+            {
+                if (visual.SourceKind != "projectImage" || visual.SourceRefId is not { } imageId)
+                    continue;
+                entries.Add(message.Role == ProjectImageMessageRole.User
+                    ? (activeTurnId, imageId, "attached to Images Chat context", false)
+                    : (activeTurnId, imageId, $"returned by {message.ToolName}", message.ToolName is { } toolName && ImageOutputTools.Contains(toolName)));
+            }
+        }
+
+        if (entries.Count == 0)
+            return new(new Dictionary<Guid, string>(), []);
+        // Deleted images drop out of the log rather than failing the turn.
+        var images = (await projectImages.ListByIdsAsync(projectId, entries.Select(entry => entry.ImageId).Distinct().ToList(), cancellationToken))
+            .ToDictionary(image => image.Id);
+        var logByTurn = entries
+            .Where(entry => images.ContainsKey(entry.ImageId))
+            .GroupBy(entry => entry.TurnId)
+            .ToDictionary(
+                turn => turn.Key,
+                turn => "\n\nLorekeeper image log for this turn (recorded by the app, not written by the user):\n" + string.Join("\n", turn
+                    .GroupBy(entry => entry.ImageId)
+                    .Select(image => $"- imageId={image.Key:N}; file={images[image.Key].FileName}; {string.Join(", ", image.Select(entry => entry.Source).Distinct())}")));
+        var currentIds = turnImages.Select(image => image.Id).ToHashSet();
+        var recent = entries
+            .Where(entry => entry.IsFocus && images.ContainsKey(entry.ImageId) && !currentIds.Contains(entry.ImageId))
+            .Select(entry => entry.ImageId)
+            .Reverse()
+            .Distinct()
+            .Take(RecentImageLimit)
+            .Select(imageId => images[imageId])
+            .ToList();
+        return new(logByTurn, recent);
+    }
+
+    private async Task AppendRecentImagesAsync(
+        Guid projectId,
+        ChatMessage message,
+        IReadOnlyList<ProjectImageView> recent,
+        bool visionReady,
+        CancellationToken cancellationToken)
+    {
+        if (recent.Count == 0)
+            return;
+        message.Contents.Add(new TextContent(
+            "\nMost recent images attached or produced in earlier turns, newest first (recorded by the app). Resolve follow-up references such as \"it\" or \"that one\" against these and the turn image logs"
+            + (visionReady ? "; their pixels follow." : "; the active provider is not vision-ready, so pixels are unavailable.")));
+        message.Contents.Add(new TextContent(JsonSerializer.Serialize(new { recentImages = recent.Select(ImagesChatImagePayload.From) }, JsonOptions)));
+        if (!visionReady)
+            return;
+        foreach (var image in recent)
+        {
+            var data = await projectImages.GetDataAsync(projectId, image.Id, cancellationToken: cancellationToken);
+            if (data is null) continue;
+            message.Contents.Add(new TextContent($"\nPixels for recent project image {image.Id:N} ({image.FileName}) follow."));
+            message.Contents.Add(new DataContent(data.Data, data.ContentType) { Name = data.FileName });
+        }
+    }
+
     private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(
         Guid projectId,
         IReadOnlyList<ProjectImageView> images,
@@ -741,5 +848,8 @@ public sealed class ImagesChatService(
             logger.LogError(ex, "Failed to persist Images chat message {MessageId}", message.Id);
         }
     }
-
 }
+
+internal sealed record ImagesChatHistoryImages(
+    IReadOnlyDictionary<Guid, string> LogByTurn,
+    IReadOnlyList<ProjectImageView> Recent);

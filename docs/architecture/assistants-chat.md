@@ -58,7 +58,12 @@ extensions such as Gemini thought signatures alongside complete supported reason
 protocol. Cross-turn replay retains conversational prose and same-connection/model
 assistant reasoning metadata; historical tool calls, tool results, and model-only
 visual attachments are never replayed. Legacy or foreign-model assistant prose is
-labeled quoted history, without inventing missing reasoning.
+labeled quoted history, without inventing missing reasoning. Images Chat
+appends an app-recorded image log (image IDs, file names, and whether the user
+attached or a tool returned each image) to each replayed user turn, and resupplies
+the two most recent attached or produced images with the current message, so
+follow-up references resolve without replaying tool results. Deleted images
+drop out of the log.
 
 Reasoning deltas (`TextReasoningContent`) stream into a collapsed-by-default,
 expandable transcript section per assistant message and are persisted on the
@@ -116,6 +121,9 @@ them without another repository read or another visual delivery. Because
 cross-turn replay omits images and providers do not retain Lorekeeper's
 binary context, a later turn must resolve and resubmit its persistent attachment
 bytes once; this is distinct from redundant tool-driven rereads within a turn.
+The Images context also carries the World Brief and a Canonical Entity Visual
+References item listing every entity's canonical images by ID; pixels are
+supplied only for entities named in the current message.
 The one exception is `read_project_image` with `fullResolution=true`, which
 rereads an attached image so its original bytes bypass the provider image
 compaction described in [Providers and background work](providers-background.md).
@@ -182,7 +190,9 @@ estimate display text until complete protocol is available.
 `SystemPromptComposer` owns the single system-role prompt shape. It combines the
 surface charter and code-owned workflow/tool rules with dynamic guidance,
 protected Project Guidance and Book Brief, the direct-reference manifest, and
-the feature's current working context. Outline, Voice, World, Images, and
+the feature's current working context. Dynamic format guidance follows the Book
+Brief kind; for a picture book, Editor treats each story page or facing spread
+as a Designed Page by default and uses a flowing Figure only on request. Outline, Voice, World, Images, and
 Publish each have a dedicated professional charter; Editor, Contest Candidate,
 and Revision Worker share the editorial charter. User-owned direction remains distinguishable
 from code-owned rules and must not be persisted as seeded guidance. The shared

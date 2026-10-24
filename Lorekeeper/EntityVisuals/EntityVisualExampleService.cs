@@ -44,6 +44,13 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
         return examples.GroupBy(example => example.EntityId).ToDictionary(group => group.Key, group => (IReadOnlyList<EntityVisualExampleView>)group.OrderBy(item => item.SortOrder).ToList());
     }
 
+    public async Task<IReadOnlyList<EntityVisualExampleView>> ListForProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var examples = await QueryExamples(databaseOperation.Db, projectId).ToListAsync(cancellationToken);
+        return examples.Select(example => ToView(projectId, example)).ToList();
+    }
+
     public async Task<IReadOnlyList<EntityVisualExampleView>> ListForImageAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
