@@ -75,7 +75,7 @@ public sealed class EditorRevisionAgentProcessor(
                     $"The captured revision model '{session.ModelName}' is no longer configured on provider {selectedProviderId}. Start a new revision request.");
             }
 
-            var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
+            var chat = await chatClientFactory.CreateChatClientAsync(provider, cancellationToken);
 
             session.Status = EditorRevisionSessionStatus.Running;
             session.ProviderId = provider.Id;
@@ -121,6 +121,8 @@ public sealed class EditorRevisionAgentProcessor(
                 new(ChatRole.System, systemPrompt),
                 new(ChatRole.User, userPrompt),
             };
+            ChatRequestLayout.Initialize(messages, contextAssembly.ToPrompt(SystemPromptAgentRole.RevisionWorker),
+                userPrompt, session.Id, "RevisionWorker");
             if (await entityVisualContext.BuildVisionMessageAsync(
                 job.ProjectId,
                 contextAssembly.Visuals,

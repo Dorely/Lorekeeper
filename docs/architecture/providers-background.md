@@ -50,7 +50,7 @@ including the model stored on the top-level connection row itself, appears as
 an ordinary row in the section's models grid; token budgets and model discovery
 live in each row's details area. This is presentation only: storage still keeps
 the first model on the parent row. Built-in
-OpenAI-compatible presets include OpenAI, two Cline connection modes sharing the
+provider presets include OpenAI, two Cline connection modes sharing the
 same endpoint, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral,
 Together, Ollama, LM Studio, and a custom endpoint. Presets pre-fill endpoint,
 authentication, suggested model, and compatibility fields; they do
@@ -146,9 +146,13 @@ unless a row or deployment override supplies a different value.
 
 ### Chat and vision wire compatibility
 
-`IChatClientFactory` creates either the account Responses client or an
-OpenAI-compatible client and applies the selected reasoning effort, effective
-output-token budget, max-token field policy, and configured timeout.
+IChatClientFactory resolves official OpenAI Responses, native Anthropic Messages,
+or generic OpenAI-compatible Chat Completions from the connection endpoint and
+supported model. Gateways are never classified by a model's vendor name. API-key
+OpenAI models that support Responses share ResponsesChatClient with the account
+profiles; chat-only models keep the compatible client. Factory overloads accept a
+captured provider row so an active turn's model/settings cannot change during
+client creation. Credentials still resolve through their existing owners.
 `IVisionModelClientFactory` uses the same connection resolution and error policy
 for readiness probes and artifact vision reads. Assistant transcript/tool-loop
 semantics are owned by [Assistants and chat](assistants-chat.md).
@@ -185,7 +189,8 @@ The current classifications are:
 - Other remote OpenAI-compatible endpoints, including OpenRouter and custom
   gateways, use the standard field.
 
-Each provider row can override both `MaxOutputTokens` and `MaxTokensField`.
+Each provider row can override `MaxOutputTokens`; compatible Chat Completions
+rows can also override `MaxTokensField` (hidden for native transports).
 Unset output limits and reasoning effort are omitted for all OpenAI-compatible
 connections; no sampling settings are added automatically. Presets leave output
 limits blank. Saved numeric limits and reasoning choices remain explicit overrides;
@@ -196,7 +201,7 @@ OpenAI-compatible chat requests share a pooled transport with
 `Agents:ChatRequestTimeoutSeconds` (600 seconds by default). Codex requests use
 the configured Codex timeout.
 
-Both chat client kinds are wrapped in `ModelImagePayloadChatClient`, which
+All chat client kinds are wrapped in `ModelImagePayloadChatClient`, which
 compacts image payloads on every request without mutating the caller's
 transcript. Assistant tool loops resend their whole history each round, so a few
 multi-megabyte PNG references would otherwise repeat in every request. An image
@@ -209,7 +214,7 @@ Editor, Images, and Publish `read_project_image` tools set it when the model pas
 `fullResolution=true`; that read then also skips the
 `EntityVisualContext:MaxImageEdge` downscale.
 
-Codex strict tool-schema preparation hoists local subschema references into
+Responses strict tool-schema preparation hoists local subschema references into
 root-level `$defs`, including repeated contributor types in bibliography tools.
 Recursive references remain references; definitions receive the same required-field
 and object-closure rules as inline schemas. Schema traversal preserves authored
@@ -236,6 +241,62 @@ and [OpenRouter reasoning tokens](https://openrouter.ai/docs/guides/best-practic
 for the external field contracts. Codex also exposes terminal finish reasons and
 usage to the shared round engine. Gateway integration still requires a live,
 user-authorized check; build and static validation do not establish interoperability.
+
+### Request caching and native Claude
+
+Wire contracts: [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Claude caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+and [Claude late system messages](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages).
+
+The neutral layout is owned by the assistants chapter. Responses keeps developer
+input in order rather than hoisting all system text into instructions; that
+field contains only a fixed transport instruction. On supported GPT-5.6/GPT-6
+models, explicit content breakpoints and prompt_cache_options.mode=explicit
+mark reusable prefixes. Earlier models retain implicit caching. A structured
+unsupported-cache rejection before any assistant output disables those optional
+fields for that connection/model in memory and retries once with the same input
+and selected model. This applies to public API-key, plan, and Codex profiles;
+public API support is not evidence that an account route accepts a field.
+Unsupported developer/system placement can retain fresh context in initial
+instructions on the same profile. Native chat requests use bounded retries for
+transient connection/HTTP failures before exposing a response stream; cancellation
+still propagates and partial assistant output is never automatically replayed.
+Profile authentication, output-limit restrictions, and hosted-search exposure remain
+separate; moving API keys to Responses does not enable hosted search for them.
+
+AnthropicChatClient uses native /v1/messages, x-api-key, and the pinned
+anthropic-version header. It serializes native schemas, images, tool_use and
+correlated user tool_result blocks; preserves ordered native response blocks,
+including thinking/signatures; and streams text and incremental tool arguments
+through the shared engine. Buffered consumers preserve finish reasons/protocol/
+usage as well. Model metadata is read with a 30-second bound and cached in-process;
+documented capabilities/output ceilings remain available when discovery fails.
+Explicit output limits win, otherwise the model's output ceiling is used. Unset
+thinking remains provider-owned; only supported explicit effort values are sent.
+Native authenticated model listing and vision/readiness use the same connection
+ownership. Saved model selections are never upgraded automatically.
+
+Claude's cache_control marks up to four semantic endpoints with its default
+TTL. Late system context is used only on supporting models and is placed after
+user/visual deliveries, never between a tool_use and its result. Older/unknown
+models receive fresh authoritative context in top-level system content and may
+reuse less conversation cache. Unsupported cache controls degrade without
+changing model selection. Generic gateways receive ordered messages without
+native cache fields; an explicit late-system rejection can retry once with a
+combined initial system message and retain that encoding for the endpoint.
+No transport adds prewarming calls, padding, extended TTLs, or stale tool replay.
+Tool definitions are deterministically ordered on native transports.
+
+Usage normalizes cache reads into UsageDetails.CachedInputTokenCount and writes
+into AdditionalCounts.CacheWriteInputTokenCount. Responses/compatible input
+already includes cached input; Claude input is normalized as uncached + cache
+read + cache creation. Claude's cumulative streaming counters are replaced, not
+summed, and known partial usage survives a failed stream. Missing counts remain
+unknown. Shared per-round Debug diagnostics identify conversation/surface, model,
+transport, effective cache mode, input/output/reasoning/read/write tokens, and
+duration, without adding prompt text, image bytes, or opaque protocol to logs.
+A cache hit or cost/latency improvement requires an authorized live provider
+exercise; compilation and static inspection establish neither.
 
 ### OAuth and credential security
 
@@ -385,7 +446,7 @@ indexing rules belong to [Narrative context](narrative-context.md).
 World web search has two sources behind the shared `WebSearchResult` contract.
 A chat client whose model has built-in search exposes `IModelWebSearch` through
 `IChatClient.GetService`; World's `web_search` uses it whenever it is present,
-so OpenAI account models need no search provider. `CodexChatClient` runs a
+so OpenAI account models need no search provider. `ResponsesChatClient` runs a
 separate Responses request with the hosted `web_search` tool, low reasoning
 effort, and `web_search_call.action.sources` included. Results are only URLs the
 hosted search cited, in citation order, then other reported sources; the
@@ -663,7 +724,8 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Llm/LlmProviderCatalog.cs`](../../Lorekeeper/Llm/LlmProviderCatalog.cs), [`OpenAiAccountModelCatalog.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalog.cs), [`OpenAiAccountModelCatalogService.cs`](../../Lorekeeper/Llm/OpenAiAccountModelCatalogService.cs), [`IOpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/IOpenAiAccountModelDiscovery.cs), [`OpenAiAccountModelDiscovery.cs`](../../Lorekeeper/Llm/OpenAiAccountModelDiscovery.cs), [`ModelCatalogService.cs`](../../Lorekeeper/Llm/ModelCatalogService.cs), [`LlmProviderService.cs`](../../Lorekeeper/Llm/LlmProviderService.cs), and [`LlmConnectionResolver.cs`](../../Lorekeeper/Llm/LlmConnectionResolver.cs) | Generic provider presets/discovery, the static account catalog, account model-list transport, persisted connection/model ownership, working-default resolution, and shared credential lookup. Generic discovery rejects account-backed rows; account refresh uses the dedicated discovery transport. |
-| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`CodexChatClient.cs`](../../Lorekeeper/Llm/CodexChatClient.cs), [`ResponsesTransportProfile.cs`](../../Lorekeeper/Llm/ResponsesTransportProfile.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, account-kind Responses transport profiles, Codex Responses transport and its hosted web search ([`CodexChatClient.WebSearch.cs`](../../Lorekeeper/Llm/CodexChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
+| [`Lorekeeper/Llm/ChatClientFactory.cs`](../../Lorekeeper/Llm/ChatClientFactory.cs), [`ResponsesChatClient.cs`](../../Lorekeeper/Llm/ResponsesChatClient.cs), [`ResponsesTransportProfile.cs`](../../Lorekeeper/Llm/ResponsesTransportProfile.cs), and [`VisionModelClientFactory.cs`](../../Lorekeeper/Llm/VisionModelClientFactory.cs) | Provider-neutral chat/vision construction, API-key/account Responses transport profiles, shared Responses serialization and account-only hosted web search ([`ResponsesChatClient.WebSearch.cs`](../../Lorekeeper/Llm/ResponsesChatClient.WebSearch.cs)), image payload compaction ([`ModelImagePayloadChatClient.cs`](../../Lorekeeper/Llm/ModelImagePayloadChatClient.cs)), verification probes, timeouts, and normalized failures. |
+| [`Lorekeeper/Llm/AnthropicChatClient.cs`](../../Lorekeeper/Llm/AnthropicChatClient.cs), [`ProviderChatProtocol.cs`](../../Lorekeeper/Llm/ProviderChatProtocol.cs), [`NativeChatUsage.cs`](../../Lorekeeper/Llm/NativeChatUsage.cs), and [`ChatHttpRequests.cs`](../../Lorekeeper/Llm/ChatHttpRequests.cs) | Native Claude Messages, official endpoint/model transport selection, normalized cache usage, and bounded native HTTP recovery. |
 | [`Lorekeeper/Llm/WireCompat/`](../../Lorekeeper/Llm/WireCompat/) and [`OpenAICompatEnvelopeHandler.cs`](../../Lorekeeper/Llm/OpenAICompatEnvelopeHandler.cs) | Endpoint-host compatibility classification plus narrowly scoped max-token and response-envelope adaptations. |
 | [`Lorekeeper/Authorization/`](../../Lorekeeper/Authorization/), [`Lorekeeper/Llm/CodexProvider.cs`](../../Lorekeeper/Llm/CodexProvider.cs), and [`Lorekeeper/Auth/OpenAiOAuthEndpoints.cs`](../../Lorekeeper/Auth/OpenAiOAuthEndpoints.cs) | Account authorization/token contracts, process-local PKCE lifecycle, serialized refresh/credential replacement, allowlisted external launch, callback-origin validation, completion page, Codex endpoint/default constants, and the local callback endpoint. |
 | [`Lorekeeper/Llm/EmbeddingClient.cs`](../../Lorekeeper/Llm/EmbeddingClient.cs), [`EmbeddingConfigurationService.cs`](../../Lorekeeper/Llm/EmbeddingConfigurationService.cs), and [`ProviderEmbeddingService.cs`](../../Lorekeeper/Llm/ProviderEmbeddingService.cs) | Embedding transport, test-before-save configuration, active-provider resolution, batching, truncation, and dimension validation. |

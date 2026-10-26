@@ -4,11 +4,13 @@ using System.Text.Json;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.Models;
 using SkiaSharp;
+using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Llm;
 
 public sealed class VisionModelClientFactory(
     ILlmProviderService providerService,
+    IChatClientFactory chatClients,
     IOpenAiAccountService accountService,
     IHttpClientFactory httpClientFactory,
     ILogger<VisionModelClientFactory> logger) : IVisionModelClientFactory
@@ -70,6 +72,18 @@ public sealed class VisionModelClientFactory(
 
         if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)
             throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
+
+        if (ProviderChatProtocol.For(provider) is ProviderChatProtocol.Anthropic or ProviderChatProtocol.Responses)
+        {
+            using var client = await chatClients.CreateChatClientAsync(provider, cancellationToken);
+            var result = await client.GetResponseAsync(
+                [new ChatMessage(ChatRole.User, [new TextContent(prompt), new DataContent(imageBytes, mediaType)])],
+                new ChatOptions { MaxOutputTokens = Math.Clamp(maxOutputTokens, 1, 32_000), ToolMode = ChatToolMode.None },
+                cancellationToken);
+            if (result.FinishReason == ChatFinishReason.Length)
+                throw new InvalidOperationException(ChatResponseMetadata.OutputLimitMessage);
+            return result.Text.Trim();
+        }
 
         return await ReadOpenAiCompatibleImageAsync(
             httpClient,
@@ -362,8 +376,7 @@ public sealed class VisionModelClientFactory(
         }
         else
         {
-            // Omit temperature: newer models (e.g. current Claude models behind
-            // Anthropic's OpenAI-compatible endpoint) reject it outright.
+            // Sampling settings remain provider-owned defaults.
             body["max_tokens"] = clampedMaxOutputTokens;
         }
         var json = JsonSerializer.Serialize(body);

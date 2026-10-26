@@ -11,6 +11,8 @@ namespace Lorekeeper.Llm;
 public sealed class ChatResponseMetadata
 {
     public int Version { get; set; } = 1;
+    public string Transport { get; set; } = ProviderChatProtocol.ChatCompletions;
+    public string? CacheMode { get; set; }
     public int? ConnectionId { get; set; }
     public string? ModelId { get; set; }
     public string? EndpointFingerprint { get; set; }
@@ -21,7 +23,8 @@ public sealed class ChatResponseMetadata
 
     [JsonIgnore]
     public bool OutputLimitReached => string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(FinishReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(FinishReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(FinishReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
     public string? FailureMessage => OutputLimitReached ? OutputLimitMessage
@@ -32,8 +35,9 @@ public sealed class ChatResponseMetadata
     public const string OutputLimitMessage =
         "The model exhausted its output budget before finishing. Partial output is retained; pending tools were not executed. Increase or clear the output limit, or ask for a smaller response.";
 
-    public static ChatResponseMetadata ForProvider(LlmProvider provider) => new()
+    public static ChatResponseMetadata ForProvider(LlmProvider provider, string? transport = null) => new()
     {
+        Transport = transport ?? ProviderChatProtocol.For(provider),
         ConnectionId = provider.EffectiveCredentialProviderId,
         ModelId = provider.ModelId,
         EndpointFingerprint = Fingerprint(provider.EndpointUrl),
@@ -41,6 +45,7 @@ public sealed class ChatResponseMetadata
 
     public bool Matches(LlmProvider provider) => Version == 1
         && provider.OpenAiAccountId is null
+        && string.Equals(Transport, ProviderChatProtocol.For(provider), StringComparison.Ordinal)
         && ConnectionId == provider.EffectiveCredentialProviderId
         && string.Equals(ModelId, provider.ModelId, StringComparison.Ordinal)
         && string.Equals(EndpointFingerprint, Fingerprint(provider.EndpointUrl), StringComparison.Ordinal);
@@ -84,6 +89,15 @@ internal sealed class ChatResponseCapture
         {
             var result = _protocol?.Snapshot() ?? new ChatResponseMetadata();
             result.FinishReason = _finishReason ?? result.FinishReason;
+            if (_usage is not null && result.Usage is { } nativeUsage)
+            {
+                _usage.CachedInputTokenCount ??= nativeUsage.CachedInputTokenCount;
+                _usage.ReasoningTokenCount ??= nativeUsage.ReasoningTokenCount;
+            }
+            if (_usage is not null && result.Usage?.AdditionalCounts is { } counts)
+            {
+                foreach (var (name, count) in counts) (_usage.AdditionalCounts ??= [])[name] = count;
+            }
             result.Usage = _usage ?? result.Usage;
             return result;
         }

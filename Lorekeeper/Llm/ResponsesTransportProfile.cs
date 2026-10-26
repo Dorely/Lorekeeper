@@ -5,16 +5,15 @@ using Lorekeeper.Models;
 namespace Lorekeeper.Llm;
 
 /// <summary>
-/// The endpoint, headers, and failure mapping for one OpenAI account kind's
-/// Responses transport. Codex uses the ChatGPT backend; ChatGPT plan usage uses
-/// the public Responses API with the bearer token alone.
+/// Endpoint, headers, and failure mapping for API-key and account Responses transports.
+/// Codex uses the ChatGPT backend; plan and API-key profiles use the public endpoint.
 /// </summary>
 public sealed class ResponsesTransportProfile
 {
     private const string PlanUsageUnavailableMessage =
         "ChatGPT plan usage is temporarily unavailable. Try again shortly.";
 
-    private ResponsesTransportProfile(OpenAiAccountKind kind, string endpoint, string label)
+    private ResponsesTransportProfile(OpenAiAccountKind? kind, string endpoint, string label)
     {
         Kind = kind;
         Endpoint = endpoint;
@@ -27,13 +26,16 @@ public sealed class ResponsesTransportProfile
     public static readonly ResponsesTransportProfile ChatGptPlan =
         new(OpenAiAccountKind.ChatGptPlan, CodexProvider.PlanResponsesEndpoint, "ChatGPT plan");
 
+    public static readonly ResponsesTransportProfile ApiKey =
+        new(null, "https://api.openai.com/v1/responses", "OpenAI");
+
     public static ResponsesTransportProfile For(OpenAiAccountKind kind) => kind switch
     {
         OpenAiAccountKind.ChatGptPlan => ChatGptPlan,
         _ => Codex,
     };
 
-    public OpenAiAccountKind Kind { get; }
+    public OpenAiAccountKind? Kind { get; }
 
     public string Endpoint { get; }
 
@@ -42,7 +44,7 @@ public sealed class ResponsesTransportProfile
 
     public void ApplyHeaders(HttpRequestMessage request, string accessToken, string externalAccountId)
     {
-        if (Kind != OpenAiAccountKind.ChatGptPlan)
+        if (Kind == OpenAiAccountKind.Codex)
         {
             CodexProvider.ApplyAccountHeaders(request, accessToken, externalAccountId, eventStream: true);
             return;

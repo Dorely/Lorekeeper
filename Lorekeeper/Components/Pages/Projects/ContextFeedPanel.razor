@@ -32,10 +32,10 @@ else
             <div class="ctx-open"
                  role="button"
                  tabindex="0"
-                 aria-label="Open assembled system prompt preview"
+                 aria-label="Open assistant context preview"
                  @onclick="OpenAssembledPrompt"
                  @onkeydown="OnAssembledPromptKeyDown">
-                <span class="ctx-label">Assembled system prompt preview</span>
+                <span class="ctx-label">Assistant context preview</span>
                 <span class="ctx-badge">Read only</span>
             </div>
         </div>
@@ -184,9 +184,9 @@ else
     {
         if (_assembly is null) return;
         OpenDetail(new ContextItem(
-            "assembled-system-prompt-preview",
+            "assistant-context-preview",
             ContextItemKind.SystemInstructions,
-            "Assembled system prompt preview",
+            "Assistant context preview",
             _assembly.Assemble(),
             IsEnabled: true,
             IsRemovable: false,

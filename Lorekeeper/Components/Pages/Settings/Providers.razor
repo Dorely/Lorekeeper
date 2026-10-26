@@ -47,7 +47,7 @@
     {
         <section class="lk-section-card provider-add-card" aria-labelledby="add-connection-title">
             <div class="lk-section-heading">
-                <div><span class="lk-section-kicker">OpenAI-compatible API</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and credentials, choose an initial model, test it, then save. Add more models to the connection afterwards.</p></div>
+                <div><span class="lk-section-kicker">API connections</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and credentials, choose an initial model, test it, then save. Add more models to the connection afterwards.</p></div>
             </div>
             <fieldset class="form-group-block">
                 <legend>Connection</legend>
@@ -118,23 +118,26 @@
                     <label>
                         <span>Max output tokens</span>
                         <input type="number" min="1" step="1" class="form-control" placeholder="Provider default" @bind="_newProvider.MaxOutputTokens" />
-                        <small class="field-note">Optional response budget, including reasoning when counted by the provider. Leave blank to use the provider default.</small>
+                        <small class="field-note">Optional response budget, including reasoning when counted by the provider. Leave blank to use the provider default (Claude: the model's output ceiling).</small>
                     </label>
                     <label>
                         <span>Max input tokens</span>
                         <input type="number" min="1" step="1" class="form-control" placeholder="Auto (model/default)" @bind="_newProvider.MaxInputTokens" />
                         <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
                     </label>
-                    <label>
-                        <span>Max tokens field</span>
-                        <select class="form-select" @bind="_newProvider.MaxTokensField">
-                            @foreach (var choice in MaxTokensFieldChoices)
-                            {
-                                <option value="@choice.Value">@choice.Label</option>
-                            }
-                        </select>
-                        <small class="field-note">Field name carrying the output budget. "Auto" follows the endpoint (legacy <code>max_tokens</code> for DeepSeek/Together and local servers, OpenAI <code>max_completion_tokens</code> otherwise). Override for gateways that reject the auto-chosen field.</small>
-                    </label>
+                    @if (UsesChatCompletions(_newProvider.EndpointUrl, _newProvider.ModelId))
+                    {
+                        <label>
+                            <span>Max tokens field</span>
+                            <select class="form-select" @bind="_newProvider.MaxTokensField">
+                                @foreach (var choice in MaxTokensFieldChoices)
+                                {
+                                    <option value="@choice.Value">@choice.Label</option>
+                                }
+                            </select>
+                            <small class="field-note">Field name carrying the output budget. "Auto" follows the endpoint (legacy <code>max_tokens</code> for DeepSeek/Together and local servers, OpenAI <code>max_completion_tokens</code> otherwise). Override for gateways that reject the auto-chosen field.</small>
+                        </label>
+                    }
                     <label class="connection-checkbox"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsDefault" /><span>Make this the default after verification</span></label>
                 </div>
             </fieldset>
@@ -209,7 +212,7 @@
 
         @if (!OtherParents.Any() && AccountSections.All(section => ModelsFor(section).Count == 0))
         {
-            <div class="lk-empty-state"><h2>No model connections yet</h2><p>Connect ChatGPT above or add an OpenAI-compatible endpoint.</p><button class="btn btn-primary" @onclick="ToggleAddConnection">Add a connection</button></div>
+            <div class="lk-empty-state"><h2>No model connections yet</h2><p>Connect ChatGPT above or add a native or OpenAI-compatible API connection.</p><button class="btn btn-primary" @onclick="ToggleAddConnection">Add a connection</button></div>
         }
     </section>
 </ConfigurationShell>
@@ -1452,22 +1455,25 @@
         <label>
             <span>Max output tokens</span>
             <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Provider default" @bind="model.MaxOutputTokens" />
-            <small class="field-note">Blank uses the provider default.</small>
+            <small class="field-note">Blank uses the provider default (Claude: the model's output ceiling).</small>
         </label>
         <label>
             <span>Max input tokens</span>
             <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="@inputPlaceholder" @bind="model.MaxInputTokens" />
             <small class="field-note">@inputNote</small>
         </label>
-        <label>
-            <span>Max tokens field</span>
-            <select class="form-select form-select-sm" @bind="model.MaxTokensField">
-                @foreach (var choice in MaxTokensFieldChoices)
-                {
-                    <option value="@choice.Value">@choice.Label</option>
-                }
-            </select>
-        </label>
+        @if (UsesChatCompletions(model.EndpointUrl, model.ModelId, model.OpenAiAccountId))
+        {
+            <label>
+                <span>Max tokens field</span>
+                <select class="form-select form-select-sm" @bind="model.MaxTokensField">
+                    @foreach (var choice in MaxTokensFieldChoices)
+                    {
+                        <option value="@choice.Value">@choice.Label</option>
+                    }
+                </select>
+            </label>
+        }
     };
 
     private RenderFragment RenderChildForm(LlmProvider parent) => __builder =>
@@ -1521,22 +1527,25 @@
                 <label>
                     <span>Max output tokens</span>
                     <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Provider default" @bind="draft.MaxOutputTokens" />
-                    <small class="field-note">Blank uses the provider default.</small>
+                    <small class="field-note">Blank uses the provider default (Claude: the model's output ceiling).</small>
                 </label>
                 <label>
                     <span>Max input tokens</span>
                     <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="draft.MaxInputTokens" />
                     <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
                 </label>
-                <label>
-                    <span>Max tokens field</span>
-                    <select class="form-select form-select-sm" @bind="draft.MaxTokensField">
-                        @foreach (var choice in MaxTokensFieldChoices)
-                        {
-                            <option value="@choice.Value">@choice.Label</option>
-                        }
-                    </select>
-                </label>
+                @if (UsesChatCompletions(parent.EndpointUrl, draft.ModelId, parent.OpenAiAccountId))
+                {
+                    <label>
+                        <span>Max tokens field</span>
+                        <select class="form-select form-select-sm" @bind="draft.MaxTokensField">
+                            @foreach (var choice in MaxTokensFieldChoices)
+                            {
+                                <option value="@choice.Value">@choice.Label</option>
+                            }
+                        </select>
+                    </label>
+                }
             </div>
         </div>
     };
@@ -1825,6 +1834,12 @@
         public OpenAiCallbackOriginValidation? CallbackOrigin { get; set; }
         public string SectionKey => Kind == OpenAiAccountKind.Codex ? "openai-account" : "chatgpt-plan";
     }
+
+    private static bool UsesChatCompletions(string? endpoint, string? model, int? accountId = null) =>
+        ProviderChatProtocol.For(new LlmProvider
+        {
+            Name = "", EndpointUrl = endpoint ?? "", ModelId = model ?? "", OpenAiAccountId = accountId,
+        }) == ProviderChatProtocol.ChatCompletions;
 
     private sealed class NewProviderDraft
     {

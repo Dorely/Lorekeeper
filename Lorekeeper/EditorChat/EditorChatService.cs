@@ -280,7 +280,7 @@ public sealed class EditorChatService(
         Chapter? currentChapter = null;
         var contestModeEnabled = false;
         IReadOnlyList<EntityVisualContextReference> initialEntityVisuals = [];
-        string systemPrompt = string.Empty;
+        ChatPrompt requestPrompt = new("", "", "");
         string contestSystemPrompt = string.Empty;
         string? setupError = null;
         try
@@ -303,7 +303,7 @@ public sealed class EditorChatService(
                 cancellationToken);
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
-            systemPrompt = assembly.Assemble();
+            requestPrompt = assembly.ToPrompt(SystemPromptAgentRole.Editor);
             contestSystemPrompt = EditorContestService.CaptureSystemPrompt(assembly);
             if (!contentTarget.IsCore)
             {
@@ -313,13 +313,13 @@ public sealed class EditorChatService(
                         cancellationToken),
                     cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
                 var targetPrompt = $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
-                systemPrompt += targetPrompt;
+                requestPrompt = requestPrompt.WithTurnContext(targetPrompt);
                 contestSystemPrompt += $"\n\n## Selected content target\nPublication release: {edition.Name} ({edition.Id:D}). The captured manuscript and replacement scope belong to this release.";
             }
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
             await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
 
-            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider, cancellationToken);
 
             editorContext = new EditorChatContext(
                 projectId,
@@ -356,7 +356,7 @@ public sealed class EditorChatService(
             repositories => repositories.EditorConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         if (await entityVisualContext.BuildVisionMessageAsync(
             projectId,
             initialEntityVisuals,
@@ -377,6 +377,7 @@ public sealed class EditorChatService(
             if (replay is not null) messages.Add(replay);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "Editor");
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {

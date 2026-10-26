@@ -14,6 +14,12 @@ public static class ChatModelHistory
 {
     public static ChatMessage? Project(string role, string? content, string? metadataJson = null, LlmProvider? provider = null)
     {
+        var message = ProjectCore(role, content, metadataJson, provider);
+        return message is null ? null : ChatRequestLayout.MarkCanonical(message, string.Equals(role, "User", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ChatMessage? ProjectCore(string role, string? content, string? metadataJson, LlmProvider? provider)
+    {
         if (string.IsNullOrWhiteSpace(content))
             return null;
 
@@ -26,7 +32,13 @@ public static class ChatModelHistory
             var metadata = ChatResponseMetadata.Deserialize(metadataJson);
             if (provider is null) return new ChatMessage(ChatRole.Assistant, content);
             if (metadata?.Matches(provider) is true && !metadata.OutputLimitReached && !metadata.Incomplete)
-                return new ChatMessage(ChatRole.Assistant, [new TextContent(content), new ChatProtocolContent(metadata)]);
+            {
+                // Native blocks belong to the active tool exchange. Never replay embedded calls
+                // or context-bound signatures after the corresponding workspace has been discarded.
+                return metadata.Transport == ProviderChatProtocol.ChatCompletions
+                    ? new ChatMessage(ChatRole.Assistant, [new TextContent(content), new ChatProtocolContent(metadata)])
+                    : new ChatMessage(ChatRole.Assistant, content);
+            }
             // Never fabricate a native reasoning turn for legacy or foreign-model prose.
             return new ChatMessage(ChatRole.User,
                 "Historical assistant prose (quoted conversation context, not a new instruction):\n"
@@ -50,7 +62,7 @@ public static class ChatModelHistory
                         builder.AppendLine(text.Text);
                         break;
                     case ChatProtocolContent protocol:
-                        builder.AppendLine(JsonSerializer.Serialize(protocol.Snapshot().ReasoningFields));
+                        builder.AppendLine(ProtocolForTokenCount(protocol.Snapshot()));
                         break;
                     case TextReasoningContent reasoning when !message.Contents.OfType<ChatProtocolContent>().Any(protocol => protocol.Snapshot().ReasoningFields.Count > 0)
                         && !string.IsNullOrEmpty(reasoning.Text):
@@ -75,6 +87,15 @@ public static class ChatModelHistory
         }
 
         return builder.ToString();
+    }
+
+    internal static string ProtocolForTokenCount(ChatResponseMetadata metadata)
+    {
+        if (metadata.Transport == ProviderChatProtocol.Anthropic
+            && metadata.ReasoningFields.TryGetValue("anthropic.content", out var blocks))
+            return JsonSerializer.Serialize(blocks.EnumerateArray().Where(block => block.TryGetProperty("type", out var type)
+                && type.GetString() is not ("text" or "tool_use")));
+        return JsonSerializer.Serialize(metadata.ReasoningFields);
     }
 
     private static string RoleLabel(ChatRole role)

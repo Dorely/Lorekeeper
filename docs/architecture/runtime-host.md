@@ -54,6 +54,10 @@ OAuth and media endpoints, installs the startup gate, and creates the desktop
 window. Keep provider-specific transport behavior behind provider-neutral
 contracts and keep feature behavior in injected services; the composition root
 should wire those owners rather than reproduce their logic.
+The scoped chat factory owns native Responses, native Anthropic Messages, and
+compatible clients behind `IChatClient`; the vision factory delegates native
+image reads/readiness through that same construction boundary. These clients
+capture a turn's selected model/settings and do not own database operations.
 The scoped OpenAI account-catalog, authorization, and token services are such
 owners. Process-local authorization state, per-account operation coordination,
 callback-origin validation, and the platform-selected external launcher are

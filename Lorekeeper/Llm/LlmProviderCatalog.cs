@@ -12,9 +12,9 @@ public sealed record LlmProviderPreset(
     string? Note = null);
 
 /// <summary>
-/// Catalog of built-in OpenAI-compatible provider presets used to pre-fill new
+/// Catalog of built-in provider presets used to pre-fill new
 /// connections in Settings > Providers. Presets only supply defaults; every
-/// connection still uses the same OpenAI-compatible chat-completions protocol.
+/// connection resolves its native or compatible protocol through the shared factory.
 /// </summary>
 public static class LlmProviderCatalog
 {
@@ -50,7 +50,7 @@ public static class LlmProviderCatalog
         ],
             KeyManagementUrl: "https://app.cline.bot/settings",
             Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog."),
-        new("anthropic", "Anthropic (OpenAI-compatible)", "https://api.anthropic.com/v1", AuthType.ApiKey,
+        new("anthropic", "Anthropic", "https://api.anthropic.com/v1", AuthType.ApiKey,
         [
             "claude-sonnet-4-5",
             "claude-opus-4-5",

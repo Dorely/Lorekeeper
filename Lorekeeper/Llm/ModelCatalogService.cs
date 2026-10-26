@@ -49,7 +49,9 @@ public sealed class ModelCatalogService(
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         if (access.EffectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(access.ApiKey))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.ApiKey);
+            if (ProviderChatProtocol.For(provider) == ProviderChatProtocol.Anthropic)
+                AnthropicChatClient.ApplyHeaders(request, access.ApiKey);
+            else request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.ApiKey);
         }
 
         var httpClient = httpClientFactory.CreateClient();

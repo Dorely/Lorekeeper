@@ -46,7 +46,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
 
         var assistantWorkflow = request.OperatingRules
-            ?? await ResolveOperatingRulesAsync(request.Purpose, project, cancellationToken);
+            ?? ResolveOperatingRules(request.Purpose, project);
         var brief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         var composition = systemPrompts.Compose(new(
             project,
@@ -55,6 +55,16 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             assistantWorkflow,
             currentChapter, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content));
         var items = composition.Sections.Select(ToContextItem).ToList();
+        if (request.Purpose == ContextBuildPurpose.Editor && !project.ContestModeEnabled)
+        {
+            var semanticSearchAvailable = await embeddings.IsAvailableAsync(cancellationToken);
+            items.Add(new ContextItem("editor-capabilities", ContextItemKind.DynamicGuidance,
+                "Current Editor Capabilities",
+                $"Semantic retrieval available: {semanticSearchAvailable}. Review Edits enabled: {project.ReviewEditsEnabled}.\n"
+                    + (semanticSearchAvailable ? string.Empty : "Semantic retrieval is unavailable. Ground work through lexical project search, graph tools, and exact reads; do not claim semantic retrieval.\n")
+                    + (project.ReviewEditsEnabled ? AssistantWorkflowInstructions.EditorPendingReviewWorkflow : string.Empty),
+                true, false, IsProtected: true));
+        }
         var projectReferencesItem = await BuildProjectReferencesItemAsync(project.Id, cancellationToken);
         if (projectReferencesItem is not null)
             items.Add(projectReferencesItem);
@@ -272,19 +282,14 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         return new ContextAssembly(items.Select(AddTokenEstimate).ToList());
     }
 
-    private async Task<string> ResolveOperatingRulesAsync(
-        ContextBuildPurpose purpose,
-        Project project,
-        CancellationToken cancellationToken)
+    private static string ResolveOperatingRules(ContextBuildPurpose purpose, Project project)
     {
         return purpose switch
         {
             ContextBuildPurpose.Editor when project.ContestModeEnabled =>
                 AssistantWorkflowInstructions.EditorContestPreparationWorkflow,
             ContextBuildPurpose.Editor =>
-                AssistantWorkflowInstructions.EditorChatFor(
-                    await embeddings.IsAvailableAsync(cancellationToken),
-                    project.ReviewEditsEnabled),
+                AssistantWorkflowInstructions.EditorChatWorkflow,
             ContextBuildPurpose.EditorRevision =>
                 AssistantWorkflowInstructions.EditorRevisionWorker
                 + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
@@ -310,16 +315,18 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
     };
 
-    private static ContextItem ToContextItem(SystemPromptSection section)
+    internal static ContextItem ToContextItem(SystemPromptSection section)
     {
         var kind = section.Kind switch
         {
             SystemPromptSectionKind.ProfessionalIdentity => ContextItemKind.SystemInstructions,
             SystemPromptSectionKind.OperatingRules => ContextItemKind.AssistantWorkflow,
             SystemPromptSectionKind.DynamicGuidance => ContextItemKind.DynamicGuidance,
+            SystemPromptSectionKind.BookFormatGuidance => ContextItemKind.BookFormatGuidance,
             SystemPromptSectionKind.ProjectGuidance => ContextItemKind.ProjectGuidance,
             SystemPromptSectionKind.BookBrief => ContextItemKind.BookBrief,
             SystemPromptSectionKind.WorldBrief => ContextItemKind.WorldBrief,
+            SystemPromptSectionKind.WorkingContext => ContextItemKind.ProjectOutline,
             _ => throw new ArgumentOutOfRangeException(nameof(section)),
         };
         var key = section.Kind switch

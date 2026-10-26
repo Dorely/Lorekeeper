@@ -29,8 +29,8 @@ public class Project
     public PublicationBook? PublicationBook { get; set; }
 
     /// <summary>
-    /// When true, the currently-open chapter is included in the assembled system prompt
-    /// as a line-numbered block. Toggleable from the Context Feed.
+    /// Project-level preference for including the active chapter in assistant context.
+    /// Per-chapter context preferences own the current Assistant Memory selection.
     /// </summary>
     public bool IncludeCurrentChapterInContext { get; set; } = true;
 

@@ -119,8 +119,12 @@ chapters are unioned across facets and must survive focused project search plus
 exact chapter reads before revision assignment; anchor proximity, generic
 substring matches, and unexplained aggregate scores are insufficient evidence.
 
-`ContextBuilder` owns the Editor's bounded automatic working context. It starts
-from protected Project Guidance and Book Brief direction, then adds relevant
+`ContextBuilder` owns the Editor's bounded automatic working context. Its typed
+sections are rebuilt each turn, then partitioned by the assistant surface's
+lifetime policy described in [Assistants and chat](assistants-chat.md). Reusable
+prefix placement never reuses a saved project-state snapshot; retrieval, direct
+references, active manuscript/review state, and visuals remain fresh turn context.
+Assembly starts from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph
 relationships, project-search results, named manuscript styles, page setup,
 annotations, and canonical entity visuals. The active chapter is loaded once as

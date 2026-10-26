@@ -101,7 +101,7 @@ public sealed class ChatResponseProtocolMigrationTests
     }
 
     private const string ProtocolJson = """
-        {"Version":1,"ConnectionId":17,"ModelId":"origin-model","EndpointFingerprint":"non-secret-fingerprint","ReasoningFields":{"reasoning_content":"First\\nsecond","reasoning_details":[{"type":"reasoning.encrypted","data":"AA+/==","signature":"opaque+/=","index":0,"vendor":{"unknown":[1,null,true]}}]},"FinishReason":"length","Usage":{"InputTokenCount":11,"OutputTokenCount":23,"ReasoningTokenCount":19}}
+        {"Version":1,"Transport":"anthropic-messages","CacheMode":"explicit","ConnectionId":17,"ModelId":"origin-model","EndpointFingerprint":"non-secret-fingerprint","ReasoningFields":{"reasoning_content":"First\\nsecond","reasoning_details":[{"type":"reasoning.encrypted","data":"AA+/==","signature":"opaque+/=","index":0,"vendor":{"unknown":[1,null,true]}}]},"FinishReason":"length","Usage":{"InputTokenCount":11,"OutputTokenCount":23,"ReasoningTokenCount":19,"CachedInputTokenCount":5,"AdditionalCounts":{"CacheWriteInputTokenCount":3}}}
         """;
 
 #pragma warning disable EF1002 // Fixture table names are fixed constants, while values remain parameters.

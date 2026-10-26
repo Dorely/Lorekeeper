@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Diagnostics;
+using Lorekeeper.ChatTurns;
+using System.Collections.Concurrent;
 using Lorekeeper.Models;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
@@ -12,31 +14,36 @@ using Microsoft.Extensions.AI;
 namespace Lorekeeper.Llm;
 
 /// <summary>
-/// IChatClient implementation that calls the Codex Responses API at
-/// chatgpt.com/backend-api/codex/responses using an OAuth token.
+/// Shared stateless Responses protocol for API-key and account connections.
 /// </summary>
-public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
+public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
 {
     private const int MaxBufferedResponseAttempts = 2;
+    private static readonly ConcurrentDictionary<string, bool> CacheRejected = new();
+    private static readonly ConcurrentDictionary<string, bool> InitialInstructionsRequired = new();
+    private readonly LlmProvider? _provider;
+    private string CacheCapabilityKey => $"{_profile.Endpoint}:{_model}:{_provider?.EffectiveCredentialProviderId}";
+    private bool ExplicitCache => ProviderChatProtocol.SupportsExplicitCache(_model) && !CacheRejected.ContainsKey(CacheCapabilityKey);
 
     private readonly HttpClient _httpClient;
     private readonly string _accessToken;
     private readonly string _model;
     private readonly string? _reasoningEffort;
     private readonly string _accountId;
-    private readonly ILogger<CodexChatClient> _logger;
+    private readonly ILogger<ResponsesChatClient> _logger;
     private readonly ResponsesTransportProfile _profile;
     private readonly Func<CancellationToken, Task>? _onPlanNotEligible;
 
-    public CodexChatClient(
+    public ResponsesChatClient(
         HttpClient httpClient,
         string accessToken,
         string externalAccountId,
         string model,
         LlmReasoningEffort? reasoningEffort,
-        ILogger<CodexChatClient> logger,
+        ILogger<ResponsesChatClient> logger,
         ResponsesTransportProfile profile,
-        Func<CancellationToken, Task>? onPlanNotEligible = null)
+        Func<CancellationToken, Task>? onPlanNotEligible = null,
+        LlmProvider? provider = null)
     {
         _httpClient = httpClient;
         _accessToken = accessToken;
@@ -46,9 +53,12 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         _logger = logger;
         _profile = profile;
         _onPlanNotEligible = onPlanNotEligible;
+        _provider = provider;
     }
 
-    public ChatClientMetadata Metadata => _profile.Kind == OpenAiAccountKind.ChatGptPlan
+    public ChatClientMetadata Metadata => _profile.Kind is null
+        ? new("OpenAIResponsesAPI", new Uri("https://api.openai.com"))
+        : _profile.Kind == OpenAiAccountKind.ChatGptPlan
         ? new("ChatGptPlanResponsesAPI", new Uri("https://api.openai.com"))
         : new("CodexResponsesAPI", new Uri("https://chatgpt.com"));
 
@@ -63,11 +73,13 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         {
             var fullText = new StringBuilder();
             var functionCalls = new List<FunctionCallContent>();
+            var capture = new ChatResponseCapture();
 
             try
             {
                 await foreach (var update in GetStreamingResponseAsync(bufferedMessages, options, cancellationToken))
                 {
+                    capture.Observe(update);
                     foreach (var content in update.Contents)
                     {
                         if (content is TextContent tc && tc.Text is { Length: > 0 })
@@ -101,7 +113,11 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                 throw;
             }
 
-            return CreateResponse(fullText, functionCalls);
+            var result = CreateResponse(fullText, functionCalls);
+            result.Messages[0].Contents = capture.Attach(result.Messages[0].Contents.ToList());
+            result.Usage = capture.Metadata.Usage;
+            result.FinishReason = capture.Metadata.FinishReason is { } finish ? new ChatFinishReason(finish) : ChatFinishReason.Stop;
+            return result;
         }
 
         throw new HttpRequestException(
@@ -119,6 +135,45 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> chatMessages, ChatOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var messages = chatMessages.ToList();
+        for (var attempt = 0; ; attempt++)
+        {
+            var emitted = false;
+            var retry = false;
+            await using var stream = StreamAsync(messages, options, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            while (true)
+            {
+                bool hasNext;
+                try { hasNext = await stream.MoveNextAsync(); }
+                catch (ContextPlacementRejectedException) when (!emitted && attempt < 2)
+                {
+                    InitialInstructionsRequired[CacheCapabilityKey] = true;
+                    retry = true;
+                    _logger.LogDebug("{Transport} requires initial instructions; retaining fresh authoritative context in the supported position", _profile.Label);
+                    break;
+                }
+                catch (CacheControlRejectedException) when (!emitted && attempt < 2)
+                {
+                    CacheRejected[CacheCapabilityKey] = true;
+                    retry = true;
+                    _logger.LogDebug("{Transport} cache controls unsupported; retrying the same model without them", _profile.Label);
+                    break;
+                }
+                if (!hasNext) break;
+                emitted |= stream.Current.Contents.Any(content => content is TextContent or TextReasoningContent or FunctionCallContent or FunctionCallStartedContent);
+                yield return stream.Current;
+            }
+            if (!retry) yield break;
+        }
+    }
+
+    private sealed class CacheControlRejectedException : Exception;
+    private sealed class ContextPlacementRejectedException : Exception;
+
+    private async IAsyncEnumerable<ChatResponseUpdate> StreamAsync(
         IEnumerable<ChatMessage> chatMessages,
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -128,9 +183,11 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         var json = JsonSerializer.Serialize(body);
         var toolCount = options?.Tools?.Count ?? 0;
 
-        _logger.LogDebug("{Transport} request body: {Body}", _profile.Label, LogRedaction.RedactJson(json));
+        var metadata = _provider is null ? new ChatResponseMetadata { Transport = ProviderChatProtocol.Responses, ModelId = _model }
+            : ChatResponseMetadata.ForProvider(_provider);
+        metadata.CacheMode = body.ContainsKey("prompt_cache_options") ? "explicit" : "implicit";
+        var protocol = new ChatProtocolContent(metadata);
 
-        using var request = CreateResponsesRequest(json);
 
         _logger.LogDebug(
             "{Transport} request: POST {Endpoint}, account={AccountId}, model={Model}, messages={MessageCount}, tools={ToolCount}, bodyChars={BodyChars}",
@@ -142,12 +199,16 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             toolCount,
             json.Length);
 
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await ChatHttpRequests.SendAsync(_httpClient, () => CreateResponsesRequest(json), cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
+            if ((int)response.StatusCode is 400 or 422 && !InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(errorBody))
+                throw new ContextPlacementRejectedException();
+            if ((int)response.StatusCode is 400 or 422 && ExplicitCache && RejectsCache(errorBody))
+                throw new CacheControlRejectedException();
             _logger.LogError(
                 "{Transport} API error {StatusCode}: {Body}",
                 _profile.Label,
@@ -175,6 +236,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         var functionCallCount = 0;
         string? lastEventType = null;
         var lastEventData = string.Empty;
+        var nativeReasoning = new List<JsonElement>();
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [protocol] };
 
         while (true)
         {
@@ -324,6 +387,14 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                     }
                     break;
 
+                case "response.output_item.done":
+                    if (evt.TryGetProperty("item", out var completedItem) && OptionalString(completedItem, "type") == "reasoning")
+                    {
+                        nativeReasoning.Add(completedItem.Clone());
+                        metadata.ReasoningFields["responses.reasoning"] = JsonSerializer.SerializeToElement(nativeReasoning);
+                    }
+                    break;
+
                 case "response.completed" or "response.done" or "response.incomplete":
                     var terminal = new ChatResponseUpdate { Role = ChatRole.Assistant };
                     var terminalResponse = evt.TryGetProperty("response", out var nestedResponse) ? nestedResponse : evt;
@@ -338,19 +409,12 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         : functionCallCount > 0 ? ChatFinishReason.ToolCalls : ChatFinishReason.Stop;
                     if (terminalResponse.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
                     {
-                        var details = new UsageDetails
-                        {
-                            InputTokenCount = usage.TryGetProperty("input_tokens", out var input) ? input.GetInt64() : null,
-                            OutputTokenCount = usage.TryGetProperty("output_tokens", out var output) ? output.GetInt64() : null,
-                            TotalTokenCount = usage.TryGetProperty("total_tokens", out var total) ? total.GetInt64() : null,
-                        };
-                        if (usage.TryGetProperty("output_tokens_details", out var outputDetails)
-                            && outputDetails.ValueKind == JsonValueKind.Object
-                            && outputDetails.TryGetProperty("reasoning_tokens", out var reasoningTokens)
-                            && reasoningTokens.ValueKind == JsonValueKind.Number)
-                            details.ReasoningTokenCount = reasoningTokens.GetInt64();
+                        var details = NativeChatUsage.Responses(usage);
                         terminal.Contents.Add(new UsageContent(details));
                     }
+                    metadata.FinishReason = terminal.FinishReason?.ToString();
+                    metadata.Incomplete = incomplete;
+                    terminal.Contents.Add(protocol);
                     yield return terminal;
                     _logger.LogDebug(
                         "{Transport} streaming response completed after {EventCount} SSE events. TextChars={TextChars}, FunctionCalls={FunctionCallCount}",
@@ -364,7 +428,6 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                 case "response.in_progress":
                 case "response.content_part.added":
                 case "response.content_part.done":
-                case "response.output_item.done":
                 case "response.output_text.done":
                 case "response.reasoning_summary_part.added":
                 case "response.reasoning_summary_part.done":
@@ -373,7 +436,7 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                     break;
 
                 case "response.failed":
-                    var responseFailedMessage = ExtractCodexErrorMessage(
+                    var responseFailedMessage = ExtractResponseErrorMessage(
                         evt,
                         $"{_profile.Label} API response failed");
                     var (failedCode, failedParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
@@ -387,10 +450,13 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         _model,
                         json.Length,
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
+                    if (!InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(lastEventData))
+                        throw new ContextPlacementRejectedException();
+                    if (ExplicitCache && RejectsCache(lastEventData)) throw new CacheControlRejectedException();
                     throw await MapAsync(_profile.MapStreamError(failedCode, failedParam, responseFailedMessage));
 
                 case "error":
-                    var errorMessage = ExtractCodexErrorMessage(evt, "Unknown error");
+                    var errorMessage = ExtractResponseErrorMessage(evt, "Unknown error");
                     var (errorCode, errorParam) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(evt);
                     _logger.LogError(
                         "{Transport} streaming error after {EventCount} SSE events; lastEvent={LastEventType}; textChars={TextChars}; functionCalls={FunctionCallCount}; model={Model}; bodyChars={BodyChars}; event={EventData}",
@@ -402,6 +468,9 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         _model,
                         json.Length,
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
+                    if (!InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(lastEventData))
+                        throw new ContextPlacementRejectedException();
+                    if (ExplicitCache && RejectsCache(lastEventData)) throw new CacheControlRejectedException();
                     throw await MapAsync(_profile.MapStreamError(
                         errorCode,
                         errorParam,
@@ -422,10 +491,11 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
             eventCount,
             outputTextChars,
             functionCallCount);
+        throw new HttpRequestException($"{_profile.Label} stream ended before completion. Partial output is retained.");
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) =>
-        serviceKey is null && serviceType == typeof(IModelWebSearch) ? this : null;
+        serviceKey is null && _profile.Kind is not null && serviceType == typeof(IModelWebSearch) ? this : null;
 
     public void Dispose() { }
 
@@ -460,11 +530,12 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
     private static bool IsResponseEnded(HttpIOException exception) =>
         exception.HttpRequestError == HttpRequestError.ResponseEnded;
 
-    private static string ExtractCodexErrorMessage(JsonElement evt, string fallback)
+    private static string ExtractResponseErrorMessage(JsonElement evt, string fallback)
     {
         foreach (var path in new[]
         {
             new[] { "message" },
+            new[] { "detail" },
             new[] { "error", "message" },
             new[] { "response", "error", "message" },
             new[] { "error", "code" },
@@ -499,94 +570,96 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
         return trimmed.Length <= max ? trimmed : trimmed[..max] + "...";
     }
 
+    private static bool RejectsContextPlacement(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var message = ExtractResponseErrorMessage(document.RootElement, "");
+            return (message.Contains("developer", StringComparison.OrdinalIgnoreCase) || message.Contains("system message", StringComparison.OrdinalIgnoreCase))
+                && (message.Contains("not support", StringComparison.OrdinalIgnoreCase) || message.Contains("first", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("beginning", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static bool RejectsCache(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var (_, param) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(document.RootElement);
+            if (param?.Contains("prompt_cache", StringComparison.Ordinal) is true) return true;
+            if (param?.EndsWith(".output", StringComparison.Ordinal) is true
+                && ExtractResponseErrorMessage(document.RootElement, "").Contains("string", StringComparison.OrdinalIgnoreCase)) return true;
+            var message = ExtractResponseErrorMessage(document.RootElement, "");
+            return message.Contains("prompt_cache", StringComparison.Ordinal)
+                && (message.Contains("unsupported", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("not supported", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("unrecognized", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException) { return false; }
+    }
+
     private Dictionary<string, object> BuildRequestBody(IEnumerable<ChatMessage> chatMessages, ChatOptions? options)
     {
-        var instructions = new List<string>();
         var inputItems = new List<object>();
-
+        var initialInstructions = new List<string>();
         foreach (var msg in chatMessages)
         {
-            if (msg.Role == ChatRole.System)
+            if (msg.Role == ChatRole.System && InitialInstructionsRequired.ContainsKey(CacheCapabilityKey))
             {
-                instructions.Add(msg.Text ?? string.Empty);
+                initialInstructions.Add(msg.Text ?? "");
                 continue;
             }
-
-            var functionCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
-            if (functionCalls.Count > 0)
+            var protocol = msg.Contents.OfType<ChatProtocolContent>().LastOrDefault()?.Snapshot();
+            if (protocol?.Transport == ProviderChatProtocol.Responses
+                && protocol.ReasoningFields.TryGetValue("responses.reasoning", out var reasoning))
+                inputItems.AddRange(reasoning.EnumerateArray().Select(item => (object)item.Clone()));
+            var calls = msg.Contents.OfType<FunctionCallContent>().ToList();
+            var results = msg.Contents.OfType<FunctionResultContent>().ToList();
+            if (calls.Count > 0)
             {
-                var textParts = msg.Contents.OfType<TextContent>()
-                    .Where(tc => tc.Text is { Length: > 0 })
-                    .ToList();
-                if (textParts.Count > 0)
+                if (!string.IsNullOrEmpty(msg.Text)) inputItems.Add(new { role = "assistant", content = new[] { new { type = "output_text", text = msg.Text } } });
+                foreach (var call in calls)
+                    inputItems.Add(new { type = "function_call", call_id = call.CallId, name = call.Name,
+                        arguments = JsonSerializer.Serialize(call.Arguments ?? new Dictionary<string, object?>()) });
+                continue;
+            }
+            if (results.Count > 0)
+            {
+                foreach (var result in results)
                 {
-                    var combinedText = string.Join("", textParts.Select(tc => tc.Text));
-                    inputItems.Add(new Dictionary<string, object>
-                    {
-                        ["role"] = "assistant",
-                        ["content"] = new[] { new { type = "output_text", text = combinedText } }
-                    });
-                }
-
-                foreach (var fc in functionCalls)
-                {
-                    inputItems.Add(new Dictionary<string, object>
-                    {
-                        ["type"] = "function_call",
-                        ["call_id"] = fc.CallId ?? "",
-                        ["name"] = fc.Name,
-                        ["arguments"] = fc.Arguments is not null
-                            ? JsonSerializer.Serialize(fc.Arguments)
-                            : "{}"
-                    });
+                    var content = new Dictionary<string, object> { ["type"] = "input_text", ["text"] = result.Result?.ToString() ?? "" };
+                    if (ExplicitCache && ChatRequestLayout.IsBoundary(msg) && result == results[^1])
+                        content["prompt_cache_breakpoint"] = new { mode = "explicit" };
+                    inputItems.Add(new { type = "function_call_output", call_id = result.CallId, output = ExplicitCache ? (object)new[] { content } : result.Result?.ToString() ?? "" });
                 }
                 continue;
             }
-
-            var functionResults = msg.Contents.OfType<FunctionResultContent>().ToList();
-            if (functionResults.Count > 0)
+            if (msg.Role == ChatRole.System || msg.Role == ChatRole.User)
             {
-                foreach (var fr in functionResults)
-                {
-                    inputItems.Add(new Dictionary<string, object>
-                    {
-                        ["type"] = "function_call_output",
-                        ["call_id"] = fr.CallId ?? "",
-                        ["output"] = fr.Result?.ToString() ?? ""
-                    });
-                }
-                continue;
-            }
-
-            var text = msg.Text ?? string.Empty;
-            if (msg.Role == ChatRole.User)
-            {
-                inputItems.Add(new Dictionary<string, object>
-                {
-                    ["role"] = "user",
-                    ["content"] = BuildUserContent(msg)
-                });
+                var content = BuildUserContent(msg).ToList();
+                if (ExplicitCache && ChatRequestLayout.IsBoundary(msg) && content.LastOrDefault() is Dictionary<string, object> last)
+                    last["prompt_cache_breakpoint"] = new { mode = "explicit" };
+                inputItems.Add(new { role = msg.Role == ChatRole.System ? "developer" : "user", content });
             }
             else if (msg.Role == ChatRole.Assistant)
-            {
-                inputItems.Add(new Dictionary<string, object>
-                {
-                    ["role"] = "assistant",
-                    ["content"] = new[] { new { type = "output_text", text } }
-                });
-            }
+                inputItems.Add(new { role = "assistant", content = new[] { new { type = "output_text", text = msg.Text ?? "" } } });
         }
-
         var body = new Dictionary<string, object>
         {
-            ["model"] = _model,
-            ["stream"] = true,
-            ["store"] = false,
+            ["model"] = _model, ["stream"] = true, ["store"] = false,
             ["input"] = inputItems,
-            ["instructions"] = instructions.Count > 0
-                ? string.Join("\n\n", instructions)
-                : "You are a helpful assistant."
+            ["instructions"] = initialInstructions.Count > 0 ? string.Join("\n\n", initialInstructions)
+                : "You are Lorekeeper's assistant. Follow the supplied application instructions.",
+            ["include"] = new[] { "reasoning.encrypted_content" },
         };
+        if (ExplicitCache && chatMessages.Any(ChatRequestLayout.IsBoundary))
+            body["prompt_cache_options"] = new { mode = "explicit" };
+        if (_profile.Kind is null && (_provider?.MaxOutputTokens ?? options?.MaxOutputTokens) is > 0 and var limit)
+            body["max_output_tokens"] = limit;
 
         if (_reasoningEffort is not null)
         {
@@ -602,8 +675,8 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
 
         if (options?.Tools is { Count: > 0 } tools)
         {
-            var codexTools = new List<object>();
-            foreach (var tool in tools)
+            var responseTools = new List<object>();
+            foreach (var tool in tools.OrderBy(tool => tool is AIFunction function ? function.Name : string.Empty, StringComparer.Ordinal))
             {
                 if (tool is AIFunction func)
                 {
@@ -631,12 +704,12 @@ public sealed partial class CodexChatClient : IChatClient, IModelWebSearch
                         };
                     }
 
-                    codexTools.Add(toolDef);
+                    responseTools.Add(toolDef);
                 }
             }
-            if (codexTools.Count > 0)
+            if (responseTools.Count > 0)
             {
-                body["tools"] = codexTools;
+                body["tools"] = responseTools;
                 body["tool_choice"] = "auto";
             }
         }

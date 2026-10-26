@@ -25,7 +25,7 @@ public sealed record ContextBuildRequest(
     EditorContentTarget ContentTarget = default);
 
 /// <summary>
-/// Builds the visible Context Feed and the literal system-role message. The request is
+/// Builds typed context for Assistant Memory, inspection, and provider-neutral request layout. The request is
 /// turn-aware so automatic context can be selected against the user's current intent.
 /// </summary>
 public interface IContextBuilder
@@ -90,6 +90,7 @@ public enum ContextItemKind
     WorldWorkingNotes,
     EntityInventory,
     EntityVisualReferences,
+    BookFormatGuidance,
 }
 
 public sealed record ContextTraceEntry(
@@ -126,7 +127,25 @@ public sealed record ContextAssembly(
             .Concat(OmittedItems ?? [])
             .ToList();
 
-    /// <summary>The literal single system message sent to the provider.</summary>
+    public ChatPrompt ToPrompt(SystemPromptAgentRole role)
+    {
+        var enabled = Items.Where(item => item.IsEnabled).ToList();
+        string Render(PromptLifetime lifetime) => string.Join("\n\n", enabled
+            .Where(item => LifetimeFor(item.Kind, role) == lifetime)
+            .Select(item => $"## {item.Label}\n{item.Body}"));
+        return new(Render(PromptLifetime.StableApplication), Render(PromptLifetime.StableProject), Render(PromptLifetime.TurnEphemeral));
+    }
+
+    public static PromptLifetime LifetimeFor(ContextItemKind kind, SystemPromptAgentRole role) => kind switch
+    {
+        ContextItemKind.SystemInstructions or ContextItemKind.AssistantWorkflow => PromptLifetime.StableApplication,
+        ContextItemKind.ProjectGuidance => PromptLifetime.StableProject,
+        ContextItemKind.BookBrief or ContextItemKind.BookFormatGuidance when role is not (SystemPromptAgentRole.Outline or SystemPromptAgentRole.Images) => PromptLifetime.StableProject,
+        ContextItemKind.WorldBrief when role != SystemPromptAgentRole.World => PromptLifetime.StableProject,
+        _ => PromptLifetime.TurnEphemeral,
+    };
+
+    /// <summary>Complete text projection for inspection and immutable contest capture.</summary>
     public string Assemble()
     {
         var builder = new System.Text.StringBuilder();

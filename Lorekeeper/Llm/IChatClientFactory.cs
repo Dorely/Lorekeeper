@@ -6,6 +6,7 @@ namespace Lorekeeper.Llm;
 public interface IChatClientFactory
 {
     Task<IChatClient> CreateChatClientAsync(int providerId, CancellationToken cancellationToken = default);
+    Task<IChatClient> CreateChatClientAsync(LlmProvider provider, CancellationToken cancellationToken = default);
 
     /// <summary>Sends a short request to verify the provider/model and configured reasoning effort.</summary>
     Task TestModelAsync(int providerId, CancellationToken cancellationToken = default);

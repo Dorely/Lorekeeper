@@ -226,7 +226,12 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         Guid projectId,
         Guid? selectedEditionId,
         PublishAssistantWorkspaceContext? workspaceContext = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        (await BuildRequestPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken)).Text;
+
+    private async Task<ChatPrompt> BuildRequestPromptAsync(
+        Guid projectId, Guid? selectedEditionId, PublishAssistantWorkspaceContext? workspaceContext,
+        CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var projects = databaseOperation.Repositories.Projects;
@@ -241,8 +246,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 project,
                 Purpose: ContextBuildPurpose.Publish,
                 OperatingRules: WorkflowInstructions
-                    + "\n\n" + selection
-                    + "\n\n" + visibleWorkspace
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                     + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
                     + "\n\n" + AssistantWorkflowInstructions.PublicationContentCraft
@@ -252,7 +255,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     + "\n\n" + AssistantWorkflowInstructions.PublicationCompositionDesign
                     + "\n\n" + AssistantWorkflowInstructions.PublicationDesign),
             cancellationToken);
-        return assembly.Assemble();
+        return assembly.ToPrompt(SystemPromptAgentRole.Publish).WithTurnContext(selection + "\n\n" + visibleWorkspace);
     }
 
     private async Task<string> DescribeVisibleWorkspaceAsync(
@@ -393,15 +396,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         IChatClient? chat = null;
         IList<AITool>? aiTools = null;
         PublishAssistantContext? assistantContext = null;
-        string? systemPrompt = null;
+        ChatPrompt requestPrompt = new("", "", "");
         Exception? setupException = null;
         var setupCancelled = false;
         try
         {
-            chat = await clients.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
+            chat = await clients.CreateChatClientAsync(persistedProvider, cancellationToken);
             assistantContext = new PublishAssistantContext(projectId, conversation.Id, selectedEditionId, workspaceContext, visionReady, cancellationToken);
             aiTools = await tools.BuildAsync(assistantContext, cancellationToken);
-            systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
+            requestPrompt = await BuildRequestPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
         }
         catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
         {
@@ -433,7 +436,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var readyChat = chat!;
         var readyTools = aiTools!;
 
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt!) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         var persistedMessages = await turnEngine.ReadAsync(
             repositories => repositories.PublishConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
@@ -454,6 +457,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 messages.Add(replay);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "Publish");
         var chatOptions = new ChatOptions { Tools = readyTools, ToolMode = ChatToolMode.Auto };
         var priorActor = actorContext.Actor;
         actorContext.Actor = "assistant";

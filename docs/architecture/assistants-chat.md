@@ -187,18 +187,42 @@ estimate display text until complete protocol is available.
 
 ### Prompts, context, and tool boundaries
 
-`SystemPromptComposer` owns the single system-role prompt shape. It combines the
-surface charter and code-owned workflow/tool rules with dynamic guidance,
-protected Project Guidance and Book Brief, the direct-reference manifest, and
-the feature's current working context. Dynamic format guidance follows the Book
-Brief kind; for a picture book, Editor treats each story page or facing spread
-as a Designed Page by default and uses a flowing Figure only on request. Outline, Voice, World, Images, and
-Publish each have a dedicated professional charter; Editor, Contest Candidate,
-and Revision Worker share the editorial charter. User-owned direction remains distinguishable
-from code-owned rules and must not be persisted as seeded guidance. The shared
-workflow instructions enforce active-canon precedence, read-only foreign
-references, compact paging and owning-service mutations, durable work logs, and honest
-verification.
+SystemPromptComposer owns typed application and project sections. It separates
+book-format guidance from active-page guidance. ContextAssembly.ToPrompt
+classifies enabled sections as stable application instructions, reusable project
+direction, or a fresh turn workspace; Assemble is a complete inspection/contest
+projection, not a wire system message. Project Guidance is reusable on all six
+surfaces. Book Brief and its format guidance are fresh on Outline and Images and
+reusable elsewhere; World Brief is fresh on World and reusable elsewhere. Every
+section is rebuilt each turn, including reusable direction. Editing a prefix
+brief legitimately invalidates the following cached conversation.
+
+ChatRequestLayout places application instructions and reusable direction before
+canonical history/current user text, then adds fresh manuscript, references,
+retrieval, review, capabilities, target/selection state, image logs, and pixels.
+Initial visuals and current attachments never precede canonical history. Images'
+regenerated image log retains originating turn IDs in the fresh workspace instead
+of modifying historical user text. Only actual user rows are canonical user cache
+endpoints: foreign-model assistant prose quoted into a user role is not one.
+Successful later mutations supersede the turn-start snapshot. Operating rules no
+longer embed Publish's selected release/visible surface or Editor's changing
+retrieval/review capability state. Assistant Memory and token previews still
+include every enabled section and keep user direction distinguishable from app
+rules. Context snapshot traces and immutable contest captures remain intact.
+
+The shared image-payload client recomputes semantic cache endpoints on a copied
+request after each tool batch/trim: application instructions, previous and current
+canonical users, and the current workspace endpoint (at most four). Active-turn
+context can be cached within that turn but is discarded on the next user turn.
+Provider adapters own wire markers, capability fallback, and usage normalization
+(see the providers chapter). Compaction still counts the complete input, never
+subtracts cache reads from the input budget, and retains its existing result
+pairing and audit ownership. Native protocol blocks are counted without duplicating
+their displayed prose or tool arguments. Native signed/opaque content is retained
+for active tool follow-ups; cross-turn replay carries native prose without those
+context-bound blocks. Generic compatible reasoning keeps its existing provenance
+checks. Revision workers use the shared layout; contests keep their immutable
+captured inputs and ingest keeps its separate composition.
 
 The six user-facing roles also receive
 `AssistantWorkflowInstructions.ChatReplyFormatting`, which encourages Markdown
@@ -254,7 +278,7 @@ operations may accompany an assigned prose revision, but Figure-only work does
 not count toward the three-prose-chapter threshold.
 
 `AssistantWorkflowInstructions.EditorContinuityMemory`, appended by
-`EditorChatFor` to both vector-enabled and vector-disabled Editor prompts,
+`EditorChatWorkflow` regardless of semantic retrieval availability,
 keeps Editor continuity memory narrower than ordinary drafting. Continuity-
 sensitive drafting or revision requires focused project searches and relevant
 current-record reads for grounding; search does not itself authorize
@@ -701,7 +725,7 @@ assistant evidence link never silently creates a manuscript citation.
 |---|---|
 | [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, provenance-bound replay, compaction, message-store boundary, and image attachments. |
 | [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, inert Markdown rendering, tool chips, and composer behavior. |
-| [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
+| [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | Typed prompt composition, semantic lifetimes (`ChatPrompt.cs`), and code-owned cross-surface workflow/tool rules. |
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
 | [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Git-backed Review page, contests, revision jobs/workers, and active-turn updates. |
 | [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Voice service, sample/profile tool catalog, runner, and writing-sample application boundary. |

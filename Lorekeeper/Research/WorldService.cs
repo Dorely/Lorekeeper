@@ -297,13 +297,13 @@ public sealed class WorldService(
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
-        string systemPrompt = string.Empty;
+        ChatPrompt requestPrompt = new("", "", "");
         ContextAssembly? initialAssembly = null;
         WorldToolContext? toolContext = null;
         string? setupError = null;
         try
         {
-            chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(chatProvider, cancellationToken);
             initialAssembly = await contextBuilder.BuildAsync(
                 new ContextBuildRequest(
                     project,
@@ -312,7 +312,7 @@ public sealed class WorldService(
                     OperatingRules: WorldWorkflowInstructions
                         + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
                 cancellationToken);
-            systemPrompt = initialAssembly.Assemble();
+            requestPrompt = initialAssembly.ToPrompt(SystemPromptAgentRole.World);
             // World tools always mutate the live project. Review derives pending work from
             // the version-history baseline rather than a per-turn staging overlay.
             toolContext = new WorldToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady,
@@ -341,7 +341,7 @@ public sealed class WorldService(
             repositories => repositories.WorldConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         if (initialAssembly is not null && toolContext is not null)
         {
             var initialVisuals = await entityVisualContext.BuildVisionMessageAsync(
@@ -360,6 +360,7 @@ public sealed class WorldService(
             if (replay is not null) messages.Add(replay);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "World");
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {

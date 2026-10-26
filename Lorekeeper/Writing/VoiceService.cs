@@ -190,7 +190,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         VoiceContext? toolContext = null;
-        var systemPrompt = string.Empty;
+        ChatPrompt requestPrompt = new("", "", "");
         string? setupError = null;
         try
         {
@@ -199,10 +199,10 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            systemPrompt = (await contextBuilder.BuildAsync(new ContextBuildRequest(
+            requestPrompt = (await contextBuilder.BuildAsync(new ContextBuildRequest(
                 project, UserMessage: userText, Purpose: ContextBuildPurpose.Voice,
-                OperatingRules: VoiceWorkflowInstructions), cancellationToken)).Assemble();
-            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
+                OperatingRules: VoiceWorkflowInstructions), cancellationToken)).ToPrompt(SystemPromptAgentRole.Voice);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider, cancellationToken);
             toolContext = new VoiceContext(project.Id, currentSampleTitle, currentSampleBody, visionReady);
             aiTools = tools.Build(toolContext);
         }
@@ -229,7 +229,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             repositories => repositories.VoiceConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         foreach (var persistedMessage in history)
         {
             if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
@@ -241,6 +241,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             if (replay is not null) messages.Add(replay);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "Voice");
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {

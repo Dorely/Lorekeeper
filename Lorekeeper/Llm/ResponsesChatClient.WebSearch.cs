@@ -10,7 +10,7 @@ namespace Lorekeeper.Llm;
 /// Results are only the pages the hosted search reported as sources or that the reply cited,
 /// so every returned URL comes from the provider's search rather than from model text.
 /// </summary>
-public sealed partial class CodexChatClient
+public sealed partial class ResponsesChatClient
 {
     private const int MaxSnippetChars = 300;
 
@@ -126,7 +126,8 @@ public sealed partial class CodexChatClient
         }
 
         _logger.LogDebug(
-            "Codex web search completed. SearchCalls={SearchCalls}, Citations={Citations}, Sources={Sources}, Results={Results}",
+            "{Transport} web search completed. SearchCalls={SearchCalls}, Citations={Citations}, Sources={Sources}, Results={Results}",
+            _profile.Label,
             searchCalls, cited.Count, sources.Count, results.Count);
         return new WebSearchResponse(DisplayName, request.Query, results, JsonSerializer.Serialize(new { queries, searchCalls }));
     }
@@ -164,7 +165,7 @@ public sealed partial class CodexChatClient
                     throw await MapAsync(_profile.MapStreamError(
                         code,
                         param,
-                        ExtractCodexErrorMessage(evt, $"{_profile.Label} web search failed.")));
+                        ExtractResponseErrorMessage(evt, $"{_profile.Label} web search failed.")));
             }
         }
 

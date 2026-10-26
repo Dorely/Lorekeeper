@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -173,6 +174,7 @@ public sealed class ChatTurnEngine(
         ChatOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var elapsed = Stopwatch.StartNew();
         var textBuilder = new StringBuilder();
         var reasoningBuilder = new StringBuilder();
         var pendingCalls = new List<ChatPendingToolCall>();
@@ -290,6 +292,11 @@ public sealed class ChatTurnEngine(
         }
 
         var metadata = response.Metadata;
+        logger.LogDebug("Chat round {ConversationSurface} model={Model} transport={Transport} cache={CacheMode} input={Input} output={Output} reasoning={Reasoning} cacheRead={CacheRead} cacheWrite={CacheWrite} elapsedMs={ElapsedMs}",
+            messages.Select(ChatRequestLayout.RequestIdentity).FirstOrDefault(identity => identity is not null),
+            metadata.ModelId, metadata.Transport, metadata.CacheMode ?? "provider-default", metadata.Usage?.InputTokenCount,
+            metadata.Usage?.OutputTokenCount, metadata.Usage?.ReasoningTokenCount, metadata.Usage?.CachedInputTokenCount,
+            metadata.Usage?.AdditionalCounts?.GetValueOrDefault(NativeChatUsage.CacheWriteInputTokens), elapsed.Elapsed.TotalMilliseconds);
         failure ??= metadata.FailureMessage;
         metadata.Incomplete = cancelled || failure is not null || (textBuilder.Length == 0 && pendingCalls.Count == 0);
         if (cancelled)

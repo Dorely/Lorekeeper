@@ -43,7 +43,7 @@ internal sealed class OpenAIChatProtocolClient(IChatClient innerClient, LlmProvi
                 {
                     var snapshot = metadata.Snapshot();
                     snapshot.FinishReason = response.FinishReason?.ToString();
-                    snapshot.Usage = response.Usage;
+                    snapshot.Usage ??= response.Usage;
                     return snapshot;
                 }));
             }
@@ -276,11 +276,25 @@ internal sealed class OpenAIChatProtocolClient(IChatClient innerClient, LlmProvi
         private readonly Dictionary<string, JsonNode?> _fields = [];
         private readonly Dictionary<string, JsonObject> _details = [];
         private readonly Dictionary<string, StringBuilder> _textFields = [];
+        private UsageDetails? _usage;
         private string? _displayField;
         private bool _hasStreamedDetails;
 
         public string Observe(JsonElement root, bool streamed)
         {
+            if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+            {
+                _usage = new UsageDetails { InputTokenCount = NativeChatUsage.Count(usage, "prompt_tokens"),
+                    OutputTokenCount = NativeChatUsage.Count(usage, "completion_tokens"), TotalTokenCount = NativeChatUsage.Count(usage, "total_tokens") };
+                if (usage.TryGetProperty("prompt_tokens_details", out var input))
+                {
+                    _usage.CachedInputTokenCount = NativeChatUsage.Count(input, "cached_tokens");
+                    if (NativeChatUsage.Count(input, "cache_write_tokens") is { } writes)
+                        (_usage.AdditionalCounts ??= [])[NativeChatUsage.CacheWriteInputTokens] = writes;
+                }
+                if (usage.TryGetProperty("completion_tokens_details", out var output))
+                    _usage.ReasoningTokenCount = NativeChatUsage.Count(output, "reasoning_tokens");
+            }
             if (!root.TryGetProperty("choices", out var choices)
                 || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0) return string.Empty;
             var choice = choices[0];
@@ -344,7 +358,8 @@ internal sealed class OpenAIChatProtocolClient(IChatClient innerClient, LlmProvi
 
         public ChatResponseMetadata Snapshot()
         {
-            var metadata = ChatResponseMetadata.ForProvider(provider);
+            var metadata = ChatResponseMetadata.ForProvider(provider, ProviderChatProtocol.ChatCompletions);
+            metadata.Usage = _usage;
             foreach (var (name, value) in _fields)
                 metadata.ReasoningFields[name] = JsonSerializer.SerializeToElement(value);
             foreach (var (name, value) in _textFields)

@@ -53,6 +53,12 @@ public class ChatClientFactory(
         return CreateChatClient(provider, access);
     }
 
+    public async Task<IChatClient> CreateChatClientAsync(LlmProvider provider, CancellationToken cancellationToken = default)
+    {
+        var access = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
+        return CreateChatClient(provider, access);
+    }
+
     public async Task TestModelAsync(int providerId, CancellationToken cancellationToken = default)
     {
         var chatClient = await CreateChatClientAsync(providerId, cancellationToken);
@@ -76,19 +82,20 @@ public class ChatClientFactory(
             var httpClient = httpClientFactory.CreateClient();
             var timeoutSeconds = Math.Clamp(agentOptions.Value.CodexRequestTimeoutSeconds, 1, 3600);
             httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            return new ModelImagePayloadChatClient(new CodexChatClient(
+            return new ModelImagePayloadChatClient(new ResponsesChatClient(
                 httpClient,
                 access.ApiKey,
                 access.ExternalAccountId,
                 provider.ModelId,
                 provider.EffectiveReasoningEffort,
-                loggerFactory.CreateLogger<CodexChatClient>(),
+                loggerFactory.CreateLogger<ResponsesChatClient>(),
                 ResponsesTransportProfile.For(kind),
                 kind == OpenAiAccountKind.ChatGptPlan
                     ? cancellationToken => accountService.MarkPlanIneligibleAsync(
                         provider.OpenAiAccountId!.Value,
                         cancellationToken)
-                    : null));
+                    : null,
+                provider));
         }
 
         if (access.EffectiveAuthType != AuthType.None && access.ApiKey is null)
@@ -96,6 +103,23 @@ public class ChatClientFactory(
 
         var chatTimeoutSeconds = Math.Clamp(agentOptions.Value.ChatRequestTimeoutSeconds, 60, 3600);
         var requestTimeout = TimeSpan.FromSeconds(chatTimeoutSeconds);
+
+        var protocol = ProviderChatProtocol.For(provider);
+        if (protocol == ProviderChatProtocol.Responses)
+        {
+            var http = httpClientFactory.CreateClient();
+            http.Timeout = requestTimeout;
+            return new ModelImagePayloadChatClient(new ResponsesChatClient(http, access.ApiKey!, "", provider.ModelId,
+                provider.EffectiveReasoningEffort, loggerFactory.CreateLogger<ResponsesChatClient>(),
+                ResponsesTransportProfile.ApiKey, provider: provider));
+        }
+        if (protocol == ProviderChatProtocol.Anthropic)
+        {
+            var http = httpClientFactory.CreateClient();
+            http.Timeout = requestTimeout;
+            return new ModelImagePayloadChatClient(new AnthropicChatClient(http, access.ApiKey!, provider,
+                loggerFactory.CreateLogger<AnthropicChatClient>()));
+        }
 
         var options = new OpenAIClientOptions
         {
@@ -148,6 +172,9 @@ public class ChatClientFactory(
             // Exercise the configured client, including explicit user overrides.
             // Unset generation settings remain provider-owned defaults.
             var response = await chatClient.GetResponseAsync("Reply with exactly: ok", cancellationToken: cancellationToken);
+            if (response.Messages.SelectMany(message => message.Contents).OfType<ChatProtocolContent>()
+                .Select(protocol => protocol.Snapshot().FailureMessage).FirstOrDefault(message => message is not null) is { } failure)
+                throw new InvalidOperationException(failure);
             if (response.FinishReason == Microsoft.Extensions.AI.ChatFinishReason.Length)
                 throw new InvalidOperationException(ChatResponseMetadata.OutputLimitMessage);
             if (string.IsNullOrWhiteSpace(response.Text))

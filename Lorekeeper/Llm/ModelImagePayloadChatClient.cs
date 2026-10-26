@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using Lorekeeper.ChatTurns;
 using Microsoft.Extensions.AI;
 using SkiaSharp;
 
@@ -16,13 +17,13 @@ internal sealed class ModelImagePayloadChatClient(IChatClient innerClient) : Del
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        base.GetResponseAsync(ModelImagePayload.Compact(messages), options, cancellationToken);
+        base.GetResponseAsync(ModelImagePayload.Compact(ChatRequestLayout.Prepare(messages)), options, cancellationToken);
 
     public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        base.GetStreamingResponseAsync(ModelImagePayload.Compact(messages), options, cancellationToken);
+        base.GetStreamingResponseAsync(ModelImagePayload.Compact(ChatRequestLayout.Prepare(messages)), options, cancellationToken);
 }
 
 public static class ModelImagePayload

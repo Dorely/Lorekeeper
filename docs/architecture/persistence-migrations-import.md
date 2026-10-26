@@ -39,8 +39,13 @@ The forward `PreserveChatResponseProtocol` migration adds nullable
 `ResponseMetadataJson` to all six conversational message families, revision-worker
 messages, and contest candidates. Version 1 stores reasoning protocol separately
 from display text, plus connection ID, model ID, a SHA-256 endpoint fingerprint,
-finish reason, incomplete status, and usage. It stores no credentials or raw
-endpoint URL. Existing rows remain null; legacy/foreign-model prose is quoted
+finish reason, incomplete status, and usage. The same version-1 JSON envelope now
+also carries transport provenance, effective cache mode, cached-input count, and
+named cache-write counts without an EF schema change. An absent transport means
+the historical Chat Completions protocol; switching to a native transport never
+replays those incompatible opaque blocks. Exact native response blocks are kept
+for active-turn tool follow-ups and durable audit, not cross-turn tool replay.
+It stores no credentials or raw endpoint URL. Pre-migration rows remain null; legacy/foreign-model prose is quoted
 history, and protocol is restored only to the originating connection/model.
 Ingest rounds retain equivalent response data and partial prose in existing job
 event payloads. These operational records remain outside canonical version history

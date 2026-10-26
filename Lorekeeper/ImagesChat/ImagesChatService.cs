@@ -322,7 +322,7 @@ public sealed class ImagesChatService(
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         ImagesChatToolContext toolContext = null!;
-        string systemPrompt = string.Empty;
+        ChatPrompt requestPrompt = new("", "", "");
         ContextAssembly? initialAssembly = null;
         string? setupError = null;
         try
@@ -339,8 +339,8 @@ public sealed class ImagesChatService(
                     Purpose: ContextBuildPurpose.Images,
                     OperatingRules: ImagesWorkflowInstructions + "\n\n" + AssistantWorkflowInstructions.VisualCreationWorkflow),
                 cancellationToken);
-            systemPrompt = initialAssembly.Assemble();
-            chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
+            requestPrompt = initialAssembly.ToPrompt(SystemPromptAgentRole.Images);
+            chat = await chatClientFactory.CreateChatClientAsync(chatProvider, cancellationToken);
             toolContext = new ImagesChatToolContext(
                 projectId,
                 conversation.Id,
@@ -373,7 +373,7 @@ public sealed class ImagesChatService(
             repositories => repositories.ProjectImageConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         if (initialAssembly is not null)
         {
             var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
@@ -406,10 +406,11 @@ public sealed class ImagesChatService(
             if (modelMessage is null)
                 continue;
             if (historyImages.LogByTurn.TryGetValue(persistedMessage.Id, out var turnLog))
-                modelMessage.Contents.Add(new TextContent(turnLog));
+                requestPrompt = requestPrompt.WithTurnContext($"## Image history for user message {persistedMessage.Id:N}\n{turnLog}");
             messages.Add(modelMessage);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "Images");
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {

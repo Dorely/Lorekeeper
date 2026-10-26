@@ -27,6 +27,7 @@ public enum SystemPromptSectionKind
     BookBrief,
     WorldBrief,
     WorkingContext,
+    BookFormatGuidance,
 }
 
 public sealed record SystemPromptSourceSection(
@@ -51,9 +52,7 @@ public sealed record SystemPromptComposeRequest(
     IReadOnlyCollection<PublicationEditionFormat>? PublicationFormats = null,
     string WorldBrief = "");
 
-public sealed record SystemPromptComposition(
-    string Prompt,
-    IReadOnlyList<SystemPromptSection> Sections);
+public sealed record SystemPromptComposition(IReadOnlyList<SystemPromptSection> Sections);
 
 public interface ISystemPromptComposer
 {
@@ -96,6 +95,9 @@ public sealed class SystemPromptComposer(
                 AssistantWorkflowInstructions.ProjectReferenceContinuity),
         };
 
+        sections.Add(new("fresh-turn-state", SystemPromptSectionKind.OperatingRules,
+            "Fresh Authoritative Workspace", AssistantWorkflowInstructions.FreshTurnState));
+
         if (RendersChatReplies(request.AgentRole))
         {
             sections.Add(new(
@@ -108,10 +110,18 @@ public sealed class SystemPromptComposer(
         sections.AddRange(
         [
             new(
+                "book-format-guidance",
+                SystemPromptSectionKind.BookFormatGuidance,
+                "Book Format Guidance",
+                formatGuidance.GetConcise(request.BookBrief,
+                    request.AgentRole == SystemPromptAgentRole.Outline
+                        ? BookFormatGuidanceScope.StructureOnly : BookFormatGuidanceScope.StructureAndPublication,
+                    request.PublicationFormats)),
+            new(
                 "dynamic-guidance",
                 SystemPromptSectionKind.DynamicGuidance,
                 "Book and Active-Page Guidance",
-                DynamicGuidanceFor(request.BookBrief, request.ActiveChapter, request.AgentRole, request.PublicationFormats, formatGuidance)),
+                ActivePageGuidanceFor(request.ActiveChapter)),
             new(
                 "project-guidance",
                 SystemPromptSectionKind.ProjectGuidance,
@@ -145,19 +155,7 @@ public sealed class SystemPromptComposer(
                 source.Body.Trim()));
         }
 
-        return new SystemPromptComposition(Assemble(sections), sections);
-    }
-
-    private static string Assemble(IEnumerable<SystemPromptSection> sections)
-    {
-        var builder = new StringBuilder();
-        foreach (var section in sections)
-        {
-            if (builder.Length > 0)
-                builder.Append("\n\n");
-            builder.Append("## ").Append(section.Label).Append('\n').Append(section.Body);
-        }
-        return builder.ToString();
+        return new SystemPromptComposition(sections);
     }
 
     // Contest candidates return manuscript prose and revision workers report to the Editor, not the chat panel.
@@ -280,18 +278,9 @@ public sealed class SystemPromptComposer(
             """;
     }
 
-    private static string DynamicGuidanceFor(
-        BookBrief brief,
-        Chapter? chapter,
-        SystemPromptAgentRole agentRole,
-        IReadOnlyCollection<PublicationEditionFormat>? formats,
-        IBookFormatGuidanceService formatGuidance)
+    private static string ActivePageGuidanceFor(Chapter? chapter)
     {
         var builder = new StringBuilder();
-        var guidanceScope = agentRole == SystemPromptAgentRole.Outline
-            ? BookFormatGuidanceScope.StructureOnly
-            : BookFormatGuidanceScope.StructureAndPublication;
-        builder.Append(formatGuidance.GetConcise(brief, guidanceScope, formats));
 
         if (chapter is null)
         {

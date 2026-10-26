@@ -313,7 +313,7 @@ Entity conventions:
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
         OutlineCollaborationContext? toolContext = null;
-        var systemPrompt = string.Empty;
+        ChatPrompt requestPrompt = new("", "", "");
         string? setupError = null;
         try
         {
@@ -322,8 +322,8 @@ Entity conventions:
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            systemPrompt = await ComposeSystemPromptAsync(project, cancellationToken);
-            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
+            requestPrompt = await ComposeRequestPromptAsync(project, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider, cancellationToken);
 
             // All outline tool mutations are applied immediately to the live project. Review
             // derives pending work from the version-history baseline rather than a staging overlay.
@@ -352,7 +352,7 @@ Entity conventions:
             repositories => repositories.OutlineConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, requestPrompt.Text) };
         foreach (var persistedMessage in history)
         {
             if (persistedMessage.Id == userMsg.Id && imageIds.Count > 0)
@@ -364,6 +364,7 @@ Entity conventions:
             if (replay is not null) messages.Add(replay);
         }
 
+        ChatRequestLayout.Initialize(messages, requestPrompt, userText, conversation.Id, "Outline");
         var maxIterations = Math.Max(1, options.Value.MaxToolIterations);
         OutlineMessage? activeAssistant = null;
 
@@ -547,7 +548,10 @@ Entity conventions:
         }
     }
 
-    private async Task<string> ComposeSystemPromptAsync(Project project, CancellationToken cancellationToken)
+    private async Task<string> ComposeSystemPromptAsync(Project project, CancellationToken cancellationToken) =>
+        (await ComposeRequestPromptAsync(project, cancellationToken)).Text;
+
+    private async Task<ChatPrompt> ComposeRequestPromptAsync(Project project, CancellationToken cancellationToken)
     {
         var brief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         var context = await workingContext.BuildAsync(project.Id, cancellationToken);
@@ -556,12 +560,13 @@ Entity conventions:
             brief,
             SystemPromptAgentRole.Outline,
             CollaborationOperatingRules,
-            WorkingContext: context, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content)).Prompt;
+            WorkingContext: context, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content));
         var referenceManifest = ProjectReferenceManifestFormatter.Format(
             await projectReferences.ListReferenceManifestsAsync(project.Id, cancellationToken));
-        return referenceManifest is null
-            ? prompt
-            : prompt + "\n\n## Direct Project Reference Continuity\n" + referenceManifest;
+        var layout = new ContextAssembly(prompt.Sections.Select(ContextBuilder.ToContextItem).ToList())
+            .ToPrompt(SystemPromptAgentRole.Outline);
+        return referenceManifest is null ? layout
+            : layout.WithTurnContext("## Direct Project Reference Continuity\n" + referenceManifest);
     }
 
     // -- mutation flag (drained between yields so the UI can refresh the tree) --
