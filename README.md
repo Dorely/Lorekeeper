@@ -36,10 +36,11 @@ provenance, and a reproducible export recipe.
   embedding model (or any API-key embeddings endpoint).
 - **Image providers:** generate images with your ChatGPT (Codex) account (on its
   own image allowance, at about 1.6 megapixels in the requested aspect), an
-  OpenRouter API key, or an OpenAI Images-compatible endpoint. Pick the default
-  in Settings > Image providers, and switch provider or model per request in
-  the Images workspace, where any library image can also be edited from a
-  written description of the change.
+  OpenRouter API key, or an OpenAI Images-compatible endpoint. In Settings >
+  Image providers, discover models and explicitly save the ones you want, or
+  add them manually. Assistants always use your selected default provider and
+  model. The manual Images workspace can choose among your saved models per
+  request and edit any library image from a written description of the change.
 - **Manuscript to finished book:** one Core Book becomes paperback, hardcover,
   EPUB, and PDF ebook releases, with covers sized to the calculated spine and
   print profiles for Amazon KDP, IngramSpark, Barnes & Noble Press, and Lulu, or
@@ -354,8 +355,10 @@ technical map.
   copy regions: Lorekeeper chooses the native generation request and prepares the
   output asset for that target internally. Very narrow or wide targets use a
   crop-safe generated aspect and still fill their canvas rather than turning into
-   an assistant-managed panel plan. Image jobs use Flare by default, with
-   explicit Sunburst selection for demanding detail, typography, or composition.
+   an assistant-managed panel plan. Assistant image jobs always use the default
+   provider and model selected in Settings > Image providers. Discovery never
+   enables models automatically. Upgrades preserve each provider's current default
+   and manually saved models, removing extra models previously added by discovery.
    Requested model, background (`auto`, `opaque`, or `transparent`), quality,
    output format, and compression are saved with each job; provider-reported
    values remain separate audit data. Transparent output requests an empty

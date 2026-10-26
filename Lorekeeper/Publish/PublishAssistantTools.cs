@@ -374,13 +374,13 @@ public sealed class PublishAssistantTools(
                 name: "validate_publication_designed_page",
                 description: "Validate one publication-section Designed Page against the protected active Core/release target for geometry, semantic coverage, reading order, accessibility, overflow, image readiness, and font readiness."),
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
-                    GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? background = null) =>
+                    GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, background),
                 name: "generate_project_image",
                 description: "Generate one unattached project image and wait for a terminal result. For a bound target, pass the generationTarget returned by read_publication_generation_target; for free-standing work, supply only the intended aspect when it matters. Compose edge-to-edge for the target and expect crop-to-fill placement. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with the focused Cover placement tool in this turn." + imageGuidance),
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? imageModel = null, string? background = null) =>
-                    EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, imageModel, background),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, PublishImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? background = null) =>
+                    EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, background),
                 name: "edit_project_image",
                 description: "Edit one project image and wait for a terminal result. Use the latest accepted source image for one coherent desired result. Pass a bound generationTarget when the edit must fill a specific page, frame, or cover region; describe any intentional framing expansion in the desired result. Lorekeeper selects resolution and prepares the appropriate target asset internally. Inspect the image, then place its returned imageId with Cover unless the user needs the complete uncropped source." + imageGuidance),
             AIFunctionFactory.Create(
@@ -1347,7 +1347,6 @@ public sealed class PublishAssistantTools(
         string? quality,
         string? outputFormat,
         int? outputCompression,
-        string? imageModel,
         string? background)
     {
         if (imageWorkflow is null)
@@ -1366,7 +1365,6 @@ public sealed class PublishAssistantTools(
                 "Publish image",
                 context.TrackImageJob,
                 context.TurnCancellationToken,
-                imageModel: imageModel,
                 background: background);
             return ImageResult(context, result);
         }
@@ -1392,7 +1390,6 @@ public sealed class PublishAssistantTools(
         string? quality,
         string? outputFormat,
         int? outputCompression,
-        string? imageModel,
         string? background)
     {
         if (imageWorkflow is null)
@@ -1412,7 +1409,6 @@ public sealed class PublishAssistantTools(
                 "Publish image edit",
                 context.TrackImageJob,
                 context.TurnCancellationToken,
-                imageModel: imageModel,
                 background: background);
             return ImageResult(context, result);
         }

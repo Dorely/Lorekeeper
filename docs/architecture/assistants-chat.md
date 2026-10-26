@@ -374,12 +374,13 @@ it. Deterministic resize creates a new
 unattached source-linked asset and adds no visual detail; it is never evidence
 of publication-quality enhancement.
 
-Image tools always use the default image provider. Their parameter guidance is
-generated from that provider's models, qualities, and capabilities, or names the
-missing configuration when none is ready. Assistants use the default model for
-ordinary work and name another listed model explicitly for demanding detail,
-exact raster text, or difficult composition; the highest qualities are reserved
-for a concrete unmet need. Layout-target and raster-preflight payloads report the
+Image tools always use the user's selected default image provider and model.
+Their schemas and the shared agent image workflow accept no model or provider
+override. Parameter guidance exposes only the default model's qualities,
+formats, and capabilities, or names the missing configuration and its Settings
+action. Only explicitly saved image models are available; discovery alone never
+enables them. The highest qualities are reserved for a concrete unmet need.
+Layout-target and raster-preflight payloads report the
 resolved model's raster constraints. Requested model, background,
 quality, output format, and compression are captured per job; provider-reported
 values remain separate audit evidence. Transparent output keeps an empty alpha

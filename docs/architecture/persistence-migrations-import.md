@@ -205,6 +205,13 @@ GPT Image models only when a Codex account already holds a token, and points
 every existing image job at it; otherwise no provider is created and image work
 waits for explicit configuration. Its downgrade drops the provider tables and
 the job column.
+The forward `ExplicitImageModelConfiguration` migration removes only non-default
+`Bundled` and `Discovered` image-model rows that the old refresh automatically
+inserted. Each provider's existing default and every manually saved model retain
+their identities and settings. Providers, credentials, authored assets, and image
+job requests/audit fields remain unchanged; soft job model references do not
+cascade. Future discovery is read-only, and explicit Save model is the only
+Settings path that adds a model. Downgrade does not repopulate discovered models.
 The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
 authorization codes, tokens, and sensitive payloads must never be copied into

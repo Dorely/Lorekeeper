@@ -19,7 +19,6 @@ public interface IAgentProjectImageWorkflow
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
         int? defaultMinimumDpi = null,
-        string? imageModel = null,
         string? background = null);
 
     Task<AgentProjectImageResult> EditAsync(
@@ -36,7 +35,6 @@ public interface IAgentProjectImageWorkflow
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
         int? defaultMinimumDpi = null,
-        string? imageModel = null,
         string? background = null);
 
     Task<AgentProjectImageResult?> ReadAsync(
@@ -110,11 +108,10 @@ public sealed class AgentProjectImageWorkflow(
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
         int? defaultMinimumDpi = null,
-        string? imageModel = null,
         string? background = null)
     {
         var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
-        var model = await imageProviders.ResolveAsync(modelId: imageModel, cancellationToken: cancellationToken);
+        var model = await imageProviders.ResolveAsync(cancellationToken: cancellationToken);
         var resolved = ProjectImageModelCatalog.Resolve(model, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileGenerationAsync(
             projectId,
@@ -161,11 +158,10 @@ public sealed class AgentProjectImageWorkflow(
         Action<Guid>? onJobCreated = null,
         CancellationToken cancellationToken = default,
         int? defaultMinimumDpi = null,
-        string? imageModel = null,
         string? background = null)
     {
         var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
-        var model = await imageProviders.ResolveAsync(modelId: imageModel, cancellationToken: cancellationToken);
+        var model = await imageProviders.ResolveAsync(cancellationToken: cancellationToken);
         var resolved = ProjectImageModelCatalog.Resolve(model, quality, outputFormat, outputCompression, background, options.Value, effectiveTarget?.TargetId is not null);
         var compiled = await prompts.CompileEditAsync(
             projectId,

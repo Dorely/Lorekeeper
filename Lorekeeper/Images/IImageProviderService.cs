@@ -37,9 +37,6 @@ public interface IImageProviderService
 
     Task<IReadOnlyList<DiscoveredImageModel>> DiscoverModelsAsync(ImageProvider provider, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds or refreshes the provider's discovered models; manual rows are left alone.</summary>
-    Task<int> RefreshModelsAsync(int providerId, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Resolves the provider and model a request will use. A null provider means
     /// the default provider; a null model means that provider's default model.
@@ -53,7 +50,7 @@ public interface IImageProviderService
     Task<ImageProviderReadiness> GetReadinessAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Assistant tool guidance naming the default provider's models, qualities,
+    /// Assistant tool guidance naming only the default provider's default model, qualities,
     /// and capabilities; describes the missing configuration when none is ready.
     /// </summary>
     Task<string> GetToolGuidanceAsync(CancellationToken cancellationToken = default);

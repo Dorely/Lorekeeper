@@ -132,22 +132,16 @@ public static class ProjectImageModelCatalog
             : throw new ArgumentException("Image background must be Auto, Opaque, or Transparent.", nameof(background));
     }
 
-    /// <summary>Assistant guidance for the given ready models, default first.</summary>
-    public static string BuildToolGuidance(IReadOnlyList<ResolvedImageModel> models)
+    /// <summary>Assistant guidance for the user's selected default model.</summary>
+    public static string BuildToolGuidance(ResolvedImageModel defaultModel)
     {
-        if (models.Count == 0)
-            return " " + ImageProviderNotConfiguredException.DefaultMessage + " Image generation and editing fail until one is configured.";
-
-        var defaultModel = models[0];
-        var providerModels = models.Where(model => model.ProviderId == defaultModel.ProviderId).ToList();
-        var modelList = string.Join(", ", providerModels.Select(model =>
-            $"{model.ModelId} (quality {string.Join("/", model.Capabilities.Qualities)}{(model.IsDefaultModel ? "; default" : string.Empty)})"));
         var capabilities = defaultModel.Capabilities;
         var limits = new List<string>();
         if (!capabilities.Edit) limits.Add("no edits");
         if (!capabilities.TransparentBackground) limits.Add("no transparent backgrounds");
         limits.Add($"at most {capabilities.MaxReferenceImages} reference image(s)");
-        return $" Images use {defaultModel.ProviderLabel}. Optional imageModel selects one of: {modelList}; omit it for {defaultModel.ModelId}."
+        return $" Images always use the user's default model {defaultModel.ModelId} on {defaultModel.ProviderLabel}; model selection is controlled in Settings > Image providers."
+            + $" Quality values: {string.Join(", ", capabilities.Qualities)}. Output formats: {string.Join(", ", capabilities.OutputFormats)}."
             + $" The default model allows {string.Join(", ", limits)}."
             + " Background is auto, opaque, or transparent; transparent requires PNG or WebP, never JPEG. Output compression is 0-100 for JPEG/WebP only; layout-bound output is PNG."
             + " Inspect warningCodes and the complete image before accepting or placing it; an unmet transparency requirement leaves the output unattached.";

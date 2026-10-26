@@ -74,8 +74,8 @@ public sealed class ImageProviderMigrationTests
                 Assert.Null(provider.ApiKey);
                 Assert.Null(provider.EndpointUrl);
 
-                Assert.Equal(6, provider.Models.Count);
-                // The full upgrade also carries the bundled rows to the direct Codex image endpoints.
+                Assert.Single(provider.Models);
+                // The full upgrade keeps the established default and its direct Codex capabilities.
                 Assert.All(provider.Models, model =>
                 {
                     Assert.Equal(ImageProviderModelOrigin.Bundled, model.Origin);
@@ -183,6 +183,84 @@ public sealed class ImageProviderMigrationTests
                 Assert.Equal("openai-account", job.Provider);
                 Assert.Equal("gpt-image-2.5-flare", job.ImageModel);
                 Assert.Equal("A lighthouse at dusk", job.Prompt);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task Upgrade_removes_automatically_added_models_but_preserves_defaults_manual_configuration_and_job_history()
+    {
+        await WithDatabaseAsync(async options =>
+        {
+            int providerId;
+            int defaultModelId;
+            int manualModelId;
+            Guid jobId;
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.GetService<IMigrator>().MigrateAsync("20261023204840_RemoveImageMasks");
+                var provider = new ImageProvider
+                {
+                    Name = "openrouter",
+                    Kind = ImageProviderKind.OpenRouter,
+                    ApiKey = "image-key-fixture",
+                    ConfigurationJson = "{\"fixture\":true}",
+                    IsDefault = true,
+                    Models =
+                    [
+                        LegacyGptImageModel("selected", ImageProviderModelOrigin.Discovered, isDefault: true),
+                        LegacyGptImageModel("manually-saved", ImageProviderModelOrigin.Manual, isDefault: false),
+                        LegacyGptImageModel("auto-discovered", ImageProviderModelOrigin.Discovered, isDefault: false),
+                        LegacyGptImageModel("auto-bundled", ImageProviderModelOrigin.Bundled, isDefault: false),
+                    ],
+                };
+                db.ImageProviders.Add(provider);
+                db.ImageProviders.Add(new ImageProvider
+                {
+                    Name = "no-default",
+                    Kind = ImageProviderKind.OpenAiImagesCompatible,
+                    EndpointUrl = "http://localhost:9999/v1",
+                    Models = [LegacyGptImageModel("saved-without-default", ImageProviderModelOrigin.Manual, isDefault: false)],
+                });
+                jobId = SeedJob(db);
+                await db.SaveChangesAsync();
+                providerId = provider.Id;
+                defaultModelId = provider.Models.Single(model => model.IsDefault).Id;
+                manualModelId = provider.Models.Single(model => model.Origin == ImageProviderModelOrigin.Manual).Id;
+                var job = await db.ProjectImageGenerationJobs.AsTracking().SingleAsync(row => row.Id == jobId);
+                job.ImageProviderId = providerId;
+                job.ImageModel = "auto-discovered";
+                job.RawProviderResponseJson = "{\"audit\":\"preserve\"}";
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                await db.Database.MigrateAsync();
+                await db.Database.MigrateAsync();
+
+                var provider = await db.ImageProviders.AsNoTracking().Include(row => row.Models).SingleAsync(row => row.Id == providerId);
+                Assert.True(provider.IsDefault);
+                Assert.Equal("image-key-fixture", provider.ApiKey);
+                Assert.Equal("{\"fixture\":true}", provider.ConfigurationJson);
+                Assert.Equal(2, provider.Models.Count);
+                var selected = Assert.Single(provider.Models, row => row.IsDefault);
+                Assert.Equal(defaultModelId, selected.Id);
+                Assert.Equal("selected", selected.ModelId);
+                var manual = Assert.Single(provider.Models, row => row.Id == manualModelId);
+                Assert.False(manual.IsDefault);
+                Assert.Equal(GptImageConstraintsJson, manual.RasterConstraintsJson);
+                Assert.True(manual.SupportsStreaming);
+                var noDefault = await db.ImageProviders.AsNoTracking().Include(row => row.Models).SingleAsync(row => row.Name == "no-default");
+                Assert.False(noDefault.IsDefault);
+                Assert.False(Assert.Single(noDefault.Models).IsDefault);
+
+                var job = await db.ProjectImageGenerationJobs.AsNoTracking().SingleAsync(row => row.Id == jobId);
+                Assert.Equal(providerId, job.ImageProviderId);
+                Assert.Equal("auto-discovered", job.ImageModel);
+                Assert.Equal(ProjectImageGenerationJobStatus.Succeeded, job.Status);
+                Assert.Equal("A lighthouse at dusk", job.Prompt);
+                Assert.Equal("{\"audit\":\"preserve\"}", job.RawProviderResponseJson);
             }
         });
     }

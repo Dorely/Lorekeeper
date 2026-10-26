@@ -108,15 +108,6 @@ public sealed partial class ImageProviderService(
         // Jobs keep their soft ImageProviderId so history survives; queued work then fails clearly.
         providers.Remove(provider);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        if (!provider.IsDefault)
-            return;
-
-        var next = (await providers.GetAllAsync(cancellationToken)).FirstOrDefault();
-        if (next is not null)
-        {
-            await providers.SetDefaultAsync(next.Id, cancellationToken);
-            await databaseOperation.SaveChangesAsync(cancellationToken);
-        }
     }
 
     public async Task SetDefaultAsync(int id, CancellationToken cancellationToken = default)
@@ -126,7 +117,7 @@ public sealed partial class ImageProviderService(
         var provider = await providers.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Image provider {id} was not found.");
         if (provider.Models.Count == 0)
-            throw new InvalidOperationException("Add or refresh at least one model before making this the default image provider.");
+            throw new InvalidOperationException("Save at least one model before making this the default image provider.");
 
         await providers.SetDefaultAsync(id, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
@@ -182,15 +173,6 @@ public sealed partial class ImageProviderService(
 
         providers.RemoveModel(model);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        if (!model.IsDefault)
-            return;
-
-        var provider = await providers.GetByIdAsync(model.ImageProviderId, cancellationToken);
-        if (provider?.Models.FirstOrDefault() is { } next)
-        {
-            await providers.SetDefaultModelAsync(provider.Id, next.Id, cancellationToken);
-            await databaseOperation.SaveChangesAsync(cancellationToken);
-        }
     }
 
     public async Task SetDefaultModelAsync(int modelId, CancellationToken cancellationToken = default)
@@ -240,53 +222,6 @@ public sealed partial class ImageProviderService(
         return await factory.Get(provider.Kind).DiscoverModelsAsync(provider, cancellationToken);
     }
 
-    public async Task<int> RefreshModelsAsync(int providerId, CancellationToken cancellationToken = default)
-    {
-        var provider = await GetByIdAsync(providerId, cancellationToken)
-            ?? throw new InvalidOperationException($"Image provider {providerId} was not found.");
-        var discovered = await factory.Get(provider.Kind).DiscoverModelsAsync(provider, cancellationToken);
-
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        var providers = databaseOperation.Repositories.ImageProviders;
-        var stored = await providers.GetByIdAsync(providerId, cancellationToken)
-            ?? throw new InvalidOperationException($"Image provider {providerId} was not found.");
-        var now = DateTime.UtcNow;
-        var nextSortOrder = stored.Models.Count == 0 ? 0 : stored.Models.Max(model => model.SortOrder) + 1;
-        var changed = 0;
-        foreach (var candidate in discovered)
-        {
-            var row = ToModel(candidate);
-            NormalizeAndValidateModel(row);
-            var existing = stored.Models.FirstOrDefault(model => model.ModelId == row.ModelId);
-            if (existing is null)
-            {
-                row.ImageProviderId = stored.Id;
-                row.SortOrder = nextSortOrder++;
-                row.CreatedAt = now;
-                row.UpdatedAt = now;
-                await providers.AddModelAsync(row, cancellationToken);
-                changed++;
-            }
-            else if (existing.Origin != ImageProviderModelOrigin.Manual)
-            {
-                // Listed capabilities replace the stored ones; manual rows stay as the user entered them.
-                row.DisplayName = existing.DisplayName ?? row.DisplayName;
-                CopyModel(row, existing);
-                existing.UpdatedAt = now;
-                changed++;
-            }
-        }
-
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-        var refreshed = (await providers.GetByIdAsync(providerId, cancellationToken))!;
-        if (refreshed.Models.Count > 0 && !refreshed.Models.Any(model => model.IsDefault))
-        {
-            await providers.SetDefaultModelAsync(providerId, refreshed.Models.First().Id, cancellationToken);
-            await databaseOperation.SaveChangesAsync(cancellationToken);
-        }
-        return changed;
-    }
-
     public async Task<ResolvedImageModel> ResolveAsync(int? providerId = null, string? modelId = null, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
@@ -302,13 +237,13 @@ public sealed partial class ImageProviderService(
 
         var requestedModel = string.IsNullOrWhiteSpace(modelId) ? null : modelId.Trim();
         var model = requestedModel is null
-            ? provider.Models.FirstOrDefault(candidate => candidate.IsDefault) ?? provider.Models.FirstOrDefault()
+            ? provider.Models.FirstOrDefault(candidate => candidate.IsDefault)
             : provider.Models.FirstOrDefault(candidate => candidate.ModelId == requestedModel)
                 ?? throw new ArgumentException(
                     $"Image model '{requestedModel}' is not offered by {Label(provider)}. Use one of: {string.Join(", ", provider.Models.Select(candidate => candidate.ModelId))}.",
                     nameof(modelId));
         if (model is null)
-            throw new ImageProviderNotConfiguredException($"{Label(provider)} has no image models. Refresh or add models in Settings > Image providers.");
+            throw new ImageProviderNotConfiguredException($"Choose a default image model for {Label(provider)} in Settings > Image providers.");
         return ResolvedImageModel.From(provider, model);
     }
 
@@ -359,11 +294,7 @@ public sealed partial class ImageProviderService(
         if (readiness.Default is not { } defaultModel)
             return " " + readiness.Message + " Image generation and editing fail until it is fixed.";
 
-        var models = (await ListReadyModelsAsync(cancellationToken))
-            .Where(model => model.ProviderId == defaultModel.ProviderId)
-            .OrderByDescending(model => model.ModelId == defaultModel.ModelId)
-            .ToList();
-        return ProjectImageModelCatalog.BuildToolGuidance(models);
+        return ProjectImageModelCatalog.BuildToolGuidance(defaultModel);
     }
 
     public static ImageProviderModel ToModel(DiscoveredImageModel discovered) => new()
@@ -388,7 +319,7 @@ public sealed partial class ImageProviderService(
     {
         var label = Label(provider);
         if (provider.Models.Count == 0)
-            return (false, $"{label} has no image models. Refresh or add models in Settings > Image providers.");
+            return (false, $"{label} has no saved image models. Discover and save a model, or add one manually, in Settings > Image providers.");
 
         switch (provider.Kind)
         {

@@ -479,7 +479,7 @@ is a security and external-service behavior change, not a UI-only adjustment.
 
 Image connections are configured separately from chat providers, under
 Settings > Image providers. `ImageProvider` rows hold any number of connections
-with exactly one default; each owns `ImageProviderModel` rows carrying the
+with at most one default; each owns explicitly saved `ImageProviderModel` rows carrying the
 model's qualities, output formats, capability flags (generate, edit, reference
 limit, transparency, streaming), and `ImageRasterConstraints`.
 Kinds are the ChatGPT (Codex) account, which borrows that account's OAuth tokens
@@ -490,11 +490,25 @@ provider row and never enter tool payloads, job provenance, or logs.
 Settings offers only kinds whose adapter is registered with
 `IImageProviderClientFactory`.
 
+Discovery is read-only metadata for the Settings picker. Saving a connection,
+testing it, or discovering models never saves model rows. The author selects a
+discovered model and presses Save model, or saves a manual model; the first
+saved model becomes that connection's default. Saved discovery metadata includes
+the complete capabilities and raster constraints, including aspect/tier lists.
+Discovery never modifies saved settings or changes defaults. The forward
+`ExplicitImageModelConfiguration` migration removes non-default bundled and
+discovered rows created by the old automatic refresh, preserving every manual
+row and each provider's established default. Job requests and audit data remain
+intact. Deleting a default provider or model does not select another implicitly;
+Settings offers the explicit default action on the remaining saved choices.
+
 `IImageProviderService.ResolveAsync(providerId?, modelId?)` is the single
 resolution boundary: a null provider means the default, a null model means that
 provider's default model, and readiness is decided from stored state without a
-network call. Pickers list every ready provider's models; assistant tools always
-use the default provider and may name one of its models. Capability errors (an
+network call. Manual pickers list every ready provider's saved models; assistant
+tools have no provider/model selection parameters and the shared agent workflow
+always resolves the selected default provider and model. Tool guidance exposes
+only that model's capabilities, formats, and qualities. Capability errors (an
 edit on a model without edit support, too many references, transparency without
 support) fail before any durable job. A job stamps its
 `ImageProviderId` and never falls back to another provider; a deleted or
@@ -628,7 +642,8 @@ interrupted running jobs failed and resumes queued work after database readiness
 
 Image jobs normalize the requested model, quality, output format/compression,
 and background before dispatch and capture those settings on the durable job.
-The default model is Flare; Sunburst is an explicit option for demanding work.
+Assistant jobs capture the user's selected default provider and model before
+prompt compilation and retain that selection through dispatch and retries.
 Provider-reported model and quality remain separate result provenance. Background
 `transparent` is validated as a requested alpha output and prompt guidance
 requests an empty backdrop unless the brief explicitly requires background elements;

@@ -10,7 +10,7 @@
 
 <PageTitle>Image Providers</PageTitle>
 
-<ConfigurationShell Title="Image providers" Description="Image generation and editing use the default provider unless a request picks another.">
+<ConfigurationShell Title="Image providers" Description="Save the models you want to use. Assistants always use your default provider and model.">
     @if (!string.IsNullOrWhiteSpace(_statusMessage))
     {
         <div class="alert alert-@_statusKind alert-dismissible fade show" role="alert">
@@ -111,7 +111,7 @@
                             <span class="lk-status-pill @LastTestPillClass(provider)" title="@provider.LastTestMessage">@LastTestPillLabel(provider)</span>
                             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleEdit(provider)">@(_editingProviderId == provider.Id ? "Close edit" : "Edit")</button>
                             <button type="button" class="btn btn-sm btn-outline-info" disabled="@(_testingProviderId == provider.Id)" @onclick="() => TestProviderAsync(provider)">@(_testingProviderId == provider.Id ? "Testing…" : "Test")</button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_refreshingProviderId == provider.Id)" @onclick="() => RefreshProviderModelsAsync(provider)">@(_refreshingProviderId == provider.Id ? "Refreshing…" : "Refresh models")</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_discoveringProviderId == provider.Id)" @onclick="() => DiscoverProviderModelsAsync(provider)">@(_discoveringProviderId == provider.Id ? "Discovering…" : "Discover models")</button>
                             @if (!provider.IsDefault)
                             {
                                 <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_defaultingProviderId == provider.Id)" @onclick="() => SetDefaultProviderAsync(provider)">@(_defaultingProviderId == provider.Id ? "Setting…" : "Make default")</button>
@@ -178,6 +178,8 @@
     private string _newPreset = "custom";
     private readonly Dictionary<int, ProviderDraft> _editDrafts = [];
     private readonly Dictionary<int, ModelDraft> _modelForms = [];
+    private readonly Dictionary<int, IReadOnlyList<DiscoveredImageModel>> _discoveredModels = [];
+    private readonly Dictionary<int, string> _selectedDiscoveredModels = [];
     private readonly Dictionary<int, bool> _collapsedProviders = [];
     private int? _editingProviderId;
     private bool _loading = true;
@@ -186,7 +188,7 @@
     private bool _savingNew;
     private int? _savingProviderId;
     private int? _testingProviderId;
-    private int? _refreshingProviderId;
+    private int? _discoveringProviderId;
     private int? _defaultingProviderId;
     private int? _savingModelProviderId;
     private int? _defaultingModelId;
@@ -335,12 +337,12 @@
             var created = await ImageProviderService.CreateAsync(BuildProvider(_newDraft, 0));
             try
             {
-                var refreshed = await ImageProviderService.RefreshModelsAsync(created.Id);
-                SetStatus($"Image provider '{Label(created)}' created and {refreshed} models discovered.", "success");
+                _discoveredModels[created.Id] = await ImageProviderService.DiscoverModelsAsync(created);
+                SetStatus($"Image provider '{Label(created)}' created. Select and save a model below to enable image work.", "success");
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
             {
-                SetStatus($"Image provider '{Label(created)}' was created, but its models could not be refreshed: {ex.Message}", "warning");
+                SetStatus($"Image provider '{Label(created)}' was created. Add a model manually or retry discovery: {ex.Message}", "warning");
             }
 
             _adding = false;
@@ -424,22 +426,52 @@
         }
     }
 
-    private async Task RefreshProviderModelsAsync(ImageProvider provider)
+    private async Task DiscoverProviderModelsAsync(ImageProvider provider)
     {
-        _refreshingProviderId = provider.Id;
+        _discoveringProviderId = provider.Id;
         try
         {
-            var refreshed = await ImageProviderService.RefreshModelsAsync(provider.Id);
-            SetStatus($"Refreshed {refreshed} models.", "success");
-            await ReloadAsync();
+            _discoveredModels[provider.Id] = await ImageProviderService.DiscoverModelsAsync(provider);
+            _selectedDiscoveredModels.Remove(provider.Id);
+            _collapsedProviders[provider.Id] = false;
+            SetStatus("Discovery does not enable models. Select a model below and press Save model.", "success");
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException)
         {
-            SetStatus($"Model refresh failed: {ex.Message}", "danger");
+            SetStatus($"Could not discover models. You can still add one manually: {ex.Message}", "warning");
         }
         finally
         {
-            _refreshingProviderId = null;
+            _discoveringProviderId = null;
+        }
+    }
+
+    private DiscoveredImageModel? SelectedDiscoveredModel(int providerId) =>
+        _selectedDiscoveredModels.TryGetValue(providerId, out var modelId)
+        && _discoveredModels.TryGetValue(providerId, out var models)
+            ? models.FirstOrDefault(model => model.ModelId == modelId)
+            : null;
+
+    private async Task SaveDiscoveredModelAsync(ImageProvider provider)
+    {
+        if (SelectedDiscoveredModel(provider.Id) is not { } discovered)
+            return;
+
+        _savingModelProviderId = provider.Id;
+        try
+        {
+            await ImageProviderService.SaveModelAsync(provider.Id, Lorekeeper.Images.ImageProviderService.ToModel(discovered));
+            _selectedDiscoveredModels.Remove(provider.Id);
+            SetStatus($"Image model '{discovered.DisplayName ?? discovered.ModelId}' saved to {Label(provider)}.", "success");
+            await ReloadAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            SetStatus($"Could not save the model: {ex.Message}", "danger");
+        }
+        finally
+        {
+            _savingModelProviderId = null;
         }
     }
 
@@ -687,7 +719,7 @@
             </div>
             @if (models.Count == 0)
             {
-                <div class="model-grid-empty">No models yet. Use Refresh models or add one.</div>
+                <div class="model-grid-empty">No saved models yet. Discover and save a model, or add one manually.</div>
             }
             @foreach (var model in models)
             {
@@ -743,6 +775,37 @@
             }
         </div>
 
+        @if (_discoveredModels.TryGetValue(provider.Id, out var discovered))
+        {
+            var candidates = discovered.Where(candidate => !models.Any(model => model.ModelId == candidate.ModelId)).ToList();
+            <div class="child-model-form">
+                <div class="child-model-heading">
+                    <strong>Save a discovered model</strong>
+                    <small>Only saved models are available. The first model you save becomes this provider's default.</small>
+                </div>
+                @if (candidates.Count == 0)
+                {
+                    <p class="field-note">No additional models found. You can add a model manually.</p>
+                }
+                else
+                {
+                    <label>
+                        <span>Discovered model</span>
+                        <select class="form-select form-select-sm" value="@(_selectedDiscoveredModels.GetValueOrDefault(provider.Id, string.Empty))" @onchange="e => _selectedDiscoveredModels[provider.Id] = e.Value?.ToString() ?? string.Empty">
+                            <option value="">Select a model to save</option>
+                            @foreach (var candidate in candidates)
+                            {
+                                <option value="@candidate.ModelId">@(candidate.DisplayName ?? candidate.ModelId) · @candidate.ModelId</option>
+                            }
+                        </select>
+                    </label>
+                    <div class="provider-form-actions">
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingModelProviderId == provider.Id || SelectedDiscoveredModel(provider.Id) is null)" @onclick="() => SaveDiscoveredModelAsync(provider)">@(_savingModelProviderId == provider.Id ? "Saving…" : "Save model")</button>
+                    </div>
+                }
+            </div>
+        }
+
         <div class="model-add-toolbar">
             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAddModel(provider.Id)">@(_modelForms.ContainsKey(provider.Id) ? "Cancel add model" : "Add model")</button>
         </div>
@@ -754,7 +817,7 @@
                     <div class="child-model-heading">
                         <span class="lk-section-kicker">Manual model</span>
                         <strong>Add a model</strong>
-                        <small>Manual rows are kept when the provider's model list is refreshed.</small>
+                        <small>Enter an exact model ID and its capabilities, then save it to make it available.</small>
                     </div>
                     <div class="lk-toolbar child-model-actions">
                         <button type="button" class="btn btn-sm btn-primary" disabled="@(_savingModelProviderId == provider.Id)" @onclick="() => SaveModelAsync(provider)">@(_savingModelProviderId == provider.Id ? "Saving…" : "Save model")</button>

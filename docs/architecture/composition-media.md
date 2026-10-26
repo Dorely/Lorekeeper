@@ -315,8 +315,10 @@ opaque output requests use an appropriate plain or scene-integrated background.
 The shared contract records model, background, quality, output format, and
 compression settings per job, while provider-reported values remain separate
 audit evidence. Each job resolves one image provider and model through
-`IImageProviderService`; the provider's default model serves ordinary work,
-another listed model is chosen explicitly for demanding tasks, and the highest
+`IImageProviderService`. Assistant generation and editing always capture the
+user's selected default provider and model; neither the agent workflow nor the
+tool schemas accept model overrides. Manual requests may select another
+explicitly saved model. Discovery alone never enables a model. The highest
 qualities are reserved for unmet concrete needs. Model/quality/background
 combinations, edit support, reference counts, and transparency are checked
 against the resolved model's capabilities and rejected before job creation when
