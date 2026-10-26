@@ -15,7 +15,7 @@
     <LorekeeperDistributionChannel Condition="'$(LorekeeperDistributionChannel)' == ''">Development</LorekeeperDistributionChannel>
     <Title>Lorekeeper</Title>
     <Description>A local bookmaking workspace for writing, worldbuilding, research, design, and publishing.</Description>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Authors>Dorely</Authors>
     <Company>Dorely</Company>
     <ProjectUrl>https://github.com/Dorely/Lorekeeper</ProjectUrl>
