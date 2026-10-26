@@ -1,0 +1,5 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "extends": "../../Lorekeeper/Properties/electron-builder.json",
+  "electronDist": "../win-x64-electron"
+}

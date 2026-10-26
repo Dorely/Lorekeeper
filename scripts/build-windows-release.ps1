@@ -19,6 +19,9 @@ $solutionPath = Join-Path $repoRoot 'Lorekeeper.sln'
 $projectPath = Join-Path $repoRoot 'Lorekeeper\Lorekeeper.csproj'
 $stageDirectory = Join-Path $repoRoot 'publish\win-x64-stage'
 $outputDirectory = Join-Path $repoRoot 'publish\win-x64'
+# Lorekeeper/Properties/electron-builder.windows-release.json names this
+# directory relative to the stage, so keep the two paths in step.
+$electronDistDirectory = Join-Path $repoRoot 'publish\win-x64-electron'
 $semanticEditorDirectory = Join-Path $repoRoot 'tools\semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.NOTICES.txt'
@@ -211,6 +214,7 @@ try
 {
     Remove-GeneratedDirectory $stageDirectory
     Remove-GeneratedDirectory $outputDirectory
+    Remove-GeneratedDirectory $electronDistDirectory
 
     foreach ($requiredPath in @(
         (Join-Path $semanticEditorDirectory 'package-lock.json'),
@@ -255,6 +259,31 @@ try
         "-p:LorekeeperDistributionChannel=$DistributionChannel"
     )
 
+    # electron-builder's default unpack extracts Electron into
+    # win-unpacked.tmp and renames it, which real-time antivirus scanning of the
+    # fresh binaries can fail with EPERM. Hand it the distribution that the
+    # Electron package installer already extracted and checksum-verified during
+    # the build; electron-builder copies an unpacked distribution in place.
+    $projectProperties = (& dotnet msbuild $projectPath -getProperty:OutDir -getProperty:ElectronVersion -p:Configuration=Release |
+        Out-String | ConvertFrom-Json).Properties
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw 'Could not read the Release output directory and Electron version from the project.'
+    }
+    $projectElectronVersion = [string]$projectProperties.ElectronVersion
+    $installedElectronRoot = Join-Path (Join-Path (Split-Path $projectPath) $projectProperties.OutDir) '.electron\node_modules\electron'
+    $installedElectronDist = Join-Path $installedElectronRoot 'dist'
+    $installedElectronPackageVersion = [string](Get-Content -Raw (Join-Path $installedElectronRoot 'package.json') | ConvertFrom-Json).version
+    $installedElectronDistVersion = (Get-Content -Raw (Join-Path $installedElectronDist 'version')).Trim()
+    if ($installedElectronPackageVersion -ne $projectElectronVersion -or $installedElectronDistVersion -ne $projectElectronVersion -or
+        -not (Test-Path -LiteralPath (Join-Path $installedElectronDist 'electron.exe') -PathType Leaf))
+    {
+        throw "The built Electron distribution does not match ElectronVersion ${projectElectronVersion}: package=$installedElectronPackageVersion, dist=$installedElectronDistVersion."
+    }
+    Copy-Item -LiteralPath $installedElectronDist -Destination $electronDistDirectory -Recurse
+    # Match electron-builder's own cleanup of a downloaded distribution.
+    Remove-Item -LiteralPath (Join-Path $electronDistDirectory 'resources\default_app.asar'), (Join-Path $electronDistDirectory 'version')
+
     $previousCi = $env:CI
     try
     {
@@ -268,6 +297,7 @@ try
             '-p:PublishProfile=win-x64',
             "-p:Version=$Version",
             "-p:LorekeeperDistributionChannel=$DistributionChannel",
+            '-p:ElectronBuilderJson=electron-builder.windows-release.json',
             '--no-restore'
         )
     }
@@ -327,9 +357,10 @@ try
     }
     $manifestElectronVersion = [string]$manifest.devDependencies.electron
     $installedElectronVersion = [string]$installedElectronManifest.version
-    if ($manifestElectronVersion -ne $lockedElectronVersion -or $lockedElectronVersion -ne $installedElectronVersion)
+    if ($manifestElectronVersion -ne $lockedElectronVersion -or $lockedElectronVersion -ne $installedElectronVersion -or
+        $installedElectronVersion -ne $projectElectronVersion)
     {
-        throw "Electron version mismatch: manifest=$manifestElectronVersion, lock=$lockedElectronVersion, installed=$installedElectronVersion."
+        throw "Electron version mismatch: manifest=$manifestElectronVersion, lock=$lockedElectronVersion, installed=$installedElectronVersion, packaged=$projectElectronVersion."
     }
 
     $severityRank = @{
@@ -418,6 +449,7 @@ try
     }
 
     Remove-GeneratedDirectory $stageDirectory
+    Remove-GeneratedDirectory $electronDistDirectory
 
     $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid)

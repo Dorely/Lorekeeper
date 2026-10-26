@@ -219,7 +219,17 @@ they use .NET APIs and operators that Windows PowerShell 5.1 lacks. Store
 submission requires PowerShell 7.5 or later.
 The builders use exact dependency/editor/Press inputs, check immutable channel
 metadata and notice hashes, probe the packaged renderer contract, and verify
-artifact checksums. Windows outputs NSIS/portable executables; Linux outputs
+artifact checksums. Windows outputs NSIS/portable executables. Its publish
+selects `Lorekeeper/Properties/electron-builder.windows-release.json`, which
+extends the shared configuration with `electronDist` set to
+`publish/win-x64-electron`. The builder fills that directory from the Release
+build's `node_modules/electron/dist`. The Electron package installer extracted
+that distribution after checking the release zip against the package checksums.
+The builder first confirms that its version matches `ElectronVersion`, then
+removes `default_app.asar` and `version`, as electron-builder's own unpack does.
+electron-builder then copies the unpacked runtime in place. Its default extracts
+to `win-unpacked.tmp` and renames the folder, which real-time antivirus scanning
+can fail with `EPERM`. Linux outputs
 `Lorekeeper-<version>-x86_64.AppImage` and
 `Lorekeeper-<version>-amd64.deb` with source/archive provenance. macOS
 electron-builder keeps only `Electron.app` from the runtime zip, so the builder
@@ -486,8 +496,8 @@ results, manual or integration checks performed, checks intentionally not run,
 final commit, and working-tree status.
 
 For the M0.3 local performance baseline, build the unsigned Windows Release
-package only after confirming `publish/win-x64-stage` and `publish/win-x64` are
-disposable ignored outputs. Run the packaged Electron app only with the sampler's
+package only after confirming `publish/win-x64-stage`, `publish/win-x64-electron`,
+and `publish/win-x64` are disposable ignored outputs. Run the packaged Electron app only with the sampler's
 isolated database/history directories and Development environment, which disables
 desktop update behavior. The trace path is valid only below
 `.artifacts/performance/` and records timestamp, metric, duration, and sequence
