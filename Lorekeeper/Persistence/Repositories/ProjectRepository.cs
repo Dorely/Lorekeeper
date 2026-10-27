@@ -12,10 +12,10 @@ public class ProjectRepository(AppDatabaseReadOperation operation) : IProjectRep
         operation.Db.Projects.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
     public Task<Project?> GetSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        operation.Db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+        operation.Db.Projects.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
     public Task<Project?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
-        operation.Db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Slug == slug, cancellationToken);
+        operation.Db.Projects.FirstOrDefaultAsync(p => p.Slug == slug, cancellationToken);
 
     public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
         operation.Db.Projects.AnyAsync(p => p.Slug == slug, cancellationToken);

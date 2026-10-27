@@ -960,7 +960,7 @@ public class ChapterService(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var editionIds = await db.PublicationEditionChapterOverrides.AsNoTracking()
             .Where(item => item.ChapterId == chapter.Id)
             .Select(item => item.EditionId)

@@ -44,13 +44,16 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outl
         string key,
         string? value,
         Guid? id = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedVersion = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var nodes = databaseOperation.Repositories.GraphNodes;
         var projects = databaseOperation.Repositories.Projects;
         var normalized = NormalizeKey(key);
+        if (expectedVersion is not null)
+            ContentVersion.Require(expectedVersion, await GetByKeyAsync(projectId, normalized, cancellationToken));
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);

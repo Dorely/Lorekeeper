@@ -66,6 +66,22 @@ profile implementations.
 
 ## Current architecture and invariants
 
+### Explicit external publication targets
+
+[External Publish workspaces](external-access.md) select Core or a release
+explicitly and use owning book, release, section, cover, preparation and artifact
+services. Release prose editing requires explicit enablement and keeps Core
+unchanged. Preparation materializes application-owned defaults before capturing
+its source fingerprint, so it works without a previous visit to the Publish UI.
+Preparation never authorizes external publication or claims vendor acceptance.
+
+`PublicationCoverPreviewService` supplies saved cover scenes with publication
+text bindings and background color to both agent adapters. Unsaved UI cover
+previews carry their own background with the preview request. Canvas previews
+and prepared artifact pixels remain distinct evidence. Artifact discovery uses
+the owning artifact list, including prepared EPUB/package outputs without PDF
+render jobs.
+
 Core Book follows the project outline: acts sort by `Act.Order` and stable ID,
 then each act's chapters sort by their act-local `Chapter.Order` and stable ID,
 followed by unassigned chapters with the same chapter ordering. The persisted

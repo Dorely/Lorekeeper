@@ -32,6 +32,20 @@ rebases, force-pushes, or resolves conflicts by discarding either history.
 
 ## Current architecture and invariants
 
+### External handoffs and task completion
+
+[External project links](external-access.md) reuse the canonical snapshot writer,
+reader and comparer against current saved creative state, including pending
+edits. Their retained captures and independent acknowledged baselines live
+outside Git and creative exports. Comparison and acknowledgement neither approve
+Review edits nor create checkpoints or push intents. Exact captured files and
+hash-verified assets remain available after later edits or deletion.
+
+Completing external work with Review Edits disabled uses the existing complete
+project checkpoint service and its automatic remote-sync behavior, with an
+idempotent work-derived request key. With Review Edits enabled, the saved work
+remains pending. Abandonment preserves committed authored content.
+
 ### Local repository and storage
 
 Lorekeeper creates one app-managed bare repository per

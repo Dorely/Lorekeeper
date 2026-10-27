@@ -65,6 +65,35 @@ Everything else supports those three:
 - **Your data stays local:** projects live in local SQLite, move between
   machines as `.lorekeeper` archives, and need no Lorekeeper account.
 
+## External agents through MCP
+
+Claude Code, Codex, and other Streamable HTTP MCP clients can work in Lorekeeper
+across Outline, Editor, World, Images, Voice, and Publish. Enable this in
+**Settings > External access**, choose a client and review its capabilities and
+project scope, then choose **Save and connect**. Setup provisions the local
+credential and, for Codex or Claude Code, installs the versioned Lorekeeper skill. Open a fresh client
+session to discover it. A supported compatible runtime is detected without
+replacing an older CLI; private manual configuration is also available.
+
+Access starts disabled. Each client has independent permissions and revocation,
+with visibly stated access to all local projects by default and selected-project
+restrictions available. There are no recurring sign-in prompts. Keep manual
+client configuration private: it contains the connection credential. Provider
+accounts and keys remain managed inside Lorekeeper Settings.
+
+Agents discover projects and call `open_workspace` to obtain current app-built
+context before using a surface. They can refresh or resume a task across several
+surfaces without moving your UI. Completed work follows **Review Edits**: on
+leaves edits pending; off checkpoints the complete live project and inherits any
+previously configured automatic remote synchronization.
+
+For a game or another external project, agents can import story, canon and
+artwork, retain stable source identities, then compare current saved state with
+an independently acknowledged transfer baseline. Pending edits are included.
+The supplied helper transfers authenticated binary assets without base64 or
+server filesystem paths. Acknowledging a captured handoff does not approve edits
+or checkpoint the book, and later edits remain outstanding.
+
 ## Screenshots
 
 | | |

@@ -45,6 +45,18 @@ PDF bytes, endpoint cache, or database record.
 
 ## Current architecture and invariants
 
+### Local external-agent boundary
+
+The [External Access adapter](external-access.md) shares this process and startup
+readiness. Its loopback MCP and binary routes run before browser error handling,
+status-page reexecution and HTTPS redirects. Electron and browser hosts advertise
+the actual listening HTTP port. Configuration navigation and the project list
+expose External Access; saved external mutations notify visible projects through
+a refresh banner without selecting a chapter or changing the user's role.
+
+The binary helper's `--external-transfer` command exits before host construction,
+so transferring artwork or a publication never starts a competing host.
+
 ### Host topology and dependency ownership
 
 [`Program.cs`](../../Lorekeeper/Program.cs) is the composition root. It determines

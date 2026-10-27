@@ -80,6 +80,7 @@ hints; concepts and downstream consumers determine the final impact area.
 
 | Task area or path signal | Required chapter | Common companion chapters |
 |---|---|---|
+| Local MCP, external agents, grants, client/skill setup, workspaces, binary transfer and external-project baselines, `ExternalAccess/` | [`external-access.md`](architecture/external-access.md) | Runtime, persistence, assistants, version history and every exposed domain |
 | Host startup, DI, middleware, shared layout, dialogs, theme, Electron/browser behavior, `Program.cs`, `Startup/`, shared `Components/` | [`runtime-host.md`](architecture/runtime-host.md) | Providers for client wiring; persistence for startup database work; validation for packaging |
 | Projects, outline, canon, graph, retrieval, indexing, direct references, provenance, ingest corpus, `Graph/`, `Knowledge/`, `Context/`, `Outline/` | [`narrative-context.md`](architecture/narrative-context.md) | Assistants for tool/prompt changes; persistence for stored forms |
 | User-facing chat, turn runtime, prompt composition, tools, compaction, review, contests, revision workers, `ChatTurns/`, `EditorChat/`, chat components | [`assistants-chat.md`](architecture/assistants-chat.md) | The owning narrative, manuscript, composition, publishing, or provider chapter |

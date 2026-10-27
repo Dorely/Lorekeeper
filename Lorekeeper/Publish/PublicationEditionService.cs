@@ -691,7 +691,7 @@ public sealed class PublicationEditionService(
         await using var databaseOperation = await database.OpenWriteAsync(edition.ProjectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         edition.Revision++;
         edition.UpdatedAt = DateTime.UtcNow;
         var project = await db.Projects.FirstAsync(project => project.Id == edition.ProjectId, cancellationToken);
@@ -1398,8 +1398,7 @@ public sealed class PublicationEditionService(
     private static void EnsureRevision(PublicationEdition edition, long expectedRevision)
     {
         if (edition.Revision != expectedRevision)
-            throw new DbUpdateConcurrencyException(
-                $"Publication release changed in another editor (expected revision {expectedRevision}, current {edition.Revision}).");
+            throw new ContentRevisionConflictException(edition.Revision);
     }
 
     internal static void EnsureDraft(PublicationEdition edition)

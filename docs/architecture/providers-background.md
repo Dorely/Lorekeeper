@@ -40,6 +40,17 @@ ephemeral progress to currently connected Blazor circuits.
 
 ## Current architecture and invariants
 
+### External provider use
+
+[External Access](external-access.md) exposes configured research and image
+workflows through provider-neutral owning services. It exposes no provider
+administration, credentials or arbitrary fetch transport. Web reads keep guarded
+destination checks; retained research is searchable evidence until deliberately
+promoted to canon. Image prompt compilation occurs before the atomic authoring
+writer, while persisted job creation and its receipt commit together. Queue
+wakeups and cancellation signals run after commit, and durable queued work can
+be recovered after restart.
+
 ### LLM connection model
 
 Settings > Providers shows each connection (one ChatGPT (Codex) account section,

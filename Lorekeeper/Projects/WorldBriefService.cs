@@ -36,7 +36,7 @@ public sealed class WorldBriefService(IAppDatabaseOperationFactory database, ICo
             var existing = await operation.Db.WorldBriefs.SingleOrDefaultAsync(value => value.ProjectId == projectId, cancellationToken);
             brief = existing ?? new WorldBrief { ProjectId = projectId };
             if (brief.Revision != expectedRevision)
-                throw new InvalidOperationException("The World Brief changed. Read it again before saving; your draft has been retained.");
+                throw new ContentRevisionConflictException(brief.Revision);
             if (brief.Content == content) return brief;
             brief.Content = content;
             brief.Revision++;
@@ -62,7 +62,7 @@ public sealed class WorldBriefService(IAppDatabaseOperationFactory database, ICo
             var existing = await operation.Db.WorldBriefs.SingleOrDefaultAsync(value => value.ProjectId == projectId, cancellationToken);
             brief = existing ?? new WorldBrief { ProjectId = projectId };
             if (brief.WorkingNotesRevision != expectedRevision)
-                throw new InvalidOperationException("The World Working Notes changed. Read them again before saving; your draft has been retained.");
+                throw new ContentRevisionConflictException(brief.WorkingNotesRevision);
             if (brief.WorkingNotes == notes) return brief;
             brief.WorkingNotes = notes;
             brief.WorkingNotesRevision++;

@@ -22,7 +22,8 @@ public sealed record ContextBuildRequest(
     string UserMessage = "",
     ContextBuildPurpose Purpose = ContextBuildPurpose.Editor,
     string? OperatingRules = null,
-    EditorContentTarget ContentTarget = default);
+    EditorContentTarget ContentTarget = default,
+    bool ExternalWorkspace = false);
 
 /// <summary>
 /// Builds typed context for Assistant Memory, inspection, and provider-neutral request layout. The request is

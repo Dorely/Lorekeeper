@@ -8,10 +8,12 @@ public enum VectorIndexWorkKind
     ContextAct,
     ContextEntity,
     ContextProjectProfile,
+    ContextWritingSample,
 }
 
 public interface IVectorIndexWorkCoordinator
 {
+    void ReportFailure();
     IVectorIndexWorkDeferral BeginDeferral();
 
     Task QueueOrRunAsync(
@@ -23,14 +25,20 @@ public interface IVectorIndexWorkCoordinator
 
 public interface IVectorIndexWorkDeferral : IAsyncDisposable
 {
+    bool HasFailures { get; }
+    IReadOnlyList<VectorIndexRepairTarget> PendingTargets { get; }
     Task FlushAsync(CancellationToken cancellationToken = default);
 }
+
+public sealed record VectorIndexRepairTarget(VectorIndexWorkKind Kind, string ResourceKey);
 
 public sealed class VectorIndexWorkCoordinator(ILogger<VectorIndexWorkCoordinator> logger) : IVectorIndexWorkCoordinator
 {
     private readonly Dictionary<VectorIndexWorkKey, VectorIndexWorkItem> _pending = [];
     private int _deferralDepth;
     private bool _flushing;
+    private long _failureCount;
+    public void ReportFailure() => _failureCount++;
 
     public IVectorIndexWorkDeferral BeginDeferral()
     {
@@ -112,6 +120,7 @@ public sealed class VectorIndexWorkCoordinator(ILogger<VectorIndexWorkCoordinato
                     }
                     catch (Exception ex)
                     {
+                        _failureCount++;
                         logger.LogWarning(
                             ex,
                             "Deferred vector index work failed for {WorkKind}/{ResourceKey}.",
@@ -145,6 +154,10 @@ public sealed class VectorIndexWorkCoordinator(ILogger<VectorIndexWorkCoordinato
     private sealed class Deferral(VectorIndexWorkCoordinator owner) : IVectorIndexWorkDeferral
     {
         private bool _completed;
+        private readonly long _initialFailures = owner._failureCount;
+        public bool HasFailures => owner._failureCount > _initialFailures;
+        public IReadOnlyList<VectorIndexRepairTarget> PendingTargets => owner._pending.Keys
+            .Select(value => new VectorIndexRepairTarget(value.Kind, value.ResourceKey)).ToArray();
 
         public async Task FlushAsync(CancellationToken cancellationToken = default)
         {

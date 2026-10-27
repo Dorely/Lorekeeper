@@ -19,7 +19,7 @@ public sealed class VoiceProfileService(IEntityService entities, IAppDatabaseOpe
         var character = await entities.GetAsync(projectId, characterId, cancellationToken)
             ?? throw new InvalidOperationException("Character not found in this project.");
         if (character.Type != "Character") throw new InvalidOperationException("Voice profiles belong to Character entities.");
-        if (Read(character) != expectedContent) throw new InvalidOperationException("The voice profile changed. Read it again before saving; your draft has been retained.");
+        if (Read(character) != expectedContent) throw new ContentVersionConflictException(ContentVersion.For(Read(character)));
         if (content == expectedContent) return character;
         var updated = await entities.UpdateAsync(projectId, characterId,
             propertiesToSet: content.Length == 0 ? null : new Dictionary<string, string?> { [PropertyName] = content },

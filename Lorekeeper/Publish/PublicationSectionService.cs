@@ -582,7 +582,7 @@ public sealed class PublicationSectionService(
         await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var row = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken);
         if (row is null)
             return;

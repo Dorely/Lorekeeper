@@ -106,14 +106,14 @@ public sealed class EditionContentService(
             .SingleOrDefaultAsync(item => item.Id == editionId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("The publication release was not found in this project.");
         if (edition.Revision != expectedEditionRevision)
-            throw new InvalidOperationException($"Release revision conflict: expected {expectedEditionRevision}, current {edition.Revision}.");
+            throw new ContentRevisionConflictException(edition.Revision);
         if (edition.Status == PublicationEditionStatus.Archived)
             throw new InvalidOperationException("Archived releases cannot enable edition-specific content.");
         if (edition.EditionSpecificContentEnabled == enabled)
             return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, edition.ChapterOverrides.Count);
         if (!enabled && edition.ChapterOverrides.Count > 0 && !confirmDiscard)
             throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter. Confirmation is required.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var discardedHistoryTargets = new List<string>();
         if (!enabled)
         {

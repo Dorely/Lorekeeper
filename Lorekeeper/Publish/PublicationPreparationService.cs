@@ -87,7 +87,8 @@ public sealed class PublicationPreparationService(
     IPublicationRenderService renders,
     PublicationPreparationCancellationRegistry cancellationRegistry,
     ILogger<PublicationPreparationService> logger,
-    IAuthoringMutationFence authoringFence) : IPublicationPreparationService
+    IAuthoringMutationFence authoringFence,
+    IPublishService publishing) : IPublicationPreparationService
 {
     internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
@@ -109,6 +110,11 @@ public sealed class PublicationPreparationService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
+        // Materialize application-owned default matter and styles before capturing the job.
+        // A client can prepare directly without first visiting the Publish UI.
+        _ = targetKind == PublicationTargetKind.CoreBook
+            ? await publishing.GetCoreDocumentAsync(projectId, cancellationToken)
+            : await publishing.GetDocumentAsync(projectId, editionId!.Value, cancellationToken);
         var fingerprint = targetKind == PublicationTargetKind.CoreBook
             ? await books.GetSourceFingerprintAsync(projectId, cancellationToken)
             : await editions.GetSourceFingerprintAsync(projectId, editionId!.Value, cancellationToken);
@@ -137,7 +143,8 @@ public sealed class PublicationPreparationService(
         };
         db.PublicationPreparationJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
-        await queue.EnqueueAsync(job.Id, CancellationToken.None);
+        if (!MutationCommitEffects.TryDefer(token => queue.EnqueueAsync(job.Id, token).AsTask()))
+            await queue.EnqueueAsync(job.Id, CancellationToken.None);
         logger.LogDebug(
             "Preparation job {JobId} requested for project {ProjectId}, edition {EditionId}: targetKind={TargetKind}, fingerprint={Fingerprint}",
             job.Id, projectId, editionId, targetKind, fingerprint);
@@ -180,7 +187,8 @@ public sealed class PublicationPreparationService(
             job.Message = "Cancelled";
             job.CompletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
-            cancellationRegistry.Cancel(jobId);
+            if (!MutationCommitEffects.TryDefer(_ => { cancellationRegistry.Cancel(jobId); return Task.CompletedTask; }))
+                cancellationRegistry.Cancel(jobId);
             var renderJobIds = new[] { job.BookRenderJobId, job.InteriorRenderJobId, job.CoverRenderJobId }
                 .OfType<Guid>()
                 .Distinct()

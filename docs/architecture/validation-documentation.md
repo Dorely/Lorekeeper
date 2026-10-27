@@ -31,7 +31,7 @@ The repository has intentionally narrow automated-test boundaries. Press
 conformance tests map to the native renderer evidence matrix and verify PDF-spec
 parity. `Lorekeeper.Tests` is limited to the data-safety core: startup database
 migration, versioned project import/export, archive, and history preservation
-and fail-closed behavior, and recovery. **Automated tests outside those two
+and automatic conflict/error resolution, and recovery. **Automated tests outside those two
 scopes are forbidden.** Do not create new test projects, suites, or one-off test
 harnesses anywhere else merely because a feature would normally invite one; a
 request to add tests does not broaden this boundary unless the user explicitly
@@ -43,6 +43,15 @@ checks, screenshots, and interactive provider or Word exercises — requires the
 user's explicit authorization before it is performed. Do not claim an external
 provider or rendered UI was exercised unless that authorized integration check
 actually ran.
+
+External Access acceptance uses real MCP clients and fresh supported client
+sessions, actual skill installation/discovery, and disposable application data.
+It does not introduce a general protocol harness or mocked integration evidence.
+Migration and atomic receipt/content preservation tests belong to the existing
+data-safety suite. Record each exercised host, provider, surface, transfer and
+permission boundary separately; missing configuration and native capture failures
+remain unperformed checks. The dated [MCP acceptance record](../evidence/mcp-acceptance-2026-10-26.md)
+records the current evidence and its limitations.
 
 ## Current architecture and invariants
 

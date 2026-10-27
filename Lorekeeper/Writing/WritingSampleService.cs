@@ -66,7 +66,7 @@ IContextIndexingService contextIndexing, ProjectVersionHistoryUiEvents? historyE
             ?? throw new InvalidOperationException($"Writing sample {sampleId} not found.");
 
         if (sample.ProjectId != projectId) throw new InvalidOperationException("Sample not found in this project.");
-        if (sample.Revision != expectedRevision) throw new InvalidOperationException("The sample changed. Read it again before saving; your draft has been retained.");
+        if (sample.Revision != expectedRevision) throw new ContentRevisionConflictException(sample.Revision);
 
         var changed = false;
         if (title is not null)

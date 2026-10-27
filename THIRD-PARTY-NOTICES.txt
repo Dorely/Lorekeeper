@@ -209,11 +209,11 @@ Authors: Microsoft
 Source: https://github.com/dotnet/dotnet a612c2a1056fe3265387ae3ff7c94eba1505caf9
 Retained full terms/notice: licenses/third-party/ae48df11a335dc1a-LICENSE.TXT (SHA-256 ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b); https://raw.githubusercontent.com/dotnet/dotnet/a612c2a1056fe3265387ae3ff7c94eba1505caf9/LICENSE.TXT
 
-Microsoft.Extensions.AI.Abstractions/10.4.1 — MIT
+Microsoft.Extensions.AI.Abstractions/10.11.0 — MIT
 © Microsoft Corporation. All rights reserved.
 Authors: Microsoft
-Source: https://github.com/dotnet/extensions b797b53993672eae537cf2cebe6ad3cf58c507e6
-Retained full terms/notice: licenses/third-party/47f0ad8ba753eae5-LICENSE (SHA-256 47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275); https://raw.githubusercontent.com/dotnet/extensions/b797b53993672eae537cf2cebe6ad3cf58c507e6/LICENSE
+Source: https://github.com/dotnet/extensions 25f07afa51034e37b334210642d7dc5f191c142d
+Retained full terms/notice: licenses/third-party/47f0ad8ba753eae5-LICENSE (SHA-256 47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275); https://raw.githubusercontent.com/dotnet/extensions/25f07afa51034e37b334210642d7dc5f191c142d/LICENSE
 
 Microsoft.Extensions.AI.OpenAI/10.3.0 — MIT
 © Microsoft Corporation. All rights reserved.
@@ -268,6 +268,24 @@ Authors: Microsoft
 Source: https://github.com/dotnet/runtime 5535e31a712343a63f5d7d796cd874e563e5ac14
 Retained full terms/notice: licenses/third-party/19c19dcac9f3ee63-THIRD-PARTY-NOTICES.TXT (SHA-256 19c19dcac9f3ee6302cfbc6745bb8e79f08efc4c933eb8dc5509bf14b88347ec); nuget:Microsoft.Win32.SystemEvents/8.0.0/THIRD-PARTY-NOTICES.TXT
 Retained full terms/notice: licenses/third-party/d7a68596ab69b06f-LICENSE.TXT (SHA-256 d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b); nuget:Microsoft.Win32.SystemEvents/8.0.0/LICENSE.TXT
+
+ModelContextProtocol.AspNetCore/2.3.0 — Apache-2.0
+© Model Context Protocol a Series of LF Projects, LLC.
+Authors: ModelContextProtocol
+Source: https://github.com/modelcontextprotocol/csharp-sdk 9a327829ef066c44a0d737c58bf3c7617d7c701c
+Retained full terms/notice: licenses/third-party/7c6a686d2b34b86a-LICENSE (SHA-256 7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc); https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE
+
+ModelContextProtocol.Core/2.3.0 — Apache-2.0
+© Model Context Protocol a Series of LF Projects, LLC.
+Authors: ModelContextProtocol
+Source: https://github.com/modelcontextprotocol/csharp-sdk 9a327829ef066c44a0d737c58bf3c7617d7c701c
+Retained full terms/notice: licenses/third-party/7c6a686d2b34b86a-LICENSE (SHA-256 7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc); https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE
+
+ModelContextProtocol/2.3.0 — Apache-2.0
+© Model Context Protocol a Series of LF Projects, LLC.
+Authors: ModelContextProtocol
+Source: https://github.com/modelcontextprotocol/csharp-sdk 9a327829ef066c44a0d737c58bf3c7617d7c701c
+Retained full terms/notice: licenses/third-party/7c6a686d2b34b86a-LICENSE (SHA-256 7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc); https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE
 
 Mono.TextTemplating/3.0.0 — MIT
 Authors: Mikayla Hutchinson

@@ -306,7 +306,7 @@ public sealed class ManuscriptAnnotationService(
             cancellationToken))
             throw new InvalidOperationException("The annotation chapter does not belong to the selected project.");
         if (annotation.Revision != expectedRevision)
-            throw new InvalidOperationException($"Annotation revision conflict: expected {expectedRevision}, current revision is {annotation.Revision}.");
+            throw new ContentRevisionConflictException(annotation.Revision);
         return annotation;
     }
 

@@ -1,3 +1,5 @@
+using Lorekeeper.Persistence;
+
 namespace Lorekeeper.VersionHistory.Services;
 
 /// <summary>
@@ -63,6 +65,7 @@ public sealed class ProjectVersionHistoryUiEvents
     /// </summary>
     public void PublishReviewStateChanged(Guid projectId)
     {
+        if (MutationCommitEffects.TryDefer(_ => { PublishReviewStateChanged(projectId); return Task.CompletedTask; })) return;
         ValidateProjectId(projectId);
         Publish(ReviewStateChanged, projectId);
     }

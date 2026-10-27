@@ -333,7 +333,10 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
             await contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken);
         }
         if (job.Status == IngestJobStatus.Queued)
-            queue.Enqueue(job.Id);
+        {
+            if (!MutationCommitEffects.TryDefer(_ => { queue.Enqueue(job.Id); return Task.CompletedTask; }))
+                queue.Enqueue(job.Id);
+        }
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Created);
         return job;
         }

@@ -33,6 +33,21 @@ projection participates here.
 
 ## Current architecture and invariants
 
+### Shared external authoring and recovery
+
+The [external workspace adapter](external-access.md) reuses Outline working
+context, focused context, exact source reads and owning canon services. Guidance,
+Book Brief, entities, facts and manual relationships accept owning-service
+concurrency preconditions. Canonical content versions normalize UTC timestamps
+and property ordering before hashing. External callers cannot alter managed
+source-evidence properties or mutate referenced projects through exact reads.
+
+Context indexing, including writing samples, participates in deferred index work
+inside an enclosing atomic command. Captured repair targets survive an external
+response loss or indexing failure; recovery reindexes current content without
+replaying the original authored mutation. Lexical search remains available when
+no embedding provider is configured.
+
 ### Project direction and outline spine
 
 A `Project` is the ownership root for Project Guidance, one structured Book

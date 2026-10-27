@@ -549,7 +549,7 @@ public sealed class PublicationBookService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken) ?? throw new InvalidOperationException("Core Book was not found.");
@@ -668,7 +668,7 @@ public sealed class PublicationBookService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
             && item.TargetKind == "core-cover-scene", cancellationToken)

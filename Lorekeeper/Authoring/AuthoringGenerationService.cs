@@ -78,6 +78,7 @@ internal sealed class AuthoringGenerationService(
 
     public void CompleteInvalidation(IReadOnlyCollection<string> targetIds)
     {
+        if (MutationCommitEffects.TryDefer(_ => { CompleteInvalidation(targetIds); return Task.CompletedTask; })) return;
         foreach (var targetId in targetIds.Distinct(StringComparer.Ordinal))
             history.Clear(targetId);
     }

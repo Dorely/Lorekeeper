@@ -34,7 +34,8 @@ public sealed class BookBriefService(
     public async Task<BookBrief> UpdateAsync(
         Guid projectId,
         BookBriefPatch patch,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? expectedUpdatedAt = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -47,6 +48,8 @@ public sealed class BookBriefService(
             throw new InvalidOperationException($"Project {projectId} not found.");
         var brief = existing ?? new BookBrief { ProjectId = projectId };
 
+        if (expectedUpdatedAt is DateTime expected && brief.UpdatedAt != expected)
+            throw new ContentVersionConflictException(ContentVersion.For(brief.UpdatedAt));
         var clearFields = NormalizeClearFields(patch.ClearFields);
 
         ApplyClearFields(brief, clearFields);

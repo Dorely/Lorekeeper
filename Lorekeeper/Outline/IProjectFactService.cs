@@ -11,7 +11,8 @@ public interface IProjectFactService
         string key,
         string? value,
         Guid? id = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? expectedVersion = null);
 
     Task DeleteAsync(Guid projectId, Guid factId, CancellationToken cancellationToken = default);
 }

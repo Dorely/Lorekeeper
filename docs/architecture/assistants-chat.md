@@ -34,6 +34,16 @@ against Git HEAD.
 
 ## Current architecture and invariants
 
+### External workspace audience
+
+[External agents](external-access.md) use application-built context below chat
+adapters. ContextBuilder and SystemPromptComposer accept an external-workspace
+audience that omits built-in chat-reply and fresh-turn assumptions. The adapter
+filters authored context against current grant permissions and uses explicit
+project, chapter and Core/release targets. It creates no assistant conversation,
+turn, implicit selection or internal tool-loop state. External mutation actors
+identify the configured client and logical work rather than a built-in turn.
+
 ### Six surfaces over one shared protocol
 
 `ChatTurnSurface` has exactly six user-facing values: `Outline`, `Editor`,

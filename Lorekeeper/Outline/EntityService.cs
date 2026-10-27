@@ -126,7 +126,8 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         string? name = null,
         IDictionary<string, string?>? propertiesToSet = null,
         IReadOnlyCollection<string>? propertiesToRemove = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedVersion = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -134,6 +135,8 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken)
             ?? throw new InvalidOperationException($"Entity {entityId} not found in project {projectId}.");
 
+        if (expectedVersion is not null)
+            ContentVersion.Require(expectedVersion, await GetAsync(projectId, entityId, cancellationToken));
         // Mutate in-place through the repo so we control merge semantics (graph store's UpsertNodeAsync
         // *replaces* the property bag wholesale when a non-null dict is passed).
         if (!string.IsNullOrWhiteSpace(name))
@@ -359,12 +362,15 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         long edgeId,
         string edgeType,
         IDictionary<string, string?>? properties = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTime? expectedUpdatedAt = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var edges = databaseOperation.Repositories.GraphEdges;
         var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
+        if (expectedUpdatedAt is DateTime expected && edge.UpdatedAt != expected)
+            throw new ContentVersionConflictException(ContentVersion.For(edge.UpdatedAt));
         if (IsReadOnlyLink(edge))
             throw new InvalidOperationException("Managed and auto-generated links cannot be edited directly.");
 

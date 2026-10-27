@@ -151,7 +151,7 @@ public sealed class DesignedPageService(
             await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var page = new DesignedPage
         {
             ProjectId = projectId,
@@ -245,7 +245,7 @@ public sealed class DesignedPageService(
         await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var chapter = await db.Chapters.AsNoTracking().SingleOrDefaultAsync(item => item.Id == chapterId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Chapter was not found in this project.");
         var effective = await manuscripts.GetManuscriptAsync(target, chapterId, cancellationToken)
@@ -1180,7 +1180,7 @@ public sealed class DesignedPageService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         AuthoringDeltaHistoryStage? historyStage = null;
         var variant = await db.DesignedPageVariants.AsTracking().Include(item => item.Content)
             .ThenInclude(item => item.Variants)
@@ -1459,7 +1459,7 @@ public sealed class DesignedPageService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(
             item => item.Id == stageId
                 && item.ProjectId == projectId
@@ -1597,7 +1597,7 @@ public sealed class DesignedPageService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
             && item.ContentTargetKind == target.Kind.ToString()
@@ -1747,7 +1747,7 @@ public sealed class DesignedPageService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
             && item.ContentTargetKind == target.Kind.ToString()
@@ -2932,7 +2932,7 @@ public sealed class DesignedPageService(
         operation.ShareWithNestedOperations();
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var page = new DesignedPage
         {
             ProjectId = projectId,
@@ -3015,7 +3015,7 @@ public sealed class DesignedPageService(
         if (page.ScopeEditionId == editionId)
             throw new InvalidDataException("The release-only Designed Page is missing its content.");
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         _ = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
             item => item.ProjectId == projectId && item.Id == editionId,
             cancellationToken) ?? throw new KeyNotFoundException("The publication release was not found in this project.");
@@ -3100,7 +3100,7 @@ public sealed class DesignedPageService(
         await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var sourcePage = await db.DesignedPages.AsNoTracking()
             .Include(item => item.Contents)
                 .ThenInclude(item => item.Variants)
@@ -3197,7 +3197,7 @@ public sealed class DesignedPageService(
         operation.ShareWithNestedOperations();
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var page = await db.DesignedPages.AsTracking().Include(item => item.Contents)
             .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.Id == pageId, cancellationToken)
             ?? throw new KeyNotFoundException("The Designed Page was not found in this project.");
@@ -3251,7 +3251,7 @@ public sealed class DesignedPageService(
         operation.ShareWithNestedOperations();
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var reference = await db.DesignedPagePlacementReferences
             .SingleOrDefaultAsync(item => item.Id == placementId
                 && item.ProjectId == projectId
@@ -3297,7 +3297,7 @@ public sealed class DesignedPageService(
         operation.ShareWithNestedOperations();
         var db = operation.Db;
         await EnsureEditableTargetAsync(db, projectId, target, cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var reference = await db.DesignedPagePlacementReferences
             .SingleOrDefaultAsync(item => item.Id == placementId
                 && item.ProjectId == projectId

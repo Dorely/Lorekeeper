@@ -1,0 +1,164 @@
+@page "/settings/external-access"
+@using Lorekeeper.ExternalAccess
+@using Lorekeeper.Projects
+@rendermode InteractiveServer
+@inject McpClientGrantService Grants
+@inject ExternalClientSetupService Setup
+@inject IProjectService Projects
+
+<PageTitle>External access - Lorekeeper</PageTitle>
+<ConfigurationShell Title="External access" Description="Let configured agents work in Lorekeeper through local MCP workspaces.">
+  @if (_error is not null) { <div class="alert alert-danger" role="alert">@_error</div> }
+  @if (_message is not null) { <div class="alert alert-info" role="status">@_message</div> }
+  <section class="lk-section-card p-3 mb-3">
+    <h2>Lorekeeper MCP server</h2>
+    <p>Connections stay on this computer. Configure each client once; there is no recurring sign-in.</p>
+    <label class="form-check form-switch">
+      <input class="form-check-input" type="checkbox" checked="@_enabled" disabled="@_busy" @onchange="ToggleAsync" />
+      <span class="form-check-label">@(_enabled ? "Enabled" : "Disabled")</span>
+    </label>
+    <p class="mt-2">Local endpoint: <code>@Setup.Endpoint</code></p>
+    <p>Completed agent tasks follow each project's Review Edits setting. When it is off, completion checkpoints the complete live project and uses any previously configured automatic remote synchronization.</p>
+  </section>
+  <section class="lk-section-card p-3 mb-3">
+    <h2>Configured clients</h2>
+    @foreach (var client in _clients)
+    {
+      <div class="d-flex flex-wrap align-items-center gap-2 py-2 border-bottom">
+        <strong>@client.DisplayName</strong>
+        <span>@(client.Enabled ? "Configured" : "Revoked")</span>
+        <span>Last used: @(client.LastUsedAt?.ToLocalTime().ToString("g") ?? "Not yet used")</span>
+        <button class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => Edit(client)">Configure</button>
+        <button class="btn btn-sm btn-outline-danger" disabled="@(_busy || !client.Enabled)" @onclick="() => _revokeId = client.Id">Revoke</button>
+      </div>
+    }
+    @if (_clients.Count == 0) { <p>No clients configured yet.</p> }
+    <button class="btn btn-outline-primary mt-2" disabled="@_busy" @onclick="NewClient">Add client</button>
+  </section>
+  <section class="lk-section-card p-3">
+    <h2>@(_editingId is null ? "Connect an agent" : "Configure connection")</h2>
+    <label class="form-label" for="external-client-name">Connection name</label>
+    <input id="external-client-name" class="form-control mb-2" maxlength="120" @bind="_name" />
+    <label class="form-label" for="external-client-kind">Client</label>
+    <select id="external-client-kind" class="form-select mb-2" @bind="_kind">
+      <option>Codex</option><option>Claude Code</option><option>Other MCP client</option>
+    </select>
+    <label class="form-label" for="external-profile">Access profile</label>
+    <select id="external-profile" class="form-select mb-2" @bind="_profile" @bind:after="ApplyPreset">
+      <option>Read only</option><option>Authoring</option><option>Full control</option><option>Custom</option>
+    </select>
+    <details class="mb-3">
+      <summary>Capabilities</summary>
+      @foreach (var capability in ExternalCapabilities.All)
+      {
+        <label class="form-check">
+          <input class="form-check-input" type="checkbox" checked="@_permissions.Contains(capability.Id)" @onchange="eventArgs => TogglePermission(capability.Id, eventArgs)" />
+          <span class="form-check-label">@capability.Label</span>
+        </label>
+      }
+    </details>
+    <details class="mb-3">
+      <summary>Preview available tools</summary>
+      <p>Tools, resources, context and downloads use the same saved project and capability restrictions.</p>
+      <dl>
+        @foreach (var tool in ExternalToolCatalog.Tools.Where(value => value.Capabilities.All(_permissions.Contains)))
+        {
+          <dt><code>@tool.Tool.Name</code></dt><dd>@tool.Tool.Description</dd>
+        }
+      </dl>
+    </details>
+    <label class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" @bind="_allProjects" />
+      <span class="form-check-label">All local projects, including projects created later</span>
+    </label>
+    @if (!_allProjects)
+    {
+      @foreach (var project in _projects)
+      {
+        <label class="form-check">
+          <input class="form-check-input" type="checkbox" checked="@_projectIds.Contains(project.Id)" @onchange="eventArgs => ToggleProject(project.Id, eventArgs)" />
+          <span class="form-check-label">@project.Name</span>
+        </label>
+      }
+    }
+    <label class="form-check my-3">
+      <input class="form-check-input" type="checkbox" @bind="_installSkill" />
+      <span class="form-check-label">Install or update the Lorekeeper skill</span>
+    </label>
+    <button class="btn btn-primary" disabled="@_busy" @onclick="ConnectAsync">@(_busy ? "Saving…" : "Save and connect")</button>
+    @if (_editingId is Guid id)
+    {
+      <button class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => ShowManualAsync(id)">Manual configuration</button>
+      <button class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => RotateAsync(id)">Rotate and reconnect</button>
+    }
+    @if (_manual is not null)
+    {
+      <div class="alert alert-warning mt-3">This private client configuration contains its connection credential. Keep it out of shared files and repositories.</div>
+      <textarea class="form-control font-monospace" rows="12" readonly aria-label="Private manual MCP configuration">@_manual</textarea>
+    }
+  </section>
+</ConfigurationShell>
+<ConfirmationDialog IsOpen="@(_revokeId is not null)" Title="Revoke this connection?"
+  Message="The client will lose access immediately. Its saved project work remains in Lorekeeper."
+  ConfirmLabel="Revoke" Destructive="true" OnConfirm="RevokeAsync" OnCancel="() => _revokeId = null" />
+
+@code {
+  private bool _enabled, _busy, _allProjects = true, _installSkill = true;
+  private string _name = "Codex", _kind = "Codex", _profile = "Authoring";
+  private string? _error, _message, _manual;
+  private Guid? _editingId, _revokeId;
+  private HashSet<string> _permissions = ExternalCapabilities.Preset("Authoring").ToHashSet(StringComparer.Ordinal);
+  private HashSet<Guid> _projectIds = [];
+  private IReadOnlyList<McpClientView> _clients = [];
+  private IReadOnlyList<Lorekeeper.Models.Project> _projects = [];
+
+  protected override async Task OnInitializedAsync()
+  {
+    if (RendererInfo.IsInteractive) await ReloadAsync();
+  }
+  private async Task ReloadAsync()
+  {
+    _enabled = await Grants.IsEnabledAsync();
+    _clients = await Grants.ListAsync();
+    _projects = await Projects.ListAsync();
+  }
+  private void ApplyPreset() { if (_profile != "Custom") _permissions = ExternalCapabilities.Preset(_profile).ToHashSet(StringComparer.Ordinal); }
+  private void TogglePermission(string id, ChangeEventArgs value)
+  {
+    _profile = "Custom";
+    if (value.Value is true) _permissions.Add(id); else _permissions.Remove(id);
+  }
+  private void ToggleProject(Guid id, ChangeEventArgs value) { if (value.Value is true) _projectIds.Add(id); else _projectIds.Remove(id); }
+  private void NewClient() { _editingId = null; _name = _kind; _manual = null; _profile = "Authoring"; ApplyPreset(); _allProjects = true; _projectIds.Clear(); }
+  private void Edit(McpClientView value)
+  {
+    _editingId = value.Id; _name = value.DisplayName; _kind = value.ClientKind is "Codex" or "Claude Code" ? value.ClientKind : "Other MCP client"; _profile = "Custom";
+    _permissions = value.Permissions.ToHashSet(StringComparer.Ordinal); _allProjects = value.ProjectIds is null;
+    _projectIds = value.ProjectIds?.ToHashSet() ?? []; _manual = null;
+  }
+  private async Task RunAsync(Func<Task> action)
+  {
+    if (_busy) return;
+    _busy = true; _error = null; _message = null;
+    try { await action(); await ReloadAsync(); }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or System.Security.Cryptography.CryptographicException)
+    { _error = "The connection could not be updated. Your project content is unchanged. Check the client setup location and retry, or use manual configuration."; }
+    finally { _busy = false; }
+  }
+  private Task ToggleAsync(ChangeEventArgs args) => RunAsync(() => Grants.SetEnabledAsync(args.Value is true));
+  private Task ConnectAsync() => RunAsync(async () =>
+  {
+    var client = await Grants.ConfigureAsync(_editingId, _name, _permissions.ToArray(), _allProjects ? null : _projectIds.ToArray(), clientKind: _kind);
+    _editingId = client.Id;
+    var result = await Setup.ConfigureAsync(client.Id, _kind, _installSkill);
+    _message = result.Message;
+  });
+  private Task ShowManualAsync(Guid id) => RunAsync(async () => _manual = await Setup.ManualConfigurationAsync(id));
+  private Task RotateAsync(Guid id) => RunAsync(async () =>
+  {
+    _ = await Grants.CredentialForSetupAsync(id, rotate: true);
+    _manual = null;
+    _message = (await Setup.ConfigureAsync(id, _clients.Single(value => value.Id == id).ClientKind, _installSkill)).Message;
+  });
+  private Task RevokeAsync() => RunAsync(async () => { if (_revokeId is Guid id) await Grants.RevokeAsync(id); _revokeId = null; _manual = null; });
+}

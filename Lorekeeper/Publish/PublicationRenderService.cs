@@ -287,7 +287,7 @@ public sealed class PublicationRenderService(
         {
             job.CancellationRequested = true;
             job.ProgressMessage = "Cancellation requested";
-            queue.Cancel(job.Id);
+            if (!MutationCommitEffects.TryDefer(_ => { queue.Cancel(job.Id); return Task.CompletedTask; })) queue.Cancel(job.Id);
             await db.SaveChangesAsync(cancellationToken);
         }
         var fingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken);
@@ -396,7 +396,7 @@ public sealed class PublicationRenderService(
             job.CompletedAt = DateTime.UtcNow;
         }
         await db.SaveChangesAsync(cancellationToken);
-        queue.Cancel(jobId);
+        if (!MutationCommitEffects.TryDefer(_ => { queue.Cancel(jobId); return Task.CompletedTask; })) queue.Cancel(jobId);
         return await GetAsync(projectId, editionId, jobId, cancellationToken);
     }
 

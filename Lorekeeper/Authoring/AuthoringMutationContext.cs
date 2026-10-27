@@ -1,11 +1,10 @@
 namespace Lorekeeper.Authoring;
 
 public sealed record AuthoringMutationContext(
-    Guid AssistantTurnId,
-    string ActionLabel)
-{
-    public bool IsAssistant => AssistantTurnId != Guid.Empty;
-}
+    MutationActor Actor,
+    string ActionLabel);
+
+public sealed record MutationActor(string Kind, Guid? AssistantTurnId = null, Guid? ClientGrantId = null, Guid? WorkId = null);
 
 public interface IAuthoringMutationContextAccessor
 {
@@ -14,6 +13,7 @@ public interface IAuthoringMutationContextAccessor
     IDisposable BeginAssistantTurn(
         Guid turnId,
         string actionLabel);
+    IDisposable BeginExternalWork(Guid clientGrantId, Guid? workId, string clientName);
     IDisposable SuppressHistory();
 }
 
@@ -32,11 +32,16 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
 
     public IDisposable BeginAssistantTurn(
         Guid turnId,
-        string actionLabel)
+        string actionLabel) => Begin(new MutationActor("LorekeeperAssistant", AssistantTurnId: turnId), actionLabel);
+
+    public IDisposable BeginExternalWork(Guid clientGrantId, Guid? workId, string clientName) =>
+        Begin(new MutationActor("ExternalClient", ClientGrantId: clientGrantId, WorkId: workId), $"External client: {clientName}");
+
+    private IDisposable Begin(MutationActor actor, string actionLabel)
     {
         var previous = _current;
         var previousAmbient = Ambient.Value;
-        _current = new AuthoringMutationContext(turnId, actionLabel);
+        _current = new AuthoringMutationContext(actor, actionLabel);
         Ambient.Value = _current;
         return new Scope(() =>
         {

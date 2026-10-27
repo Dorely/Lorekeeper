@@ -53,7 +53,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             brief,
             RoleFor(request.Purpose),
             assistantWorkflow,
-            currentChapter, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content));
+            currentChapter, WorldBrief: (await worldBriefs.GetAsync(project.Id, cancellationToken)).Content, ExternalWorkspace: request.ExternalWorkspace));
         var items = composition.Sections.Select(ToContextItem).ToList();
         if (request.Purpose == ContextBuildPurpose.Editor && !project.ContestModeEnabled)
         {
@@ -62,7 +62,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 "Current Editor Capabilities",
                 $"Semantic retrieval available: {semanticSearchAvailable}. Review Edits enabled: {project.ReviewEditsEnabled}.\n"
                     + (semanticSearchAvailable ? string.Empty : "Semantic retrieval is unavailable. Ground work through lexical project search, graph tools, and exact reads; do not claim semantic retrieval.\n")
-                    + (project.ReviewEditsEnabled ? AssistantWorkflowInstructions.EditorPendingReviewWorkflow : string.Empty),
+                    + (project.ReviewEditsEnabled ? request.ExternalWorkspace
+                        ? "Pending changes are evidence, not approval. Use inspect_pending_review and exact owning-surface reads to inspect them. Follow returned pagination; finish_work honors the project's Review Edits setting."
+                        : AssistantWorkflowInstructions.EditorPendingReviewWorkflow : string.Empty),
                 true, false, IsProtected: true));
         }
         var projectReferencesItem = await BuildProjectReferencesItemAsync(project.Id, cancellationToken);

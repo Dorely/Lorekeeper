@@ -11,7 +11,7 @@ public interface IProjectService
     Task<Project> RenameAsync(Guid id, string newName, CancellationToken cancellationToken = default);
 
     /// <summary>Replace the optional user-authored Project Guidance. Blank clears it.</summary>
-    Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default);
+    Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default, string? expectedVersion = null);
 
     /// <summary>Toggle whether the currently-open chapter is included in the assembled context.</summary>
     Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default);

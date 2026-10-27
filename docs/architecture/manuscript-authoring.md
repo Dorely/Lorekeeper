@@ -186,7 +186,7 @@ additional replacement blocks. The runtime does not automatically deduplicate
 similar prose because repeated language may be intentional.
 
 Editor assistants never send a full projected document back to an apply call.
-`EditorManuscriptApplyService` converts and validates one complete operation
+`ManuscriptOperationCommand` converts and validates one complete operation
 batch, verifies the protected source revision, and writes the resulting document
 through `IManuscriptService` in that same call. Review Edits controls whether the
 completed turn checkpoints; it does not create an overlay. The result reports
@@ -199,6 +199,12 @@ side where available, overlapping ranges merge, and long ranges split at the
 100-block read limit. An insertion-only text batch against a non-empty source
 returns `MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` as a warning rather than
 rejecting intentional additive work.
+
+`EditorManuscriptApplyService` is the built-in chat adapter over that command;
+the [external Editor workspace](external-access.md) invokes the shared command
+directly. Explicit targets retain the same revision checks, authoring fences,
+Contest guards, annotation rebasing and readback requirements. External work
+completion applies Review Edits at task scope, including work across surfaces.
 
 `ManuscriptInspection` supplies shared validation, normalization diagnostics,
 and structural search to Editor and revision workers. Prompt/tool guidance and

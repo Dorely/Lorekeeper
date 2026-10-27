@@ -12,6 +12,7 @@ using Lorekeeper.Desktop;
 using Lorekeeper.Diagnostics;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.ExternalAccess;
 using Lorekeeper.Fonts;
 using Lorekeeper.Graph;
 using Lorekeeper.Images;
@@ -40,6 +41,12 @@ using Lorekeeper.VersionHistory.Services;
 using Lorekeeper.VersionHistory.Snapshots;
 using Lorekeeper.VersionHistory.Sync;
 using Lorekeeper.Writing;
+
+if (args.FirstOrDefault() == "--external-transfer")
+{
+    Environment.ExitCode = await ExternalTransferCommand.RunAsync(args[1..]);
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
@@ -86,6 +93,8 @@ builder.Services.AddSingleton(new ApplicationStartupOptions(
 builder.Services.AddHostedService<ApplicationStartupWorker>();
 
 builder.Services.AddHttpClient();
+builder.Services.AddExternalAccess(builder.Configuration);
+builder.Services.AddScoped<ManuscriptOperationCommand>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<OpenAiAccountOperationCoordinator>();
 builder.Services.AddSingleton<OpenAiAuthorizationFlowRegistry>();
@@ -403,6 +412,7 @@ else
 builder.Services.AddSingleton<PublicationEpubPreviewCache>();
 builder.Services.AddScoped<IPublicationEpubPreviewService, PublicationEpubPreviewService>();
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
+builder.Services.AddScoped<PublicationCoverPreviewService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
 builder.Services.AddSingleton<IPublicationPreparationQueue, PublicationPreparationQueue>();
 builder.Services.AddSingleton<PublicationPreparationCancellationRegistry>();
@@ -444,23 +454,22 @@ builder.Services.AddScoped<IImagesChatService, ImagesChatService>();
 builder.Services.AddSingleton<IImagesChatTurnRunner, ImagesChatTurnRunner>();
 
 var app = builder.Build();
+app.UseMiddleware<ExternalAccessHttpGate>();
 if (isElectronMode && distributionChannelPolicy.UsesGitHubReleaseChecks)
     desktopReleaseUpdateChecker = app.Services.GetRequiredService<IDesktopReleaseUpdateChecker>();
 desktopUpdates.SetInstalledVersion(GetInstalledAppVersion());
 
 // Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+app.UseWhen(context => !ExternalAccessHttpGate.IsExternalRequest(context), branch =>
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    if (!isElectronMode)
+    if (!app.Environment.IsDevelopment())
     {
-        // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
-        app.UseHsts();
+        branch.UseExceptionHandler("/Error", createScopeForErrors: true);
+        if (!isElectronMode) branch.UseHsts();
     }
-}
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-if (!isElectronMode)
-    app.UseHttpsRedirection();
+    branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+    if (!isElectronMode) branch.UseHttpsRedirection();
+});
 
 app.UseAntiforgery();
 
@@ -475,6 +484,7 @@ app.MapProjectSources();
 app.MapProjectArchiveEndpoints();
 app.MapPublishEndpoints();
 app.MapPrintingEndpoints();
+app.MapExternalAccess();
 
 app.Run();
 

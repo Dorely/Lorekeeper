@@ -98,7 +98,7 @@ public class ProjectService(
         return project;
     }
 
-    public async Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default)
+    public async Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default, string? expectedVersion = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -106,6 +106,7 @@ public class ProjectService(
         var project = await repo.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Project {id} not found.");
 
+        ContentVersion.Require(expectedVersion, project.ProjectGuidance);
         project.ProjectGuidance = (projectGuidance ?? string.Empty).Trim();
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);

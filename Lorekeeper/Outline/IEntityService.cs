@@ -49,7 +49,8 @@ public interface IEntityService
         string? name = null,
         IDictionary<string, string?>? propertiesToSet = null,
         IReadOnlyCollection<string>? propertiesToRemove = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? expectedVersion = null);
 
     /// <summary>
     /// Moves a non-structural entity to another non-structural type, keeping its identity,
@@ -89,7 +90,8 @@ public interface IEntityService
         long edgeId,
         string edgeType,
         IDictionary<string, string?>? properties = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        DateTime? expectedUpdatedAt = null);
 
     Task DeleteLinkAsync(Guid projectId, long edgeId, CancellationToken cancellationToken = default);
 

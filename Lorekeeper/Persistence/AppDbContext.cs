@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Citations;
+using Lorekeeper.ExternalAccess;
 using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -18,6 +19,15 @@ public class AppDbContext(
     private const int _maxLockedSaveAttempts = 6;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
+    public DbSet<ExternalAccessSettings> ExternalAccessSettings => Set<ExternalAccessSettings>();
+    public DbSet<McpClientGrant> McpClientGrants => Set<McpClientGrant>();
+    public DbSet<ExternalWork> ExternalWorks => Set<ExternalWork>();
+    public DbSet<ExternalWorkspace> ExternalWorkspaces => Set<ExternalWorkspace>();
+    public DbSet<ExternalMutationReceipt> ExternalMutationReceipts => Set<ExternalMutationReceipt>();
+    public DbSet<ExternalProjectLink> ExternalProjectLinks => Set<ExternalProjectLink>();
+    public DbSet<ExternalSourceIdentity> ExternalSourceIdentities => Set<ExternalSourceIdentity>();
+    public DbSet<ExternalTransferCapture> ExternalTransferCaptures => Set<ExternalTransferCapture>();
+    public DbSet<ExternalAssetTransfer> ExternalAssetTransfers => Set<ExternalAssetTransfer>();
     public DbSet<OpenAiAccount> OpenAiAccounts => Set<OpenAiAccount>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
@@ -346,6 +356,7 @@ public class AppDbContext(
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ExternalAccessModel.Configure(modelBuilder);
         var jsonDictConverter = new ValueConverter<Dictionary<string, object?>, string>(
             v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default),
             v => JsonSerializer.Deserialize<Dictionary<string, object?>>(v, JsonSerializerOptions.Default) ?? new Dictionary<string, object?>());

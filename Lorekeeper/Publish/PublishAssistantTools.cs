@@ -106,7 +106,6 @@ public sealed class PublishAssistantTools(
     IPublicationPreparationService preparation,
     IPublishService publishing,
     IPublicationRenderService renders,
-    IPublicationPaginationService pagination,
     IPublicationEpubPreviewService epubPreviews,
     IPublicationCoverService covers,
     IManuscriptStyleService manuscriptStyles,
@@ -117,6 +116,7 @@ public sealed class PublishAssistantTools(
     IPrintGeometryService printGeometry,
     IAppDatabaseOperationFactory database,
     CitationAssistantTools citationTools,
+    PublicationCoverPreviewService coverPreviews,
     IEditionContentService? editionContent = null,
     ICompositionCanvasPreviewService? canvasPreviews = null,
     IDesignedPageService? compositions = null,
@@ -2451,18 +2451,7 @@ public sealed class PublishAssistantTools(
         PublishAssistantContext context,
         Guid editionId)
     {
-        PublicationEditionFormat? format;
-        await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
-        {
-            format = await operation.Db.PublicationEditions.AsNoTracking()
-                .Where(item => item.ProjectId == context.ProjectId && item.Id == editionId)
-                .Select(item => (PublicationEditionFormat?)item.Format)
-                .SingleOrDefaultAsync(context.TurnCancellationToken);
-        }
-        if (format is null)
-            throw new KeyNotFoundException("Publication release not found.");
-        if (format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
-            await pagination.EnsureCurrentAsync(context.ProjectId, editionId, context.TurnCancellationToken);
+        await coverPreviews.EnsureGeometryAsync(context.ProjectId, editionId, context.TurnCancellationToken);
     }
 
     private static EditorContentTarget SectionContentTarget(Guid? releaseId) =>
@@ -2646,8 +2635,6 @@ public sealed class PublishAssistantTools(
         string? surfaceRole,
         string mode)
     {
-        if (canvasPreviews is null)
-            return Serialize(new { ok = false, code = "CANVAS_PREVIEW_UNAVAILABLE", summary = "Cover canvas preview is unavailable." });
         var previewMode = (mode ?? string.Empty).Trim().ToLowerInvariant() switch
         {
             "annotated" => CompositionCanvasPreviewMode.Annotated,
@@ -2661,29 +2648,10 @@ public sealed class PublishAssistantTools(
         {
             if (releaseId is Guid paginatedReleaseId)
                 await EnsurePrintCoverPaginationAsync(context, paginatedReleaseId);
-            var cover = releaseId is Guid editionId
-                ? string.IsNullOrWhiteSpace(surfaceRole)
-                    ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
-                    : await covers.GetSurfaceAsync(context.ProjectId, editionId, surfaceRole, context.TurnCancellationToken)
-                : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
-            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException("The cover composition is empty.");
             var targetId = releaseId ?? context.ProjectId;
-            var preview = await canvasPreviews.RenderSceneAsync(
-                context.ProjectId,
-                targetId,
-                cover.Revision,
-                scene,
-                previewMode.Value,
-                context.TurnCancellationToken,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["title"] = cover.Title,
-                    ["subtitle"] = cover.Subtitle,
-                    ["author"] = cover.Author,
-                    ["spineText"] = cover.SpineText,
-                    ["description"] = cover.Description,
-                });
+            var rendered = await coverPreviews.RenderAsync(context.ProjectId, releaseId, surfaceRole, previewMode.Value, context.TurnCancellationToken);
+            var cover = rendered.Cover;
+            var preview = rendered.Preview;
             var visualId = Guid.NewGuid();
             var fileName = $"cover-{targetId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
             context.AddTransientVisual(new(
@@ -2792,8 +2760,6 @@ public sealed class PublishAssistantTools(
         string? surfaceRole,
         string mode)
     {
-        if (canvasPreviews is null)
-            return Serialize(new { ok = false, code = "CANVAS_PREVIEW_UNAVAILABLE", summary = "Cover canvas preview is unavailable." });
         try
         {
             await EnsurePrintCoverPaginationAsync(context, releaseId);
@@ -2804,27 +2770,10 @@ public sealed class PublishAssistantTools(
                 "clean" => CompositionCanvasPreviewMode.Clean,
                 _ => throw new ArgumentException("mode must be annotated or clean."),
             };
-            var cover = string.IsNullOrWhiteSpace(surfaceRole)
-                ? await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken)
-                : await covers.GetSurfaceAsync(context.ProjectId, releaseId, surfaceRole, context.TurnCancellationToken);
+            var rendered = await coverPreviews.RenderAsync(context.ProjectId, releaseId, surfaceRole, previewMode, context.TurnCancellationToken);
+            var cover = rendered.Cover;
             var region = cover.Regions.Single(item => item.Role == role);
-            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
-                ?? throw new InvalidDataException("The cover composition is empty.");
-            var preview = await canvasPreviews.RenderSceneAsync(
-                context.ProjectId,
-                releaseId,
-                cover.Revision,
-                scene,
-                previewMode,
-                context.TurnCancellationToken,
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["title"] = cover.Title,
-                    ["subtitle"] = cover.Subtitle,
-                    ["author"] = cover.Author,
-                    ["spineText"] = cover.SpineText,
-                    ["description"] = cover.Description,
-                });
+            var preview = rendered.Preview;
             using var source = SKBitmap.Decode(preview.Data) ?? throw new InvalidDataException("The cover preview could not be decoded.");
             var bounds = region.Bounds;
             var left = Math.Clamp((int)Math.Floor(bounds.XPercent / 100 * source.Width), 0, source.Width - 1);

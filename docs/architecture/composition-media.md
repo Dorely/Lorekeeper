@@ -156,6 +156,17 @@ are transient UI state; persistence and interchange contracts are unchanged.
 
 ## Current architecture and invariants
 
+### External composition and artwork
+
+[External workspaces](external-access.md) use the same project image, visual
+association and Designed Page services. Binary uploads are staged, hash verified
+and imported as unattached assets before a separate canonical association or
+placement. Generation/edit jobs use configured provider defaults and return
+durable job identities; actual pixels must be inspected before use. Scene and
+semantic page mutations have separate revision checks and preserve accessibility
+and semantic ownership. Every batch operation touching visual blocks is checked
+for composition and image permissions.
+
 Project images are reusable assets with bytes, media metadata, crop lineage,
 alt text, prompt/source metadata, and placement
 relationships. Generated or edited work first creates one unattached project

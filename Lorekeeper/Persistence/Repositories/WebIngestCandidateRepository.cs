@@ -43,7 +43,6 @@ public sealed class WebIngestCandidateRepository(AppDatabaseReadOperation operat
         ids.Count == 0
             ? Task.FromResult(new List<WebIngestCandidate>())
             : operation.Db.WebIngestCandidates
-                .AsNoTracking()
                 .Where(candidate => ids.Contains(candidate.Id))
                 .OrderBy(candidate => candidate.CrawlDepth)
                 .ThenBy(candidate => candidate.SearchRank)

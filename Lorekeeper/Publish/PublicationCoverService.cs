@@ -21,7 +21,8 @@ public sealed record PublicationCoverCanvasPreviewRequest(
     long Revision,
     string SurfaceLabel,
     CompositionScene Scene,
-    IReadOnlyDictionary<string, string> TextBindings);
+    IReadOnlyDictionary<string, string> TextBindings,
+    string BackgroundColor);
 
 public sealed record PublicationCoverDesignView(
     Guid Id,
@@ -390,7 +391,7 @@ public sealed class PublicationCoverService(
         var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         ValidateAuthoringUpdate(update);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         ValidateProduct(update, edition);
@@ -644,7 +645,7 @@ public sealed class PublicationCoverService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginMutationTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item =>
             item.Id == stageId
             && item.ProjectId == projectId

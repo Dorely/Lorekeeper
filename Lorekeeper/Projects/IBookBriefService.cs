@@ -9,7 +9,8 @@ public interface IBookBriefService
     Task<BookBrief> UpdateAsync(
         Guid projectId,
         BookBriefPatch patch,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        DateTime? expectedUpdatedAt = null);
 
     Task<BookBrief> UpdateVisualDirectionAsync(
         Guid projectId,

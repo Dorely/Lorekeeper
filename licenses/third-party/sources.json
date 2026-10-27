@@ -599,18 +599,18 @@
       ]
     },
     {
-      "package": "Microsoft.Extensions.AI.Abstractions/10.4.1",
-      "sha512": "ZxhU/wg9BOc3ohibhLl18toPLWm96ysQoE+3OhCgrZ0TUPZd7bsUmGteeatz08yweyuPIEhtyUzEZTF+3bMWEQ==",
+      "package": "Microsoft.Extensions.AI.Abstractions/10.11.0",
+      "sha512": "h4DX/TdJU4fk1GGaf19n6Kujkj6VXbGeL4UEOsQ8+ZJC5fVApPauokCtvBP684BYbczUYZQNfo1mbmyHG4WVSg==",
       "licenseExpression": "MIT",
       "repository": "https://github.com/dotnet/extensions",
-      "repositoryCommit": "b797b53993672eae537cf2cebe6ad3cf58c507e6",
+      "repositoryCommit": "25f07afa51034e37b334210642d7dc5f191c142d",
       "copyright": "© Microsoft Corporation. All rights reserved.",
       "authors": "Microsoft",
       "evidence": [
         {
           "path": "licenses/third-party/47f0ad8ba753eae5-LICENSE",
           "sha256": "47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275",
-          "source": "https://raw.githubusercontent.com/dotnet/extensions/b797b53993672eae537cf2cebe6ad3cf58c507e6/LICENSE"
+          "source": "https://raw.githubusercontent.com/dotnet/extensions/25f07afa51034e37b334210642d7dc5f191c142d/LICENSE"
         }
       ]
     },
@@ -769,6 +769,54 @@
           "path": "licenses/third-party/d7a68596ab69b06f-LICENSE.TXT",
           "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
           "source": "nuget:Microsoft.Win32.SystemEvents/8.0.0/LICENSE.TXT"
+        }
+      ]
+    },
+    {
+      "package": "ModelContextProtocol.AspNetCore/2.3.0",
+      "sha512": "YaRK007jAIFYAGH65I2SPsXVHzaFDRBx+d3swxLCziRYysmk9zGCWm+Lqdt5geHq0wDwCcvwYkMzAOSUWLpajw==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/modelcontextprotocol/csharp-sdk",
+      "repositoryCommit": "9a327829ef066c44a0d737c58bf3c7617d7c701c",
+      "copyright": "© Model Context Protocol a Series of LF Projects, LLC.",
+      "authors": "ModelContextProtocol",
+      "evidence": [
+        {
+          "path": "licenses/third-party/7c6a686d2b34b86a-LICENSE",
+          "sha256": "7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc",
+          "source": "https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "ModelContextProtocol.Core/2.3.0",
+      "sha512": "EDpbQholhVWoNumb0Ab3oGv9LmXOLgaD5ixEIUkrnzpnqD0TJCSHTJ5G71/J1KlrQ98aWDclWTPMffKTnCJoMw==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/modelcontextprotocol/csharp-sdk",
+      "repositoryCommit": "9a327829ef066c44a0d737c58bf3c7617d7c701c",
+      "copyright": "© Model Context Protocol a Series of LF Projects, LLC.",
+      "authors": "ModelContextProtocol",
+      "evidence": [
+        {
+          "path": "licenses/third-party/7c6a686d2b34b86a-LICENSE",
+          "sha256": "7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc",
+          "source": "https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE"
+        }
+      ]
+    },
+    {
+      "package": "ModelContextProtocol/2.3.0",
+      "sha512": "PHZ0q8xTAoysqUKpA5gC0RGJSfwpZhfsNz+9Sw0X0RzFFVHjIE52sx6C+ogMn+LSE+FfiYiNscPJhM6q6DMT6Q==",
+      "licenseExpression": "Apache-2.0",
+      "repository": "https://github.com/modelcontextprotocol/csharp-sdk",
+      "repositoryCommit": "9a327829ef066c44a0d737c58bf3c7617d7c701c",
+      "copyright": "© Model Context Protocol a Series of LF Projects, LLC.",
+      "authors": "ModelContextProtocol",
+      "evidence": [
+        {
+          "path": "licenses/third-party/7c6a686d2b34b86a-LICENSE",
+          "sha256": "7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc",
+          "source": "https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/9a327829ef066c44a0d737c58bf3c7617d7c701c/LICENSE"
         }
       ]
     },

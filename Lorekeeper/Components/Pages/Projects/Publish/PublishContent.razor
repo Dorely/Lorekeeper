@@ -2292,14 +2292,16 @@ else
     {
         if (Project is null)
             return;
-        _coverPreview = await CoverCanvasPreviews.RenderSceneAsync(
+        _coverPreview = await CoverCanvasPreviews.RenderSceneAtResolutionAsync(
             Project.Id,
             request.CoverId,
             request.Revision,
             request.Scene,
+            ManuscriptCodec.CreateEmpty(request.CoverId),
             CompositionCanvasPreviewMode.Clean,
+            1600,
             _dispose.Token,
-            request.TextBindings);
+            request.TextBindings, request.BackgroundColor);
         _coverPreviewDataUrl = $"data:image/png;base64,{Convert.ToBase64String(_coverPreview.Data)}";
         _coverPreviewLabel = request.SurfaceLabel;
     }

@@ -266,6 +266,21 @@ back to the latest attempt only when no active extraction exists.
 
 ## Current architecture and invariants
 
+### External operational state and atomic commands
+
+[External Access](external-access.md) persists grants, logical workspaces, retry
+receipts, source identity links, transfer captures and upload reservations as
+local operational state. These tables are excluded from creative exports and
+canonical Git snapshots. Grant credentials use the installation's Data Protection
+boundary and never enter project content.
+
+`ApplicationTransactions.BeginMutationTransactionAsync` joins an enclosing
+application transaction through a savepoint while preserving ordinary standalone
+service transactions. External content, safe actor provenance and its immutable
+request/outcome receipt commit together. `MutationCommitEffects` defers process
+effects until commit and attempts every effect even if another fails. A durable
+projection-repair receipt preserves successful content while derived work retries.
+
 The application stores local state in SQLite through `AppDbContext`, including
 provider/OAuth configuration, projects, Book Briefs, outline/graph state,
 transcripts, review/contest state, writing samples, ingest/import jobs, images,

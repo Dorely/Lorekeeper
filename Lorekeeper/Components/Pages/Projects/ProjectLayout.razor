@@ -1,7 +1,12 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
+@using Lorekeeper.ExternalAccess
+@using Lorekeeper.Authoring
+@implements IDisposable
 @inject IProjectService Projects
 @inject NavigationManager Nav
+@inject ExternalWorkspaceUiEvents ExternalEvents
+@inject IAuthoringMutationFence AuthoringFence
 
 @if (_loading)
 {
@@ -38,6 +43,14 @@ else
 
         <CascadingValue Value="Project">
             <div class="project-body">
+                @if (_externalChanges)
+                {
+                    <div class="alert alert-info d-flex align-items-center gap-2" role="status">
+                        <span>An external agent saved project changes.</span>
+                        <button class="btn btn-sm btn-outline-primary" disabled="@_refreshing" @onclick="RefreshExternalAsync">Refresh workspace</button>
+                        @if (_refreshError is not null) { <span>@_refreshError</span> }
+                    </div>
+                }
                 @ChildContent
             </div>
         </CascadingValue>
@@ -66,6 +79,34 @@ else
     public Project? Project { get; private set; }
     private bool _loading = true;
     private string? _loadedSlug;
+    private bool _externalChanges, _refreshing, _disposed;
+    private string? _refreshError;
+
+    protected override void OnInitialized() => ExternalEvents.ProjectChanged += OnExternalChanged;
+
+    private async void OnExternalChanged(Guid projectId)
+    {
+        if (_disposed || Project?.Id != projectId) return;
+        try { await InvokeAsync(() => { if (!_disposed) { _externalChanges = true; StateHasChanged(); } }); }
+        catch (Exception exception) when (exception is ObjectDisposedException or OperationCanceledException or InvalidOperationException) { }
+    }
+
+    private async Task RefreshExternalAsync()
+    {
+        if (Project is null || _refreshing) return;
+        _refreshing = true;
+        _refreshError = null;
+        try
+        {
+            await AuthoringFence.ExecuteAsync(new(Project.Id, [], "save visible work before refreshing external changes"),
+                (_, _) => Task.FromResult(true));
+            Nav.Refresh(forceReload: true);
+        }
+        catch (AuthoringMutationFenceException) { _refreshError = "Finish saving visible changes, then refresh again. Your work is retained."; }
+        finally { _refreshing = false; }
+    }
+
+    public void Dispose() { _disposed = true; ExternalEvents.ProjectChanged -= OnExternalChanged; }
 
     protected override async Task OnParametersSetAsync()
     {

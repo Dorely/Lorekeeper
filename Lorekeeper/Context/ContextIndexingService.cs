@@ -43,6 +43,7 @@ public sealed class ContextIndexingService(
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            indexWork.ReportFailure();
                             logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
                         }
                     },
@@ -70,6 +71,7 @@ public sealed class ContextIndexingService(
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            indexWork.ReportFailure();
                             logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
                         }
                     },
@@ -97,6 +99,7 @@ public sealed class ContextIndexingService(
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            indexWork.ReportFailure();
                             logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
                         }
                     },
@@ -119,6 +122,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to reindex context ingest source {SourceId}", sourceId);
         }
     }
@@ -139,6 +143,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to delete context ingest source vectors for {SourceId}", sourceId);
         }
     }
@@ -159,6 +164,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to reindex context ingest source chunk {SourceChunkId}", sourceChunkId);
         }
     }
@@ -206,6 +212,7 @@ public sealed class ContextIndexingService(
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
+                            indexWork.ReportFailure();
                             logger.LogWarning(ex, "Failed to reindex project profile {ProjectId}", projectId);
                         }
                     },
@@ -215,7 +222,11 @@ public sealed class ContextIndexingService(
     public Task DeleteProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.ProjectProfile, projectId, cancellationToken);
 
-    public async Task ReindexWritingSampleAsync(Guid sampleId, CancellationToken cancellationToken = default)
+    public Task ReindexWritingSampleAsync(Guid sampleId, CancellationToken cancellationToken = default) =>
+        indexWork.QueueOrRunAsync(VectorIndexWorkKind.ContextWritingSample, sampleId.ToString("N"),
+            token => ReindexWritingSampleCoreAsync(sampleId, token), cancellationToken);
+
+    private async Task ReindexWritingSampleCoreAsync(Guid sampleId, CancellationToken cancellationToken)
     {
         try
         {
@@ -241,6 +252,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to reindex writing sample {SampleId}", sampleId);
         }
     }
@@ -264,6 +276,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to reindex context entity node {NodeType}/{NodeKey}", node.NodeType, node.Key);
         }
     }
@@ -405,6 +418,7 @@ public sealed class ContextIndexingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            indexWork.ReportFailure();
             logger.LogWarning(ex, "Failed to delete context vectors for {SourceType}/{SourceId}", sourceType, sourceId);
         }
     }
