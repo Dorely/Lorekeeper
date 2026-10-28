@@ -133,6 +133,14 @@
 - Show the user a failure only when no automatic resolution exists and their
   decision is genuinely required. Then explain it plainly in product terms and
   offer the action that resolves it, never a dead end or a generic error.
+- Never let a state that will fail later exist in the app. Validate every value
+  where it enters (UI, in-app assistant tools, MCP tools, import, and any path
+  that copies it into another field) against what its downstream consumers
+  accept, and reject or normalize it there. A rejection names the field and
+  states the fix, such as the exact valid options, and that message must reach
+  the caller intact across the UI, assistant, and MCP boundaries. When an
+  invalid state is found already stored, repair it in the same change without
+  losing authored content.
 - Security boundaries are not fail-closed UX and stay strict: credentials and
   tokens, path containment and reparse-point checks, untrusted-content execution,
   and external-publication consent.
