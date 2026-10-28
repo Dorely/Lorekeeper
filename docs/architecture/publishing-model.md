@@ -27,7 +27,10 @@ presentation, fixed outline content, chapter inclusion, Core publication
 sections, project-linked page setup usage, the shared paginated chapter-start
 policy, Digital PDF presentation defaults, and the reusable Core front-cover
 scene. Core exists even when no publication release exists and can produce only
-a private `ReadingPdf`.
+a private `ReadingPdf`. `PublicationLanguage` resolves stored languages,
+including free-form Book Brief locales such as "English (UK spelling)", to a
+culture tag on every read, so a descriptive locale reaches Press as `en-GB`
+rather than as an unsupported language.
 
 `IPublicationSectionService` owns matter around the fixed Core outline. A
 publication section is either a semantic prose document with optional flowing

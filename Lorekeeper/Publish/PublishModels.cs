@@ -26,6 +26,30 @@ public static class PublicationLanguage
             return null;
 
         var candidate = value.Trim().Replace('_', '-');
+        if (Resolve(candidate) is { } exact)
+            return exact;
+
+        // Free-form locales such as "English (UK spelling: colour)" name the language before any qualifier
+        // and an optional region first inside parentheses.
+        var qualifier = candidate.IndexOfAny(['(', ',', ';', ':']);
+        if (qualifier <= 0)
+            return candidate;
+        var language = candidate[..qualifier].Trim();
+        if (candidate[qualifier] == '(')
+        {
+            var detail = candidate[(qualifier + 1)..].Split([')', ',', ';', ':'], 2)[0].Trim();
+            var region = detail.Split(' ', 2)[0];
+            if ((Resolve($"{language} ({detail})") ?? Resolve($"{language} ({region})")) is { } regional)
+                return regional;
+        }
+
+        return Resolve(language) ?? candidate;
+    }
+
+    private static string? Resolve(string candidate)
+    {
+        if (candidate.Length == 0)
+            return null;
         try
         {
             var culture = CultureInfo.GetCultureInfo(candidate);
@@ -36,7 +60,7 @@ public static class PublicationLanguage
         {
         }
 
-        return KnownNames.GetValueOrDefault(candidate, candidate);
+        return KnownNames.GetValueOrDefault(candidate);
     }
 
     public static bool IsPressSupported(string? value)
