@@ -1,0 +1,102 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Outline
+@using Lorekeeper.Writing
+
+<aside class="voice-list">
+    <div class="voice-list-header">
+        <div>
+            <div class="voice-list-title">@(ShowCharacters ? "Character Voices" : "Writing Samples")</div>
+            <div class="voice-list-count">@CountLabel</div>
+        </div>
+        @if (!ShowCharacters)
+        {
+            <button type="button" class="btn btn-primary btn-sm" @onclick="CreateAsync">New</button>
+        }
+    </div>
+
+    @if (Rows.Count == 0)
+    {
+        <div class="voice-list-empty">@(ShowCharacters ? "No characters yet. Ask Voice to create one." : "No samples yet.")</div>
+    }
+    else
+    {
+        <div class="voice-list-scroll">
+            @foreach (var row in Rows)
+            {
+                var active = ActiveId == row.Id;
+                <div class="voice-list-row @(active ? "active" : "")">
+                    <button type="button" class="voice-list-row-main" @onclick="() => SelectAsync(row.Id)">
+                        <span class="voice-list-row-title">@row.Title</span>
+                        @if (row.Time is not null)
+                        {
+                            <span class="voice-list-row-time">@row.Time</span>
+                        }
+                        <span class="voice-list-row-excerpt">@row.Excerpt</span>
+                    </button>
+                    @if (!ShowCharacters)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-danger voice-list-row-delete"
+                                title="Delete sample" @onclick="() => AskDelete(row.Id)">Delete</button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</aside>
+
+<ConfirmationDialog IsOpen="@(_confirmDeleteId is not null)" Title="Delete writing sample?" Message="This removes the sample from project style evidence." ConfirmLabel="Delete sample" Destructive="true" OnConfirm="() => ConfirmDeleteAsync(_confirmDeleteId!.Value)" OnCancel="CancelDelete" />
+
+@code {
+    [Parameter] public IReadOnlyList<WritingSample> Samples { get; set; } = [];
+    [Parameter] public IReadOnlyList<StoryEntity> Characters { get; set; } = [];
+    [Parameter] public bool ShowCharacters { get; set; }
+    [Parameter] public Guid? ActiveId { get; set; }
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public EventCallback<Guid> OnDelete { get; set; }
+
+    private Guid? _confirmDeleteId;
+
+    private sealed record Row(Guid Id, string Title, string? Time, string Excerpt);
+
+    private IReadOnlyList<Row> Rows => ShowCharacters
+        ? Characters.Select(character => new Row(character.Id, character.Name, null, Excerpt(VoiceProfileService.Read(character), "No voice profile yet"))).ToList()
+        : Samples.Select(sample => new Row(sample.Id, sample.Title, $"Updated {sample.UpdatedAt.ToLocalTime():MMM d, HH:mm}", Excerpt(sample.Body, "Empty draft"))).ToList();
+
+    private string CountLabel => ShowCharacters
+        ? $"{Characters.Count} character{(Characters.Count == 1 ? string.Empty : "s")}"
+        : $"{Samples.Count} sample{(Samples.Count == 1 ? string.Empty : "s")}";
+
+    private async Task SelectAsync(Guid id)
+    {
+        _confirmDeleteId = null;
+        if (OnSelect.HasDelegate)
+            await OnSelect.InvokeAsync(id);
+    }
+
+    private async Task CreateAsync()
+    {
+        _confirmDeleteId = null;
+        if (OnCreate.HasDelegate)
+            await OnCreate.InvokeAsync();
+    }
+
+    private void AskDelete(Guid sampleId) => _confirmDeleteId = sampleId;
+
+    private void CancelDelete() => _confirmDeleteId = null;
+
+    private async Task ConfirmDeleteAsync(Guid sampleId)
+    {
+        _confirmDeleteId = null;
+        if (OnDelete.HasDelegate)
+            await OnDelete.InvokeAsync(sampleId);
+    }
+
+    private static string Excerpt(string body, string empty)
+    {
+        var compact = string.Join(' ', (body ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (compact.Length == 0) return empty;
+        return compact.Length <= 110 ? compact : compact[..110] + "...";
+    }
+}

@@ -59,7 +59,7 @@ public sealed class VoiceTools(
             AIFunctionFactory.Create((string title, string body) => MutateAsync(context, async () => {
                 var value = await samples.CreateAsync(context.ProjectId, title, body);
                 return (true, new { value.Id, value.Revision });
-            }), "create_writing_sample", "Create a project-wide prose style sample when requested: a substantial passage, not a single line or one character's dialogue."),
+            }), "create_writing_sample", "Create a project-wide style sample from the author's own writing or writing they supply to influence style, only when requested. Never use it for lines taken from the story."),
             AIFunctionFactory.Create((Guid sampleId, long expectedRevision, string? title = null, string? body = null) => MutateAsync(context, async () => {
                 var before = await samples.GetAsync(sampleId);
                 var value = await samples.UpdateAsync(context.ProjectId, sampleId, expectedRevision, title, body);
@@ -75,7 +75,7 @@ public sealed class VoiceTools(
             AIFunctionFactory.Create((Guid characterId, string expectedContent, string content) => MutateAsync(context, async () => {
                 var value = await profiles.SaveAsync(context.ProjectId, characterId, expectedContent, content);
                 return (expectedContent != content, new { value.Id, saved = true });
-            }), "save_voice_profile", "Save one character's free-form dialogue and POV voice, including representative exact lines from their existing dialogue, using the exact previously read content. Empty content clears the profile."),
+            }), "save_voice_profile", "Save one character's free-form dialogue and POV voice, using the exact previously read content: described speech characteristics plus example speech and dialogue, quoting their existing lines where they exist. Empty content clears the profile."),
             AIFunctionFactory.Create((string name) => MutateAsync(context, async () => {
                 var value = await entities.CreateAsync(context.ProjectId, "Character", name);
                 return (true, new { value.Id, value.Name });

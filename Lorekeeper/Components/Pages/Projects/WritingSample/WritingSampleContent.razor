@@ -19,10 +19,6 @@
             @if (_error is not null) { <div class="alert alert-danger">@_error</div> }
             @if (_charactersView)
             {
-                <select class="form-select mb-2" aria-label="Character" value="@_characterId" @onchange="SelectCharacter">
-                    <option value="">Select a character</option>
-                    @foreach (var option in _characters) { <option value="@option.Id">@option.Name</option> }
-                </select>
                 @if (CurrentCharacter is { } character)
                 {
                     <NarrativeTextEditor @ref="_editor" @key="character.Id" ProjectId="Project.Id" TargetId="@($"voice:{character.Id:N}")"
@@ -30,7 +26,7 @@
                         Placeholder="Describe dialogue, POV narration, rhythm, vocabulary, emotional variations, and illustrative lines..."
                         Save="draft => SaveProfileAsync(character.Id, draft)" OnResumed="ReloadAsync" />
                 }
-                else { <p>Select a character, or ask Voice to create one.</p> }
+                else { <p>Select a character from the list, or ask Voice to create one.</p> }
             }
             else if (_current is { } sample)
             {
@@ -41,8 +37,9 @@
             else { <button class="btn btn-primary" @onclick="CreateSampleAsync">Create first sample</button> }
         </section>
         <div class="writing-sample-pane-list">
-            <WritingSampleListPanel Samples="_samples" ActiveSampleId="@_current?.Id"
-                OnSelect="SelectSampleAsync" OnCreate="CreateSampleAsync" OnDelete="DeleteSampleAsync" />
+            <VoiceListPanel Samples="_samples" Characters="_characters" ShowCharacters="_charactersView"
+                ActiveId="@(_charactersView ? _characterId : _current?.Id)"
+                OnSelect="SelectAsync" OnCreate="CreateSampleAsync" OnDelete="DeleteSampleAsync" />
         </div>
     </div>
 }
@@ -110,16 +107,17 @@
         try { if (_editor is not null) await _editor.EnsureSavedAsync(); return true; }
         catch (InvalidOperationException exception) { _error = exception.Message; return false; }
     }
-    private async Task SwitchViewAsync(bool characters) { if (await CanLeaveAsync()) _charactersView = characters; }
-    private async Task SelectCharacter(ChangeEventArgs args)
-    {
-        if (await CanLeaveAsync()) _characterId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
-    }
-    private async Task SelectSampleAsync(Guid id)
+    private async Task SwitchViewAsync(bool characters)
     {
         if (!await CanLeaveAsync()) return;
-        _current = _samples.FirstOrDefault(value => value.Id == id);
-        _charactersView = false;
+        _charactersView = characters;
+        if (characters && CurrentCharacter is null) _characterId = _characters.FirstOrDefault()?.Id;
+    }
+    private async Task SelectAsync(Guid id)
+    {
+        if (!await CanLeaveAsync()) return;
+        if (_charactersView) _characterId = id;
+        else _current = _samples.FirstOrDefault(value => value.Id == id);
     }
     private async Task CreateSampleAsync()
     {

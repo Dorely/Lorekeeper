@@ -23,8 +23,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         Read current records and their revisions before editing. Use list_writing_samples and read_writing_sample to resolve the visible sample; never guess its identity from its title.
         Use read_current_section for the visible workspace selection. It is a turn-start snapshot, not a substitute for a fresh record before writing.
         Preserve the author's style while helping with rhythm, diction, imagery, pacing, dialogue, and POV narration.
-        Profiles may discuss vocabulary, rhythm, emotional variation, distinguishing traits, internal narration, and illustrative lines. No fixed headings are required.
-        Samples remain general style evidence: substantial prose passages, not single lines or one character's dialogue. Profile example lines illustrate a voice, not dialogue to repeat automatically.
+        A profile combines described speech characteristics (vocabulary, rhythm, emotional variation, distinguishing traits, internal narration) with example speech and dialogue from the character, quoting their existing lines where they exist. No fixed headings are required.
+        Samples are only the author's own writing or writing the author supplies to influence style; never fill them with lines taken from the story. Profile example lines illustrate a voice, not dialogue to repeat automatically.
         Create a Character only when the user's request requires it. Mutate only the active project.
         Surface conflicts with existing canon or briefs. Keep unrelated entity properties unchanged.
         A successful mutation result is verification; reread only when a result is missing, ambiguous, or an error. Distinguish saved work from suggestions.

@@ -443,8 +443,9 @@ read, revise, and delete samples with expected revisions, and save or clear the
 canonical voiceProfile entity property with an exact previous-value check. It can
 create a Character when requested work requires one. Dialogue and POV guidance
 travel with relevant entity context; samples remain project-wide style evidence.
-Samples are substantial prose passages; a character's representative dialogue
-lines belong in that character's profile, not in samples.
+Samples hold only the author's own writing or writing the author supplies to
+influence style; a character's described speech characteristics and example
+dialogue belong together in that character's profile.
 Voice uses shared prompts, mutation fencing, workspace refresh, and checkpoints.
 
 World is one adaptive assistant for world development and research. It combines

@@ -2,7 +2,7 @@
 name: lorekeeper-external-access
 description: Build, edit, research, illustrate, inspect, and exchange Lorekeeper projects through its local MCP workspaces. Use for Lorekeeper creative work and transfers to another project; repository development uses that repository's own instructions.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 Lorekeeper is authoritative project state. Discover its currently advertised capabilities; this skill never grants a permission or implies that a tool is installed.
@@ -19,7 +19,7 @@ Continue one task across surfaces by passing its workId to subsequent workspace 
 - **Editor:** semantic Core/release manuscript edits, annotations, styles, Figures, Designed Pages, and layout. Core is shared source; a release is an explicit override target. Read the manuscript and styles before editing.
 - **World:** World Brief, Working Notes, source research, and canon development. Brief/canon are established state; notes hold proposals and uncertainty. Search evidence is not automatically canon.
 - **Images:** existing artwork, canonical entity associations, generation/editing, and inspection. Creating an asset and attaching or placing it are distinct operations. Inspect generated/edited pixels before use.
-- **Voice:** project-wide writing samples and per-character voice profiles. A writing sample is a substantial passage of the book's own prose that shows its style, never single lines or one character's dialogue. Put a character's voice in their profile: study their existing dialogue, describe how they speak and think, and quote a few representative exact lines. Keep appearance and backstory on the entity record.
+- **Voice:** project-wide writing samples and per-character voice profiles. Writing samples hold only the author's own writing or writing the author supplies to influence style; never fill them with lines or passages taken from the story. A character's voice profile holds both a concrete description of how they speak and think and example speech and dialogue from them, quoting their existing lines where they exist. Keep appearance and backstory on the entity record.
 - **Publish:** Core Book, releases, sections, covers, previews, readiness, and artifact preparation. Preparation is not external publication or proof of vendor acceptance. Follow returned diagnostics and verification requirements.
 
 ## Ground and preserve edits
