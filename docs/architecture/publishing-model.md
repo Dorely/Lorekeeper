@@ -27,10 +27,17 @@ presentation, fixed outline content, chapter inclusion, Core publication
 sections, project-linked page setup usage, the shared paginated chapter-start
 policy, Digital PDF presentation defaults, and the reusable Core front-cover
 scene. Core exists even when no publication release exists and can produce only
-a private `ReadingPdf`. `PublicationLanguage` resolves stored languages,
-including free-form Book Brief locales such as "English (UK spelling)", to a
-culture tag on every read, so a descriptive locale reaches Press as `en-GB`
-rather than as an unsupported language.
+a private `ReadingPdf`. `PublicationLanguage` lists the languages Press renders
+(`en`, `en-US`, `en-GB`). The Book Brief, Core Book, and release language entry
+points reject any other value with a `CorrectableInputException` that names the
+field and lists those options; spelling and usage conventions belong in House
+style. Import, version restore, and Core migration carry older shapes, so
+`AppDbContext` repairs their unsupported languages on save and startup repairs
+stored rows. Repair maps descriptive wording such as "English (UK spelling)" to
+`en-GB`, falls back to `en` for languages Press cannot render, and appends any
+wording the tag does not preserve to Book Brief House style as a language note.
+A Press `PRESS_LANGUAGE_UNSUPPORTED` diagnostic, which can still come from
+language marks or figure languages, is presented with the same options.
 
 `IPublicationSectionService` owns matter around the fixed Core outline. A
 publication section is either a semantic prose document with optional flowing

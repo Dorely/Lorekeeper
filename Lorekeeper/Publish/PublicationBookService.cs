@@ -61,7 +61,7 @@ public sealed record PublicationBookPatch(
     string? Title = null,
     string? Subtitle = null,
     string? Author = null,
-    string? Language = null,
+    [property: System.ComponentModel.Description(PublicationLanguage.FieldDescription)] string? Language = null,
     string? Publisher = null,
     string? Copyright = null,
     string? Description = null,
@@ -278,7 +278,7 @@ public sealed class PublicationBookService(
         {
             ProjectId = projectId,
             Title = project.Name.Trim(),
-            Language = PublicationLanguage.Normalize(project.BookBrief?.LanguageLocale),
+            Language = PublicationLanguage.Repaired(project.BookBrief?.LanguageLocale),
             IncludeVisibleTableOfContents = project.BookBrief?.BookKind is not (BookKind.Novel
                 or BookKind.Novella
                 or BookKind.ShortStory
@@ -380,8 +380,9 @@ public sealed class PublicationBookService(
         book.Title = Value(patch.Title, book.Title, clear, nameof(patch.Title));
         book.Subtitle = Value(patch.Subtitle, book.Subtitle, clear, nameof(patch.Subtitle));
         book.Author = Value(patch.Author, book.Author, clear, nameof(patch.Author));
-        book.Language = PublicationLanguage.Normalize(
-            Value(patch.Language, book.Language, clear, nameof(patch.Language)));
+        book.Language = PublicationLanguage.RequirePressSupported(
+            Value(patch.Language, book.Language, clear, nameof(patch.Language)) is { Length: > 0 } language ? language : "en",
+            "Core Book language");
         book.Publisher = Value(patch.Publisher, book.Publisher, clear, nameof(patch.Publisher));
         book.Copyright = Value(patch.Copyright, book.Copyright, clear, nameof(patch.Copyright));
         book.Description = Value(patch.Description, book.Description, clear, nameof(patch.Description));
@@ -983,12 +984,11 @@ public sealed class PublicationBookService(
 
     private static void Validate(PublicationBook book)
     {
+        PublicationLanguage.RequirePressSupported(book.Language, "Core Book language");
         if (book.Title.Length > 500 || book.Subtitle.Length > 500 || book.Author.Length > 500
-            || book.Language.Length > 40 || book.Publisher.Length > 500
+            || book.Publisher.Length > 500
             || book.Copyright.Length > 100_000 || book.Description.Length > 100_000)
             throw new InvalidOperationException("One or more Core Book fields exceed supported limits.");
-        if (!PublicationLanguage.IsPressSupported(book.Language))
-            throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the Core Book language.");
         if (!Enum.IsDefined(book.TitlePageMode))
             throw new InvalidOperationException("The Core Book title-page setting is invalid.");
         if (!Enum.IsDefined(book.CitationStyle))

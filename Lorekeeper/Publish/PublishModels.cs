@@ -10,6 +10,10 @@ public static class PublicationLanguage
 {
     private static readonly IReadOnlyDictionary<string, string> KnownNames = BuildKnownNames();
 
+    /// <summary>Schema guidance for every language field; keep it in step with <see cref="SupportedOptions"/>.</summary>
+    public const string FieldDescription =
+        "Language tag. Use exactly one of: en (English), en-US (English (United States)), en-GB (English (United Kingdom)). Describe spelling and usage conventions in Book Brief House style instead.";
+
     public static IReadOnlyList<PublicationLanguageOption> SupportedOptions { get; } =
     [
         new("en", "English"),
@@ -26,30 +30,98 @@ public static class PublicationLanguage
             return null;
 
         var candidate = value.Trim().Replace('_', '-');
-        if (Resolve(candidate) is { } exact)
-            return exact;
+        return Resolve(candidate) ?? candidate;
+    }
 
-        // Free-form locales such as "English (UK spelling: colour)" name the language before any qualifier
-        // and an optional region first inside parentheses.
+    public static bool IsPressSupported(string? value) => SupportedTag(value) is not null;
+
+    /// <summary>True when the value is already stored exactly as a supported tag.</summary>
+    public static bool IsCanonical(string? value) => value is not null && SupportedTag(value) == value;
+
+    public static string SupportedOptionsText { get; } =
+        string.Join(", ", SupportedOptions.Select(item => $"{item.Tag} ({item.Label})"));
+
+    /// <summary>States the fix when Press rejects a language anywhere in a render request.</summary>
+    public static string PressUnsupportedGuidance { get; } =
+        $"Change the book language, release language, and any language marks or figure languages to one of: {SupportedOptionsText}.";
+
+    /// <summary>Returns the canonical supported tag, or rejects the value naming the field and its valid options.</summary>
+    public static string RequirePressSupported(string? value, string field, string? guidance = null) =>
+        SupportedTag(value) ?? throw new CorrectableInputException(
+            $"{field} must be one of: {SupportedOptionsText}." + (guidance is null ? string.Empty : $" {guidance}"));
+
+    /// <summary>
+    /// Repairs a stored or imported language that predates entry validation. Free-form wording such as
+    /// "English (UK spelling: colour)" names a language before any qualifier and an optional region first
+    /// inside parentheses. Note carries the original wording whenever the tag alone does not preserve it.
+    /// </summary>
+    public static (string? Tag, string? Note) Repair(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return (null, null);
+        if (SupportedTag(value) is { } exact)
+            return (exact, null);
+
+        var original = value.Trim();
+        var candidate = original.Replace('_', '-');
         var qualifier = candidate.IndexOfAny(['(', ',', ';', ':']);
         if (qualifier <= 0)
-            return candidate;
+            return (null, original);
         var language = candidate[..qualifier].Trim();
         if (candidate[qualifier] == '(')
         {
             var detail = candidate[(qualifier + 1)..].Split([')', ',', ';', ':'], 2)[0].Trim();
-            var region = detail.Split(' ', 2)[0];
-            if ((Resolve($"{language} ({detail})") ?? Resolve($"{language} ({region})")) is { } regional)
-                return regional;
+            if ((SupportedTag($"{language} ({detail})") ?? SupportedTag($"{language} ({detail.Split(' ', 2)[0]})")) is { } regional)
+                return (regional, original);
         }
 
-        return Resolve(language) ?? candidate;
+        return (SupportedTag(language), original);
+    }
+
+    /// <summary>Repairs an unsupported Book Brief language, keeping its original wording in House style.</summary>
+    public static bool RepairStored(BookBrief brief)
+    {
+        if (brief.LanguageLocale.Length == 0 || IsCanonical(brief.LanguageLocale))
+            return false;
+        var (tag, note) = Repair(brief.LanguageLocale);
+        brief.LanguageLocale = tag ?? string.Empty;
+        brief.HouseStyle = WithLanguageNote(brief.HouseStyle, note);
+        return true;
+    }
+
+    /// <summary>Repairs an unsupported Core Book or release language; values that name no supported language become English.</summary>
+    public static bool RepairStored(PublicationBook book) => RepairStored(book.Language, value => book.Language = value);
+
+    public static bool RepairStored(PublicationEdition edition) => RepairStored(edition.Language, value => edition.Language = value);
+
+    /// <summary>Appends an unsupported language description to House style so repair never drops authored wording.</summary>
+    public static string WithLanguageNote(string houseStyle, string? note)
+    {
+        if (string.IsNullOrWhiteSpace(note) || houseStyle.Contains(note, StringComparison.Ordinal))
+            return houseStyle;
+        var line = $"Language notes: {note}";
+        return string.IsNullOrWhiteSpace(houseStyle) ? line : $"{houseStyle.TrimEnd()}\n\n{line}";
+    }
+
+    /// <summary>The Core Book or release language a stored or imported value repairs to.</summary>
+    public static string Repaired(string? value) => Repair(value).Tag ?? "en";
+
+    private static bool RepairStored(string value, Action<string> assign)
+    {
+        if (IsCanonical(value))
+            return false;
+        assign(Repaired(value));
+        return true;
+    }
+
+    private static string? SupportedTag(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        return SupportedOptions.FirstOrDefault(item => string.Equals(item.Tag, normalized, StringComparison.OrdinalIgnoreCase))?.Tag;
     }
 
     private static string? Resolve(string candidate)
     {
-        if (candidate.Length == 0)
-            return null;
         try
         {
             var culture = CultureInfo.GetCultureInfo(candidate);
@@ -61,12 +133,6 @@ public static class PublicationLanguage
         }
 
         return KnownNames.GetValueOrDefault(candidate);
-    }
-
-    public static bool IsPressSupported(string? value)
-    {
-        var normalized = NormalizeOptional(value);
-        return SupportedOptions.Any(item => string.Equals(item.Tag, normalized, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyDictionary<string, string> BuildKnownNames()
@@ -199,7 +265,7 @@ public sealed record PublicationReleaseOverridePatch(
     string? Title = null,
     string? Subtitle = null,
     string? Author = null,
-    string? Language = null,
+    [property: System.ComponentModel.Description(PublicationLanguage.FieldDescription)] string? Language = null,
     string? Publisher = null,
     string? Copyright = null,
     string? Description = null,

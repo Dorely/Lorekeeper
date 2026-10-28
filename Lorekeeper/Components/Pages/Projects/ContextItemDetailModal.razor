@@ -4,6 +4,7 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Projects
+@using Lorekeeper.Publish
 @inject IEntityService Entities
 @inject IChapterService Chapters
 @inject IActService Acts
@@ -749,8 +750,15 @@
                     <input class="form-control" @bind="_bookBrief.ReadingLevelGuidance" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Language / locale</label>
-                    <input class="form-control" @bind="_bookBrief.LanguageLocale" />
+                    <label class="form-label">Language</label>
+                    <select class="form-select" @bind="_bookBrief.LanguageLocale">
+                        <option value="">Not set</option>
+                        @foreach (var option in PublicationLanguage.SupportedOptions)
+                        {
+                            <option value="@option.Tag">@option.Label</option>
+                        }
+                    </select>
+                    <div class="form-text">Describe spelling and usage conventions in House style.</div>
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Point of view</label>

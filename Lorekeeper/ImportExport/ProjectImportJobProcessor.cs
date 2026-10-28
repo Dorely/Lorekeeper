@@ -320,6 +320,10 @@ public sealed class ProjectImportJobProcessor(
             return;
 
         var current = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
+        // Older exports may carry free-form languages; keep their wording in House style beside the repaired tag.
+        var language = current.LanguageLocale.Length == 0 ? PublicationLanguage.Repair(imported.LanguageLocale) : default;
+        var houseStyle = PublicationLanguage.WithLanguageNote(
+            string.IsNullOrWhiteSpace(current.HouseStyle) ? imported.HouseStyle : current.HouseStyle, language.Note);
         await bookBriefs.UpdateAsync(project.Id, new BookBriefPatch
         {
             BookKind = current.BookKind == BookKind.Unspecified && imported.BookKind != BookKind.Unspecified
@@ -338,8 +342,8 @@ public sealed class ProjectImportJobProcessor(
             PointOfView = Missing(current.PointOfView, imported.PointOfView),
             Tense = Missing(current.Tense, imported.Tense),
             VoiceAndTone = Missing(current.VoiceAndTone, imported.VoiceAndTone),
-            LanguageLocale = Missing(current.LanguageLocale, imported.LanguageLocale),
-            HouseStyle = Missing(current.HouseStyle, imported.HouseStyle),
+            LanguageLocale = language.Tag,
+            HouseStyle = string.IsNullOrWhiteSpace(houseStyle) || houseStyle == current.HouseStyle ? null : houseStyle,
             ReadAloudPriority = current.ReadAloudPriority is null ? imported.ReadAloudPriority : null,
             AccessibilityGoals = Missing(current.AccessibilityGoals, imported.AccessibilityGoals),
             VisualDirection = Missing(current.VisualDirection, imported.VisualDirection),
@@ -1510,7 +1514,6 @@ public sealed class ProjectImportJobProcessor(
                 || edition.TitleOverride.Trim().Length > 500
                 || edition.Subtitle.Trim().Length > 500
                 || edition.Author.Trim().Length > 500
-                || edition.Language.Trim().Length > 40
                 || edition.Publisher.Trim().Length > 500
                 || edition.Copyright.Trim().Length > 100_000
                 || edition.Description.Trim().Length > 100_000)
@@ -2815,7 +2818,6 @@ public sealed class ProjectImportJobProcessor(
             || book.Title.Trim().Length > 500
             || book.Subtitle.Trim().Length > 500
             || book.Author.Trim().Length > 500
-            || book.Language.Trim().Length > 40
             || book.Publisher.Trim().Length > 500
             || book.Copyright.Trim().Length > 100_000
             || book.Description.Trim().Length > 100_000
@@ -4544,7 +4546,7 @@ public sealed class ProjectImportJobProcessor(
             Title = edition.TitleOverride.Trim(),
             Subtitle = edition.Subtitle.Trim(),
             Author = edition.Author.Trim(),
-            Language = edition.Language.Trim().ToLowerInvariant(),
+            Language = PublicationLanguage.Repaired(edition.Language),
             Publisher = edition.Publisher.Trim(),
             Copyright = edition.Copyright.Trim(),
             Description = edition.Description.Trim(),
@@ -4609,7 +4611,7 @@ public sealed class ProjectImportJobProcessor(
         string.Equals(existing.TitleOverride, imported.TitleOverride.Trim(), StringComparison.Ordinal)
         && string.Equals(existing.Subtitle, imported.Subtitle.Trim(), StringComparison.Ordinal)
         && string.Equals(existing.Author, imported.Author.Trim(), StringComparison.Ordinal)
-        && string.Equals(existing.Language, imported.Language.Trim(), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(existing.Language, PublicationLanguage.Repaired(imported.Language), StringComparison.Ordinal)
         && string.Equals(existing.Publisher, imported.Publisher.Trim(), StringComparison.Ordinal)
         && string.Equals(existing.Copyright, imported.Copyright.Trim(), StringComparison.Ordinal)
         && string.Equals(existing.Description, imported.Description.Trim(), StringComparison.Ordinal)

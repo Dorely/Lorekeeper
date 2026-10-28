@@ -3,6 +3,7 @@ using System.Text;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Projects;
@@ -205,7 +206,7 @@ public sealed class BookBriefService(
             Field("POV", brief.PointOfView),
             Field("Tense", brief.Tense),
             Field("Voice/tone", brief.VoiceAndTone),
-            Field("Language/locale", brief.LanguageLocale),
+            Field("Language", brief.LanguageLocale),
             Field("House style", brief.HouseStyle),
             $"Read-aloud priority: {NullableBoolean(brief.ReadAloudPriority)}",
             Field("Accessibility goals", brief.AccessibilityGoals),
@@ -243,7 +244,9 @@ public sealed class BookBriefService(
         SetString(value => brief.PointOfView = value, patch.PointOfView, BookBriefField.PointOfView, cleared);
         SetString(value => brief.Tense = value, patch.Tense, BookBriefField.Tense, cleared);
         SetString(value => brief.VoiceAndTone = value, patch.VoiceAndTone, BookBriefField.VoiceAndTone, cleared);
-        SetString(value => brief.LanguageLocale = value, patch.LanguageLocale, BookBriefField.LanguageLocale, cleared);
+        SetString(value => brief.LanguageLocale = value.Length == 0 ? value : PublicationLanguage.RequirePressSupported(
+            value, "Book Brief language", "Describe spelling and usage conventions in House style instead."),
+            patch.LanguageLocale, BookBriefField.LanguageLocale, cleared);
         SetString(value => brief.HouseStyle = value, patch.HouseStyle, BookBriefField.HouseStyle, cleared);
         if (patch.ReadAloudPriority is { } readAloudPriority && !cleared.Contains(BookBriefField.ReadAloudPriority)) brief.ReadAloudPriority = readAloudPriority;
         SetString(value => brief.AccessibilityGoals = value, patch.AccessibilityGoals, BookBriefField.AccessibilityGoals, cleared);

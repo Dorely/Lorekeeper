@@ -4,6 +4,7 @@ using Lorekeeper.Authoring;
 using Lorekeeper.Context;
 using Lorekeeper.Persistence;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Composition;
 using Lorekeeper.Images;
 using System.Security.Cryptography;
@@ -181,7 +182,7 @@ internal sealed class ExternalAccessDispatcher(ExternalAccessCommands commands, 
             // Log only operation identity. Exception messages may contain paths, provider data, or authored text.
             logger.LogInformation("External operation {Operation} returned {Code}.", name, code);
             logger.LogDebug("External boundary diagnostic {ExceptionType}: {Stack}", exception.GetType().Name, exception.StackTrace);
-            var safeMessage = exception is ExternalAccessException or ContentVersionConflictException or ContentRevisionConflictException or ManuscriptRevisionConflictException or AuthoringMutationFenceException
+            var safeMessage = exception is ExternalAccessException or CorrectableInputException or ContentVersionConflictException or ContentRevisionConflictException or ManuscriptRevisionConflictException or AuthoringMutationFenceException
                 ? exception.Message : "The request could not be applied. Refresh the exact target and its revision, check the supplied fields, and reassess the operation.";
             return new CallToolResult { IsError = true, Content = [new TextContentBlock { Text = JsonSerializer.Serialize(new { code, message = safeMessage,
                 currentVersion = (exception as ContentVersionConflictException)?.CurrentVersion,

@@ -1637,6 +1637,80 @@ public sealed class LorekeeperPressMigrationTests
         }
     }
 
+    [Fact]
+    public async Task StartupAndSaveRepairUnsupportedLanguagesWithoutLosingTheirWording()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "language-repair.db");
+            var configuration = TestConfiguration(path);
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={path}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+            var recovery = new DatabaseMigrationRecoveryService(configuration, NullLogger<DatabaseMigrationRecoveryService>.Instance);
+            var database = new AppDatabaseOperationFactory(new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(), new ProjectMutationCoordinator());
+            await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+            var startup = new DatabaseStartupMigrationService(database,
+                new ManuscriptMigrationService(configuration, recovery, NullLogger<ManuscriptMigrationService>.Instance),
+                new PublicationEditionMigrationService(configuration, recovery, NullLogger<PublicationEditionMigrationService>.Instance),
+                new PublicationPressMigrationService(configuration, recovery, NullLogger<PublicationPressMigrationService>.Instance),
+                new VisualCompositionMigrationService(recovery, NullLogger<VisualCompositionMigrationService>.Instance),
+                new AuthoringPageMigrationService(recovery, NullLogger<AuthoringPageMigrationService>.Instance),
+                new PublicationCoreMigrationService(database, recovery, NullLogger<PublicationCoreMigrationService>.Instance),
+                new EditionContentMigrationService(recovery, new MigrationManuscriptService(db), NullLogger<EditionContentMigrationService>.Instance),
+                new PublicationSectionMigrationService(recovery, NullLogger<PublicationSectionMigrationService>.Instance),
+                new DesignedPageMigrationService(),
+                new PrintArtifactProfileMigrationService(recovery, new PrintArtifactProfileRegistry(), NullLogger<PrintArtifactProfileMigrationService>.Instance),
+                recovery);
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+
+            const string british = "English (UK spelling: colour, realise, grey)";
+            var stored = new Project { Name = "Stored languages", Slug = "stored-languages" };
+            var edition = new PublicationEdition { ProjectId = stored.Id, Name = "Stored release", Revision = 4 };
+            db.Projects.Add(stored);
+            db.BookBriefs.Add(new BookBrief { ProjectId = stored.Id, HouseStyle = "Serial commas." });
+            db.PublicationBooks.Add(new PublicationBook { ProjectId = stored.Id, Revision = 7 });
+            db.PublicationEditions.Add(edition);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            // Values written before entry validation bypass today's save-time repair.
+            await db.BookBriefs.Where(item => item.ProjectId == stored.Id).ExecuteUpdateAsync(item => item.SetProperty(row => row.LanguageLocale, british));
+            await db.PublicationBooks.Where(item => item.ProjectId == stored.Id).ExecuteUpdateAsync(item => item.SetProperty(row => row.Language, british));
+            await db.PublicationEditions.Where(item => item.Id == edition.Id).ExecuteUpdateAsync(item => item.SetProperty(row => row.Language, "French"));
+
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            var brief = await db.BookBriefs.SingleAsync(item => item.ProjectId == stored.Id);
+            Assert.Equal("en-GB", brief.LanguageLocale);
+            Assert.Equal($"Serial commas.\n\nLanguage notes: {british}", brief.HouseStyle);
+            var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == stored.Id);
+            Assert.Equal(("en-GB", 8L), (book.Language, book.Revision));
+            var release = await db.PublicationEditions.SingleAsync(item => item.Id == edition.Id);
+            Assert.Equal(("en", 5L), (release.Language, release.Revision));
+            Assert.True(await startup.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+            Assert.Equal(brief.HouseStyle, (await db.BookBriefs.SingleAsync(item => item.ProjectId == stored.Id)).HouseStyle);
+            Assert.Equal(8, (await db.PublicationBooks.SingleAsync(item => item.ProjectId == stored.Id)).Revision);
+
+            // Import, restore, and migration write entities directly; saving repairs them before storage.
+            var imported = new Project { Name = "Imported languages", Slug = "imported-languages" };
+            db.Projects.Add(imported);
+            db.BookBriefs.Add(new BookBrief { ProjectId = imported.Id, LanguageLocale = "american english" });
+            db.PublicationBooks.Add(new PublicationBook { ProjectId = imported.Id, Language = "EN_us" });
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            var importedBrief = await db.BookBriefs.SingleAsync(item => item.ProjectId == imported.Id);
+            Assert.Equal(("en-US", ""), (importedBrief.LanguageLocale, importedBrief.HouseStyle));
+            Assert.Equal("en-US", (await db.PublicationBooks.SingleAsync(item => item.ProjectId == imported.Id)).Language);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class MigrationManuscriptService(AppDbContext db) : IManuscriptService
     {
         public async Task<ManuscriptSnapshot?> GetManuscriptAsync(

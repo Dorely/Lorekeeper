@@ -337,6 +337,8 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
             return "An image requires alternative text or an explicit decorative decision before publishing.";
         if (string.Equals(code, "PRESS_COMPOSITION_RANGE_INVALID", StringComparison.OrdinalIgnoreCase))
             return "A text frame points to an invalid portion of its page content. Open the page to repair or replace that text.";
+        if (string.Equals(code, "PRESS_LANGUAGE_UNSUPPORTED", StringComparison.OrdinalIgnoreCase))
+            return $"{PublicationDiagnosticText.SanitizeUserFacing(message)} {PublicationLanguage.PressUnsupportedGuidance}";
 
         return PublicationDiagnosticText.SanitizeUserFacing(message);
     }
@@ -351,6 +353,7 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
             ["PRESS_COMPOSITION_VARIANT_MISSING"] = "Page layout is missing",
             ["PRESS_COMPOSITION_MISSING"] = "Designed Page is missing",
             ["PRESS_COMPOSITION_RANGE_INVALID"] = "Page text reference needs repair",
+            ["PRESS_LANGUAGE_UNSUPPORTED"] = "Language is not supported",
             ["PRESS_PAGE_MAP_INCOMPLETE"] = "Some content was not placed on a page",
             ["PRESS_PAGE_MAP_DUPLICATE"] = "Duplicate page entry",
             ["PRESS_PAGE_MAP_UNEXPECTED"] = "Unexpected page entry",

@@ -104,6 +104,11 @@ The external actor also identifies publication audit entries. Revision checks,
 Contest guards, semantic reference validation, annotation rebasing, history
 invalidation, and index maintenance remain owned by the application services.
 
+Failed tool results carry a generic message unless the exception is known to be
+safe. `ExternalAccessException`, revision conflicts, authoring fences, and
+`CorrectableInputException` pass their message through, so a rejected value
+reaches the client with the field and its valid options.
+
 An uncertain response is recovered by repeating the same operation and payload
 with the original mutation ID, or by `read_mutation_receipt`. `list_work_mutations`
 recovers forgotten mutation IDs; `list_image_jobs` recovers recent image jobs.

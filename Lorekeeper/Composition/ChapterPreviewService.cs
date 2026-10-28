@@ -656,7 +656,7 @@ public sealed class ChapterPreviewService(
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
             if (process.ExitCode != 0)
-                throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
+                throw PressFailure(stdout, stderr);
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
             if (response.ProtocolVersion != 15)
@@ -1137,6 +1137,23 @@ public sealed class ChapterPreviewService(
         }
     }
 
+    /// <summary>Turns a Press rejection the author can fix into a message that names the fix and survives every boundary.</summary>
+    private static Exception PressFailure(string stdout, string stderr)
+    {
+        LayoutDiagnostic[]? diagnostics = null;
+        try
+        {
+            diagnostics = JsonSerializer.Deserialize<PressFailureResponse>(stdout, JsonOptions)?.Diagnostics;
+        }
+        catch (JsonException)
+        {
+        }
+        if (diagnostics?.FirstOrDefault(item => item.Code == "PRESS_LANGUAGE_UNSUPPORTED") is { } language)
+            return new CorrectableInputException(
+                $"{PublicationDiagnosticText.SanitizeUserFacing(language.Message)} {PublicationLanguage.PressUnsupportedGuidance}");
+        return new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
+    }
+
     private static string Limit(string value) => value.Length <= 2000 ? value : value[..2000];
 
     private static void TryTerminate(Process process)
@@ -1153,6 +1170,7 @@ public sealed class ChapterPreviewService(
 
     private sealed record LayoutResponse(int ProtocolVersion, string JobId, LayoutPage[] Pages, LayoutPageMap[] PageMap, LayoutDiagnostic[]? Diagnostics);
     private sealed record LayoutDiagnostic(string Severity, string Code, string Message);
+    private sealed record PressFailureResponse(LayoutDiagnostic[]? Diagnostics);
     private sealed record LayoutPage(string Kind, double WidthPoints, double HeightPoints, string? PageLabel, string? Bookmark, LayoutPaint[] PaintOrder, LayoutLine[] Lines, LayoutImage[] Images, LayoutShape[] Shapes);
     private sealed record LayoutPaint(string Kind, int Index);
     private sealed record LayoutLine(

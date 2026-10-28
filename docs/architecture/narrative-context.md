@@ -56,7 +56,8 @@ publishing state, and graph rows. Project Guidance is optional user-authored
 direction, edited from its Assistant Memory item or the Editor Chat header's
 Guidance link. The Book Brief is canonical high-level direction with validated
 partial updates: `null` means unchanged, while an explicit clear list removes a
-field. Code-owned professional instructions must never be copied into either
+field. Its language accepts only the tags Press renders, as described in the
+publishing model. Code-owned professional instructions must never be copied into either
 user-owned field.
 
 Acts and chapters form the editable outline spine. Act deletion demotes its

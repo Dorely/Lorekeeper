@@ -303,7 +303,7 @@ public sealed class PublicationEditionService(
         Override(fields, PublicationEditionOverrideField.Subtitle, patch.Subtitle, value => edition.Subtitle = value);
         Override(fields, PublicationEditionOverrideField.Author, patch.Author, value => edition.Author = value);
         Override(fields, PublicationEditionOverrideField.Language, patch.Language,
-            value => edition.Language = PublicationLanguage.Normalize(value));
+            value => edition.Language = PublicationLanguage.RequirePressSupported(value, "Release language"));
         Override(fields, PublicationEditionOverrideField.Publisher, patch.Publisher, value => edition.Publisher = value);
         Override(fields, PublicationEditionOverrideField.Copyright, patch.Copyright, value => edition.Copyright = value);
         Override(fields, PublicationEditionOverrideField.Description, patch.Description, value => edition.Description = value);
@@ -1359,12 +1359,11 @@ public sealed class PublicationEditionService(
             || !double.IsFinite(edition.PageMarginInches) || edition.PageMarginInches < .125
             || edition.PageMarginInches > Math.Min(edition.PageWidthInches, edition.PageHeightInches) / 3)
             throw new InvalidOperationException("Release page settings are outside supported limits.");
+        PublicationLanguage.RequirePressSupported(edition.Language, "Release language");
         if (edition.TitleOverride.Length > 500 || edition.Subtitle.Length > 500 || edition.Author.Length > 500
-            || edition.Language.Length > 40 || edition.Publisher.Length > 500
+            || edition.Publisher.Length > 500
             || edition.Copyright.Length > 100_000 || edition.Description.Length > 100_000)
             throw new InvalidOperationException("One or more release overrides exceed supported limits.");
-        if (!PublicationLanguage.IsPressSupported(edition.Language))
-            throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the release language.");
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)

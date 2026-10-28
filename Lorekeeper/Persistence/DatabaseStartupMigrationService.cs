@@ -274,7 +274,37 @@ public sealed class DatabaseStartupMigrationService(
         await RemovePrinterDimensionCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
+        await RepairUnsupportedLanguagesAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Repairs languages stored before entry validation, such as free-form Book Brief wording copied into the Core Book,
+    /// so previews and publishing never reach Press with a value it cannot render. Original wording moves to House style.
+    /// </summary>
+    private static async Task RepairUnsupportedLanguagesAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        var briefIds = (await db.BookBriefs.AsNoTracking().Select(item => new { item.Id, item.LanguageLocale }).ToListAsync(cancellationToken))
+            .Where(item => item.LanguageLocale.Length > 0 && !PublicationLanguage.IsCanonical(item.LanguageLocale)).Select(item => item.Id).ToList();
+        var bookIds = (await db.PublicationBooks.AsNoTracking().Select(item => new { item.ProjectId, item.Language }).ToListAsync(cancellationToken))
+            .Where(item => !PublicationLanguage.IsCanonical(item.Language)).Select(item => item.ProjectId).ToList();
+        var editionIds = (await db.PublicationEditions.AsNoTracking().Select(item => new { item.Id, item.Language }).ToListAsync(cancellationToken))
+            .Where(item => !PublicationLanguage.IsCanonical(item.Language)).Select(item => item.Id).ToList();
+        if (briefIds.Count + bookIds.Count + editionIds.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+        foreach (var brief in await db.BookBriefs.AsTracking().Where(item => briefIds.Contains(item.Id)).ToListAsync(cancellationToken))
+            if (PublicationLanguage.RepairStored(brief))
+                brief.UpdatedAt = now;
+        foreach (var book in await db.PublicationBooks.AsTracking().Where(item => bookIds.Contains(item.ProjectId)).ToListAsync(cancellationToken))
+            if (PublicationLanguage.RepairStored(book))
+                (book.Revision, book.UpdatedAt) = (book.Revision + 1, now);
+        foreach (var edition in await db.PublicationEditions.AsTracking().Where(item => editionIds.Contains(item.Id)).ToListAsync(cancellationToken))
+            if (PublicationLanguage.RepairStored(edition))
+                (edition.Revision, edition.UpdatedAt) = (edition.Revision + 1, now);
+        await db.SaveChangesAsync(cancellationToken);
+        db.ChangeTracker.Clear();
     }
 
     private async Task PrepareDesignedPageTransitionAsync(

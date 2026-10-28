@@ -5,6 +5,7 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Legacy;
+using Lorekeeper.Publish;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -156,6 +157,7 @@ public class AppDbContext(
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         NormalizePublicationTargetOwnership();
+        RepairUnsupportedLanguages();
         ValidateSourceRetentionMutations();
         try
         {
@@ -179,6 +181,7 @@ public class AppDbContext(
     private async Task<int> SaveChangesWithLockRetryAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
         NormalizePublicationTargetOwnership();
+        RepairUnsupportedLanguages();
         ValidateSourceRetentionMutations();
         var delay = TimeSpan.FromMilliseconds(100);
         try
@@ -1866,6 +1869,20 @@ public class AppDbContext(
         {
             entity.HasIndex(e => new { e.MigrationName, e.StartedAt });
         });
+    }
+
+    /// <summary>
+    /// Entry points reject unsupported languages with their valid options; system writes such as import, restore,
+    /// and Core migration carry older shapes, so repair them here before anything Press cannot render is stored.
+    /// </summary>
+    private void RepairUnsupportedLanguages()
+    {
+        foreach (var entry in ChangeTracker.Entries<BookBrief>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            PublicationLanguage.RepairStored(entry.Entity);
+        foreach (var entry in ChangeTracker.Entries<PublicationBook>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            PublicationLanguage.RepairStored(entry.Entity);
+        foreach (var entry in ChangeTracker.Entries<PublicationEdition>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            PublicationLanguage.RepairStored(entry.Entity);
     }
 
     private void NormalizePublicationTargetOwnership()

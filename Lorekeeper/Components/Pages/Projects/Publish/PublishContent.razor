@@ -999,11 +999,7 @@ else
         @CitationStyleSelect(_releaseDraft.CitationStyle, !_releaseOverrides.Contains(PublicationEditionOverrideField.CitationStyle), ReleaseCitationStyleChanged)
     </div>;
 
-    private RenderFragment LanguageSelect(string Value, bool Disabled, Action<string?> Changed) => @<select class="form-select" disabled="@Disabled" value="@PublicationLanguage.Normalize(Value)" @onchange="e => Changed(e.Value?.ToString())">
-        @if (!PublicationLanguage.IsPressSupported(Value))
-        {
-            <option value="@PublicationLanguage.Normalize(Value)" disabled>Unsupported saved value (@Value)</option>
-        }
+    private RenderFragment LanguageSelect(string Value, bool Disabled, Action<string?> Changed) => @<select class="form-select" disabled="@Disabled" value="@Value" @onchange="e => Changed(e.Value?.ToString())">
         @foreach (var option in PublicationLanguage.SupportedOptions)
         {
             <option value="@option.Tag">@option.Label</option>

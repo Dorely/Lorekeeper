@@ -1,5 +1,6 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
+@using Lorekeeper.Publish
 @inject IBookBriefService BookBriefs
 
 <section class="book-brief-panel" aria-label="Book Brief">
@@ -51,7 +52,7 @@
                     @RenderField("Reader age", AgeRange(_brief.MinimumReaderAge, _brief.MaximumReaderAge))
                     @RenderField("Target words", _brief.TargetWordCount?.ToString("N0"))
                     @RenderField("Read aloud", NullableBoolean(_brief.ReadAloudPriority))
-                    @RenderField("Language / locale", _brief.LanguageLocale)
+                    @RenderField("Language", PublicationLanguage.SupportedOptions.FirstOrDefault(option => option.Tag == _brief.LanguageLocale)?.Label)
                     @RenderField("Premise", _brief.Premise, wide: true)
                     @RenderField("Purpose", _brief.Purpose, wide: true)
                     @RenderField("Primary themes", _brief.PrimaryThemes, wide: true)

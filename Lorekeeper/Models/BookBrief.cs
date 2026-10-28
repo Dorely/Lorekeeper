@@ -115,6 +115,7 @@ public sealed class BookBriefPatch
     public string? PointOfView { get; init; }
     public string? Tense { get; init; }
     public string? VoiceAndTone { get; init; }
+    [Description(Lorekeeper.Publish.PublicationLanguage.FieldDescription)]
     public string? LanguageLocale { get; init; }
     public string? HouseStyle { get; init; }
     public bool? ReadAloudPriority { get; init; }
