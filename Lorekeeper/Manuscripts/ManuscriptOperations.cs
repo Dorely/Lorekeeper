@@ -54,10 +54,10 @@ public static class ManuscriptOperations
                 case InsertManuscriptBlock insert:
                     if (insert.Index < 0 || insert.Index > blocks.Count)
                         throw new ArgumentOutOfRangeException(nameof(insert.Index));
-                    ValidateBlockText(insert.Type, insert.Text);
+                    ValidateBlockText(insert.Type, insert.Content is null ? insert.Text : string.Concat(insert.Content.Select(inline => inline.Text)));
                     var inserted = NewBlock(
                         insert.Type,
-                        insert.Text,
+                        insert.Content?.Select(ManuscriptClone.Inline).ToList() ?? [new ManuscriptInline { Text = insert.Text }],
                         insert.StyleRole,
                         insert.ImageId,
                         insert.AltText,
@@ -453,35 +453,6 @@ public static class ManuscriptOperations
             throw new ArgumentOutOfRangeException(parameterName, "The offset splits a Unicode surrogate pair.");
         }
     }
-
-    private static ManuscriptBlock NewBlock(
-        ManuscriptBlockType type,
-        string text,
-        string? styleRole,
-        Guid? imageId = null,
-        string? altText = null,
-        int? headingLevel = null,
-        bool decorative = false,
-        FigurePresentation? figurePresentation = null,
-        Guid? designedPageId = null,
-        string? language = null,
-        FigureAccessibilityRole accessibilityRole = FigureAccessibilityRole.Figure,
-        string? blockId = null) =>
-        NewBlock(
-            type,
-            type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table
-                ? []
-                : [new ManuscriptInline { Text = text }],
-            styleRole,
-            imageId,
-            altText,
-            headingLevel,
-            decorative,
-            figurePresentation,
-            designedPageId,
-            language,
-            accessibilityRole,
-            blockId);
 
     private static ManuscriptBlock NewBlock(
         ManuscriptBlockType type,

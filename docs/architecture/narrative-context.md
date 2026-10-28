@@ -189,8 +189,9 @@ object paginator.
 ### Voice workspace
 
 Voice retains project-wide writing samples and owns an optional free-form
-voiceProfile property on Character entities. Profiles cover dialogue and POV
-narration and follow ordinary entity indexing, context, archive, and history
+voiceProfile property on Character entities. Samples are substantial passages of
+the book's prose; profiles cover one character's dialogue and POV narration,
+including representative exact lines, and follow ordinary entity indexing, context, archive, and history
 ownership. Profile writes compare the exact previously read content; sample
 writes compare their persisted Revision. Manual and assistant edits use the same
 services. NarrativeTextEditor registers with the authoring fence and blocks

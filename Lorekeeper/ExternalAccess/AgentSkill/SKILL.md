@@ -2,7 +2,7 @@
 name: lorekeeper-external-access
 description: Build, edit, research, illustrate, inspect, and exchange Lorekeeper projects through its local MCP workspaces. Use for Lorekeeper creative work and transfers to another project; repository development uses that repository's own instructions.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 Lorekeeper is authoritative project state. Discover its currently advertised capabilities; this skill never grants a permission or implies that a tool is installed.
@@ -19,7 +19,7 @@ Continue one task across surfaces by passing its workId to subsequent workspace 
 - **Editor:** semantic Core/release manuscript edits, annotations, styles, Figures, Designed Pages, and layout. Core is shared source; a release is an explicit override target. Read the manuscript and styles before editing.
 - **World:** World Brief, Working Notes, source research, and canon development. Brief/canon are established state; notes hold proposals and uncertainty. Search evidence is not automatically canon.
 - **Images:** existing artwork, canonical entity associations, generation/editing, and inspection. Creating an asset and attaching or placing it are distinct operations. Inspect generated/edited pixels before use.
-- **Voice:** project-wide style samples and character dialogue/POV profiles. Preserve exact wording as evidence rather than automatically promoting dialogue into a voice rule.
+- **Voice:** project-wide writing samples and per-character voice profiles. A writing sample is a substantial passage of the book's own prose that shows its style, never single lines or one character's dialogue. Put a character's voice in their profile: study their existing dialogue, describe how they speak and think, and quote a few representative exact lines. Keep appearance and backstory on the entity record.
 - **Publish:** Core Book, releases, sections, covers, previews, readiness, and artifact preparation. Preparation is not external publication or proof of vendor acceptance. Follow returned diagnostics and verification requirements.
 
 ## Ground and preserve edits
@@ -28,7 +28,7 @@ Search one concise content facet at a time, then read exact records. Snippets, s
 
 Read revisions/version tokens before writes. Supply a new mutationId for each intended mutation, and reuse that same ID with the original payload after an uncertain response. On a conflict, reread and reassess; never blindly replay against a newer revision.
 
-Use semantic manuscript operations, not wholesale projected-document replacement. Preserve stable block IDs, inline formatting, Figures, Designed Pages, tables, notes, citations, and annotations. InsertBlock is additive; revisions must replace or remove superseded content in the same batch. Read every returned readback range at the resulting revision/hash. Inspect annotated and clean visual previews when the owning workflow requires them.
+Use semantic manuscript operations, not wholesale projected-document replacement. Preserve stable block IDs, inline formatting, Figures, Designed Pages, tables, notes, citations, and annotations. InsertBlock is additive and takes plain `text` or marked `inlineContent` runs; revisions must replace or remove superseded content in the same batch. Read every returned readback range at the resulting revision/hash. Inspect annotated and clean visual previews when the owning workflow requires them.
 
 Call `finish_work` only after the entire requested task and its background jobs are finished. Review Edits controls whether work stays pending or the complete live project is checkpointed. Checkpoints inherit the project's previously configured automatic remote synchronization. Abandoning work preserves its saved changes.
 

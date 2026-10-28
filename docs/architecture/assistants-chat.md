@@ -327,7 +327,8 @@ policy only: when enabled, the mutation is written to live SQLite and remains
 uncheckpointed for Git review; when disabled, the completed mutating turn may
 checkpoint the complete live project.
 The operation contract distinguishes additive insertion from revision:
-`InsertBlock` never supersedes existing prose, single-block revisions preserve
+`InsertBlock` never supersedes existing prose and accepts plain text or marked
+inline runs (its text must match the runs when both are given), single-block revisions preserve
 identity with `ReplaceBlockText`, and multi-block rewrites must replace or
 delete every superseded source block in the atomic batch. Text/structure
 mutation results include operation and block counts, diagnostics, a full source
@@ -339,7 +340,8 @@ Blocks containing citation/note atoms reject lossy plain-text replacement,
 split/merge, and range-mark operations. `ReplaceInlineContent` addresses one leaf
 through its complete position and preserves unrelated atoms and formatting; it
 is bounded to 1,024 inlines and 65,536 text characters. Agent projection v4 exposes
-the canonical inline content for rich leaf blocks, and nested changes map
+the canonical inline content for rich leaf blocks and UTF-16 positions only for
+the returned page of blocks plus notes, and nested changes map
 readback to the owning top-level block rather than an unrelated opening range.
 
 Editor and Publish use `CitationAssistantTools` for bounded `list_bibliography`,
@@ -441,6 +443,8 @@ read, revise, and delete samples with expected revisions, and save or clear the
 canonical voiceProfile entity property with an exact previous-value check. It can
 create a Character when requested work requires one. Dialogue and POV guidance
 travel with relevant entity context; samples remain project-wide style evidence.
+Samples are substantial prose passages; a character's representative dialogue
+lines belong in that character's profile, not in samples.
 Voice uses shared prompts, mutation fencing, workspace refresh, and checkpoints.
 
 World is one adaptive assistant for world development and research. It combines

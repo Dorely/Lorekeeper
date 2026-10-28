@@ -37,13 +37,13 @@ public sealed record ManuscriptOperationInput(
     ParagraphPresentation? ParagraphPresentation = null,
     [property: Description("Exact full position from positionsUtf16 plus manuscriptId for ReplaceInlineContent. Offset must be zero; retain the complete document/table/cell or notes path.")]
     ManuscriptPosition? Position = null,
-    [property: Description("Complete inline content of one existing leaf block for ReplaceInlineContent. Preserve unrelated text, marks, note references, and citation atoms with their stable IDs. Citation items use bibliography IDs read from the project bibliography; source locations are optional verified evidence. At most 1024 inlines and 65536 text characters.")]
+    [property: Description("Complete inline content for ReplaceInlineContent on one existing leaf block, or for a new InsertBlock text block whose runs carry marks. For InsertBlock, text may be omitted; when supplied it must equal the concatenated run text. Preserve unrelated text, marks, note references, and citation atoms with their stable IDs. Citation items use bibliography IDs read from the project bibliography; source locations are optional verified evidence. At most 1024 inlines and 65536 text characters.")]
     IReadOnlyList<ManuscriptInline>? InlineContent = null)
 {
     public const string ToolOperationGuidance =
         "Canonical operations are InsertBlock, ReplaceBlockText, ReplaceInlineContent, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, and SetParagraphPresentation. " +
         "Use ReplaceInlineContent at an exact full position to insert, edit, or remove citation atoms or edit nested table/note text. Retain every unrelated inline atom, mark, and stable ID. Plain text replacement/split/merge/mark operations reject blocks containing citation or note atoms to prevent losing them. " +
-        "InsertBlock is additive: it creates a new block and never replaces or removes existing prose. Use ReplaceBlockText as the default for revising one existing block because it preserves that block's stable ID. " +
+        "InsertBlock is additive: it creates a new block and never replaces or removes existing prose. Give InsertBlock either plain text or inlineContent runs with their marks. Use ReplaceBlockText as the default for revising one existing block because it preserves that block's stable ID. " +
         "For a multi-block rewrite, account for every source block in the intended range: retain it deliberately, replace its text, or delete it in the same atomic batch; insert only genuinely additional replacement blocks and never append a rewritten section while leaving its superseded source in place. " +
         "Use SetBlockStyle—not SetStyleRole—to apply a Book Text Style. For direct formatting on a new block, give InsertBlock an explicit blockId and follow it in the same batch with SetParagraphPresentation for that ID.";
 
@@ -90,7 +90,7 @@ public sealed record ManuscriptOperationInput(
     {
         var position = operation.Position ?? throw new ArgumentException("position is required.");
         var content = operation.InlineContent ?? throw new ArgumentException("inlineContent is required.");
-        if (position.Offset != 0 || content.Count > 1024 || content.Sum(inline => (long)inline.Text.Length) > 65536)
+        if (position.Offset != 0 || !WithinInlineLimits(content))
             throw new ArgumentException("ReplaceInlineContent requires offset zero and at most 1024 inlines / 65536 text characters.");
         return new(position, content);
     }
@@ -98,16 +98,26 @@ public sealed record ManuscriptOperationInput(
     private static InsertManuscriptBlock InsertBlock(ManuscriptOperationInput operation)
     {
         var blockType = ParseEnum<ManuscriptBlockType>(operation.BlockType, "blockType");
+        var content = operation.InlineContent;
+        if (content is not null && !WithinInlineLimits(content))
+            throw new ArgumentException("InsertBlock inlineContent allows at most 1024 inlines / 65536 text characters.");
+        var contentText = content is null ? null : string.Concat(content.Select(inline => inline.Text));
+        if (contentText is not null && operation.Text is not null && !string.Equals(operation.Text, contentText, StringComparison.Ordinal))
+            throw new ArgumentException("InsertBlock text must equal the concatenated inlineContent text; omit text when supplying inlineContent.");
         return new InsertManuscriptBlock(
             Required(operation.Index, "index"),
             blockType,
-            NormalizeBlockText(blockType, operation.Text),
+            NormalizeBlockText(blockType, contentText ?? operation.Text),
             NormalizeStyleRole(operation.StyleRole),
             operation.ImageId,
             operation.AltText,
             operation.HeadingLevel,
-            BlockId: operation.BlockId);
+            BlockId: operation.BlockId,
+            Content: blockType is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage or ManuscriptBlockType.Table ? null : content);
     }
+
+    private static bool WithinInlineLimits(IReadOnlyList<ManuscriptInline> content) =>
+        content.Count <= 1024 && content.Sum(inline => (long)inline.Text.Length) <= 65536;
 
     private static SetManuscriptBlockType SetBlockType(ManuscriptOperationInput operation)
     {

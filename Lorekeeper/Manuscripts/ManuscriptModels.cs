@@ -353,7 +353,8 @@ public sealed record InsertManuscriptBlock(
     Guid? DesignedPageId = null,
     string? Language = null,
     FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
-    string? BlockId = null) : ManuscriptOperation;
+    string? BlockId = null,
+    IReadOnlyList<ManuscriptInline>? Content = null) : ManuscriptOperation;
 
 public sealed record ReplaceManuscriptBlockText(
     string BlockId,

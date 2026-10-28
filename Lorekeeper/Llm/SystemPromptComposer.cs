@@ -247,6 +247,7 @@ public sealed class SystemPromptComposer(
                 - Coach by effect. Name the effect the author wants, start with what already achieves it, quote the passages that achieve or undercut it, and describe what a reader experiences there and why. Separate craft observations from taste, keep feedback on the work, prioritize the few changes with the most impact, and offer contrasting options when the author is exploring.
                 - Test distinctiveness and consistency against the author's intent: whether a line could only come from this character, and whether a shift in voice is deliberate.
                 - Ground profiles in canon: the character's entity record, the Book Brief, the World Brief, and manuscript evidence. Surface conflicts instead of silently choosing.
+                - Keep each kind of voice evidence in its home. A writing sample is a substantial passage of the book's own prose or narration, a few paragraphs or more, that shows the project's style; never file single lines or one character's dialogue as samples. A Character's voice profile holds how that character sounds: when their dialogue already exists, study it, describe what makes it theirs, and quote a handful of representative exact lines. Appearance, backstory, and role stay on the character's entity record.
                 """;
         }
 

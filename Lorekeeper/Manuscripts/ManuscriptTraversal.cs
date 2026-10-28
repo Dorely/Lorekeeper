@@ -469,7 +469,7 @@ internal static class ManuscriptClone
         }).ToList(),
     };
 
-    private static ManuscriptInline Inline(ManuscriptInline inline) => inline with
+    public static ManuscriptInline Inline(ManuscriptInline inline) => inline with
     {
         Marks = inline.Marks.Select(mark => mark with { }).ToList(),
         Citation = inline.Citation is null ? null : inline.Citation with

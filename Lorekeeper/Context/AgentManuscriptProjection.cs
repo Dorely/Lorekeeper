@@ -436,14 +436,15 @@ internal static class AgentManuscriptProjection
             document with { Content = [item.block], Notes = [] })).Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var segment in ManuscriptTraversal.EnumerateText(document))
         {
+            if (!selectedIds.Contains(segment.Block.Id) && segment.Start.ContainerPath[0] != "notes")
+                continue;
             positions.Add(new JsonArray
             {
                 JsonSerializer.SerializeToNode(segment.Start.ContainerPath, ContextPayloadJson.Options),
                 segment.Start.BlockOrAtomId,
                 segment.Text.Length,
             });
-            if ((selectedIds.Contains(segment.Block.Id) || segment.Start.ContainerPath[0] == "notes")
-                && (segment.Start.ContainerPath.Count > 1 || segment.Block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text)))
+            if (segment.Start.ContainerPath.Count > 1 || segment.Block.Content.Any(inline => inline.Type != ManuscriptInlineType.Text))
             {
                 inlineContent.Add(new JsonObject
                 {
