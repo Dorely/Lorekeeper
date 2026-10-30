@@ -263,10 +263,12 @@ The neutral layout is owned by the assistants chapter. Responses keeps developer
 input in order rather than hoisting all system text into instructions; that
 field contains only a fixed transport instruction. On supported GPT-5.6/GPT-6
 models, explicit content breakpoints and prompt_cache_options.mode=explicit
-mark reusable prefixes. Earlier models retain implicit caching. A structured
-unsupported-cache rejection before any assistant output disables those optional
-fields for that connection/model in memory and retries once with the same input
-and selected model. This applies to public API-key, plan, and Codex profiles;
+mark reusable prefixes. Earlier models retain implicit caching. Every profile sends
+the layout's conversation ID as prompt_cache_key so each round of a conversation
+routes to the same prompt cache; Codex also sends it as the session_id header.
+A structured unsupported-cache or cache-key rejection before any assistant output
+disables that optional field for that connection/model in memory and retries with
+the same input and selected model. Recorded cache mode appends +key when sent. This applies to public API-key, plan, and Codex profiles;
 public API support is not evidence that an account route accepts a field.
 Unsupported developer/system placement can retain fresh context in initial
 instructions on the same profile. Native chat requests use bounded retries for
@@ -288,7 +290,10 @@ Native authenticated model listing and vision/readiness use the same connection
 ownership. Saved model selections are never upgraded automatically.
 
 Claude's cache_control marks up to four semantic endpoints with its default
-TTL. Late system context is used only on supporting models and is placed after
+TTL. Application and canonical-user endpoints mark their own last block; a
+workspace endpoint marks the last block of the user/system run before the next
+assistant message, so one request's tail and the next request's previous-tail
+endpoint land on the same block. Late system context is used only on supporting models and is placed after
 user/visual deliveries, never between a tool_use and its result. Older/unknown
 models receive fresh authoritative context in top-level system content and may
 reuse less conversation cache. Unsupported cache controls degrade without

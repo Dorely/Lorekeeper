@@ -42,11 +42,13 @@ public sealed class ResponsesTransportProfile
     /// <summary>Used in log lines and error prefixes instead of the literal "Codex".</summary>
     public string Label { get; }
 
-    public void ApplyHeaders(HttpRequestMessage request, string accessToken, string externalAccountId)
+    public void ApplyHeaders(HttpRequestMessage request, string accessToken, string externalAccountId, string? sessionId = null)
     {
         if (Kind == OpenAiAccountKind.Codex)
         {
             CodexProvider.ApplyAccountHeaders(request, accessToken, externalAccountId, eventStream: true);
+            // Codex clients pair the session header with the body's prompt_cache_key.
+            if (sessionId is not null) request.Headers.TryAddWithoutValidation("session_id", sessionId);
             return;
         }
 

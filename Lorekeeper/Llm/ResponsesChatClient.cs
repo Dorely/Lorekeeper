@@ -20,10 +20,12 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
 {
     private const int MaxBufferedResponseAttempts = 2;
     private static readonly ConcurrentDictionary<string, bool> CacheRejected = new();
+    private static readonly ConcurrentDictionary<string, bool> CacheKeyRejected = new();
     private static readonly ConcurrentDictionary<string, bool> InitialInstructionsRequired = new();
     private readonly LlmProvider? _provider;
     private string CacheCapabilityKey => $"{_profile.Endpoint}:{_model}:{_provider?.EffectiveCredentialProviderId}";
     private bool ExplicitCache => ProviderChatProtocol.SupportsExplicitCache(_model) && !CacheRejected.ContainsKey(CacheCapabilityKey);
+    private bool KeyedCache => !CacheKeyRejected.ContainsKey(CacheCapabilityKey);
 
     private readonly HttpClient _httpClient;
     private readonly string _accessToken;
@@ -148,14 +150,21 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
             {
                 bool hasNext;
                 try { hasNext = await stream.MoveNextAsync(); }
-                catch (ContextPlacementRejectedException) when (!emitted && attempt < 2)
+                catch (ContextPlacementRejectedException) when (!emitted && attempt < 3)
                 {
                     InitialInstructionsRequired[CacheCapabilityKey] = true;
                     retry = true;
                     _logger.LogDebug("{Transport} requires initial instructions; retaining fresh authoritative context in the supported position", _profile.Label);
                     break;
                 }
-                catch (CacheControlRejectedException) when (!emitted && attempt < 2)
+                catch (CacheKeyRejectedException) when (!emitted && attempt < 3)
+                {
+                    CacheKeyRejected[CacheCapabilityKey] = true;
+                    retry = true;
+                    _logger.LogDebug("{Transport} rejected the prompt cache key; retrying the same model without it", _profile.Label);
+                    break;
+                }
+                catch (CacheControlRejectedException) when (!emitted && attempt < 3)
                 {
                     CacheRejected[CacheCapabilityKey] = true;
                     retry = true;
@@ -171,6 +180,7 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
     }
 
     private sealed class CacheControlRejectedException : Exception;
+    private sealed class CacheKeyRejectedException : Exception;
     private sealed class ContextPlacementRejectedException : Exception;
 
     private async IAsyncEnumerable<ChatResponseUpdate> StreamAsync(
@@ -185,7 +195,8 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
 
         var metadata = _provider is null ? new ChatResponseMetadata { Transport = ProviderChatProtocol.Responses, ModelId = _model }
             : ChatResponseMetadata.ForProvider(_provider);
-        metadata.CacheMode = body.ContainsKey("prompt_cache_options") ? "explicit" : "implicit";
+        var cacheKey = body.TryGetValue("prompt_cache_key", out var key) ? (string)key : null;
+        metadata.CacheMode = (body.ContainsKey("prompt_cache_options") ? "explicit" : "implicit") + (cacheKey is null ? "" : "+key");
         var protocol = new ChatProtocolContent(metadata);
 
 
@@ -199,7 +210,7 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
             toolCount,
             json.Length);
 
-        using var response = await ChatHttpRequests.SendAsync(_httpClient, () => CreateResponsesRequest(json), cancellationToken);
+        using var response = await ChatHttpRequests.SendAsync(_httpClient, () => CreateResponsesRequest(json, cacheKey), cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -207,6 +218,8 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
             var redactedErrorBody = LogRedaction.RedactJson(errorBody);
             if ((int)response.StatusCode is 400 or 422 && !InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(errorBody))
                 throw new ContextPlacementRejectedException();
+            if ((int)response.StatusCode is 400 or 422 && cacheKey is not null && RejectsCacheKey(errorBody))
+                throw new CacheKeyRejectedException();
             if ((int)response.StatusCode is 400 or 422 && ExplicitCache && RejectsCache(errorBody))
                 throw new CacheControlRejectedException();
             _logger.LogError(
@@ -452,6 +465,7 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
                     if (!InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(lastEventData))
                         throw new ContextPlacementRejectedException();
+                    if (cacheKey is not null && RejectsCacheKey(lastEventData)) throw new CacheKeyRejectedException();
                     if (ExplicitCache && RejectsCache(lastEventData)) throw new CacheControlRejectedException();
                     throw await MapAsync(_profile.MapStreamError(failedCode, failedParam, responseFailedMessage));
 
@@ -470,6 +484,7 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
                         LogRedaction.RedactJson(Truncate(lastEventData, 2000)));
                     if (!InitialInstructionsRequired.ContainsKey(CacheCapabilityKey) && RejectsContextPlacement(lastEventData))
                         throw new ContextPlacementRejectedException();
+                    if (cacheKey is not null && RejectsCacheKey(lastEventData)) throw new CacheKeyRejectedException();
                     if (ExplicitCache && RejectsCache(lastEventData)) throw new CacheControlRejectedException();
                     throw await MapAsync(_profile.MapStreamError(
                         errorCode,
@@ -499,12 +514,12 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
 
     public void Dispose() { }
 
-    private HttpRequestMessage CreateResponsesRequest(string json)
+    private HttpRequestMessage CreateResponsesRequest(string json, string? cacheKey = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, _profile.Endpoint);
         request.Content = new StringContent(json, Encoding.UTF8);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        _profile.ApplyHeaders(request, _accessToken, _accountId);
+        _profile.ApplyHeaders(request, _accessToken, _accountId, cacheKey);
         return request;
     }
 
@@ -579,6 +594,18 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
             return (message.Contains("developer", StringComparison.OrdinalIgnoreCase) || message.Contains("system message", StringComparison.OrdinalIgnoreCase))
                 && (message.Contains("not support", StringComparison.OrdinalIgnoreCase) || message.Contains("first", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("beginning", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static bool RejectsCacheKey(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var (_, param) = ResponsesTransportProfile.ReadStreamErrorIdentifiers(document.RootElement);
+            return param == "prompt_cache_key"
+                || ExtractResponseErrorMessage(document.RootElement, "").Contains("prompt_cache_key", StringComparison.Ordinal);
         }
         catch (JsonException) { return false; }
     }
@@ -658,6 +685,9 @@ public sealed partial class ResponsesChatClient : IChatClient, IModelWebSearch
         };
         if (ExplicitCache && chatMessages.Any(ChatRequestLayout.IsBoundary))
             body["prompt_cache_options"] = new { mode = "explicit" };
+        // Routes every round of a conversation to the same prompt cache.
+        if (KeyedCache && ChatRequestLayout.CacheKey(chatMessages) is { } cacheKey)
+            body["prompt_cache_key"] = cacheKey;
         if (_profile.Kind is null && (_provider?.MaxOutputTokens ?? options?.MaxOutputTokens) is > 0 and var limit)
             body["max_output_tokens"] = limit;
 

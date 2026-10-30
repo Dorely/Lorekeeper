@@ -178,12 +178,14 @@ provider-row value, then the bundled account catalog when applicable, then the
 counter. Account-backed model discovery never participates in this resolution.
 After a complete tool-call batch, reaching
 90% of that limit tombstones completed function results oldest-first, one result
-at a time, using
+at a time, until usage falls below 70%, using
 the exact structural tombstone marker and payload. The original
 `FunctionCallContent`, call ID, name, arguments, result row, and audit rendering
 remain intact; only the active in-memory result payload is replaced. Each
-replacement is recounted, so newer results are preserved when an older result is
-sufficient. Marked tool-derived visual messages and display-only reasoning may be
+replacement is recounted, so newer results are preserved once older results bring
+usage under 70%. Each trim rewrites the request from its oldest tombstoned result,
+so trimming well below the trigger lets several later rounds extend one stable
+cached prefix instead of rewriting it on every request at the limit. Marked tool-derived visual messages and display-only reasoning may be
 removed after every result in that tool round is tombstoned. Required protocol
 reasoning stays with retained assistant/tool messages, even when all results are
 tombstoned. Protocol reasoning (including opaque values) is counted without counting
@@ -231,9 +233,15 @@ include every enabled section and keep user direction distinguishable from app
 rules. Context snapshot traces and immutable contest captures remain intact.
 
 The shared image-payload client recomputes semantic cache endpoints on a copied
-request after each tool batch/trim: application instructions, previous and current
-canonical users, and the current workspace endpoint (at most four). Active-turn
-context can be cached within that turn but is discarded on the next user turn.
+request after each tool batch/trim, at most four in priority order: application
+instructions, the current canonical user, the previous request's endpoint, the
+current workspace endpoint, and the previous canonical user when a slot remains.
+The previous request's endpoint is the last non-assistant row before the newest
+assistant message: replayed history on a turn's first request, then the prior tool
+round. Re-marking it reads that round's cache entry exactly however many blocks the
+latest round added. Active-turn context can be cached within that turn but is
+discarded on the next user turn. The layout also carries the conversation (or
+revision-worker session) ID as a stable cache-routing key.
 Provider adapters own wire markers, capability fallback, and usage normalization
 (see the providers chapter). Compaction still counts the complete input, never
 subtracts cache reads from the input budget, and retains its existing result

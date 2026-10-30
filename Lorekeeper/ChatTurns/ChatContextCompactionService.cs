@@ -62,6 +62,11 @@ internal sealed class ChatContextCompactionService(
     ITokenCounter tokenCounter,
     ChatTokenLimitResolver tokenLimitResolver) : IChatContextCompactionService
 {
+    private const int TriggerPercent = 90;
+    // Trimming well below the trigger lets the following rounds extend one stable cached
+    // prefix; stopping just under it would rewrite the prefix from the oldest result every round.
+    private const int TargetPercent = 70;
+
     private sealed record ToolRound(
         ChatMessage AssistantMessage,
         IReadOnlySet<string> CallIds,
@@ -73,7 +78,7 @@ internal sealed class ChatContextCompactionService(
         ArgumentNullException.ThrowIfNull(messages);
 
         var originalCount = Count(messages, modelId, providerMaxInputTokens, out var maximumInputTokens, out var method);
-        if ((long)originalCount * 100 < (long)maximumInputTokens * 90)
+        if (!Reaches(originalCount, maximumInputTokens, TriggerPercent))
             return null;
 
         var rounds = FindToolRounds(messages);
@@ -108,11 +113,11 @@ internal sealed class ChatContextCompactionService(
             // Cleanup can remove reasoning and visual payloads, so recount the
             // post-cleanup request before deciding whether to continue.
             finalCount = Count(messages, modelId, providerMaxInputTokens, out _, out _);
-            if ((long)finalCount * 100 < (long)maximumInputTokens * 90)
+            if (!Reaches(finalCount, maximumInputTokens, TargetPercent))
                 break;
         }
 
-        var limitExceeded = (long)finalCount * 100 >= (long)maximumInputTokens * 90;
+        var limitExceeded = Reaches(finalCount, maximumInputTokens, TriggerPercent);
         return new ChatCompactionResult(
             OriginalTokenCount: originalCount,
             FinalTokenCount: finalCount,
@@ -122,6 +127,9 @@ internal sealed class ChatContextCompactionService(
             CompletedRoundCallIds: completedRoundCallIds,
             LimitExceeded: limitExceeded);
     }
+
+    private static bool Reaches(int tokens, int maximumInputTokens, int percent) =>
+        (long)tokens * 100 >= (long)maximumInputTokens * percent;
 
     private int Count(
         IEnumerable<ChatMessage> messages,

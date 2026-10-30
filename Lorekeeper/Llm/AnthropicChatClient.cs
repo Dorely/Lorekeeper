@@ -220,7 +220,9 @@ internal sealed class AnthropicChatClient(
         var system = new List<Dictionary<string, object>>();
         var messages = new List<Dictionary<string, object>>();
         var pendingSystem = new List<Dictionary<string, object>>();
-        Dictionary<string, object>? workspaceBoundary = null;
+        // Workspace endpoints cache the whole user/system run before the next assistant turn,
+        // so a request's tail and the next request's previous-tail mark land on the same block.
+        var workspaceBoundary = false;
         foreach (var message in source)
         {
             var blocks = new List<Dictionary<string, object>>();
@@ -252,12 +254,9 @@ internal sealed class AnthropicChatClient(
             if (blocks.Count == 0) continue;
             if (cache && ChatRequestLayout.IsBoundary(message))
             {
-                var block = blocks.LastOrDefault(block => block["type"] as string is not ("thinking" or "redacted_thinking"));
-                if (block is not null)
-                {
+                if (!ChatRequestLayout.IsCanonical(message) && !ChatRequestLayout.IsApplication(message)) workspaceBoundary = true;
+                else if (blocks.LastOrDefault(block => block["type"] as string is not ("thinking" or "redacted_thinking")) is { } block)
                     block["cache_control"] = new { type = "ephemeral" };
-                    if (!ChatRequestLayout.IsCanonical(message) && !ChatRequestLayout.IsApplication(message)) workspaceBoundary = block;
-                }
             }
             if (message.Role == ChatRole.System)
             {
@@ -267,22 +266,20 @@ internal sealed class AnthropicChatClient(
             else
             {
                 var role = message.Role == ChatRole.Assistant ? "assistant" : "user";
-                if (role == "assistant") FlushSystem();
+                if (role == "assistant")
+                {
+                    FlushSystem();
+                    MarkWorkspaceBoundary();
+                }
                 // Merge visual deliveries and parallel results into their owning user turn.
                 if (messages.LastOrDefault()?.GetValueOrDefault("role") as string == role)
                     ((List<Dictionary<string, object>>)messages[^1]["content"]).AddRange(blocks);
                 else messages.Add(new() { ["role"] = role, ["content"] = blocks });
             }
         }
-        FlushSystem();
         // Late system context follows user visuals on models that support it.
-        if (workspaceBoundary is not null && messages.Count > 0)
-        {
-            workspaceBoundary.Remove("cache_control");
-            var endpoint = ((List<Dictionary<string, object>>)messages[^1]["content"])
-                .LastOrDefault(block => block["type"] as string is not ("thinking" or "redacted_thinking"));
-            if (endpoint is not null) endpoint["cache_control"] = new { type = "ephemeral" };
-        }
+        FlushSystem();
+        MarkWorkspaceBoundary();
         var body = new Dictionary<string, object>
         {
             ["model"] = provider.ModelId, ["stream"] = true,
@@ -298,6 +295,15 @@ internal sealed class AnthropicChatClient(
         if (provider.EffectiveReasoningEffort is { } effort && model.Efforts.Contains(effort.ToWireValue()))
             body["output_config"] = new { effort = effort.ToWireValue() };
         return body;
+
+        void MarkWorkspaceBoundary()
+        {
+            if (!workspaceBoundary || messages.Count == 0) return;
+            workspaceBoundary = false;
+            var endpoint = ((List<Dictionary<string, object>>)messages[^1]["content"])
+                .LastOrDefault(block => block["type"] as string is not ("thinking" or "redacted_thinking"));
+            if (endpoint is not null) endpoint["cache_control"] = new { type = "ephemeral" };
+        }
 
         void FlushSystem()
         {

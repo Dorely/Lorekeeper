@@ -11,6 +11,7 @@ public static class ChatRequestLayout
     private const string Boundary = "Lorekeeper.CacheBoundary";
     private const string Lifetime = "Lorekeeper.PromptLifetime";
     private const string Identity = "Lorekeeper.RequestIdentity";
+    private const string CacheKeyProperty = "Lorekeeper.PromptCacheKey";
 
     public static ChatMessage MarkCanonical(ChatMessage message, bool isUser = false)
     {
@@ -25,6 +26,11 @@ public static class ChatRequestLayout
     public static bool IsApplication(ChatMessage message) => message.AdditionalProperties?.TryGetValue(Lifetime, out var value) is true && value is PromptLifetime.StableApplication;
     public static string? RequestIdentity(ChatMessage message) => message.AdditionalProperties?.TryGetValue(Identity, out var value) is true ? value as string : null;
 
+    /// <summary>The conversation's stable cache-routing key, carried by its application instructions.</summary>
+    public static string? CacheKey(IEnumerable<ChatMessage> messages) => messages
+        .Select(message => message.AdditionalProperties?.TryGetValue(CacheKeyProperty, out var value) is true ? value as string : null)
+        .FirstOrDefault(key => key is not null);
+
     public static void Initialize(List<ChatMessage> messages, ChatPrompt prompt, string userText, Guid conversationId, string surface)
     {
         // Adapters have loaded history in order, ending with the newly persisted user row.
@@ -37,6 +43,7 @@ public static class ChatRequestLayout
         messages.Clear();
         var app = Section(prompt.Application, PromptLifetime.StableApplication);
         app.AdditionalProperties![Identity] = $"{surface}:{conversationId:N}";
+        app.AdditionalProperties[CacheKeyProperty] = conversationId.ToString("D");
         messages.Add(app);
         if (!string.IsNullOrWhiteSpace(prompt.Project)) messages.Add(Section(prompt.Project, PromptLifetime.StableProject));
         messages.AddRange(canonical);
@@ -54,12 +61,16 @@ public static class ChatRequestLayout
     {
         var messages = source.Select(Clone).ToList();
         if (!messages.Any(IsApplication)) return messages;
-        var candidates = new List<ChatMessage> { messages.First(IsApplication) };
-        candidates.AddRange(messages.Where(IsCanonicalUser).TakeLast(2));
+        var users = messages.Where(IsCanonicalUser).ToList();
         // The live workspace is reusable during this turn only, including tools and visual deliveries.
-        var last = messages.LastOrDefault(message => message.Role != ChatRole.Assistant);
-        if (last is not null && !IsCanonical(last)) candidates.Add(last);
-        foreach (var message in candidates.Distinct().Take(4))
+        var tail = messages.LastOrDefault(message => message.Role != ChatRole.Assistant);
+        // The previous request ended at the last non-assistant row before the newest assistant
+        // message: on a turn's first request that is the replayed history, later the prior tool
+        // round. Re-marking it reads that cache entry exactly, however many blocks a round adds.
+        var lastAssistant = messages.FindLastIndex(message => message.Role == ChatRole.Assistant);
+        var previousTail = messages.Take(Math.Max(lastAssistant, 0)).LastOrDefault(message => message.Role != ChatRole.Assistant);
+        ChatMessage?[] candidates = [messages.First(IsApplication), users.LastOrDefault(), previousTail, tail, users.Count > 1 ? users[^2] : null];
+        foreach (var message in candidates.OfType<ChatMessage>().Distinct().Take(4))
             (message.AdditionalProperties ??= [])[Boundary] = true;
         return messages;
     }
