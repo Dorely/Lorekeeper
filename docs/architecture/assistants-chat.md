@@ -102,6 +102,16 @@ cancellation path. Active-turn ownership must not move into a component or
 SignalR circuit. Surface-scoped maintenance leases make reset atomic against an
 active or newly starting turn across windows.
 
+Panels read their subscription with `ReadBatchesAsync`, which yields every
+buffered update as one ordered batch, and apply each batch through the shared
+`ChatTurnUpdateBatch` in one dispatcher callback with one transcript token
+recount and one render. The cost of a streamed fragment therefore never scales
+with the transcript, system prompt, or accumulated tool arguments. This keeps
+the circuit dispatcher responsive while a large tool call streams, so the
+authoring-fence flush that a manuscript mutation sends to the open editor
+answers within its response timeout instead of queuing behind per-fragment UI
+work.
+
 Reset keeps the existing conversation root and its exact `SelectedProviderId`,
 including a soft reference to a deleted or unavailable provider. It clears the
 surface's message-owned image attachments, replaces all transcript messages with

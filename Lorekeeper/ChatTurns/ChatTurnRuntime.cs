@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 namespace Lorekeeper.ChatTurns;
@@ -35,7 +36,11 @@ public interface IChatTurnSubscription<TUpdate> : IAsyncDisposable
     Guid TurnId { get; }
     DateTime StartedAtUtc { get; }
     string UserText { get; }
-    IAsyncEnumerable<TUpdate> ReadAllAsync(CancellationToken cancellationToken);
+    /// <summary>
+    /// Yields every update buffered so far as one ordered batch. A consumer that falls behind a fast stream
+    /// catches up in one pass instead of paying its per-update UI cost for each streamed fragment.
+    /// </summary>
+    IAsyncEnumerable<IReadOnlyList<TUpdate>> ReadBatchesAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -295,8 +300,19 @@ public sealed class ChatTurnRuntime
         public Guid TurnId { get; }
         public DateTime StartedAtUtc { get; }
         public string UserText { get; }
-        public IAsyncEnumerable<TUpdate> ReadAllAsync(CancellationToken cancellationToken) =>
-            _channel.Reader.ReadAllAsync(cancellationToken);
+        public async IAsyncEnumerable<IReadOnlyList<TUpdate>> ReadBatchesAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            var reader = _channel.Reader;
+            while (await reader.WaitToReadAsync(cancellationToken))
+            {
+                var batch = new List<TUpdate>();
+                while (reader.TryRead(out var update))
+                    batch.Add(update);
+                if (batch.Count > 0)
+                    yield return batch;
+            }
+        }
         public void TryWrite(TUpdate update) => _channel.Writer.TryWrite(update);
         public void Complete() => _channel.Writer.TryComplete();
 

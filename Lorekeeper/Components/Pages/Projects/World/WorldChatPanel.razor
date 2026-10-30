@@ -81,6 +81,7 @@
     private string? _pendingUserText;
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
+    private readonly ChatTurnUpdateBatch _turnUpdates = new();
     private ChatProviderAvailability? _chatAvailability;
     private IReadOnlyList<ChatModelPickerOption> _modelOptions = [];
     private ChatModelSelection? _chatSelection;
@@ -261,8 +262,8 @@
         {
             try
             {
-                await foreach (var update in subscription.ReadAllAsync(cancellationToken))
-                    await InvokeAsync(async () => await ApplyTurnUpdateAsync(update));
+                await foreach (var updates in subscription.ReadBatchesAsync(cancellationToken))
+                    await InvokeAsync(() => _turnUpdates.ApplyAsync(updates, ApplyTurnUpdateAsync, UpdateConversationTokenCount, StateHasChanged));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
             catch (JSDisconnectedException) { }
@@ -450,8 +451,12 @@
         _ => ChatMessageStatus.Completed,
     };
 
+    protected override bool ShouldRender() => !_turnUpdates.IsApplying;
+
     private void UpdateConversationTokenCount()
     {
+        if (_turnUpdates.DeferTokenRecount())
+            return;
         _conversationTokens = ChatTranscriptTokenCounter.Count(
             TokenCounter,
             ChatTranscriptTokenCounter.ModelReplayMessages(
